@@ -42,9 +42,14 @@ class Armchair():
         else:
             return None, None
         
-    def send_pack(self, pack_type, payload):
+    def send_pack(self, pack_type, payload=None):
         #constructs a packet and sends it over network
-        n_bytes = len(payload)
-        header = self.construct_head(n_bytes, pack_type)
-        self.sock.send(header+payload)
+        if payload:
+            n_bytes = len(payload)
+            header = self.construct_head(n_bytes, pack_type)
+            self.sock.send(header+payload)
+        else:
+            n_bytes = 0
+            header = self.construct_head(n_bytes, pack_type)
+            self.sock.send(header)
         return

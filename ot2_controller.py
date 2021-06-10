@@ -3,19 +3,20 @@ import sys
 
 import dill
 
-from armchair import Armchair
+from Armchair.armchair import Armchair
 
-SERVERADDR = "127.0.0.1"
+SERVERADDR = "10.25.15.209"
 PORT = 50000
 
-def init
 
 def main():
     sock = socket.socket(socket.AF_INET)
     sock.connect((SERVERADDR, PORT))
     portal = Armchair(sock)
+    payload=None
+    pack_type = 'transfer'
     portal.send_pack(pack_type, payload)
-    client_sock.close()
+    sock.close()
 
 if __name__ == '__main__':
     main()
