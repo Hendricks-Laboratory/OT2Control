@@ -19,7 +19,7 @@ class Container(ABC):
 
     def __init__(self, name, vol, labware, loc):
         self.name = name
-        self.vol = vol
+        self.contents = Contents(vol)
         self.labware = labware
         self.loc = loc
         self.height = self.update_height()
@@ -29,7 +29,7 @@ class Container(ABC):
         pass
 
     def update_vol(self, aspvol):
-        self.volume = self.volume - aspvol
+        self.contents.update_vol(aspvol)
 
 
 
@@ -57,7 +57,7 @@ class small_tube(Container):
         vol_bottom_cylinder = 2000 # uL
         height_bottom_cylinder = 30.5  #mm
         tip_depth = 5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+(height_bottom_cylinder - tip_depth)
+        self.height = ((self.contents.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+(height_bottom_cylinder - tip_depth)
             
 class big_tube(Container):
     #TODO update class name to be reflective of size
@@ -81,7 +81,7 @@ class big_tube(Container):
         vol_bottom_cylinder = 5000 # uL
         height_bottom_cylinder = 21 #mm
         tip_depth = 5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + (height_bottom_cylinder - tip_depth) 
+        self.height = ((self.contents.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + (height_bottom_cylinder - tip_depth) 
 
 class tube2000ul(Container):
     """
@@ -104,7 +104,7 @@ class tube2000ul(Container):
         vol_bottom_cylinder = 250 #uL
         height_bottom_cylinder = 10.5 #mm
         tip_depth = 4.5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_2/2)**2)) + (height_bottom_cylinder - tip_depth)
+        self.height = ((self.contents.vol - vol_bottom_cylinder)/(math.pi*(diameter_2/2)**2)) + (height_bottom_cylinder - tip_depth)
 
 class well96(Container):
     """
@@ -124,6 +124,63 @@ class well96(Container):
         #TODO develop an update height method for wells.
         pass
 
+#TODO right now Contents is created inside the constructor of the container, but contents should
+#be passed in pre baked. This requires the code for initial stoicheometry to be moved to a main
+#in the initialization code of this or maybe the client
+class Contents(ABC):
+    """
+    There is a difference between a reagent and a product, and oftentimes it has to do with
+    reagents being dilutions and products being mixtures. Products need information
+    about what is in them, dilutions need concentrations. These attributes relate to
+    the content of the container, not the container itself. Every container has a
+    substance inside it.
+    This is a purely architectural class. It exists to preserve the seperation of things.
+    ABSTRACT ATTRIBUTES:
+        float vol: the amount of liquid in the container
+    METHODS:
+        update_vol(float aspvol) void: updates the volume of the contents left
+    """
+    def __init__(self, vol):
+        self.vol=vol
+
+    def update_vol(self, aspvol):
+        self.vol = self.vol - aspvol
+
+class Dilution(Contents):
+    """
+    A contents with a concentration meant to represent a stock solution
+    INHERITED ATTRIBUTES:
+        float vol
+    ATTRIBUTES:
+        float conc: the concentration
+    INHERITED METHODS:
+        update_vol(float aspvol)
+    """
+    def __init__(self, vol, conc):
+        self.conc = conc
+        super().__init__(vol)
+
+class Mixture(Contents):
+    """
+    This is probably a product or seed
+    It keeps track of what is in it
+    INHERITED ATTRIBUTES:
+        float vol
+    ATTRIBUTES:
+        list<tup<str, vol>> components: reagents and volumes in this mixture
+    INHERITED METHODS:
+        update_vol(float aspvol)
+    """
+    def __init__(self, vol, components):
+        self.components = components
+        super().__init__(vol)
+        return
+
+    def add(self, name, vol):
+        self.vol += vol
+        self.components += (name, vol)
+        return
+
 
 class OT2_Controller():
     """
@@ -134,12 +191,10 @@ class OT2_Controller():
         oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
           file that are used in most google sheets i/o
     """
-    def __init__(self, simulate, credentials):
+    def __init__(self, simulate):
         #params:
             #bool simulate: if true, the robot will run in simulation mode only
             #credentials: read from a local json. Required for most google sheets i/o
-        self.credentials = credentials
-        self.wks_key = wks_key
         if simulate:
             protocol = opentrons.simulate.get_protocol_api('2.9')# define version number and define protocol object
         else:
@@ -147,37 +202,3 @@ class OT2_Controller():
             protocol.set_rail_lights(on = True)
             protocol.rail_lights_on 
         protocol.home() # Homes the pipette tip
-
-
-
-
-
-class tip_rack():
-    """
-    Class to represent a rack of pipet tips
-    You might want to remove this class. I'ts starting to look like a glorified dictionary
-    for opentrons objects
-    ATTRIBUTES:
-        str name: the name we use to refer to this rack
-        Obj labware: the Opentrons labware that this corresponds to
-    """
-    #NOTE you're going to need to get the first tip from the sheets in order to construct the 
-    #labware with the appropriate tip!
-    def __init__(self, name, labware):
-        self.name = name
-        self.labware = labware 
-
-
-class Tube(Container):
-    """
-    Tube represents a test tube container, but it is still abstract. 
-    INHERITED ATTRIBUTES:
-        str name, float vol, Obj Labware, str loc
-    INHERITED METHODS:
-        update_height void
-    METHODS:
-        update_vol(float aspvol) void: eupdates the volume upon an aspiration
-        
-    """
-    def __init__(self, name, vol, labware, loc):
-        super().__init__(name,vol, labware, loc)
