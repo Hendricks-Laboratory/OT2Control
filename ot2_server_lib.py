@@ -186,19 +186,56 @@ class OT2_Controller():
     """
     The big kahuna. This class contains all the functions for controlling the robot
     ATTRIBUTES:
+        Dict<str, str> OPENTRONS_LABWARE_NAMES: This is a constant dictionary that is used to
+          translate from human readable names to opentrons labware object names.
         Dict<str, Container> containers: maps from a common name to a Container object
         Dict<str, Obj> tip_racks: maps from a common name to a opentrons tiprack labware object
-        oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
-          file that are used in most google sheets i/o
+        Dict<str, Obj> labware: maps from labware common names to opentrons labware objects. tip racks not included?
+        Opentrons...ProtocolContext protocol: the protocol object of this session
+
     """
+
+    self._OPENTRONS_LABWARE_NAMES = {'96_well_plate_1':'corning_96_wellplate_360ul_flat','96_well_plate_2':'corning_96_wellplate_360ul_flat','24_well_plate_1':'corning_24_wellplate_3.4ml_flat','24_well_plate_2':'corning_24_wellplate_3.4ml_flat','48_well_plate_1':'corning_48_wellplate_1.6ml_flat','48_well_plate_2':'corning_48_wellplate_1.6ml_flat','tip_rack_20':'opentrons_96_tiprack_20ul','tip_rack_300':'opentrons_96_tiprack_300ul','tip_rack_1000':'opentrons_96_tiprack_1000ul','tube_holder_10_1':'opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical','tube_holder_10_2':'opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical','20uL_pipette':'p20_single_gen2','300uL_pipette':'p300_single_gen2','1000uL_pipette':'p1000_single_gen2'}
+
     def __init__(self, simulate):
-        #params:
-            #bool simulate: if true, the robot will run in simulation mode only
-            #credentials: read from a local json. Required for most google sheets i/o
+        '''
+        params:
+            bool simulate: if true, the robot will run in simulation mode only
+            credentials: read from a local json. Required for most google sheets i/o
+        postconditions:
+            protocol has been initialzied
+            containers and tip_racks have been created
+            labware has been initialized
+            CAUTION: the values of tip_racks and containers must be sent from the client.
+              it is the client's responsibility to make sure that these are initialized prior
+              to operating with them
+        '''
+        self.tip_racks = {}
+        self.containers = {}
+        self.labware = {}
         if simulate:
-            protocol = opentrons.simulate.get_protocol_api('2.9')# define version number and define protocol object
+            self.protocol = opentrons.simulate.get_protocol_api('2.9')# define version number and define protocol object
         else:
-            protocol = opentrons.execute.get_protocol_api('2.9')
-            protocol.set_rail_lights(on = True)
-            protocol.rail_lights_on 
-        protocol.home() # Homes the pipette tip
+            self.protocol = opentrons.execute.get_protocol_api('2.9')
+            self.protocol.set_rail_lights(on = True)
+            self.protocol.rail_lights_on 
+        self.protocol.home() # Homes the pipette tip
+
+    def make_fixed_objects():
+        self.protocol.max_speeds['X'] = 100
+        self.protocol.max_speeds['Y'] = 100
+
+        #with open('Cuvette Rack.json') as labware_file1:
+         #   labware_def1 = json.load(labware_file1)
+        with open('/var/lib/jupyter/notebooks/JSON/plate_reader_4.json') as labware_file2:
+            labware_def2 = json.load(labware_file2)
+        with open('/var/lib/jupyter/notebooks/JSON/plate_reader_7.json') as labware_file3:
+            labware_def3 = json.load(labware_file3)
+            
+        labware['platereader4'] = protocol.load_labware_from_definition(labware_def2, 4)
+        labware['platereader7'] = protocol.load_labware_from_definition(labware_def3, 7)
+        
+        if temperature_module_response == 'y' or temperature_module_response == 'yes':
+            temperature_module = protocol.load_module('temperature module gen2', 3)
+            temperature_module.set_temperature(set_temperature_response)
+        #cuvette = protocol.load_labware_from_definition(labware_def1, 3)
