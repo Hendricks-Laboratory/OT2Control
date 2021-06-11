@@ -1,4 +1,5 @@
 from abc import ABC
+from abc import abstractmethod
 
 
 class Container(ABC):
@@ -58,7 +59,7 @@ class small_tube(Container):
         tip_depth = 5 # mm
         self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+(height_bottom_cylinder - tip_depth)
             
-class big_tube(Tubes):
+class big_tube(Container):
     #TODO update class name to be reflective of size
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
@@ -82,7 +83,7 @@ class big_tube(Tubes):
         tip_depth = 5 # mm
         self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + (height_bottom_cylinder - tip_depth) 
 
-class tube2000ul(Tubes):
+class tube2000ul(Container):
     """
     2000ul tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
@@ -130,7 +131,23 @@ class OT2_Controller():
     ATTRIBUTES:
         Dict<str, Container> containers: maps from a common name to a Container object
         Dict<str, Obj> tip_racks: maps from a common name to a opentrons tiprack labware object
+        oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
+          file that are used in most google sheets i/o
     """
+    def __init__(self, simulate, credentials):
+        #params:
+            #bool simulate: if true, the robot will run in simulation mode only
+            #credentials: read from a local json. Required for most google sheets i/o
+        self.credentials = credentials
+        self.wks_key = wks_key
+        if simulate:
+            protocol = opentrons.simulate.get_protocol_api('2.9')# define version number and define protocol object
+        else:
+            protocol = opentrons.execute.get_protocol_api('2.9')
+            protocol.set_rail_lights(on = True)
+            protocol.rail_lights_on 
+        protocol.home() # Homes the pipette tip
+
 
 
 
