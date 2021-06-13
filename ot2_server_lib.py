@@ -12,7 +12,7 @@ class Container(ABC):
         Obj Labware: a pointer to the Opentrons Labware object of which this is a part
         str loc: a location on the labware object (e.g. 'A5')
     ABSTRACT METHODS:
-        update_height void: updates self.height to hieght at which to pipet (a bit below water line)
+        _update_height void: updates self.height to hieght at which to pipet (a bit below water line)
     IMPLEMENTED METHODS:
         update_vol(float aspvol) void: updates the volume upon an aspiration
     """
@@ -22,14 +22,16 @@ class Container(ABC):
         self.contents = Contents(vol)
         self.labware = labware
         self.loc = loc
-        self.height = self.update_height()
+        self.height = self._update_height()
+        self.vol = vol
 
     @abstractmethod
-    def update_height(self):
+    def _update_height(self):
         pass
 
     def update_vol(self, aspvol):
         self.contents.update_vol(aspvol)
+        self._update_height()
 
 
 
@@ -41,7 +43,7 @@ class small_tube(Container):
     INHERITED ATTRIBUTES
         str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float aspvol) void,
     """
     
     def __init__(self, name, mass, labware, loc):
@@ -52,7 +54,7 @@ class small_tube(Container):
         super().__init__(name, vol, labware, loc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
 
-    def update_height(self):
+    def _update_height(self):
         diameter_15 = 14.0 # mm (V1 number = 14.4504)
         vol_bottom_cylinder = 2000 # uL
         height_bottom_cylinder = 30.5  #mm
@@ -66,7 +68,7 @@ class big_tube(Container):
     INHERITED ATTRIBUTES
         str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float aspvol) void,
     """
     def __init__(self, name, mass, labware, loc):
         density_water_25C = 0.9970479 # g/mL
@@ -76,7 +78,7 @@ class big_tube(Container):
         super().__init__(name,vol, labware, loc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
         
-    def update_height(self):
+    def _update_height(self):
         diameter_50 = 26.50 # mm (V1 number = 26.7586)
         vol_bottom_cylinder = 5000 # uL
         height_bottom_cylinder = 21 #mm
@@ -89,7 +91,7 @@ class tube2000ul(Container):
     INHERITED ATTRIBUTES
          str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float aspvol) void,
     """
     
     def __init__(self, name, mass, labware, loc):
@@ -99,7 +101,7 @@ class tube2000ul(Container):
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
         super().__init__(name, vol, labware, loc)
            
-    def update_height(self):
+    def _update_height(self):
         diameter_2 = 8.30 # mm
         vol_bottom_cylinder = 250 #uL
         height_bottom_cylinder = 10.5 #mm
@@ -112,7 +114,7 @@ class well96(Container):
         INHERITED ATTRIBUTES
              str name, float vol, Obj Labware, str loc
         INHERITED METHODS
-            update_height void, update_vol(float aspvol) void,
+            _update_height void, update_vol(float aspvol) void,
     """
 
     def __init__(self, name, labware, loc, vol=0):
@@ -120,13 +122,14 @@ class well96(Container):
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
         super().__init__(name, vol, labware, loc)
            
-    def update_height(self):
+    def _update_height(self):
         #TODO develop an update height method for wells.
         pass
 
 #TODO right now Contents is created inside the constructor of the container, but contents should
 #be passed in pre baked. This requires the code for initial stoicheometry to be moved to a main
 #in the initialization code of this or maybe the client
+#TODO docs not updated on these
 class Contents(ABC):
     """
     There is a difference between a reagent and a product, and oftentimes it has to do with
@@ -136,15 +139,14 @@ class Contents(ABC):
     substance inside it.
     This is a purely architectural class. It exists to preserve the seperation of things.
     ABSTRACT ATTRIBUTES:
-        float vol: the amount of liquid in the container
+        float conc: the concentration (varies in meaning based on child)
+        float mass: the mass of the reagent
     METHODS:
         update_vol(float aspvol) void: updates the volume of the contents left
     """
-    def __init__(self, vol):
-        self.vol=vol
-
-    def update_vol(self, aspvol):
-        self.vol = self.vol - aspvol
+    def __init__(self, conc, mass):
+        self.conc=conc
+        self.mass=mass
 
 class Dilution(Contents):
     """
@@ -156,9 +158,9 @@ class Dilution(Contents):
     INHERITED METHODS:
         update_vol(float aspvol)
     """
-    def __init__(self, vol, conc):
-        self.conc = conc
-        super().__init__(vol)
+    def __init__(self, conc, mass, name, molecular_weight):
+        self.molecular_weight=molecular_weight
+        super().__init__(conc,mass)
 
 class Mixture(Contents):
     """
@@ -171,16 +173,16 @@ class Mixture(Contents):
     INHERITED METHODS:
         update_vol(float aspvol)
     """
-    def __init__(self, vol, components):
+    def __init__(self, conc, mass, components):
         self.components = components
-        super().__init__(vol)
+        super().__init__(conc,mass)
         return
 
-    def add(self, name, vol):
+    def add(self, name, vol,timestamp=datetime.datetime.now()):
+        #TODO you'll wnat to format the timestamp however you like
         self.vol += vol
-        self.components += (name, vol)
+        self.components += (timestamp, name, vol)
         return
-
 
 class OT2_Controller():
     """
@@ -236,6 +238,6 @@ class OT2_Controller():
         labware['platereader7'] = protocol.load_labware_from_definition(labware_def3, 7)
         
         if temperature_module_response == 'y' or temperature_module_response == 'yes':
-            temperature_module = protocol.load_module('temperature module gen2', 3)
-            temperature_module.set_temperature(set_temperature_response)
-        #cuvette = protocol.load_labware_from_definition(labware_def1, 3)
+            labware['temp_mod'] = protocol.load_module('temperature module gen2', 3)
+            labware['temp_mod'].set_temperature(set_temperature_response)
+        #labware['cuvette'] = protocol.load_labware_from_definition(labware_def1, 3)
