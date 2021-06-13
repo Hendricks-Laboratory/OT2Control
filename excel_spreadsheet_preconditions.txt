@@ -1,0 +1,18 @@
+INPUT TEMPlATE
+worksheet 0 is the input template
+an operation is transfer, scan, or pause
+any element that is transfered shall be renamed with spaces replaced with underscores, and it's concentration appended in the format 'C0.003'
+Every one of these reagents will be queried.
+
+REAGENTS INFO
+reagents concentration and reagent names will be pulled from the input template
+You are responsible for entering the type MUST BE ['stock', or 'mix'] and if it is a product ['yes','no'] (you want eve to produce it)
+If it it not a product, you are expected to supply mass of tube with the reagent, position on the labware, and position on the deck. mass is expected in grams with cap
+If it is a product, you may specify position on labware and/or position on deck, but if you do not, eve will choose these for you.
+All products with concentrations are dilutions, so they will have water measured out for them at the start (because 'add acid' and any other chemical?).
+The chemical to be diluted with then be added JIT (just in time) directly before it it is used. (saving on tip economy)
+You can put comments, but eve won't read them
+
+DECK POSITIONS
+You must choose from the dropdown menu. If you want to use two of same element, no problem.
+You must always specify the first tube/tip ("A1" if you are full)

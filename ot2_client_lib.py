@@ -1,4 +1,6 @@
 import gspread
+from df2gspread import df2gspread as d2g
+from df2gspread import gspread2df as g2d
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import numpy as np
@@ -73,20 +75,20 @@ def get_wks_key(credentials, rxn_sheet_name):
         raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
         and make sure the spreadsheet name is spelled exactly the same as the reaction \
         spreadsheet.')
-    return credentials
+    return wks_key
 
-def load_rxn_df(rxn_sheet, rxn_sheet_name):
+def load_rxn_df(rxn_spreadsheet, rxn_sheet_name):
     '''
     reaches out to google sheets and loads the reaction protocol into a df and formats the df
     adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
     renames some columns to code friendly as opposed to human friendly names
     params:
-        gspread.Spreadsheet rxn_sheet: the sheet with all the reactions
+        gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions
         str rxn_sheet_name: the name of the spreadsheet
     returns:
-        pd.DataFrame: the information in the rxn_sheet w range index. spreadsheet cols
+        pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
     '''
-    rxn_wks = rxn_sheet.get_worksheet(0)
+    rxn_wks = rxn_spreadsheet.get_worksheet(0)
     data = rxn_wks.get_all_values()
     rxn_df = pd.DataFrame(data[1:], columns=data[0])
     #rename some of the clunkier columns 
@@ -118,28 +120,42 @@ def get_chemical_name(row):
     return pd.Series(new_cols)
 
 
-def init_robot(rxn_df, simulate):
+def init_robot(rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, credentials):
     '''
     This function gets the unique reagents, interfaces with the docs to get details on those
       reagents, and ships that information to the robot so it can initialize it's labware dicts
     '''
+    #pull labware etc from the sheets
+    labware_df = get_labware_info(rxn_spreadsheet)
+
     #get unique reagents
-    reagents = rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
-    reagents['content_type'] = reagents.apply(lambda row: 'mix' if pd.isnull(row['conc']) else 'dilution',axis=1)
+    reagents_and_conc = rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
+
+    #query the docs for more info on reagents
+    #DEBUG not overwriting vals for testing purposes
+    #construct_reagent_sheet(reagents_and_conc, spreadsheet_key, credentials)
+    input("please press enter when you've completed the reagent sheet")
+
+    #pull the info into a df
+    reagents = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, row_names = True, credentials=credentials)
     breakpoint()
-
-    #query the docs about labware etc
-
-    #pull labware etc from the docs
-
-    #construct df with "{}C{}".format(reagent,conc) key and a bunch of values needed to construct
-    #the object
 
     #iterate through that thing and send information over armchair in a network friendly way
 
     #return (god willing)
     return
 
+def construct_reagent_sheet(reagent_df, spreadsheet_key, credentials):
+    '''
+    query the user with a reagent sheet asking for more details on locations of reagents, mass
+    etc
+    Preconditions:
+        see excel_spreadsheet_preconditions.txt
+    PostConditions:
+        reagent_sheet has been constructed
+    '''
+    reagent_df[['content_type', 'product', 'mass', 'positions', 'deck_pos', 'reagent_to_dilute', 'desired_vol', 'comments']] = ''
+    d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
 
 def get_reagent_attrs(row):
@@ -174,8 +190,27 @@ def get_reagent_attrs(row):
         new_cols['content_type'] = 'dilution'
     return pd.Series(new_cols)
 
-#MAYBE USEFULL???
-#non_vol_cols = ['op','scan_params','conc','reagent','callback']
-#reagent_cols = rxn_df.drop(columns=non_vol_cols).loc[rxn_df['op'] == 'transfer']
-#grouped = rxn_df.loc[rxn_df['op'] == 'transfer'].groupby('chemical_name', dropna=False)
-#unique_reagents = grouped.sum()
+def get_labware_info(rxn_spreadsheet):
+    '''
+    Interface with sheets to get information about labware locations, first tip, etc.
+    Preconditions:
+        The second sheet in the worksheet must be initialized with where you've placed reagents 
+        and the first thing not being used
+    params:
+        gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
+          deck positions
+    returns:
+        df:
+          str name: the common name of the labware (made unique 
+    '''
+    raw_labware_data = rxn_spreadsheet.get_worksheet(1).get_all_values()
+    #the format google fetches this in is funky, so we convert it into a nice df
+    labware_dict = {'name':[], 'first_tip':[],'deck_pos':[]}
+    for row_i in range(0,10,3):
+        for col_i in range(3):
+            labware_dict['name'].append(raw_labware_data[row_i+1][col_i])
+            labware_dict['first_tip'].append(raw_labware_data[row_i+2][col_i])
+            labware_dict['deck_pos'].append(raw_labware_data[row_i][col_i])
+    labware_df = pd.DataFrame(labware_dict)
+    labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
+    return 

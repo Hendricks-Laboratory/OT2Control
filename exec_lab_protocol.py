@@ -24,9 +24,10 @@ def main():
     credentials = ot2cl.init_credentials(rxn_sheet_name)
     #wks_key is also needed for google sheets i/o. It functions like a url
     wks_key = ot2cl.get_wks_key(credentials, rxn_sheet_name)
-    rxn_sheet = ot2cl.open_sheet(rxn_sheet_name, credentials)
-    rxn_df = ot2cl.load_rxn_df(rxn_sheet, rxn_sheet_name)
-    ot2cl.init_robot(rxn_df,simulate)
+    #rxn_sheet is the entire spreadsheet
+    rxn_spreadsheet = ot2cl.open_sheet(rxn_sheet_name, credentials)
+    rxn_df = ot2cl.load_rxn_df(rxn_spreadsheet, rxn_sheet_name)
+    ot2cl.init_robot(rxn_spreadsheet, rxn_df,simulate, wks_key, credentials)
     breakpoint()
 
     #sock.close()
