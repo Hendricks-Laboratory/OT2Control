@@ -6,8 +6,6 @@ the project
 import socket
 import sys
 
-import dill
-
 from armchair import Armchair
 
 SERVERADDR = "127.0.0.1"
@@ -20,7 +18,5 @@ pack_type = 'transfer'
 w1 = 'w1'
 w2 = 'w2'
 vol = 77
-args = [w1,w2,vol]
-payload = dill.dumps(args)
-portal.send_pack(pack_type, payload)
+portal.send_pack(pack_type, w1,w2,vol)
 client_sock.close()

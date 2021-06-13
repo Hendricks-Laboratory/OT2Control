@@ -36,7 +36,7 @@ class Container(ABC):
 
 
     
-class small_tube(Container):
+class SmallTube(Container):
     #TODO update class name to be reflective of size
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
@@ -61,7 +61,7 @@ class small_tube(Container):
         tip_depth = 5 # mm
         self.height = ((self.contents.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+(height_bottom_cylinder - tip_depth)
             
-class big_tube(Container):
+class BigTube(Container):
     #TODO update class name to be reflective of size
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
@@ -148,7 +148,7 @@ class Contents(ABC):
         self.conc=conc
         self.mass=mass
 
-class Dilution(Contents):
+class Stock(Contents):
     """
     A contents with a concentration meant to represent a stock solution
     INHERITED ATTRIBUTES:
@@ -184,7 +184,7 @@ class Mixture(Contents):
         self.components += (timestamp, name, vol)
         return
 
-class OT2_Controller():
+class OT2Controller():
     """
     The big kahuna. This class contains all the functions for controlling the robot
     ATTRIBUTES:
@@ -199,7 +199,7 @@ class OT2_Controller():
 
     self._OPENTRONS_LABWARE_NAMES = {'96_well_plate_1':'corning_96_wellplate_360ul_flat','96_well_plate_2':'corning_96_wellplate_360ul_flat','24_well_plate_1':'corning_24_wellplate_3.4ml_flat','24_well_plate_2':'corning_24_wellplate_3.4ml_flat','48_well_plate_1':'corning_48_wellplate_1.6ml_flat','48_well_plate_2':'corning_48_wellplate_1.6ml_flat','tip_rack_20':'opentrons_96_tiprack_20ul','tip_rack_300':'opentrons_96_tiprack_300ul','tip_rack_1000':'opentrons_96_tiprack_1000ul','tube_holder_10_1':'opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical','tube_holder_10_2':'opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical','20uL_pipette':'p20_single_gen2','300uL_pipette':'p300_single_gen2','1000uL_pipette':'p1000_single_gen2'}
 
-    def __init__(self, simulate):
+    def __init__(self, simulate, labware_df, reagents_df):
         '''
         params:
             bool simulate: if true, the robot will run in simulation mode only
@@ -223,7 +223,28 @@ class OT2_Controller():
             self.protocol.rail_lights_on 
         self.protocol.home() # Homes the pipette tip
 
-    def make_fixed_objects():
+    def exec(self, command_type, args):
+        '''
+        takes the packet type and payload of an Armchair packet, and executes the command
+        params:
+            str command_type: the type of packet to execute
+            tuple args: the arguments to this command
+        Postconditions:
+            the command has been executed
+        '''
+        if command_type == 'init':
+            init_labware(args[0])
+            init_reagents(args[1])
+        else:
+            raise Exception("Unidenified command {}".format(pack_type))
+        return
+
+    def make_fixed_objects(self):
+        '''
+        this creates the objects that are not movable (plate reader and temp mod)
+        Postconditions:
+            
+        '''
         self.protocol.max_speeds['X'] = 100
         self.protocol.max_speeds['Y'] = 100
 

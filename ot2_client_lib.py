@@ -120,7 +120,7 @@ def get_chemical_name(row):
     return pd.Series(new_cols)
 
 
-def init_robot(rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, credentials):
+def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, credentials):
     '''
     This function gets the unique reagents, interfaces with the docs to get details on those
       reagents, and ships that information to the robot so it can initialize it's labware dicts
