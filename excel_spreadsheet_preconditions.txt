@@ -16,3 +16,8 @@ You can put comments, but eve won't read them
 DECK POSITIONS
 You must choose from the dropdown menu. If you want to use two of same element, no problem.
 You must always specify the first tube/tip ("A1" if you are full)
+Left and Right are the robot arms. specify which pipete you are using. 
+NOTE it is assumed that for a tip rack is 20, 300, or 1000 ul, and that these are in the name.
+It is also assumed that you never have two partially used tip racks of the same size on the deck at the same time
+It is also excpected that the name of the pipette be of the form <size>ul_<name>. This is required for parsing to get size
+The code is written to expect pipettes as instruments. If other instruments are chosen, the code to change will be init_labware_and_pipettes

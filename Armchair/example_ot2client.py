@@ -5,6 +5,7 @@ the project
 """
 import socket
 import sys
+from time import sleep
 
 from armchair import Armchair
 
@@ -18,5 +19,6 @@ pack_type = 'transfer'
 w1 = 'w1'
 w2 = 'w2'
 vol = 77
+sleep(10)
 portal.send_pack(pack_type, w1,w2,vol)
 client_sock.close()

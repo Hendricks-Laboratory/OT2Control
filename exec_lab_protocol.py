@@ -4,7 +4,7 @@ import sys
 import dill
 import pandas as pd
 
-import ot2_client_lib as ot2cl
+import ot2lib as ot2cl
 from Armchair.armchair import Armchair
 
 #SERVERADDR = "10.25.15.209"

@@ -20,8 +20,10 @@ print('server listening on port {}'.format(PORT_NUM))
 while True:
     sock.listen(5)
     client_sock, client_addr = sock.accept()
+    print(client_sock.gettimeout())
     connection_open=True
-    buffered_sock = BufferedSocket(client_sock)
+    buffered_sock = BufferedSocket(client_sock,timeout=None)
+    print(buffered_sock.gettimeout())
     portal = Armchair(buffered_sock)
     while connection_open: 
         pack_type, payload = portal.recv_pack()
