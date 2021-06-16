@@ -114,13 +114,44 @@ def load_rxn_df(rxn_spreadsheet, rxn_sheet_name):
     '''
     rxn_wks = rxn_spreadsheet.get_worksheet(0)
     data = rxn_wks.get_all_values()
-    rxn_df = pd.DataFrame(data[1:], columns=data[0])
+    cols = make_unique(pd.Series(data[0])) 
+    rxn_df = pd.DataFrame(data[2:], columns=cols)
     #rename some of the clunkier columns 
-    rxn_df.rename({'operation':'op', 'concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'Pause before addition?':'pause', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
+    rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'Pause before addition?':'pause', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
     rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
     rxn_df.replace('', np.nan,inplace=True)
     rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(get_chemical_name,axis=1)
+    rename_products(rxn_df)
+    #TODO create a labware dict from products to the labware requested for them
     return rxn_df
+
+def rename_products(rxn_df):
+    '''
+    renames dilutions acording to the reagent that created them
+    and renames rxns to have a concentration
+    Preconditions:
+        dilution cols are named dilution_1/2 etc
+        callback is the last column in the dataframe
+    params:
+        df rxn_df: the dataframe with all the reactions
+    Postconditions:
+        the df has had it's dilution columns renamed to the chemical used to produce it + C<conc>
+        rxn columns have C1 appended to them
+    '''
+    dilution_cols = [col for col in rxn_df.columns if 'dilution_placeholder' in col]
+    #get the rxn col names
+    rxn_cols = rxn_df.loc[:, 'callback':'chemical_name'].drop(columns=['callback','chemical_name']).columns
+    rename_key = {}
+    for col in rxn_cols:
+        if 'dilution_placeholder' in col:
+            row = rxn_df.loc[~rxn_df[col].isna()].squeeze()
+            reagent_name = row['chemical_name']
+            name = reagent_name[:reagent_name.rfind('C')+1]+row['dilution_conc']
+            rename_key[col] = name
+        else:
+            rename_key[col] = "{}C1".format(col)
+
+    rxn_df.rename(rename_key, axis=1, inplace=True)
 
 def get_chemical_name(row):
     '''
@@ -578,6 +609,27 @@ class OT2Controller():
         return i
 
 
+def make_unique(s):
+    '''
+    makes every element in s unique by adding _1, _2, ...
+    params:
+        pd.Series s: a series of elements with some duplicates
+    returns:
+        pd.Series: s with any duplicates made unique by adding a count
+    e.g.
+    ['sloth', 'gorilla', 'sloth'] becomes ['sloth_1', 'gorilla', 'sloth_2']
+    '''
+    val_counts = s.value_counts()
+    duplicates = val_counts.loc[val_counts > 1]
+    def _get_new_name(name):
+        #mini helper func for the apply
+        if name in duplicates:
+            i = duplicates[name]
+            duplicates[name] -= 1
+            return "{}_{}".format(name, i)
+        else:
+            return name
+    return s.apply(_get_new_name)
 
 
 

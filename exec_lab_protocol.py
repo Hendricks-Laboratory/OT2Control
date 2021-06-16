@@ -23,6 +23,7 @@ def main():
     #rxn_sheet is the entire spreadsheet
     rxn_spreadsheet = ot2cl.open_sheet(rxn_sheet_name, credentials)
     rxn_df = ot2cl.load_rxn_df(rxn_spreadsheet, rxn_sheet_name)
+    breakpoint()
     #establish connection
     #DEBUG sockets and armchair commented out in order to allow testing without sockets
     print("connecting to socket port {} at {}".format(PORT, SERVERADDR))
