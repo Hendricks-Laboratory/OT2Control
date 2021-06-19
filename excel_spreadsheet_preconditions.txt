@@ -1,8 +1,13 @@
+TODO Update this sheet. Some info is (really) outdated 
 INPUT TEMPlATE
 worksheet 0 is the input template
 an operation is transfer, scan, or pause
 any element that is transfered shall be renamed with spaces replaced with underscores, and it's concentration appended in the format 'C0.003'
 Every one of these reagents will be queried.
+After the reagents column, every other column must be a reaction column (This is used to determine what rows are not parameters)
+Please do not write concentrations in different ways. It's not nice. e.g. .050 sodium hydroxide and 0.05 sodium hydroxide are distinct names to the robot. (Math will be same, it just won't know they're the same chemical)
+It's really not expected that you 'transfer' liquid into yourself. I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do.
+
 
 REAGENTS INFO
 reagents concentration and reagent names will be pulled from the input template

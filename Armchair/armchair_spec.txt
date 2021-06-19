@@ -7,10 +7,25 @@ Data
 	Serialized python iterable args. The args are different for command_types
 
 COMMAND TYPES
-str_rep	code	args	desciption
-init	x00 	bool simulate, df labware, df reagents	This command tells the server to construct an Ot2Controller instance.
+
+x00: 'init'
+    Description: This command tells the server to construct an Ot2Controller instance.
+    Args:
+        bool simulate: True is simulating   
+        bool using_temp_ctrl: True if using temperature control
+        float temp: the temperature to keep unit at
+        df labware: labware information see OT2Controller.__init__
+        df reagents: reagents information see excel spec
+
+x04: 'transfer'
+    Description: This is used to perform a transfer operation as in the excel sheet
+    Args:
+        str src: the chemical_name of the source well to be transfered from 
+        list<str> callbacks: the ordered callbacks to perform on this operation, or None
+        list<tuple<str, float>> transfer_steps
+
 UNFINISHED
 close	x01
 error	x02
 status	x03
-transfer	x04
+transfer	x04	
