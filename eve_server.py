@@ -14,7 +14,6 @@ def main(client_sock):
     portal = Armchair(buffered_sock)
     eve = None
     pack_type, args = portal.recv_pack()
-    print('spinning')
     if pack_type == 'init':
         simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df = args
 
@@ -22,6 +21,8 @@ def main(client_sock):
     connection_open=True
     while connection_open:
         pack_type, payload = portal.recv_pack()
+        eve.execute(pack_type, payload)
+        break;
         print('header type = {}, payload = {}'.format(pack_type, payload))
 
 if __name__ == '__main__':

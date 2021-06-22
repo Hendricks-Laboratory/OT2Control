@@ -24,8 +24,19 @@ x04: 'transfer'
         list<str> callbacks: the ordered callbacks to perform on this operation, or None
         list<tuple<str, float>> transfer_steps
 
+x05: 'init_containers'
+    Description: This is used to initialize container(s) for a new reaction.
+    Args:
+        df product_df:
+            INDEX:
+            str chemical_name: the name of the rxn. initializes container for each row
+            COLS:
+            str labware: the type of labware this reaction must go in. If None, platereader will
+              be used unless no space or too small in which case something else will be used.
+            float max_vol: the maximum volume that will every ocupy this container. If not
+              specified, some container will be found
+
 UNFINISHED
 close	x01
 error	x02
-status	x03
-transfer	x04	
+status	x03 #consider step id for this and error? 

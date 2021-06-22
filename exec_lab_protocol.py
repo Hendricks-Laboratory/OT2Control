@@ -16,7 +16,7 @@ def main():
     #get user input
     #DEBUG
     #simulate, rxn_sheet_name, using_temp_ctrl, temp = ot2lib.pre_rxn_questions()
-    simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'pchem_week5', False, None)
+    simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'pchem_week5', True,22.5)
     #credentials are needed for a lot of i/o operations with google sheets
     credentials = ot2lib.init_credentials(rxn_sheet_name)
     #wks_key is also needed for google sheets i/o. It functions like a url
@@ -32,7 +32,6 @@ def main():
     print("connected")
     portal = Armchair(sock)
     ot2lib.init_robot(portal, rxn_spreadsheet, rxn_df,simulate, wks_key, credentials, using_temp_ctrl, temp, products_to_labware)
-    breakpoint()
 
     #sock.close()
 

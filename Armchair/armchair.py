@@ -5,7 +5,7 @@ class Armchair():
     def __init__(self, socket):
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
         self.sock = socket
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','status':b'\x03','transfer':b'\x04'})
+        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','status':b'\x03','transfer':b'\x04','init_containers':b'\x05'})
 
     def get_len(self,header):
         '''
