@@ -395,40 +395,49 @@ class Container(ABC):
         str name: the common name we use to refer to this container
         float vol: the volume of the liquid in this container in uL
         Obj Labware: a pointer to the Opentrons Labware object of which this is a part
-        str loc: a location on the labware object (e.g. 'A5')
+        str loc: a location on the deck_pos object (e.g. 'A5')
         float conc: the concentration of the substance
     ABSTRACT METHODS:
         _update_height void: updates self.height to hieght at which to pipet (a bit below water line)
     IMPLEMENTED METHODS:
-        update_vol(float aspvol) void: updates the volume upon an aspiration
+        update_vol(float del_vol) void: updates the volume upon an aspiration
     """
 
-    def __init__(self, name, labware, loc, vol=0,  conc=1):
+    def __init__(self, name, deck_pos, loc, vol=0,  conc=1):
         self.name = name
-        self.labware = labware
+        self.deck_pos = deck_pos
         self.loc = loc
         self.vol = vol
-        self.height = self._update_height()
+        self._update_height()
         self.conc = conc
 
     @abstractmethod
     def _update_height(self):
         pass
 
-    def update_vol(self, aspvol):
-        self.vol = self.vol - self.aspvol
+    def update_vol(self, del_vol):
+        self.vol = self.vol + del_vol
         self._update_height()
 
+    @property
+    def disp_height(self):
+        pass
+
+    @property
+    def asp_height(self):
+        pass
+        
 class Tube20000uL(Container):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
         str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        _update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float del_vol) void,
     """
-    
-    def __init__(self, name, labware, loc, mass=6.6699, conc=1):
+
+
+    def __init__(self, name, deck_pos, loc, mass=6.6699, conc=1):
         '''
         mass is defaulted to the avg_mass so that there is nothing in the container
         '''
@@ -436,15 +445,23 @@ class Tube20000uL(Container):
         avg_tube_mass15 = 6.6699 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
-        super().__init__(name, labware, loc, vol, conc)
+        super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
 
     def _update_height(self):
         diameter_15 = 14.0 # mm (V1 number = 14.4504)
         vol_bottom_cylinder = 2000 # uL
         height_bottom_cylinder = 30.5  #mm
-        tip_depth = 5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+(height_bottom_cylinder - tip_depth)
+        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
+
+    @property
+    def disp_height(self):
+        return self.height + 10 #mm
+
+    @property
+    def asp_height(self):
+        tip_depth = 5
+        return self.height - tip_depth
             
 class Tube50000uL(Container):
     """
@@ -452,22 +469,32 @@ class Tube50000uL(Container):
     INHERITED ATTRIBUTES
         str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        _update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float del_vol) void,
     """
-    def __init__(self, name, labware, loc, mass=13.3950, conc=1):
+
+
+    def __init__(self, name, deck_pos, loc, mass=13.3950, conc=1):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass50 = 13.3950 # grams
         self.mass = mass - avg_tube_mass50 # N = 1 (in grams) 
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
-        super().__init__(name, labware, loc, vol, conc)
+        super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
         
     def _update_height(self):
         diameter_50 = 26.50 # mm (V1 number = 26.7586)
         vol_bottom_cylinder = 5000 # uL
         height_bottom_cylinder = 21 #mm
-        tip_depth = 5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + (height_bottom_cylinder - tip_depth) 
+        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + height_bottom_cylinder
+
+    @property
+    def disp_height(self):
+        return self.height + 10 #mm
+
+    @property
+    def asp_height(self):
+        tip_depth = 5
+        return self.height - tip_depth
 
 class Tube2000uL(Container):
     """
@@ -475,22 +502,31 @@ class Tube2000uL(Container):
     INHERITED ATTRIBUTES
          str name, float vol, Obj Labware, str loc
     INHERITED METHODS
-        _update_height void, update_vol(float aspvol) void,
+        _update_height void, update_vol(float del_vol) void,
     """
-    
-    def __init__(self, name, labware, loc, mass=1.4, conc=1):
+
+
+    def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
         density_water_4C = 0.9998395 # g/mL
         avg_tube_mass2 =  1.4        # grams
         self.mass = mass - avg_tube_mass2 # N = 1 (in grams) 
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
-        super().__init__(name, labware, loc, vol, conc)
+        super().__init__(name, deck_pos, loc, vol, conc)
            
     def _update_height(self):
         diameter_2 = 8.30 # mm
         vol_bottom_cylinder = 250 #uL
         height_bottom_cylinder = 10.5 #mm
+        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
+
+    @property
+    def disp_height(self):
+        return self.height + 10 #mm
+
+    @property
+    def asp_height(self):
         tip_depth = 4.5 # mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_2/2)**2)) + (height_bottom_cylinder - tip_depth)
+        return self.height - tip_depth
 
 class Well96(Container):
     """
@@ -498,16 +534,25 @@ class Well96(Container):
         INHERITED ATTRIBUTES
              str name, float vol, Obj Labware, str loc
         INHERITED METHODS
-            _update_height void, update_vol(float aspvol) void,
+            _update_height void, update_vol(float del_vol) void,
     """
 
-    def __init__(self, name, labware, loc, vol=0, conc=1):
+    def __init__(self, name, deck_pos, loc, vol=0, conc=1):
         #vol is defaulted here because the well will probably start without anything in it
-        super().__init__(name, labware, loc, vol, conc)
+        super().__init__(name, deck_pos, loc, vol, conc)
            
     def _update_height(self):
-        #TODO develop an update height method for wells.
-        pass
+        #this method is not needed for a well of such small size because we always aspirate
+        #and dispense at the same hieghts
+        self.height = None
+
+    @property
+    def disp_height(self):
+        return 10 #mm
+
+    @property
+    def asp_height(self):
+        return 1
 
 
 #LABWARE
@@ -553,6 +598,15 @@ class Labware(ABC):
             str the type of container class
         '''
         pass
+
+    def get_well(self,loc):
+        '''
+        params:
+            str loc: the location on the labaware e.g. A1
+        returns:
+            the opentrons well object at that location
+        '''
+        return self.labware.wells_by_name()[loc]
 
     @property
     def name(self):
@@ -685,6 +739,10 @@ class OT2Controller():
         Dict<str, Container> containers: maps from a common name to a Container object
         Dict<str, Obj> tip_racks: maps from a common name to a opentrons tiprack labware object
         Dict<str, Obj> labware: maps from labware common names to opentrons labware objects. tip racks not included?
+        Dict<str:Dict<str:Obj>>: JSON style dict. First key is the arm_pos second is the attribute
+            'size' float: the size of this pipette in uL
+            'last_used' str: the chem_name of the last chemical used. 'clean' is used to denote a
+              clean pipette
         Opentrons...ProtocolContext protocol: the protocol object of this session
 
     """
@@ -726,7 +784,7 @@ class OT2Controller():
         with open('cache.pkl','wb') as cache:
             dill.dump([simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df], cache)
         self.containers = {}
-        
+        self.pipettes = {}
         #like protocol.deck, but with custom labware wrappers
         self.lab_deck = np.full(12, None, dtype='object') #note first slot not used
 
@@ -919,7 +977,10 @@ class OT2Controller():
             used_rack = self.protocol.loaded_labwares[used_rack_row['deck_pos']]
             #set starting tip
             pipette.starting_tip = used_rack.well(used_rack_row['first_usable'])
-            return
+            pipette.pick_up_tip()
+            #update self.pipettes
+            self.pipettes[arm_pos] = {'size':float(pipette_size),'last_used':'clean','pipette':pipette}
+        return
 
     def _lexo_argmax(self, s):
         '''
@@ -936,7 +997,7 @@ class OT2Controller():
             max_idx = i
         return i
  
-    def _init_empty_containers(self, product_df):
+    def _exec_init_containers(self, product_df):
         '''
         used to initialize empty containers, which is useful before transfer steps to new chemicals
         especially if we have preferences for where those chemicals are put
@@ -962,7 +1023,7 @@ class OT2Controller():
                 else:
                     viable_labware = [viable for viable in viable_labware if viable.name == labware]
             #sort the list so that platreader slots are prefered
-            viable_labware.sort(key=lambda x: self._init_empty_containers.priority[x.name])
+            viable_labware.sort(key=lambda x: self._exec_init_containers.priority[x.name])
             #iterate through the filtered labware and pick the first one that 
             loc, deck_pos, container_type  = None, None, None
             i = 0
@@ -984,9 +1045,9 @@ class OT2Controller():
 
     #a dictionary to assign priorities to different labwares. Right now used only to prioritize
     #platereader when no other labware has been specified
-    _init_empty_containers.priority = defaultdict(lambda: 100)
-    _init_empty_containers.priority['platereader4'] = 1
-    _init_empty_containers.priority['platereader7'] = 2
+    _exec_init_containers.priority = defaultdict(lambda: 100)
+    _exec_init_containers.priority['platereader4'] = 1
+    _exec_init_containers.priority['platereader7'] = 2
 
     def execute(self, command_type, arguments):
         '''
@@ -999,12 +1060,135 @@ class OT2Controller():
             the command has been executed
         '''
         if command_type == 'transfer':
-            init_labware(arguments[0])
-            init_reagents(arguments[1])
+            self._exec_tranfer(*arguments)
         elif command_type == 'init_containers':
-            self._init_empty_containers(arguments[0])
+            self._exec_init_containers(arguments[0])
         else:
             raise Exception("Unidenified command {}".format(pack_type))
+
+    def _exec_tranfer(self, src, transfer_steps, callbacks):
+        '''
+        params:
+            str src: the chem_name of the source well
+            list<tuple<str,float>> transfer_steps: each element is a dst, vol pair
+            list<str> callbacks: the ordered callbacks to perform after each transfer or None
+        '''
+        #we want to pick up new tip at the start
+        new_tip=True
+        for dst, vol in transfer_steps:
+            self._transfer_step(src,dst,vol)
+            new_tip=False #don't want to use a new tip_next_time
+            if callbacks:
+                for callback in callbacks:
+                    #call the callback
+                    pass
+        return
+
+    def _transfer_step(self, src, dst, vol):
+        '''
+        used to execute a single tranfer from src to dst. Handles things like selecting
+        appropriately sized pipettes. dropping tip if it's a new chemical. If you need
+        more than 1 step, will facilitate that
+        '''
+        #choose your pipette
+        arm = self._get_preffered_pipette(vol)
+        n_substeps = int(vol // self.pipettes[arm]['size']) + 1
+        substep_vol = vol / self.pipettes[arm]['size']
+        
+        #if you need a new tip, get one 
+        if src != self.pipettes[arm]['last_used'] and src != 'clean':
+            self._get_new_tip(arm)
+
+        #transfer the liquid in as many steps are necessary
+        for i in range(n_substeps):
+            self._liquid_transfer(src, dst, substep_vol, arm)
+        return
+
+    def _get_new_tip(self, arm):
+        '''
+        replaces the tip with a new one
+        TODO: Michael found it necessary to test if has_tip. I don't think this is needed
+          but revert to it if you run into trouble
+        TODO: pickup tip on init
+        TODO: Wrap in try for running out of tips
+        '''
+        pipette = self.pipettes[arm]['pipette']
+        pipette.drop_tip()
+        pipette.pick_up_tip()
+        self.pipettes[arm]['last_used'] = 'clean'
+
+    def _get_preffered_pipette(self, vol):
+        '''
+        returns the pipette with size, or one smaller
+        params:
+            float vol: the volume to be transfered in uL
+        returns:
+            str: in ['right', 'left'] the pipette arm you're to use
+        '''
+        preffered_size = 0
+        if vol < 50:
+            preffered_size = 20.0
+        elif vol < 600:
+            preffered_size = 300.0
+        else:
+            preffered_size = 1000.0
+        
+        #which pipette arm has a larger pipette?
+        larger_pipette=None
+        if self.pipettes['right']['size'] < self.pipettes['left']['size']:
+            larger_pipette = 'left'
+            smaller_pipette = 'right'
+        else:
+            larger_pipette = 'right'
+            smaller_pipette = 'left'
+
+        if self.pipettes[larger_pipette]['size'] < preffered_size:
+            #if the larger one is small enough return it
+            return larger_pipette
+        else:
+            #if the larger one is too large return the smaller
+            return smaller_pipette
+
+    def _liquid_transfer(self, src, dst, vol, arm):
+        '''
+        the lowest of the low. Transfer liquid from one container to another. And mark the tip
+        as dirty with src, and update the volumes of the containers it uses
+        params:
+            str src: the chemical name of the source container
+            str dst: the chemical name of the destination container
+            float vol: the volume of liquid to be transfered
+            str arm: the robot arm to use for this transfer
+        Postconditions:
+            vol uL of src has been transfered to dst
+            pipette has been adjusted to be dirty with src
+            volumes of src and dst have been updated
+        '''
+        pipette = self.pipettes[arm]['pipette']
+        src_cont = self.containers[src] #the src container
+        dst_cont = self.containers[dst] #the dst container
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.containers[src].asp_height
+        #aspirate(well_obj)
+        pipette.aspirate(vol, self.lab_deck[src_cont.deck_pos].get_well(src_cont.loc))
+        #update the vol of src
+        src_cont.update_vol(-vol)
+        #pipette is now dirty
+        self.pipettes[arm]['last_used'] = src
+        #touch tip
+        pipette.touch_tip()
+        #maybe move up if clipping
+        #set dispense height 
+        pipette.well_bottom_clearance.dispense = self.containers[dst].disp_height
+        #dispense(well_obj)
+        pipette.dispense(vol, self.lab_deck[dst_cont.deck_pos].get_well(dst_cont.loc))
+        #update vol of dst
+        dst_cont.update_vol(vol)
+        #blowout
+        for i in range(4):
+            pipette.blow_out()
+        #wiggle - touch tip (spin fast inside well)
+        pipette.touch_tip(radius=0.3,speed=40)
+
 
 def make_unique(s):
     '''
