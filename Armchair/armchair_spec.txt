@@ -1,14 +1,16 @@
 Armchair is a protocol for sending datagrams between and ot2 robot (eve) and a driver code (laptop).
 PACKET FIELDS
 Header
-	8B body_len: the length of the packet minus the header
-	1B command_type: the type of the command.
+    8B body_len: the length of the packet minus the header
+    1B command_type: the type of the command.
+    8B cid: the command id.
 Data
-	Serialized python iterable args. The args are different for command_types
+    Serialized python iterable args. The args are different for command_types
 
 COMMAND TYPES
 
 x00: 'init'
+    controller->robot
     Description: This command tells the server to construct an Ot2Controller instance.
     Args:
         bool simulate: True is simulating   
@@ -17,7 +19,20 @@ x00: 'init'
         df labware: labware information see OT2Controller.__init__
         df reagents: reagents information see excel spec
 
+x01: 'close'
+    controller<->robot
+    Description: This command is used to tell the robot to terminate. Or to tell the client it is
+        safe to terminate. It is not an interrupt.
+
+x03: 'ready'
+    robot->controller
+    Description: These are effectively Acks. They're used for flow control. They are sent after
+        a transfer, dilution, init_containers, or init
+    Args:
+        int cid: the command id of the command just executed
+
 x04: 'transfer'
+    controller->robot
     Description: This is used to perform a transfer operation as in the excel sheet
     Args:
         str src: the chemical_name of the source well to be transfered from 
@@ -25,6 +40,7 @@ x04: 'transfer'
         list<str> callbacks: the ordered callbacks to perform on this operation, or None
 
 x05: 'init_containers'
+    controller->robot
     Description: This is used to initialize container(s) for a new reaction.
     Args:
         df product_df:
@@ -36,7 +52,12 @@ x05: 'init_containers'
             float max_vol: the maximum volume that will every ocupy this container. If not
               specified, some container will be found
 
+x06: 'sending_files'
+    robot->controller
+    Description: Used to alert client to create a new socket over which to transfer files
+    Args:
+        int port: the port number of the robot server (the convention here is 50001)
+        NOTE ip not needed because you connected to the robot already
+
 UNFINISHED
-close	x01
-error	x02
-status	x03 #consider step id for this and error? 
+error x02

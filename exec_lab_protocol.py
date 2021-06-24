@@ -14,9 +14,9 @@ PORT = 50000
 
 def main():
     #get user input
+    simulate, rxn_sheet_name, using_temp_ctrl, temp = ot2lib.pre_rxn_questions()
     #DEBUG
-    #simulate, rxn_sheet_name, using_temp_ctrl, temp = ot2lib.pre_rxn_questions()
-    simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'pchem_week5', True,22.5)
+    #simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'pchem_week5', True,22.5)
     #credentials are needed for a lot of i/o operations with google sheets
     credentials = ot2lib.init_credentials(rxn_sheet_name)
     #wks_key is also needed for google sheets i/o. It functions like a url
@@ -26,14 +26,13 @@ def main():
     rxn_df, products_to_labware = ot2lib.load_rxn_table(rxn_spreadsheet, rxn_sheet_name)
     #establish connection
     #DEBUG sockets and armchair commented out in order to allow testing without sockets
-    print("connecting to socket port {} at {}".format(PORT, SERVERADDR))
     sock = socket.socket(socket.AF_INET)
     sock.connect((SERVERADDR, PORT))
-    print("connected")
-    portal = Armchair(sock)
+    print("<<controller>> connected")
+    portal = Armchair(sock,'controller','Armchair_Logs')
     ot2lib.init_robot(portal, rxn_spreadsheet, rxn_df,simulate, wks_key, credentials, using_temp_ctrl, temp, products_to_labware)
-
-    #sock.close()
+    ot2lib.run_protocol(rxn_df, portal)
+    ot2lib.close_connection(portal, SERVERADDR)
 
 if __name__ == '__main__':
     main()

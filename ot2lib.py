@@ -1,10 +1,13 @@
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
-import datetime
+from datetime import datetime
+import socket
 import json
 import dill
 import math
+import os
+import shutil
 
 import gspread
 from df2gspread import df2gspread as d2g
@@ -16,6 +19,7 @@ import opentrons.execute
 from opentrons import protocol_api, simulate, types
 import webbrowser
 from tempfile import NamedTemporaryFile
+from boltons.socketutils import BufferedSocket
 
 #VISUALIZATION
 def df_popout(df):
@@ -40,14 +44,14 @@ def pre_rxn_questions():
         bool using_temp_ctrl: true if planning to use temperature ctrl module
         float temp: the temperature you want to keep the module at
     '''
-    simulate = (input('Simulate or Execute: ').lower() == 'simulate')
-    rxn_sheet_name = input('Enter Sheet Name as it Appears on the Spreadsheets Title: ')
-    temp_ctrl_response = input('Are you using the temperature control module, yes or no?\
+    simulate = (input('<<controller>> Simulate or Execute: ').lower() == 'simulate')
+    rxn_sheet_name = input('<<controller>> Enter Sheet Name as it Appears on the Spreadsheets Title: ')
+    temp_ctrl_response = input('<<controller>> Are you using the temperature control module, yes or no?\
     (if yes, turn it on before responding): ').lower()
     using_temp_ctrl = ('y' == temp_ctrl_response or 'yes' == temp_ctrl_response)
     temp = None
     if using_temp_ctrl:
-        temp = input('What temperature in Celcius do you want the module \
+        temp = input('<<controller>> What temperature in Celcius do you want the module \
         set to? \n (the protocol will not proceed until the set point is reached) \n')
     return simulate, rxn_sheet_name, using_temp_ctrl, temp
 
@@ -64,7 +68,6 @@ def open_sheet(rxn_sheet_name, credentials):
     gc = gspread.authorize(credentials)
     try:
         wks = gc.open(rxn_sheet_name)
-        print('Everythings Ready To Go')
     except: 
         raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
     return wks
@@ -135,6 +138,8 @@ def load_rxn_table(rxn_spreadsheet, rxn_sheet_name):
     #rename chemical names
     rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(get_chemical_name,axis=1)
     rename_products(rxn_df)
+    #go back for some non numeric columns
+    rxn_df['callbacks'].fillna('',inplace=True)
     #create labware_dict
     cols = rxn_df.columns.to_list()
     product_start_i = cols.index('reagent')+1
@@ -216,7 +221,7 @@ def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, crede
 
     #query the docs for more info on reagents
     construct_reagent_sheet(rxn_df, spreadsheet_key, credentials)
-    input("please press enter when you've completed the reagent sheet")
+    input("<<controller>> please press enter when you've completed the reagent sheet")
 
     #pull the info into a df
     reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
@@ -232,14 +237,18 @@ def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, crede
     product_df = construct_product_df(rxn_df, products_to_labware)
 
     #send robot data to initialize itself
-    portal.send_pack('init', simulate, using_temp_ctrl, temp, labware_df, instruments, reagents)
+    cid = portal.send_pack('init', simulate, using_temp_ctrl, temp, labware_df, instruments, reagents)
+    
+    inflight_packs = [cid]
+    block_on_ready(inflight_packs, portal)
 
     #send robot data to initialize empty product containers. Because we know things like total
     #vol and desired labware, this makes sense for a planned experiment
     with open('product_df_cache.pkl', 'wb') as cache:
         dill.dump(product_df, cache)
-    portal.send_pack('init_containers', product_df)
-
+    cid = portal.send_pack('init_containers', product_df)
+    inflight_packs.append(cid)
+    block_on_ready(inflight_packs,portal)
     return
 
 def construct_product_df(rxn_df, products_to_labware):
@@ -385,6 +394,119 @@ def get_labware_info(rxn_spreadsheet, empty_containers):
     instruments['right'] = raw_labware_data[13][1]
     return labware_df, instruments
 
+def run_protocol(rxn_df, portal, buff_size=4):
+    '''
+    takes a protocol df and sends every step to robot to execute
+    params:
+        df rxn_df: see excel specs
+        Armchair portal: the Armchair object to communicate with the robot
+        int buff: the number of commands allowed in flight at a time
+    Postconditions:
+        every step in the protocol has been sent to the robot
+    '''
+    inflight_packs = []
+    product_cols = rxn_df.loc[:,'reagent':'chemical_name'].drop(
+            columns=['reagent','chemical_name']).columns
+    for _, row in rxn_df.iterrows():
+        if row['op'] == 'transfer':
+            cid = send_transfer_command(row, product_cols, portal)
+            inflight_packs.append(cid)
+        elif row['op'] == 'pause':
+            #read through the inflight packets
+            while inflight_packs:
+                block_on_ready(inflight_packs, portal)
+            input('<<controller>> paused. Please press enter when you\'re ready to continue')
+        elif row['op'] == 'scan':
+            #TODO implement scans
+            pass
+        elif row['op'] == 'dilution':
+            #TODO implement dilutions
+            pass
+        else:
+            raise Exception('invalid operation {}'.format(row['op']))
+        #check buffer
+        if len(inflight_packs) >= buff_size:
+            block_on_ready(inflight_packs,portal)
+
+def send_transfer_command(row, product_cols, portal):
+    '''
+    params:
+        pd.Series row: a row of rxn_df
+    returns:
+        int: the cid of this command
+    Postconditions:
+        a transfer command has been sent to the robot
+    '''
+    src = row['chemical_name']
+    containers = row[product_cols].loc[row[product_cols] != 0]
+    transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
+    callbacks = row['callbacks'].split(',')
+    cid = portal.send_pack('transfer', src, transfer_steps, callbacks)
+    return cid
+
+
+def block_on_ready(inflight_packs,portal):
+    '''
+    used to block until the server responds with a 'ready' packet
+    Preconditions: inflight_packs contains cids of packets that have been sent to server, but
+    not yet acknowledged
+    params:
+        list<int> inflight_packs: list of cids of send packets that have not been acked yet
+    Postconditions:
+        has stalled until a ready command was recieved.
+        The cid in the ready command has been removed from inflight_packs
+    '''
+    pack_type, _, arguments = portal.recv_pack()
+    if pack_type == 'error':
+        error_handler()
+    elif pack_type == 'ready':
+        cid = arguments[0]
+        inflight_packs.remove(cid)
+    else:
+        raise Exception('invalid packet type {}'.format(pack_type))
+        
+
+def close_connection(portal, ip, path='./Eve_Files'):
+    '''
+    runs through closing procedure with robot
+    params:
+        Armchair portal: the Armchair object to communicate with robot
+    Postconditions:
+        Log files have been written to path
+        Connection has been closed
+    '''
+    print('<<controller>> initializing breakdown')
+    if not os.path.exists(path):
+        os.mkdir(path)
+    portal.send_pack('close')
+    #server will initiate file transfer
+    pack_type, cid, arguments = portal.recv_pack()
+    while pack_type == 'ready':
+        #spin through all the queued ready packets
+        pack_type, cid, arguments = portal.recv_pack()
+    assert(pack_type == 'sending_files')
+    port = arguments[0]
+    name_size_pairs = arguments[1]
+    sock = socket.socket(socket.AF_INET)
+    sock.connect((ip, port))
+    buffered_sock = BufferedSocket(sock)
+    for filename, size in name_size_pairs:
+        with open(os.path.join(path,filename), 'wb') as write_file:
+            data = sock.recv(size)
+            write_file.write(data)
+    print('<<controller>> files recieved')
+    sock.close()
+    #server should now send a close command
+    pack_type, cid, arguments = portal.recv_pack()
+    assert(pack_type == 'close')
+    print('<<controller>> shutting down')
+    portal.close()
+
+def error_handler():
+    pass
+
+
+
 #SERVER
 #CONTAINERS
 class Container(ABC):
@@ -394,9 +516,15 @@ class Container(ABC):
     ABSTRACT ATTRIBUTES:
         str name: the common name we use to refer to this container
         float vol: the volume of the liquid in this container in uL
-        Obj Labware: a pointer to the Opentrons Labware object of which this is a part
+        int deck_pos: the position on the deck
         str loc: a location on the deck_pos object (e.g. 'A5')
         float conc: the concentration of the substance
+        float disp_height: the height to dispense at
+        float asp_height: the height to aspirate from
+        list<tup<timestamp, str, float> history: the history of this container. Contents:
+          timestamp timestamp: the time of the addition/removal
+          str chem_name: the name of the chemical added or blank if aspiration
+          float vol: the volume of chemical added/removed
     ABSTRACT METHODS:
         _update_height void: updates self.height to hieght at which to pipet (a bit below water line)
     IMPLEMENTED METHODS:
@@ -410,12 +538,28 @@ class Container(ABC):
         self.vol = vol
         self._update_height()
         self.conc = conc
+        self.history = []
+        if vol:
+            #create an entry with yourself as first
+            self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, vol))
 
     @abstractmethod
     def _update_height(self):
         pass
 
-    def update_vol(self, del_vol):
+    def update_vol(self, del_vol,name=''):
+        '''
+        params:
+            float del_vol: the change in volume. -vol is an aspiration
+            str name: the thing coming in if it is a dispense
+        Postconditions:
+            the volume has been adjusted
+            hieght has been adjusted
+            the history has been updated
+        '''
+        #if you are dispersing without specifying the name of incoming chemical, complain
+        assert((del_vol < 0) or (name and del_vol > 0))
+        self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
 
@@ -426,12 +570,13 @@ class Container(ABC):
     @property
     def asp_height(self):
         pass
+
         
 class Tube20000uL(Container):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
-        str name, float vol, Obj Labware, str loc
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
     INHERITED METHODS
         _update_height void, update_vol(float del_vol) void,
     """
@@ -467,7 +612,7 @@ class Tube50000uL(Container):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
-        str name, float vol, Obj Labware, str loc
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
     INHERITED METHODS
         _update_height void, update_vol(float del_vol) void,
     """
@@ -500,7 +645,7 @@ class Tube2000uL(Container):
     """
     2000uL tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
-         str name, float vol, Obj Labware, str loc
+         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
     INHERITED METHODS
         _update_height void, update_vol(float del_vol) void,
     """
@@ -532,7 +677,7 @@ class Well96(Container):
     """
         a well in a 96 well plate
         INHERITED ATTRIBUTES
-             str name, float vol, Obj Labware, str loc
+             str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
         INHERITED METHODS
             _update_height void, update_vol(float del_vol) void,
     """
@@ -736,6 +881,7 @@ class OT2Controller():
     """
     The big kahuna. This class contains all the functions for controlling the robot
     ATTRIBUTES:
+        str ip: IPv4 LAN address of this machine
         Dict<str, Container> containers: maps from a common name to a Container object
         Dict<str, Obj> tip_racks: maps from a common name to a opentrons tiprack labware object
         Dict<str, Obj> labware: maps from labware common names to opentrons labware objects. tip racks not included?
@@ -756,7 +902,7 @@ class OT2Controller():
     _TUBE_HOLDER_NAMES = {'tube_holder_10','temp_mod_24_tube'}
 
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df):
+    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, ip, portal):
         '''
         params:
             bool simulate: if true, the robot will run in simulation mode only
@@ -785,6 +931,8 @@ class OT2Controller():
             dill.dump([simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df], cache)
         self.containers = {}
         self.pipettes = {}
+        self.ip = ip
+        self.portal = portal
         #like protocol.deck, but with custom labware wrappers
         self.lab_deck = np.full(12, None, dtype='object') #note first slot not used
 
@@ -800,10 +948,32 @@ class OT2Controller():
         labware_df['empty_list'] = labware_df['empty_list'].apply(lambda x: x.split(',')
                 if x else [])
         self._init_params()
+        self._init_directories()
         self._init_labware(labware_df, using_temp_ctrl, temp)
         self._init_instruments(instruments, labware_df)
         self._init_containers(reagents_df)
-        #CONCLUDED!
+
+    def _init_directories(self):
+        '''
+        The debug/directory structure of the robot is not intended to be stored for long periods
+        of time. This is becuase the files should be shipped over FTP to laptop. In the event
+        of an epic fail, e.g. where network went down and has no means to FTP back to laptop
+        Postconditions: the following directory structure has been contstructed
+            Eve_Out: root
+                Debug: populated with error information. Used on crash
+                Logs: log files for eve
+        '''
+        #clean up last time
+        if os.path.exists('Eve_Out'):
+            shutil.rmtree('Eve_Out')
+        #make new folders
+        os.mkdir('Eve_Out')
+        os.mkdir('Eve_Out/Debug')
+        os.mkdir('Eve_Out/Logs')
+        self.root_p = 'Eve_Out/'
+        self.debug_p = os.path.join(self.root_p, 'Debug')
+        self.logs_p = os.path.join(self.root_p, 'Logs')
+
 
     def _init_containers(self, reagents_df):
         '''
@@ -1049,20 +1219,29 @@ class OT2Controller():
     _exec_init_containers.priority['platereader4'] = 1
     _exec_init_containers.priority['platereader7'] = 2
 
-    def execute(self, command_type, arguments):
+    def execute(self, command_type, cid, arguments):
         '''
         takes the packet type and payload of an Armchair packet, and executes the command
         params:
             str command_type: the type of packet to execute
             tuple<Obj> arguments: the arguments to this command 
               (generally passed as list so no *args)
+        returns:
+            int: 1=ready to recieve. 0=terminated
         Postconditions:
             the command has been executed
         '''
         if command_type == 'transfer':
             self._exec_tranfer(*arguments)
+            self.portal.send_pack('ready', cid)
+            return 1
         elif command_type == 'init_containers':
             self._exec_init_containers(arguments[0])
+            self.portal.send_pack('ready', cid)
+            return 1
+        elif command_type == 'close':
+            self._exec_close()
+            return 0
         else:
             raise Exception("Unidenified command {}".format(pack_type))
 
@@ -1163,6 +1342,7 @@ class OT2Controller():
             pipette has been adjusted to be dirty with src
             volumes of src and dst have been updated
         '''
+        self.protocol._commands.append('HEAD: transfering {} to {}'.format(src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
@@ -1182,13 +1362,100 @@ class OT2Controller():
         #dispense(well_obj)
         pipette.dispense(vol, self.lab_deck[dst_cont.deck_pos].get_well(dst_cont.loc))
         #update vol of dst
-        dst_cont.update_vol(vol)
+        dst_cont.update_vol(vol,src)
         #blowout
         for i in range(4):
             pipette.blow_out()
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
 
+    def dump_well_map(self):
+        '''
+        dumps the well_map to a file
+        '''
+        path=os.path.join(self.logs_p,'wellmap.tsv')
+        names = self.containers.keys()
+        locs = [self.containers[name].loc for name in names]
+        deck_poses = [self.containers[name].deck_pos for name in names]
+        vols = [self.containers[name].vol for name in names]
+        well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 'vol':vols})
+        well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
+        well_map.to_csv(path, sep='\t')
+
+    def dump_protocol_record(self):
+        '''
+        dumps the protocol record to tsv
+        '''
+        path=os.path.join(self.logs_p, 'protocol_record.txt')
+        command_str = ''.join(x+'\n' for x in self.protocol.commands())[:-1]
+        with open(path, 'w') as command_dump:
+            command_dump.write(command_str)
+
+    def dump_well_histories(self):
+        '''
+        gathers the history of every reaction and puts it in a single df. Writes that df to file
+        '''
+        path=os.path.join(self.logs_p, 'well_history.tsv')
+        histories=[]
+        for name, container in self.containers.items():
+            df = pd.DataFrame(container.history, columns=['timestamp', 'chemical', 'vol'])
+            df['container'] = name
+            histories.append(df)
+        all_history = pd.concat(histories, ignore_index=True)
+        all_history['timestamp'] = pd.to_datetime(all_history['timestamp'], format='%d-%b-%Y %H:%M:%S:%f')
+        all_history.sort_values(by=['timestamp'], inplace=True)
+        all_history.reset_index(inplace=True, drop=True)
+        all_history.to_csv(path, sep='\t')
+
+    def exception_handler(self, e):
+        '''
+        code to handle all exceptions.
+        Procedure:
+            Dump a locations of all of the chemicals
+        '''
+        pass
+
+    def _exec_close(self):
+        '''
+        close the connection in a nice way
+        '''
+        print('<<eve>> initializing breakdown')
+        #write logs
+        self.dump_protocol_record()
+        self.dump_well_histories()
+        self.dump_well_map()
+        #ship logs
+        filepaths = [os.path.join(self.logs_p, filename) for filename in os.listdir(self.logs_p)]
+        port = 50001 #default port for ftp 
+        self.send_files(port, filepaths)
+        #kill link
+        print('<<eve>> shutting down')
+        self.portal.send_pack('close')
+        self.portal.close()
+
+    def send_files(self,port,filepaths):
+        '''
+        used to ship files back to server
+        params:
+            int port: the port number to ship the files out of
+            list<str> filepaths: the filepaths to ship
+        '''
+        print('<<eve>> initializing filetransfer')
+        filenames = os.listdir(self.logs_p)
+        filesizes = [os.stat(filepath).st_size for filepath in filepaths]
+        name_size_pairs = list(zip(filenames, filesizes))
+        self.portal.send_pack('sending_files', port, name_size_pairs)
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.ip, port))
+        sock.listen(5)
+        client_sock, client_addr = sock.accept()
+        for filepath in filepaths:
+            with open(filepath,'rb') as local_file:
+                client_sock.sendfile(local_file)
+            #wait until client has sent that they're ready to recieve again
+        client_sock.close()
+        sock.close()
 
 def make_unique(s):
     '''
