@@ -21,6 +21,13 @@ import webbrowser
 from tempfile import NamedTemporaryFile
 from boltons.socketutils import BufferedSocket
 
+import Armchair.armchair as armchair
+
+#For Debugging
+USE_CACHE = False
+USE_CACHE = True
+CACHE_PATH = 'Cache'
+
 #VISUALIZATION
 def df_popout(df):
     '''
@@ -96,11 +103,23 @@ def get_wks_key(credentials, rxn_sheet_name):
     returns:
         str wks_key: the key associated with the sheet. It functions similar to a url
     '''
-    gc = gspread.authorize(credentials)
-    name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
-    name_key_pairs = name_key_wks.get_all_values() #list<list<str name, str key>>
-    #Note the key is a unique identifier that can be used to access the sheet
-    #d2g uses it to access the worksheet
+    #DEBUG
+    if USE_CACHE:
+        #load cache
+        with open(os.path.join(CACHE_PATH, 'name_key_pairs.pkl'), 'rb') as name_key_pairs_cache:
+            name_key_pairs = dill.load(name_key_pairs_cache)
+    else:
+        #pull down data
+        gc = gspread.authorize(credentials)
+        name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
+        name_key_pairs = name_key_wks.get_all_values() #list<list<str name, str key>>
+        #Note the key is a unique identifier that can be used to access the sheet
+        #d2g uses it to access the worksheet
+        
+        #DEBUG
+        #dump to cache
+        with open(os.path.join(CACHE_PATH, 'name_key_pairs.pkl'), 'wb') as name_key_pairs_cache:
+            dill.dump(name_key_pairs, name_key_pairs_cache)
     try:
         i=0
         wks_key = None
@@ -127,8 +146,14 @@ def load_rxn_table(rxn_spreadsheet, rxn_sheet_name):
         pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
         Dict<str,str>: effectively the 2nd row in excel. Gives labware preferences for products
     '''
-    rxn_wks = rxn_spreadsheet.get_worksheet(0)
-    data = rxn_wks.get_all_values()
+    if USE_CACHE:
+        with open(os.path.join(CACHE_PATH,'rxn_wks_data.pkl'), 'rb') as rxn_wks_data_cache:
+            data = dill.load(rxn_wks_data_cache)
+    else:
+        rxn_wks = rxn_spreadsheet.get_worksheet(0)
+        data = rxn_wks.get_all_values()
+        with open(os.path.join(CACHE_PATH,'rxn_wks_data.pkl'),'wb') as rxn_wks_data_cache:
+            dill.dump(data, rxn_wks_data_cache)
     cols = make_unique(pd.Series(data[0])) 
     rxn_df = pd.DataFrame(data[2:], columns=cols)
     #rename some of the clunkier columns 
@@ -204,8 +229,8 @@ def get_chemical_name(row):
 
 def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, credentials, using_temp_ctrl, temp, products_to_labware):
     '''
-    This function gets the unique reagents, interfaces with the docs to get details on those
-      reagents, and ships that information to the robot so it can initialize it's labware dicts
+    this is basically a wrapper for get_robot_params. It calls get_robot_params and then ships
+    the return values to the robot along with some other stuff you passed in.
     params:
         Armchair portal: the armchair object connected to robot
         gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
@@ -214,28 +239,13 @@ def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, crede
         bool simulate: if the robot is to simulate or execute
         str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
         ServiceAccount Credentials credentials: to access sheets
+        bool using_temp_ctrl: true if temp control should be used
+        float temp: the temperature to keep the module at
         Dict<str, str>: maps rxns to prefered labware
     Postconditions:
         user has been queried about reagents and response has been pulled down
     '''
-
-    #query the docs for more info on reagents
-    construct_reagent_sheet(rxn_df, spreadsheet_key, credentials)
-    input("<<controller>> please press enter when you've completed the reagent sheet")
-
-    #pull the info into a df
-    reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
-            row_names = True, credentials=credentials).drop(columns=['comments'])
-    empty_containers = reagent_info.loc['empty'].set_index('deck_pos').drop(columns=
-            ['conc', 'mass'])
-    reagents = reagent_info.drop(['empty']).astype({'conc':float,'deck_pos':int,'mass':float})
-
-    #pull labware etc from the sheets
-    labware_df, instruments = get_labware_info(rxn_spreadsheet, empty_containers)
-
-    #build_product_df with info on where to build products
-    product_df = construct_product_df(rxn_df, products_to_labware)
-
+    reagents, labware_df, instruments, product_df = get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, products_to_labware)
     #send robot data to initialize itself
     cid = portal.send_pack('init', simulate, using_temp_ctrl, temp, labware_df, instruments, reagents)
     
@@ -250,6 +260,68 @@ def init_robot(portal, rxn_spreadsheet, rxn_df, simulate, spreadsheet_key, crede
     inflight_packs.append(cid)
     block_on_ready(inflight_packs,portal)
     return
+
+def get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, products_to_labware):
+    '''
+    This function gets the unique reagents, interfaces with the docs to get details on those
+      reagents, and returns that information so it can be sent to robot
+    params:
+        Armchair portal: the armchair object connected to robot
+        gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
+          deck positions
+        df rxn_df: the input df read from sheets
+        bool simulate: if the robot is to simulate or execute
+        str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
+        ServiceAccount Credentials credentials: to access sheets
+        bool using_temp_ctrl: true if temp control should be used
+        float temp: the temperature to keep the module at
+        Dict<str, str>: maps rxns to prefered labware
+    returns:
+        df reagents_df: info on reagents. columns from sheet. See excel specification
+        df labware_df:
+            str name: the common name of the labware
+            str first_usable: the first tip/well to use
+            int deck_pos: the position on the deck of this labware
+            str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+              order
+        Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
+          are the pipette names filled in
+        df product_df:
+            INDEX
+            the chemical names of the products
+            COLS
+            str labware: type of labware to use
+            float max_vol: the maximum volume that will be in this container at any time
+    '''
+    #query the docs for more info on reagents
+    construct_reagent_sheet(rxn_df, spreadsheet_key, credentials)
+
+    #pull the info into a df
+    #DEBUG
+    if USE_CACHE:
+        #if you've already seen this don't pull it
+        with open(os.path.join(CACHE_PATH, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
+            reagent_info = dill.load(reagent_info_cache)
+    else:
+        input("<<controller>> please press enter when you've completed the reagent sheet")
+        #pull down from the cloud
+        reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
+            row_names = True, credentials=credentials).drop(columns=['comments'])
+        #cache the data
+        #DEBUG
+        with open(os.path.join(CACHE_PATH, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
+            dill.dump(reagent_info, reagent_info_cache)
+    #if there are empty tubes make a dataframe full of them
+    empty_containers = reagent_info.loc['empty' == reagent_info.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
+    reagents = reagent_info.drop(['empty'], errors='ignore') # incase not on axis
+    reagents = reagents.astype({'conc':float,'deck_pos':int,'mass':float})
+
+    #pull labware etc from the sheets
+    labware_df, instruments = get_labware_info(rxn_spreadsheet, empty_containers)
+
+    #build_product_df with info on where to build products
+    product_df = construct_product_df(rxn_df, products_to_labware)
+    return reagents, labware_df, instruments, product_df
 
 def construct_product_df(rxn_df, products_to_labware):
     '''
@@ -315,7 +387,9 @@ def construct_reagent_sheet(rxn_df, spreadsheet_key, credentials):
     reagent_df = rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
     reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
     reagent_df[['loc', 'deck_pos', 'mass', 'comments']] = ''
-    d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
+    #DEBUG
+    if not USE_CACHE:
+        d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
 
 def get_reagent_attrs(row):
@@ -486,13 +560,13 @@ def close_connection(portal, ip, path='./Eve_Files'):
         pack_type, cid, arguments = portal.recv_pack()
     assert(pack_type == 'sending_files')
     port = arguments[0]
-    name_size_pairs = arguments[1]
+    filenames = arguments[1]
     sock = socket.socket(socket.AF_INET)
     sock.connect((ip, port))
-    buffered_sock = BufferedSocket(sock)
-    for filename, size in name_size_pairs:
+    buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
+    for filename in filenames:
         with open(os.path.join(path,filename), 'wb') as write_file:
-            data = sock.recv(size)
+            data = buffered_sock.recv_until(armchair.FTP_EOF)
             write_file.write(data)
     print('<<controller>> files recieved')
     sock.close()
@@ -927,7 +1001,7 @@ class OT2Controller():
               to operating with them
         '''
         #DEBUG
-        with open('cache.pkl','wb') as cache:
+        with open(os.path.join(CACHE_PATH,'robo_init_params.pkl'),'wb') as cache:
             dill.dump([simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df], cache)
         self.containers = {}
         self.pipettes = {}
@@ -1272,7 +1346,7 @@ class OT2Controller():
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
         n_substeps = int(vol // self.pipettes[arm]['size']) + 1
-        substep_vol = vol / self.pipettes[arm]['size']
+        substep_vol = vol / n_substeps
         
         #if you need a new tip, get one 
         if src != self.pipettes[arm]['last_used'] and src != 'clean':
@@ -1342,7 +1416,7 @@ class OT2Controller():
             pipette has been adjusted to be dirty with src
             volumes of src and dst have been updated
         '''
-        self.protocol._commands.append('HEAD: transfering {} to {}'.format(src, dst))
+        self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
@@ -1380,7 +1454,7 @@ class OT2Controller():
         vols = [self.containers[name].vol for name in names]
         well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 'vol':vols})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
-        well_map.to_csv(path, sep='\t')
+        well_map.to_csv(path, index=False, sep='\t')
 
     def dump_protocol_record(self):
         '''
@@ -1405,7 +1479,7 @@ class OT2Controller():
         all_history['timestamp'] = pd.to_datetime(all_history['timestamp'], format='%d-%b-%Y %H:%M:%S:%f')
         all_history.sort_values(by=['timestamp'], inplace=True)
         all_history.reset_index(inplace=True, drop=True)
-        all_history.to_csv(path, sep='\t')
+        all_history.to_csv(path, index=False, sep='\t')
 
     def exception_handler(self, e):
         '''
@@ -1425,15 +1499,15 @@ class OT2Controller():
         self.dump_well_histories()
         self.dump_well_map()
         #ship logs
-        filepaths = [os.path.join(self.logs_p, filename) for filename in os.listdir(self.logs_p)]
+        filenames = list(os.listdir(self.logs_p))
         port = 50001 #default port for ftp 
-        self.send_files(port, filepaths)
+        self.send_files(port, filenames)
         #kill link
         print('<<eve>> shutting down')
         self.portal.send_pack('close')
         self.portal.close()
 
-    def send_files(self,port,filepaths):
+    def send_files(self,port,filenames):
         '''
         used to ship files back to server
         params:
@@ -1441,10 +1515,8 @@ class OT2Controller():
             list<str> filepaths: the filepaths to ship
         '''
         print('<<eve>> initializing filetransfer')
-        filenames = os.listdir(self.logs_p)
-        filesizes = [os.stat(filepath).st_size for filepath in filepaths]
-        name_size_pairs = list(zip(filenames, filesizes))
-        self.portal.send_pack('sending_files', port, name_size_pairs)
+        filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
+        self.portal.send_pack('sending_files', port, filenames)
         sock = socket.socket(socket.AF_INET)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((self.ip, port))
@@ -1453,6 +1525,7 @@ class OT2Controller():
         for filepath in filepaths:
             with open(filepath,'rb') as local_file:
                 client_sock.sendfile(local_file)
+                client_sock.send(armchair.FTP_EOF)
             #wait until client has sent that they're ready to recieve again
         client_sock.close()
         sock.close()
@@ -1478,3 +1551,99 @@ def make_unique(s):
         else:
             return name
     return s.apply(_get_new_name)
+
+#TESTING
+def vol_calc(name):
+    return rxn_df[name].sum() - rxn_df.loc[rxn_df['chemical_name'] == name, index].sum().sum()
+
+def get_side_by_side_df(use_cache=False, labware_df=None, rxn_df=None, reagents_df=None, product_df=None, eve_logpath='Eve_Files'):
+    '''
+    params:
+        df labware_df:
+            str name: the common name of the labware
+            str first_usable: the first tip/well to use
+            int deck_pos: the position on the deck of this labware
+            str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+              order
+        df rxn_df: as from excel
+        df reagents_df: info on reagents. columns from sheet. See excel specification
+        df product_df:
+            INDEX
+            str chem_name
+            COLS
+            str labware: requested labware
+            float max_vol: the maximum volume that this container will ever hold
+        str eve_logpath: the path to the eve's logfiles
+    returns
+        df
+            INDEX
+            chemical_name: the containers name
+            COLS: symmetric. Theoretical are suffixed _t
+            str deck_pos: position on deck
+            float vol: the volume in the container
+            list<tuple<str, float>> history: the chem_name paired with the amount or
+              keyword 'aspirate' and vol
+    '''
+    if use_cache:
+        with open(os.path.join(CACHE_PATH,'robo_init_params.pkl'),'rb') as robo_cache:
+            arguments = dill.load(robo_cache)
+            labware_df = arguments[3]
+            reagents_df = arguments[5]
+        rxn_df, product_dict = load_rxn_table(None,None) #USE_CACHE must be active
+        product_df = construct_product_df(rxn_df, product_dict)
+        theoretical_df = build_theoretical_df(labware_df, rxn_df, reagents_df, product_df)
+        result_df = pd.read_csv('Eve_Files/wellmap.tsv', sep='\t').set_index('chem_name')
+        sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
+        return sbs
+
+def build_theoretical_df(labware_df, rxn_df, reagent_df, product_df):
+    '''
+    params:
+        NOTE: As passed to get_side_by_side_df
+        df labware_df: info on labware
+        df rxn_df: rxn protocol
+        df reagent_df: info on reagents
+        df product_df: has the labware requested for product
+    returns:
+        df
+            INDEX
+            chemical_name: the containers name
+            COLS
+            str deck_pos: position on deck
+            float vol: the volume in the container
+    '''
+    labware_df = labware_df.set_index('name').rename(index={'platereader7':'platereader',
+            'platereader4':'platereader'}) #converting to dict like
+    product_df['deck_pos'] = product_df['labware'].apply(lambda labware:
+            labware_df.loc[labware,'deck_pos'].to_list())
+    product_df['vol'] = [vol_calc(name,rxn_df) for name in product_df.index]
+    reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
+    reagent_df['vol'] = 'any' #depends on the type of tube etc
+    theoretical_df = pd.concat((reagent_df.loc[:,['deck_pos','vol']], product_df.loc[:,['deck_pos','vol']]))
+    return theoretical_df
+
+def vol_calc(name, rxn_df):
+    '''
+    params:
+        str name: chem_name
+        df rxn_df: from excel
+    returns:
+        volume at end in that name
+    '''
+    dispenses = rxn_df[name].sum()
+    aspirations = rxn_df[(rxn_df['op']=='transfer') & (rxn_df['chemical_name'] == name)].sum().sum()
+    return dispenses - aspirations
+
+def is_valid_sbs(row):
+    '''
+    params:
+        pd.Series row: a row of a sbs dataframe:
+    returns:
+        Bool: True if it is a valid row
+    '''
+    if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
+        return False
+    if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t']):
+        return False
+    return True
+

@@ -1,0 +1,14 @@
+Test the bejesus out of what we have
+    write some nice sheets
+Error Exits
+    implement server side error handle
+    implement client side error handle
+    litter code with try excepts
+build in some error checking
+handle the tube problem
+    do you want to be able to specify size of tube you want? I could (ouch) just put in smallest
+    how to handle error of tubes since you've got vol at the bottom will not show up on error
+      check. User responsibility? Can we integrate over the bottom? Do we even need to? can we
+      just call the height the bottom of the tube at that point and suck from there?
+create class for the controller
+Implement the Pause

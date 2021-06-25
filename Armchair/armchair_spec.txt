@@ -57,7 +57,9 @@ x06: 'sending_files'
     Description: Used to alert client to create a new socket over which to transfer files
     Args:
         int port: the port number of the robot server (the convention here is 50001)
+	list<str> filenames: the list of ordered filenames
         NOTE ip not needed because you connected to the robot already
+	NOTE a file transfer will be initiated. the eof file delimiter in scoket is 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
 
 UNFINISHED
 error x02

@@ -3,6 +3,9 @@ from datetime import datetime
 import os
 import dill
 
+#used for armchair file transfer initialized from armchair instructions
+FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
+
 class Armchair():
     def __init__(self, socket, name, log_path=''):
         self.sock = socket
