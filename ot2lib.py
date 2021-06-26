@@ -144,7 +144,8 @@ def load_rxn_table(rxn_spreadsheet, rxn_sheet_name):
         str rxn_sheet_name: the name of the spreadsheet
     returns:
         pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
-        Dict<str,str>: effectively the 2nd row in excel. Gives labware preferences for products
+        Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
+                labware and container preferences for products
     '''
     if USE_CACHE:
         with open(os.path.join(CACHE_PATH,'rxn_wks_data.pkl'), 'rb') as rxn_wks_data_cache:
@@ -155,7 +156,7 @@ def load_rxn_table(rxn_spreadsheet, rxn_sheet_name):
         with open(os.path.join(CACHE_PATH,'rxn_wks_data.pkl'),'wb') as rxn_wks_data_cache:
             dill.dump(data, rxn_wks_data_cache)
     cols = make_unique(pd.Series(data[0])) 
-    rxn_df = pd.DataFrame(data[2:], columns=cols)
+    rxn_df = pd.DataFrame(data[3:], columns=cols)
     #rename some of the clunkier columns 
     rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'Pause before addition?':'pause', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
     rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
@@ -169,8 +170,9 @@ def load_rxn_table(rxn_spreadsheet, rxn_sheet_name):
     cols = rxn_df.columns.to_list()
     product_start_i = cols.index('reagent')+1
     requested_labware = data[1][product_start_i+1:]#add one to account for the first col (labware).
+    requested_containers = data[2][product_start_i+1:]
     #in df this is an index, so size cols is one less
-    products_to_labware = {product:labware for product, labware in zip(cols[product_start_i:], requested_labware)}
+    products_to_labware = {product:[labware,container] for product, labware, container in zip(cols[product_start_i:], requested_labware,requested_containers)}
     products = products_to_labware.keys()
     #make the reagent columns floats
     rxn_df.loc[:,products] =  rxn_df[products].astype(float)
@@ -340,7 +342,7 @@ def construct_product_df(rxn_df, products_to_labware):
     '''
     products = products_to_labware.keys()
     max_vols = [get_rxn_max_vol(rxn_df, product, products) for product in products]
-    product_df = pd.DataFrame(products_to_labware, index=['labware']).T
+    product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
     product_df['max_vol'] = max_vols
     return product_df
 
@@ -599,6 +601,8 @@ class Container(ABC):
           timestamp timestamp: the time of the addition/removal
           str chem_name: the name of the chemical added or blank if aspiration
           float vol: the volume of chemical added/removed
+    CONSTANTS:
+        float DEAD_VOL: the volume at which this 
     ABSTRACT METHODS:
         _update_height void: updates self.height to hieght at which to pipet (a bit below water line)
     IMPLEMENTED METHODS:
@@ -616,6 +620,9 @@ class Container(ABC):
         if vol:
             #create an entry with yourself as first
             self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, vol))
+
+    DEAD_VOL = 0
+    CONTAINERS_SERVICED = []
 
     @abstractmethod
     def _update_height(self):
@@ -651,10 +658,13 @@ class Tube20000uL(Container):
     Spcific tube with measurements taken to provide implementations of abstract methods
     INHERITED ATTRIBUTES
         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
+    OVERRIDDEN CONSTANTS:
+        float DEAD_VOL: the volume at which this 
     INHERITED METHODS
         _update_height void, update_vol(float del_vol) void,
     """
 
+    DEAD_VOL = 2000
 
     def __init__(self, name, deck_pos, loc, mass=6.6699, conc=1):
         '''
@@ -669,9 +679,8 @@ class Tube20000uL(Container):
 
     def _update_height(self):
         diameter_15 = 14.0 # mm (V1 number = 14.4504)
-        vol_bottom_cylinder = 2000 # uL
         height_bottom_cylinder = 30.5  #mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
+        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
 
     @property
     def disp_height(self):
@@ -691,6 +700,7 @@ class Tube50000uL(Container):
         _update_height void, update_vol(float del_vol) void,
     """
 
+    DEAD_VOL = 5000
 
     def __init__(self, name, deck_pos, loc, mass=13.3950, conc=1):
         density_water_25C = 0.9970479 # g/mL
@@ -702,9 +712,8 @@ class Tube50000uL(Container):
         
     def _update_height(self):
         diameter_50 = 26.50 # mm (V1 number = 26.7586)
-        vol_bottom_cylinder = 5000 # uL
         height_bottom_cylinder = 21 #mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_50/2)**2)) + height_bottom_cylinder
+        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_50/2)**2)) + height_bottom_cylinder
 
     @property
     def disp_height(self):
@@ -724,6 +733,7 @@ class Tube2000uL(Container):
         _update_height void, update_vol(float del_vol) void,
     """
 
+    DEAD_VOL = 250 #uL
 
     def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
         density_water_4C = 0.9998395 # g/mL
@@ -734,9 +744,8 @@ class Tube2000uL(Container):
            
     def _update_height(self):
         diameter_2 = 8.30 # mm
-        vol_bottom_cylinder = 250 #uL
         height_bottom_cylinder = 10.5 #mm
-        self.height = ((self.vol - vol_bottom_cylinder)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
+        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
 
     @property
     def disp_height(self):
@@ -752,6 +761,8 @@ class Well96(Container):
         a well in a 96 well plate
         INHERITED ATTRIBUTES
              str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
+        INHERITED CONSTANTS
+            int DEAD_VOL TODO update DEAD_VOL from experimentation
         INHERITED METHODS
             _update_height void, update_vol(float del_vol) void,
     """
@@ -773,7 +784,6 @@ class Well96(Container):
     def asp_height(self):
         return 1
 
-
 #LABWARE
 #TODO Labware was built with the assumption that once you ask for a bit of labware, you will use it
 #if you don't want to pop, we must allow that functionality
@@ -789,11 +799,15 @@ class Labware(ABC):
         bool full: True if there are no more empty containers
         int deck_pos: to map back to deck position
         str name: the name associated with this labware
+    CONSTANTS
+        list<str> CONTAINERS_SERVICED: the container types on this labware
     ABSTRACT METHODS:
         get_container_type(loc) str: returns the type of container at that location
         pop_next_well(vol=None) str: returns the index of the next available well
           If there are no available wells of the volume requested, return None
     '''
+
+    CONTAINERS_SERVICED = []
 
     def __init__(self, labware, deck_pos):
         self.labware = labware
@@ -801,10 +815,11 @@ class Labware(ABC):
         self.deck_pos = deck_pos
 
     @abstractmethod
-    def pop_next_well(self, vol=None):
+    def pop_next_well(self, vol=None, container_type=None):
         '''
         returns the next available well
         Or returns None if there is no next availible well with specified volume
+        container_type takes precedence over volume, but you shouldn't need to call it with both
         '''
         pass
 
@@ -842,55 +857,95 @@ class TubeHolder(Labware):
         get_container_type(loc) str
     INHERITED_ATTRIBUTES:
         Opentrons.Labware labware, bool full, int deck_pos, str name
+    OVERRIDEN CONSTANTS
+        list<str> CONTAINERS_SERVICED
     ATTRIBUTES:
         list<str> empty_tubes: contains locs of the empty tubes. Necessary because the user may
-          not put tubes into every slot
+          not put tubes into every slot. Sorted order smallest tube to largest
     '''
+
+    CONTAINERS_SERVICED = ['Tube50000uL', 'Tube20000uL', 'Tube2000uL']
+
     def __init__(self, labware, empty_tubes, deck_pos):
-        self.empty_tubes = empty_tubes
         super().__init__(labware,deck_pos)
+        #We create a dictionary of tubes with the container as the key and a list as the 
+        #value. The list contains all tubes that fit that volume range
+        self.empty_tubes={tube_type:[] for tube_type in self.CONTAINERS_SERVICED}
+        for tube in empty_tubes:
+            self.empty_tubes[self.get_container_type(tube)].append(tube)
         self.full = not self.empty_tubes
 
-    def pop_next_well(self, vol=None):
+
+    def pop_next_well(self, vol=None, container_type=None):
         '''
         Gets the next available tube. If vol is specified, will return an
         appropriately sized tube. Otherwise it will return a tube. It makes no guarentees that
         tube will be the correct size. It is not recommended this method be called without
         a volume argument
-        kwargs:
+        params:
             float vol: used to determine an appropriate sized tube
+            str container_type: the type of container requested
         returns:
-            str: loc the location of the next tube
+            str: loc the location of the smallest next tube that can accomodate the volume
+            None: if it can't be accomodated
         '''
         if not self.full:
-            if vol:
-                for i, loc in enumerate(self.empty_tubes):
-                    tube_capacity = self.labware.wells_by_name()[loc]._geometry._max_volume
-                    if tube_capacity > vol:
-                        tube_loc = self.empty_tubes.pop(i)
-                        self.full = not self.empty_tubes
-                        return tube_loc
-                #you checked all empty tubes and none can accomodate!
-                return None
+            if container_type:
+                viable_tubes = self.empty_tubes[container_type]
+            elif vol:
+                #neat trick
+                viable_tubes = self.empty_tubes[self.get_container_type(vol=vol)]
+                if not viable_tubes:
+                    #but if it didn't work you need to check everything
+                    for tube_type in self.CONTAINERS_SERVICED:
+                        viable_tubes = self.empty_tubes[tube_type]
+                        if viable_tubes:
+                            #check if the volume is still ok
+                            capacity = self.labware.wells_by_name()[viable_tubes[0]]._geometry._max_volume
+                            if vol < capacity:
+                                break
             else:
                 #volume was not specified
-                #return the next tube. God know's what you'll get
-                tube = self.empty_tubes.pop(0)
-                self.full = not self.empty_tubes
-                return tube
+                #return the next smallest tube.
+                #this always returns because you aren't empty
+                for tube_type in self.CONTAINERS_SERVICED:
+                    if self.empty_tubes[tube_type]:
+                        viable_tubes = self.empty_tubes[tube_type]
+                        break
+            if viable_tubes:
+                tube_loc = viable_tubes.pop()
+                self.update_full()
+                return tube_loc
+            else:
+                return None
         else:
             #self.empty_tubes is empty!
             return None
 
-    def get_container_type(self, loc):
+    def update_full(self):
         '''
+        updates self.full
+        '''
+        self.full=True
+        for tube_type in self.CONTAINERS_SERVICED:
+            if self.empty_tubes[tube_type]:
+                self.full = False
+                return
+        
+    def get_container_type(self, loc=None, vol=None):
+        '''
+        NOTE internally, this method is a little different, but the user should use as 
+        outlined below
         returns type of container
         params:
             str loc: the location on this labware
         returns:
             str: the type of container at that loc
         '''
-        tube_capacity = self.labware.wells_by_name()[loc]._geometry._max_volume
+        if not vol:
+            tube_capacity = self.labware.wells_by_name()[loc]._geometry._max_volume
+        else:
+            tube_capacity = vol
         if tube_capacity <= 2000:
             return 'Tube2000uL'
         elif tube_capacity <= 20000:
@@ -902,13 +957,19 @@ class WellPlate(Labware):
     '''
     subclass of labware for dealing with plates
     INHERITED METHODS:
-        pop_next_well(vol=None) str: vol should be provided to check if well is big enough
+        pop_next_well(vol=None,container_type=None) str: vol should be provided to 
+          check if well is big enough. container_type is for compatibility
         get_container_type(loc) str
     INHERITED_ATTRIBUTES:
         Opentrons.Labware labware, bool full, int deck_pos, str name
+    OVERRIDEN CONSTANTS:
+        list<str> CONTAINERS_SERVICED
     ATTRIBUTES:
         int current_well: the well number your on (NOT loc!)
     '''
+
+    CONTAINERS_SERVICED = ['Well96']
+
     def __init__(self, labware, first_well, deck_pos):
         n_rows = len(labware.columns()[0])
         col = first_well[:1]#alpha part
@@ -917,11 +978,12 @@ class WellPlate(Labware):
         super().__init__(labware, deck_pos)
         self.full = self.current_well >= len(labware.wells())
 
-    def pop_next_well(self, vol=None):
+    def pop_next_well(self, vol=None,container_type=None):
         '''
         returns the next well if there is one, otherwise returns None
         params:
             float vol: used to determine if your reaction can be fit in a well
+            str container_type: should never be used. Here for compatibility
         returns:
             str: the well loc if it can accomadate the request
             None: if can't accomodate request
@@ -964,16 +1026,11 @@ class OT2Controller():
             'last_used' str: the chem_name of the last chemical used. 'clean' is used to denote a
               clean pipette
         Opentrons...ProtocolContext protocol: the protocol object of this session
-
     """
 
-    _OPENTRONS_LABWARE_NAMES = {'96_well_plate':'corning_96_wellplate_360ul_flat','24_well_plate':'corning_24_wellplate_3.4ml_flat','48_well_plate':'corning_48_wellplate_1.6ml_flat','tip_rack_20uL':'opentrons_96_tiprack_20ul','tip_rack_300uL':'opentrons_96_tiprack_300ul','tip_rack_1000uL':'opentrons_96_tiprack_1000ul','tube_holder_10':'opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical','temp_mod_24_tube':'opentrons_24_aluminumblock_generic_2ml_screwcap'}
-    _CUSTOM_LABWARE_DEFINITION_PATHS = {'platereader4':'LabwareDefs/plate_reader_4.json','platereader7':'LabwareDefs/plate_reader_7.json'}
-    _OPENTRONS_INSTRUMENT_NAMES = {'20uL_pipette':'p20_single_gen2','300uL_pipette':'p300_single_gen2','1000uL_pipette':'p1000_single_gen2'}
-    _TIP_RACK_NAMES = {'tip_rack_20uL', 'tip_rack_300uL','tip_rack_1000uL'}
-    _TEMP_MOD_NAMES = {'temp_mod_24_tube'}
-    _PLATE_NAMES = {'96_well_plate','48_well_plate','24_well_plate', 'platereader4', 'platereader7'}
-    _TUBE_HOLDER_NAMES = {'tube_holder_10','temp_mod_24_tube'}
+    #Don't try to read this. Use an online json formatter 
+    _LABWARE_TYPES = {"96_well_plate":{"opentrons_name":"corning_96_wellplate_360ul_flat","groups":["well_plate"],'definition_path':""},"24_well_plate":{"opentrons_name":"corning_24_wellplate_3.4ml_flat","groups":["well_plate"],'definition_path':""},"48_well_plate":{"opentrons_name":"corning_48_wellplate_1.6ml_flat","groups":["well_plate"],'definition_path':""},"tip_rack_20uL":{"opentrons_name":"opentrons_96_tiprack_20ul","groups":["tip_rack"],'definition_path':""},"tip_rack_300uL":{"opentrons_name":"opentrons_96_tiprack_300ul","groups":["tip_rack"],'definition_path':""},"tip_rack_1000uL":{"opentrons_name":"opentrons_96_tiprack_1000ul","groups":["tip_rack"],'definition_path':""},"tube_holder_10":{"opentrons_name":"opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical","groups":["tube_holder"],'definition_path':""},"temp_mod_24_tube":{"opentrons_name":"opentrons_24_aluminumblock_generic_2ml_screwcap","groups":["tube_holder","temp_mod"],'definition_path':""},"platereader4":{"opentrons_name":"","groups":["well_plate","platereader"],"definition_path":"LabwareDefs/plate_reader_4.json"},"platereader7":{"opentrons_name":"","groups":["well_plate","platereader"],"definition_path":"LabwareDefs/plate_reader_7.json"},"platereader":{"opentrons_name":"","groups":["well_plate","platereader"]}}
+    _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
 
     def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, ip, portal):
@@ -1116,7 +1173,7 @@ class OT2Controller():
         if using_temp_ctrl:
             temp_module = self.protocol.load_module('temperature module gen2', 3)
             temp_module.set_temperature(temp)
-            opentrons_name = self._OPENTRONS_LABWARE_NAMES[name]
+            opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
             labware = temp_module.load_labware(opentrons_name,label=name)
             #this will always be a tube holder
             self._add_to_deck(name, deck_pos, labware, empty_containers=empty_tubes)
@@ -1135,7 +1192,7 @@ class OT2Controller():
             future
             str first_well: the first available well in the labware
         '''
-        with open(self._CUSTOM_LABWARE_DEFINITION_PATHS[name], 'r') as labware_def_file:
+        with open(self._LABWARE_TYPES[name]['definition_path'], 'r') as labware_def_file:
             labware_def = json.load(labware_def_file)
         labware = self.protocol.load_labware_from_definition(labware_def, deck_pos,label=name)
         self._add_to_deck(name, deck_pos, labware, **kwargs)
@@ -1153,9 +1210,9 @@ class OT2Controller():
         Postconditions:
             an entry has been added to the lab_deck
         '''
-        if name in self._TUBE_HOLDER_NAMES:
+        if 'tube_holder' in self._LABWARE_TYPES[name]['groups']:
             self.lab_deck[deck_pos] = TubeHolder(labware, kwargs['empty_containers'], deck_pos)
-        elif name in self._PLATE_NAMES:
+        elif 'well_plate' in self._LABWARE_TYPES[name]['groups']:
             self.lab_deck[deck_pos] = WellPlate(labware, kwargs['first_well'], deck_pos)
         else:
             raise Exception("Sorry, Illegal Labware Option. Your labware is not a tube or plate")
@@ -1170,20 +1227,20 @@ class OT2Controller():
         '''
         for deck_pos, name, first_usable, empty_list in labware_df.itertuples(index=False):
             #diff types of labware need diff initializations
-            if name in self._CUSTOM_LABWARE_DEFINITION_PATHS:
+            if self._LABWARE_TYPES[name]['definition_path']:
                 #plate readers (or other custom?)
                 self._init_custom_labware(name, deck_pos, first_well=first_usable)
-            elif name in self._TEMP_MOD_NAMES:
+            elif 'temp_mod' in self._LABWARE_TYPES[name]['definition_path']:
                 #temperature controlled racks
                 self._init_temp_mod(name, using_temp_ctrl, 
                         temp, deck_pos, empty_tubes=empty_list)
             else:
                 #everything else
-                opentrons_name = self._OPENTRONS_LABWARE_NAMES[name]
+                opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
                 labware = self.protocol.load_labware(opentrons_name,deck_pos,label=name)
-                if name in self._PLATE_NAMES:
+                if 'well_plate' in self._LABWARE_TYPES[name]['groups']:
                     self._add_to_deck(name, deck_pos, labware, first_well=first_usable)
-                elif name in self._TUBE_HOLDER_NAMES:
+                elif 'tube_holder' in self._LABWARE_TYPES[name]['groups']:
                     self._add_to_deck(name, deck_pos, labware, empty_containers=empty_list)
                 #if it's none of the above, it's a tip rack. We don't need them on the deck
 
@@ -1200,12 +1257,12 @@ class OT2Controller():
         '''
         for arm_pos, pipette_name in instruments.items():
             #lookup opentrons name
-            opentrons_name = self._OPENTRONS_INSTRUMENT_NAMES[pipette_name]
+            opentrons_name = self._PIPETTE_TYPES[pipette_name]['opentrons_name']
             #get the size of this pipette
             pipette_size = pipette_name[:pipette_name.find('uL')]
             #get the row inds for which the size is the same
             tip_row_inds = labware_df['name'].apply(lambda name: 
-                name in self._TIP_RACK_NAMES and pipette_size == 
+                'tip_rack' in self._LABWARE_TYPES[name]['groups'] and pipette_size == 
                 name[name.rfind('_')+1:name.rfind('uL')])
             tip_rows = labware_df.loc[tip_row_inds]
             #get the opentrons tip rack objects corresponding to the deck positions that
@@ -1250,22 +1307,22 @@ class OT2Controller():
         Postconditions:
             every container has been initialized according to the parameters specified
         '''
-        for chem_name, labware, max_vol in product_df.itertuples():
-            
+        for chem_name, req_labware, req_container, max_vol in product_df.itertuples():
             container = None
             #if you've already initialized this complane
             if chem_name in self.containers:
                 raise Exception("you tried to initialize {},\
                         but there is already an entry for {}".format(chem_name, chem_name))
             #filter labware
-            viable_labware = [viable for viable in self.lab_deck if viable]
-            if labware:
-                if labware == 'platereader':
-                    #platereader is speacial because there are two platereaders
-                    viable_labware = [viable for viable in viable_labware if \
-                    viable.name in ['platereader4','platereader7']]
-                else:
-                    viable_labware = [viable for viable in viable_labware if viable.name == labware]
+            viable_labware =[]
+            for viable in self.lab_deck:
+                if viable:
+                    labware_ok = not req_labware or (viable.name == req_labware or \
+                            req_labware in self._LABWARE_TYPES[viable.name]['groups'])
+                            #last bit necessary for platereader-> platereader4/platereader7
+                    container_ok = not req_container or (req_container in viable.CONTAINERS_SERVICED)
+                    if labware_ok and container_ok:
+                        viable_labware.append(viable)
             #sort the list so that platreader slots are prefered
             viable_labware.sort(key=lambda x: self._exec_init_containers.priority[x.name])
             #iterate through the filtered labware and pick the first one that 
@@ -1614,8 +1671,17 @@ def build_theoretical_df(labware_df, rxn_df, reagent_df, product_df):
     '''
     labware_df = labware_df.set_index('name').rename(index={'platereader7':'platereader',
             'platereader4':'platereader'}) #converting to dict like
-    product_df['deck_pos'] = product_df['labware'].apply(lambda labware:
-            labware_df.loc[labware,'deck_pos'].to_list())
+    def get_deck_pos(labware):
+        if labware:
+            deck_pos = labware_df.loc[labware,'deck_pos']
+            if isinstance(deck_pos,np.int64):
+                return [deck_pos]
+            else:
+                #for platereader with two indices
+                return deck_pos.to_list()
+        else:
+            return 'any'
+    product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
     product_df['vol'] = [vol_calc(name,rxn_df) for name in product_df.index]
     reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
     reagent_df['vol'] = 'any' #depends on the type of tube etc
@@ -1631,9 +1697,21 @@ def vol_calc(name, rxn_df):
         volume at end in that name
     '''
     dispenses = rxn_df[name].sum()
-    aspirations = rxn_df[(rxn_df['op']=='transfer') & (rxn_df['chemical_name'] == name)].sum().sum()
+    aspirations = rxn_df.loc[(rxn_df['op']=='transfer') &\
+            (rxn_df['chemical_name'] == name),products(rxn_df)].sum().sum()
     return dispenses - aspirations
 
+def products(rxn_df):
+    '''
+    handy accessor method to get the products of rxn_df
+    Preconditions:
+        reagent is the first column before the products, 'chemical_name' is the last col
+    params:
+        df rxn_df: as in excel
+    returns:
+        index: the products
+    '''
+    return rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
 def is_valid_sbs(row):
     '''
     params:
@@ -1643,7 +1721,41 @@ def is_valid_sbs(row):
     '''
     if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
         return False
-    if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t']):
+    if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
         return False
     return True
 
+def has_correct_contents(rxn_df=None, use_cache=True, eve_logpath='Eve_Files'):
+    '''
+    tests to ensure that the contents of each container is correct
+    note does not work for dilutions, and does not check reagents
+    params:
+        df rxn_df: from excel
+        bool use_cache: True if data is cached
+        str eve_logpath: the path to the eve logfiles
+    Postconditions:
+        if a difference was found it will be displayed,
+        if no differences are found, a friendly print message will be displayed
+    '''
+    if use_cache:
+        rxn_df, product_dict = load_rxn_table(None,None) #USE_CACHE must be active
+    history = pd.read_csv(os.path.join(eve_logpath, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
+    disp_hist = history.loc[history['chem_name'].astype(bool)]
+    contents = disp_hist.groupby(['container','chem_name']).sum()
+    products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+    theoretical_his_list = []
+    for _, row in rxn_df.loc[rxn_df['op']=='transfer'].iterrows():
+        for product in products:
+            theoretical_his_list.append((product, row[product], row['chemical_name']))
+    theoretical_his = pd.DataFrame(theoretical_his_list, columns=['container', 'vol', 'chem_name'])
+    theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
+    theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
+            math.isclose(x,0))]
+    sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
+    sbs['flag'] = (sbs.apply(lambda r: math.isclose(r['vol_t'], r['vol']),axis=1))
+    if not sbs.loc[~sbs['flag']].empty:
+        print('found some invalid contents. Displaying rows')
+        container_index = sbs.loc[~sbs['flag']].index.get_level_values('container')
+        print(sbs.loc[container_index])
+    else:
+        print('Well done! Product have correct ratios of reagents')

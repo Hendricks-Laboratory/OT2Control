@@ -7,6 +7,9 @@ Every one of these reagents will be queried.
 After the reagents column, every other column must be a reaction column (This is used to determine what rows are not parameters)
 Please do not write concentrations in different ways. It's not nice. e.g. .050 sodium hydroxide and 0.05 sodium hydroxide are distinct names to the robot. (Math will be same, it just won't know they're the same chemical)
 It's really not expected that you 'transfer' liquid into yourself. I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do.
+The Labware row is used to specify labware for a reagent
+The Container row is used to specify the container you want the reagent in
+It is not required that you specify any. They are just ways to constrain the placement of the fluid
 
 
 REAGENTS INFO

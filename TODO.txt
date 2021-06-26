@@ -5,10 +5,21 @@ Error Exits
     implement client side error handle
     litter code with try excepts
 build in some error checking
+    what does michael's code do? just checking if you have enough reagent? I can proabaly
+    run and try/except at the end
+
+    THROW ERRORS WITHIN CONTAINERS
+    platereader should have 200 ul. Check at each scan]
+    make sure you have enough to run reaction
 handle the tube problem
     do you want to be able to specify size of tube you want? I could (ouch) just put in smallest
+    You probably only want to specify size/container_type. Maybe I look up which labware has those
     how to handle error of tubes since you've got vol at the bottom will not show up on error
       check. User responsibility? Can we integrate over the bottom? Do we even need to? can we
       just call the height the bottom of the tube at that point and suck from there?
+      SOLUTION: get a dead volume for every container. go to bottom and recalculate. 
 create class for the controller
 Implement the Pause
+Block_On_Ready should probably be part of Armchair
+Fix the yucky state of caching. i.e. redesign the controller stuff to be more functional, and 
+  make any i/o strictly in it's own function
