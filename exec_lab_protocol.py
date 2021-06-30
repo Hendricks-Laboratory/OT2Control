@@ -25,7 +25,7 @@ def main():
     #get user input
     #simulate, rxn_sheet_name, using_temp_ctrl, temp = ot2lib.pre_rxn_questions()
     #DEBUG
-    simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'test_product_labware', True, 22.5)
+    simulate, rxn_sheet_name, using_temp_ctrl, temp = (True, 'test_wombo_combo', True, 22.5)
     #credentials are needed for a lot of i/o operations with google sheets
     credentials = ot2lib.init_credentials(rxn_sheet_name)
     #wks_key is also needed for google sheets i/o. It functions like a url

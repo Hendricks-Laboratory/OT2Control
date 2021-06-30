@@ -1,5 +1,3 @@
-Test the bejesus out of what we have
-    write some nice sheets
 Error Exits
     implement server side error handle
     implement client side error handle
@@ -8,18 +6,24 @@ build in some error checking
     what does michael's code do? just checking if you have enough reagent? I can proabaly
     run and try/except at the end
 
+    check to make sure you don't end up with two reagents in same container
+    check also that the user never specified an undefined deck position
+    check also that the mass always provided. Just throw a lot of assertions at the sheet loading
+    Check that stock solutions exist by the time you call them
+
     THROW ERRORS WITHIN CONTAINERS
     platereader should have 200 ul. Check at each scan]
     make sure you have enough to run reaction
-handle the tube problem
-    do you want to be able to specify size of tube you want? I could (ouch) just put in smallest
-    You probably only want to specify size/container_type. Maybe I look up which labware has those
-    how to handle error of tubes since you've got vol at the bottom will not show up on error
-      check. User responsibility? Can we integrate over the bottom? Do we even need to? can we
-      just call the height the bottom of the tube at that point and suck from there?
-      SOLUTION: get a dead volume for every container. go to bottom and recalculate. 
 create class for the controller
 Implement the Pause
 Block_On_Ready should probably be part of Armchair
 Fix the yucky state of caching. i.e. redesign the controller stuff to be more functional, and 
   make any i/o strictly in it's own function
+We've mostly fixed the tube problem, but for ML, where you really just want a container 
+  (any container) to accomodate volume, we'll probabaly need to revisit
+  this. I recommend
+  a new class LabwareType that has a list of labware objects and finds the best one
+With regard to the platereader interface? Make sense? No. You should go through plate dict
+Ask michael to put reactions together in formats
+40uL for 20uL else 300
+4 milimeter start for tube depth

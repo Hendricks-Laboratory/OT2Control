@@ -8,6 +8,8 @@ import dill
 import math
 import os
 import shutil
+import webbrowser
+from tempfile import NamedTemporaryFile
 
 import gspread
 from df2gspread import df2gspread as d2g
@@ -17,16 +19,19 @@ import pandas as pd
 import numpy as np
 import opentrons.execute
 from opentrons import protocol_api, simulate, types
-import webbrowser
-from tempfile import NamedTemporaryFile
 from boltons.socketutils import BufferedSocket
 
 import Armchair.armchair as armchair
 
 #For Debugging
 USE_CACHE = False
-USE_CACHE = True
+#USE_CACHE = True
 CACHE_PATH = 'Cache'
+
+#this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
+#reader given a regular loc for a 96well plate.
+#Please do not read this. paste it into a nice json viewer.
+PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3":"p4", "A4":"p4", "A5":"p4", "A13":"platereader7", "A11":"p7", "A10":"p7", "A9":"p7", "A8":"p7", "A7":"p7", "A6":"p7", "B1":"p4", "B2":"p4", "B3":"p4", "B4":"p4", "B5":"p4", "B6":"p7", "B7":"p7", "B8":"p7", "B9":"p7", "B10":"p7", "B11":"p7", "B12":"p7", "C1":"p4", "C2":"p4", "C3":"p4", "C4":"p4", "C5":"p4", "C6":"p7", "C7":"p7", "C8":"p7", "C9":"p7", "C10":"p7", "C11":"p7", "C12":"p7", "D1":"p4", "D2":"p4", "D3":"p4", "D4":"p4", "D5":"p4", "D6":"p7", "D7":"p7", "D8":"p7", "D9":"p7", "D10":"p7", "D11":"p7", "D12":"p7", "E1":"p4", "E2":"p4", "E3":"p4", "E4":"p4", "E5":"p4", "E6":"p7", "E7":"p7", "E8":"p7", "E9":"p7", "E10":"p7", "E11":"p7", "E12":"p7", "F1":"p4", "F2":"p4", "F3":"p4", "F4":"p4", "F5":"p4", "F6":"p7", "F7":"p7", "F8":"p7", "F9":"p7", "F10":"p7", "F11":"p7", "F12":"p7", "G1":"p4", "G2":"p4", "G3":"p4", "G4":"p4", "G5":"p4", "G6":"p7", "G7":"p7", "G8":"p7", "G9":"p7", "G10":"p7", "G11":"p7", "G12":"p7", "H1":"p4", "H2":"p4", "H3":"p4", "H4":"p4", "H5":"p4", "H6":"p7", "H7":"p7", "H8":"p7", "H9":"p7", "H10":"p7", "H11":"p7", "H12":"p7" }, "loc":{ "A1":"E1", "A2":"D1", "A3":"C1", "A4":"B1", "A5":"A1", "A13":"A1", "A11":"B1", "A10":"C1", "A9":"D1", "A8":"E1", "A7":"F1", "A6":"G1", "B1":"E2", "B2":"D2", "B3":"C2", "B4":"B2", "B5":"A2", "B6":"G2", "B7":"F2", "B8":"E2", "B9":"D2", "B10":"C2", "B11":"B2", "B12":"A2", "C1":"E3", "C2":"D3", "C3":"C3", "C4":"B3", "C5":"A3", "C6":"G3", "C7":"F3", "C8":"E3", "C9":"D3", "C10":"C3", "C11":"B3", "C12":"A3", "D1":"E4", "D2":"D4", "D3":"C4", "D4":"B4", "D5":"A4", "D6":"G4", "D7":"F4", "D8":"E4", "D9":"D4", "D10":"C4", "D11":"B4", "D12":"A4", "E1":"E5", "E2":"D5", "E3":"C5", "E4":"B5", "E5":"A5", "E6":"G5", "E7":"F5", "E8":"E5", "E9":"D5", "E10":"C5", "E11":"B5", "E12":"A5", "F1":"E6", "F2":"D6", "F3":"C6", "F4":"B6", "F5":"A6", "F6":"G6", "F7":"F6", "F8":"E6", "F9":"D6", "F10":"C6", "F11":"B6", "F12":"A6", "G1":"E7", "G2":"D7", "G3":"C7", "G4":"B7", "G5":"A7", "G6":"G7", "G7":"F7", "G8":"E7", "G9":"D7", "G10":"C7", "G11":"B7", "G12":"A7", "H1":"E8", "H2":"D8", "H3":"C8", "H4":"B8", "H5":"A8", "H6":"G8", "H7":"F8", "H8":"E8", "H9":"D8", "H10":"C8", "H11":"B8", "H12":"A8" }}
 
 #VISUALIZATION
 def df_popout(df):
@@ -452,6 +457,22 @@ def get_labware_info(rxn_spreadsheet, empty_containers):
             labware_dict['first_usable'].append(raw_labware_data[row_i+2][col_i])
             labware_dict['deck_pos'].append(raw_labware_data[row_i][col_i])
     labware_df = pd.DataFrame(labware_dict)
+    #platereader positions need to be translated, and they shouldn't be put in both
+    #slots
+    platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
+            (labware_df['name'] == 'platereader4')]
+    platereader_input_first_usable = platereader_rows.loc[\
+            platereader_rows['first_usable'].astype(bool), 'first_usable'].iloc[0]
+    platereader_name = PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
+    platereader_first_usable = PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
+    if platereader_name == 'platereader7':
+        platereader4_first_usable = 'F8'
+        platereader7_firstusable = platereader_first_usable
+    else:
+        platereader4_first_usable = platereader_first_usable
+        platereader7_first_usable = 'A1'
+    labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
+    labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
     labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
     labware_df.set_index('deck_pos', inplace=True)
     #add empty containers in list form
@@ -603,8 +624,9 @@ class Container(ABC):
           float vol: the volume of chemical added/removed
     CONSTANTS:
         float DEAD_VOL: the volume at which this 
+        float MIN_HEIGHT: the minimum height at which to pipette from 
     ABSTRACT METHODS:
-        _update_height void: updates self.height to hieght at which to pipet (a bit below water line)
+        _update_height void: updates self.height to height at which to pipet (a bit below water line)
     IMPLEMENTED METHODS:
         update_vol(float del_vol) void: updates the volume upon an aspiration
     """
@@ -622,7 +644,7 @@ class Container(ABC):
             self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, vol))
 
     DEAD_VOL = 0
-    CONTAINERS_SERVICED = []
+    MIN_HEIGHT = 0
 
     @abstractmethod
     def _update_height(self):
@@ -635,7 +657,7 @@ class Container(ABC):
             str name: the thing coming in if it is a dispense
         Postconditions:
             the volume has been adjusted
-            hieght has been adjusted
+            height has been adjusted
             the history has been updated
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
@@ -665,6 +687,7 @@ class Tube20000uL(Container):
     """
 
     DEAD_VOL = 2000
+    MIN_HEIGHT = 1
 
     def __init__(self, name, deck_pos, loc, mass=6.6699, conc=1):
         '''
@@ -680,7 +703,8 @@ class Tube20000uL(Container):
     def _update_height(self):
         diameter_15 = 14.0 # mm (V1 number = 14.4504)
         height_bottom_cylinder = 30.5  #mm
-        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
+        height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
+        self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
     def disp_height(self):
@@ -701,6 +725,7 @@ class Tube50000uL(Container):
     """
 
     DEAD_VOL = 5000
+    MIN_HEIGHT = 1
 
     def __init__(self, name, deck_pos, loc, mass=13.3950, conc=1):
         density_water_25C = 0.9970479 # g/mL
@@ -713,7 +738,8 @@ class Tube50000uL(Container):
     def _update_height(self):
         diameter_50 = 26.50 # mm (V1 number = 26.7586)
         height_bottom_cylinder = 21 #mm
-        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_50/2)**2)) + height_bottom_cylinder
+        height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_50/2)**2)) + height_bottom_cylinder
+        self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
     def disp_height(self):
@@ -734,6 +760,7 @@ class Tube2000uL(Container):
     """
 
     DEAD_VOL = 250 #uL
+    MIN_HEIGHT = 1
 
     def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
         density_water_4C = 0.9998395 # g/mL
@@ -745,7 +772,8 @@ class Tube2000uL(Container):
     def _update_height(self):
         diameter_2 = 8.30 # mm
         height_bottom_cylinder = 10.5 #mm
-        self.height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
+        height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
+        self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
     def disp_height(self):
@@ -767,13 +795,15 @@ class Well96(Container):
             _update_height void, update_vol(float del_vol) void,
     """
 
+    MIN_HEIGHT = 1
+
     def __init__(self, name, deck_pos, loc, vol=0, conc=1):
         #vol is defaulted here because the well will probably start without anything in it
         super().__init__(name, deck_pos, loc, vol, conc)
            
     def _update_height(self):
         #this method is not needed for a well of such small size because we always aspirate
-        #and dispense at the same hieghts
+        #and dispense at the same heights
         self.height = None
 
     @property
@@ -782,7 +812,7 @@ class Well96(Container):
 
     @property
     def asp_height(self):
-        return 1
+        return self.MIN_HEIGHT
 
 #LABWARE
 #TODO Labware was built with the assumption that once you ask for a bit of labware, you will use it
@@ -891,6 +921,7 @@ class TubeHolder(Labware):
         '''
         if not self.full:
             if container_type:
+                #here I'm assuming you wouldn't want to put more volume in a tube than it can fit
                 viable_tubes = self.empty_tubes[container_type]
             elif vol:
                 #neat trick
@@ -971,11 +1002,12 @@ class WellPlate(Labware):
     CONTAINERS_SERVICED = ['Well96']
 
     def __init__(self, labware, first_well, deck_pos):
+        super().__init__(labware, deck_pos)
+        #allow for none initialization
         n_rows = len(labware.columns()[0])
         col = first_well[:1]#alpha part
         row = first_well[1:]#numeric part
         self.current_well = (ord(col)-64)*n_rows #transform alpha num to num
-        super().__init__(labware, deck_pos)
         self.full = self.current_well >= len(labware.wells())
 
     def pop_next_well(self, vol=None,container_type=None):
@@ -1333,7 +1365,7 @@ class OT2Controller():
                     viable = viable_labware[i]
                 except IndexError: 
                     raise Exception('No viable slots to put {}.'.format(chem_name))
-                next_container_loc = viable.pop_next_well(vol=max_vol)
+                next_container_loc = viable.pop_next_well(vol=max_vol,container_type=req_container)
                 if next_container_loc:
                     #that piece of labware has space for you
                     loc = next_container_loc
@@ -1509,7 +1541,13 @@ class OT2Controller():
         locs = [self.containers[name].loc for name in names]
         deck_poses = [self.containers[name].deck_pos for name in names]
         vols = [self.containers[name].vol for name in names]
-        well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 'vol':vols})
+        def lookup_container_type(name):
+            container = self.containers[name]
+            labware = self.lab_deck[container.deck_pos]
+            return labware.get_container_type(container.loc)
+        container_types = [lookup_container_type(name) for name in names]
+        well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 
+                'vol':vols,'container':container_types})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
         well_map.to_csv(path, index=False, sep='\t')
 
@@ -1615,6 +1653,7 @@ def vol_calc(name):
 
 def get_side_by_side_df(use_cache=False, labware_df=None, rxn_df=None, reagents_df=None, product_df=None, eve_logpath='Eve_Files'):
     '''
+    This is for comparing the volumes, labwares, and containers
     params:
         df labware_df:
             str name: the common name of the labware
@@ -1683,9 +1722,13 @@ def build_theoretical_df(labware_df, rxn_df, reagent_df, product_df):
             return 'any'
     product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
     product_df['vol'] = [vol_calc(name,rxn_df) for name in product_df.index]
+    product_df['container']
+    product_df['loc'] = 'any'
+    product_df.replace('','any', inplace=True)
     reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
-    reagent_df['vol'] = 'any' #depends on the type of tube etc
-    theoretical_df = pd.concat((reagent_df.loc[:,['deck_pos','vol']], product_df.loc[:,['deck_pos','vol']]))
+    reagent_df['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
+    reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
+    theoretical_df = pd.concat((reagent_df.loc[:,['loc', 'deck_pos','vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
     return theoretical_df
 
 def vol_calc(name, rxn_df):
@@ -1720,8 +1763,24 @@ def is_valid_sbs(row):
         Bool: True if it is a valid row
     '''
     if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
+        print('deck_pos_error:')
+        print(row.to_frame().T)
+        print()
         return False
     if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
+        print('volume error:')
+        print(row.to_frame().T)
+        print()
+        return False
+    if row['container_t'] != 'any' and not row['container'] == row['container_t']:
+        print('container error:')
+        print(row.to_frame().T)
+        print()
+        return False
+    if row['loc_t'] != 'any' and not row['loc'] == row['loc_t']:
+        print('loc error:')
+        print(row.to_frame().T)
+        print()
         return False
     return True
 
