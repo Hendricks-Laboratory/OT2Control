@@ -17,7 +17,7 @@ class Armchair():
         if not os.path.exists(self.log_path):
             os.makedirs(self.log_path)
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'w') as armchair_log:
-            armchair_log.write('Armchair Log: {}, {}\n'.format(self.name, datetime.now().strftime("%d-%b-%Y")))
+            armchair_log.write('Armchair Log: {}, {}\n'.format(self.name, datetime.now().strftime('%H:%M:%S:%f')))
             
 
     def get_len(self,header):
@@ -98,7 +98,7 @@ class Armchair():
             header = self.construct_head(n_bytes, pack_type)
             self.sock.send(header)
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
-            armchair_log.write("{}\tsending {}, cid {}\n".format(datetime.now().strftime('%h:%m:%s:%f'), pack_type,self.cid))
+            armchair_log.write("{}\tsending {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'), pack_type,self.cid))
         return self.cid
 
     def close(self):

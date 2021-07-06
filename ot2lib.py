@@ -124,7 +124,6 @@ class ProtocolExecutor():
         The real deal. Input a server addr and port if you choose and protocol will be run
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        breakpoint()
         self._run(serveraddr, port, simulate=True)
         print('<<controller>> EXITING PROTOCOL')
         
@@ -824,12 +823,13 @@ class ProtocolExecutor():
                 list<tuple<str, float>> history: the chem_name paired with the amount or
                   keyword 'aspirate' and vol
         '''
-        self.robo_params['labware_df'] = self.robo_params['labware_df'].set_index('name'\
-                ).rename(index={'platereader7':'platereader',
-                'platereader4':'platereader'}) #converting to dict like
+        #copy the locals cause we're changing them
+        labware_df = self.robo_params['labware_df'].set_index('name').rename(index={'platereader7':'platereader','platereader4':'platereader'}) #converting to dict like
+        product_df = self.robo_params['product_df'].copy()
+        reagent_df = self.robo_params['reagent_df'].copy()
         def get_deck_pos(labware):
             if labware:
-                deck_pos = self.robo_params['labware_df'].loc[labware,'deck_pos']
+                deck_pos = labware_df.loc[labware,'deck_pos']
                 if isinstance(deck_pos,np.int64):
                     return [deck_pos]
                 else:
@@ -837,16 +837,15 @@ class ProtocolExecutor():
                     return deck_pos.to_list()
             else:
                 return 'any'
-        self.robo_params['product_df']['deck_pos'] = self.robo_params['product_df']['labware'].apply(get_deck_pos)
-        self.robo_params['product_df']['vol'] = [self._vol_calc(name,self.rxn_df) for name in self.robo_params['product_df'].index]
-        self.robo_params['product_df']['loc'] = 'any'
-        self.robo_params['product_df'].replace('','any', inplace=True)
-        self.robo_params['reagent_df']['deck_pos'] = self.robo_params['reagent_df']['deck_pos'].apply(lambda x: [x])
-        self.robo_params['reagent_df']['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
-        self.robo_params['reagent_df']['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
-        theoretical_df = pd.concat((self.robo_params['reagent_df'].loc[:,['loc', 'deck_pos',\
-                'vol','container']], self.robo_params['product_df'\
-                ].loc[:,['loc', 'deck_pos','vol','container']]))
+        product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
+        product_df['vol'] = [self._vol_calc(name,self.rxn_df) for name in product_df.index]
+        product_df['loc'] = 'any'
+        product_df.replace('','any', inplace=True)
+        reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
+        reagent_df['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
+        reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
+        theoretical_df = pd.concat((reagent_df.loc[:,['loc', 'deck_pos',\
+                'vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
         result_df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t').set_index('chem_name')
         sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
         return sbs
@@ -1496,6 +1495,7 @@ class OT2Controller():
             the dictionary, self.containers, has been initialized to have name keys to container
               objects
         '''
+        breakpoint()
         container_types = reagent_df['deck_pos'].apply(lambda d: self.lab_deck[d])
         container_types = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
