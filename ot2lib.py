@@ -1495,7 +1495,6 @@ class OT2Controller():
             the dictionary, self.containers, has been initialized to have name keys to container
               objects
         '''
-        breakpoint()
         container_types = reagent_df['deck_pos'].apply(lambda d: self.lab_deck[d])
         container_types = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
