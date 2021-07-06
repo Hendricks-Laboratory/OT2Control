@@ -10,6 +10,7 @@ import os
 import shutil
 import webbrowser
 from tempfile import NamedTemporaryFile
+import logging
 
 import gspread
 from df2gspread import df2gspread as d2g
@@ -208,7 +209,7 @@ def rename_products(rxn_df):
             name = reagent_name[:reagent_name.rfind('C')+1]+row['dilution_conc']
             rename_key[col] = name
         else:
-            rename_key[col] = "{}C1".format(col)
+            rename_key[col] = "{}C1".format(col).replace(' ','_')
 
     rxn_df.rename(rename_key, axis=1, inplace=True)
 
@@ -1080,6 +1081,7 @@ class OT2Controller():
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
               are the pipette names filled in
             df reagents_df: info on reagents. columns from sheet. See excel specification
+            str: ip
                 
         postconditions:
             protocol has been initialzied
@@ -1089,13 +1091,15 @@ class OT2Controller():
               it is the client's responsibility to make sure that these are initialized prior
               to operating with them
         '''
-        #DEBUG
-        with open(os.path.join(CACHE_PATH,'robo_init_params.pkl'),'wb') as cache:
-            dill.dump([simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df], cache)
         self.containers = {}
         self.pipettes = {}
         self.ip = ip
         self.portal = portal
+
+        #self.log = logging.getLogger('eve_logger')
+        #self.log.addHandler(logging.FileHandler('.eve.log',encoding='utf8'))
+        #self.log.warning('uh oh')
+
         #like protocol.deck, but with custom labware wrappers
         self.lab_deck = np.full(12, None, dtype='object') #note first slot not used
 
@@ -1364,7 +1368,10 @@ class OT2Controller():
                 try:
                     viable = viable_labware[i]
                 except IndexError: 
-                    raise Exception('No viable slots to put {}.'.format(chem_name))
+                    message = 'No containers to put {} with labware type {} and container type \
+                            {} with maximum volume {}.'.format(chem_name, \
+                            req_labware, req_container, max_vol) 
+                    raise Exception(message)
                 next_container_loc = viable.pop_next_well(vol=max_vol,container_type=req_container)
                 if next_container_loc:
                     #that piece of labware has space for you
@@ -1468,9 +1475,9 @@ class OT2Controller():
             str: in ['right', 'left'] the pipette arm you're to use
         '''
         preffered_size = 0
-        if vol < 50:
+        if vol < 40.0:
             preffered_size = 20.0
-        elif vol < 600:
+        elif vol < 1000:
             preffered_size = 300.0
         else:
             preffered_size = 1000.0
@@ -1484,7 +1491,8 @@ class OT2Controller():
             larger_pipette = 'right'
             smaller_pipette = 'left'
 
-        if self.pipettes[larger_pipette]['size'] < preffered_size:
+        FUDGE_FACTOR = 0.0001
+        if self.pipettes[larger_pipette]['size'] <= preffered_size + FUDGE_FACTOR:
             #if the larger one is small enough return it
             return larger_pipette
         else:
@@ -1509,6 +1517,9 @@ class OT2Controller():
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
+        assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {}uL'.format(src,vol,dst,src_cont.vol)
+        #It is not necessary to check that the dst will not overflow because this is done when
+        #containers are initialized
         #set aspiration height
         pipette.well_bottom_clearance.aspirate = self.containers[src].asp_height
         #aspirate(well_obj)

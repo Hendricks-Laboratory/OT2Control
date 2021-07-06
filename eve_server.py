@@ -1,4 +1,5 @@
 import socket
+import asyncio
 
 from boltons.socketutils import BufferedSocket
 
@@ -6,15 +7,18 @@ from ot2lib import OT2Controller
 from Armchair.armchair import Armchair
 
 
-def main():
+def main(**kwargs):
+    my_ip = kwargs['my_ip']
     PORT_NUM = 50000
-    ip = ''
     #construct a socket
     sock = socket.socket(socket.AF_INET)
     sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-    sock.bind(('',PORT_NUM))
+    sock.bind((my_ip,PORT_NUM))
     print('<<eve>> listening on port {}'.format(PORT_NUM))
     sock.listen(5)
+    if kwargs['barrier']:
+        #running in thread mode with barrier. Barrier waits for both threads
+        kwargs['barrier'].wait()
     client_sock, client_addr = sock.accept()
     print('<<eve>> connected')
     buffered_sock = BufferedSocket(client_sock, timeout=None)
@@ -23,7 +27,10 @@ def main():
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
         simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df = args
-        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,ip, portal)
+        #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
+        #like to be run from a thread
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, portal)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:
@@ -31,4 +38,5 @@ def main():
         connection_open = eve.execute(pack_type, cid, payload)
 
 if __name__ == '__main__':
-    main()
+    my_ip = socket.gethostname()
+    main(my_ip=my_ip, barrier=None)

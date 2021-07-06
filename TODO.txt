@@ -1,7 +1,6 @@
 Error Exits
     implement server side error handle
     implement client side error handle
-    litter code with try excepts
 build in some error checking
     what does michael's code do? just checking if you have enough reagent? I can proabaly
     run and try/except at the end
@@ -24,6 +23,6 @@ We've mostly fixed the tube problem, but for ML, where you really just want a co
   this. I recommend
   a new class LabwareType that has a list of labware objects and finds the best one
 With regard to the platereader interface? Make sense? No. You should go through plate dict
-Ask michael to put reactions together in formats
-40uL for 20uL else 300
 4 milimeter start for tube depth
+Header for input Template?
+We have the capacity to not pickup new tip on each transfer if same reagent if you wish
