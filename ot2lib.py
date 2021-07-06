@@ -11,6 +11,8 @@ import shutil
 import webbrowser
 from tempfile import NamedTemporaryFile
 import logging
+import asyncio
+import threading
 
 import gspread
 from df2gspread import df2gspread as d2g
@@ -22,8 +24,8 @@ import opentrons.execute
 from opentrons import protocol_api, simulate, types
 from boltons.socketutils import BufferedSocket
 
+from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
-
 
 
 #VISUALIZATION
@@ -58,11 +60,16 @@ class ProtocolExecutor():
         dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
           to locs on the opentrons object. Use a json viewer for more structural info
     '''
-    def __init__(self, portal, rxn_sheet_name, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+        '''
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        '''
         #set according to input
         self.cache_path = cache_path
         self.use_cache = use_cache
-        self.portal = portal
         self._make_out_dirs(out_path)
         #this will be gradually filled
         self.robo_params = {}
@@ -85,6 +92,59 @@ class ProtocolExecutor():
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
 
+    def run_simulation(self):
+        '''
+        runs a full simulation of the protocol with
+        Returns:
+            bool: True if all tests were passed
+        '''
+        print('<<controller>> ENTERING SIMULATION')
+        serveraddr = '127.0.0.1'
+        port = 50000
+        #launch an eve server in background for simulation purposes
+        b = threading.Barrier(2,timeout=20)
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread.start()
+
+        #do create a connection
+        b.wait()
+        self._run(serveraddr, port, simulate=True)
+
+        #run post execution tests
+        tests_passed = self.run_all_tests()
+
+        #collect the eve thread
+        eve_thread.join()
+
+        print('<<controller>> EXITING SIMULATION')
+        return tests_passed
+
+    def run_protocol(self, serveraddr, port=50000):
+        '''
+        The real deal. Input a server addr and port if you choose and protocol will be run
+        '''
+        serveraddr = '127.0.0.1'
+        port = 50000
+        print('<<controller>> RUNNING PROTOCOL')
+        self._run(serveraddr, port, simulate=True)
+        print('<<controller>> EXITING PROTOCOL')
+        
+    def _run(self, serveraddr, port, simulate):
+        '''
+        Returns:
+            bool: True if all tests were passed
+        '''
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((serveraddr, port))
+        print("<<controller>> connected")
+        self.portal = Armchair(sock,'controller','Armchair_Logs')
+
+        self.init_robot(simulate)
+        self.run_protocol()
+        self.close_connection(serveraddr)
+        return
+        
 
     def _init_credentials(self, rxn_sheet_name):
         '''
@@ -643,28 +703,33 @@ class ProtocolExecutor():
     def run_all_tests(self):
         '''
         runs all post rxn tests
+        Returns:
+            bool: True if all tests were passed
         '''
         print('<<controller>> running post execution tests')
-        self.test_vol_lab_cont()
-        self.test_contents()
+        valid = True
+        valid = valid and self.test_vol_lab_cont()
+        valid = valid and self.test_contents()
+        return valid
 
     def test_vol_lab_cont(self):
         '''
         tests that vol, labware, and containers are correct for a row of a side by side df with
         those attributes
         Preconditions:
-            labware_df, reagents_df, and products_df are all initialized as vals in robo_params
+            labware_df, reagent_df, and products_df are all initialized as vals in robo_params
             self.rxn_df is initialized
             df labware_df:
             df rxn_df: as from excel
-            df reagents_df: info on reagents. columns from sheet. See excel specification
+            df reagent_df: info on reagents. columns from sheet. See excel specification
             df product_df:
             self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
               over in close step
         Postconditions:
             Any errors will be printed to the screen.
-            If errors were found, a pkl of the sbs will be written and you will have an
-            opportunity to explore the sbs with pdb
+            If errors were found, a pkl of the sbs will be written
+        Returns:
+            bool: True if all tests were passed
         '''
         sbs =self._get_vol_lab_cont_sbs()
         sbs['flag'] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
@@ -675,9 +740,10 @@ class ProtocolExecutor():
             print('<<controller>> volume/deck pos/labware/container errors')
             with open(os.path.join(self.debug_path,'vol_lab_cont_sbs.pkl'), 'wb') as sbs_pkl:
                 dill.dump(sbs, sbs_pkl)
-            if input('<<controller>> would you like to enter the debugger to view the full sbs? [yn] ').lower() == 'y':
+            if input('<<controller>> would you like to view the full sbs? [yn] ').lower() == 'y':
                 print(sbs)
-                breakpoint()
+            return False
+        return True
 
     def test_contents(self):
         '''
@@ -690,6 +756,8 @@ class ProtocolExecutor():
         Postconditions:
             if a difference was found it will be displayed,
             if no differences are found, a friendly print message will be displayed
+        Returns:
+            bool: True if all tests were passed
         '''
         sbs = self._create_contents_sbs()
         sbs['flag'] = sbs.apply(self._is_valid_contents_sbs,axis=1)
@@ -700,9 +768,10 @@ class ProtocolExecutor():
             print('<<controller>> there ere some content errors')
             with open(os.path.join(self.debug_path,'contents_sbs.pkl'), 'wb') as sbs_pkl:
                 dill.dump(sbs, sbs_pkl)
-            if input('<<controller>> would you like to enter the debugger to view the full sbs? [yn] ').lower() == 'y':
+            if input('<<controller>> would you like to view the full sbs? [yn] ').lower() == 'y':
                 print(sbs)
-                breakpoint()
+            return False
+        return True
 
     def _is_valid_vol_lab_cont_sbs(self, row):
         '''
@@ -738,11 +807,11 @@ class ProtocolExecutor():
         This is for comparing the volumes, labwares, and containers
         params:
         Preconditions:
-            labware_df, reagents_df, and products_df are all initialized as vals in robo_params
+            labware_df, reagent_df, and products_df are all initialized as vals in robo_params
             self.rxn_df is initialized
             df labware_df:
             df rxn_df: as from excel
-            df reagents_df: info on reagents. columns from sheet. See excel specification
+            df reagent_df: info on reagents. columns from sheet. See excel specification
             df product_df:
             self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
               over in close step
@@ -857,7 +926,7 @@ def get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, prod
         float temp: the temperature to keep the module at
         Dict<str, str>: maps rxns to prefered labware
     returns:
-        df reagents_df: info on reagents. columns from sheet. See excel specification
+        df reagent_df: info on reagents. columns from sheet. See excel specification
         df labware_df:
             str name: the common name of the labware
             str first_usable: the first tip/well to use
@@ -1009,6 +1078,7 @@ class Tube50000uL(Container):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass50 = 13.3950 # grams
         self.mass = mass - avg_tube_mass50 # N = 1 (in grams) 
+        assert (self.mass > 0),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
@@ -1343,7 +1413,7 @@ class OT2Controller():
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, ip, portal):
+    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, ip, portal):
         '''
         params:
             bool simulate: if true, the robot will run in simulation mode only
@@ -1357,7 +1427,7 @@ class OT2Controller():
                   order
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
               are the pipette names filled in
-            df reagents_df: info on reagents. columns from sheet. See excel specification
+            df reagent_df: info on reagents. columns from sheet. See excel specification
             str: ip
                 
         postconditions:
@@ -1395,7 +1465,7 @@ class OT2Controller():
         self._init_directories()
         self._init_labware(labware_df, using_temp_ctrl, temp)
         self._init_instruments(instruments, labware_df)
-        self._init_containers(reagents_df)
+        self._init_containers(reagent_df)
 
     def _init_directories(self):
         '''
@@ -1419,20 +1489,20 @@ class OT2Controller():
         self.logs_p = os.path.join(self.root_p, 'Logs')
 
 
-    def _init_containers(self, reagents_df):
+    def _init_containers(self, reagent_df):
         '''
         params:
-            df reagents_df: as passed to init
+            df reagent_df: as passed to init
         Postconditions:
             the dictionary, self.containers, has been initialized to have name keys to container
               objects
         '''
-        container_types = reagents_df['deck_pos'].apply(lambda d: self.lab_deck[d])
-        container_types = reagents_df[['deck_pos','loc']].apply(lambda row: 
+        container_types = reagent_df['deck_pos'].apply(lambda d: self.lab_deck[d])
+        container_types = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
         container_types.name = 'container_type'
 
-        for name, conc, loc, deck_pos, mass, container_type in reagents_df.join(container_types).itertuples():
+        for name, conc, loc, deck_pos, mass, container_type in reagent_df.join(container_types).itertuples():
             self.containers[name] = self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
     
     def _construct_container(self, container_type, name, deck_pos, loc, **kwargs):
@@ -1912,6 +1982,43 @@ class OT2Controller():
             #wait until client has sent that they're ready to recieve again
         client_sock.close()
         sock.close()
+
+
+def launch_eve_server(**kwargs):
+    '''
+    launches an eve server to create robot, connect to controller etc
+    **kwargs:
+        str my_ip: the ip address to launch the server on. required arg
+        threading.Barrier barrier: if specified, will launch as a thread instead of a main
+    '''
+    my_ip = kwargs['my_ip']
+    PORT_NUM = 50000
+    #construct a socket
+    sock = socket.socket(socket.AF_INET)
+    sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+    sock.bind((my_ip,PORT_NUM))
+    print('<<eve>> listening on port {}'.format(PORT_NUM))
+    sock.listen(5)
+    if kwargs['barrier']:
+        #running in thread mode with barrier. Barrier waits for both threads
+        kwargs['barrier'].wait()
+    client_sock, client_addr = sock.accept()
+    print('<<eve>> connected')
+    buffered_sock = BufferedSocket(client_sock, timeout=None)
+    portal = Armchair(buffered_sock,'eve','Armchair_Logs')
+    eve = None
+    pack_type, cid, args = portal.recv_pack()
+    if pack_type == 'init':
+        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df = args
+        #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
+        #like to be run from a thread
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, portal)
+        portal.send_pack('ready', cid)
+    connection_open=True
+    while connection_open:
+        pack_type, cid, payload = portal.recv_pack()
+        connection_open = eve.execute(pack_type, cid, payload)
 
 def make_unique(s):
     '''
