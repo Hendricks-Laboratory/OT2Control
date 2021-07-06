@@ -662,7 +662,8 @@ class Container(ABC):
             the history has been updated
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
-        assert((del_vol < 0) or (name and del_vol > 0))
+        assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without \
+                specifying src'
         self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
@@ -674,6 +675,10 @@ class Container(ABC):
     @property
     def asp_height(self):
         pass
+
+    @property
+    def aspiratible_vol(self):
+        return self.vol - DEAD_VOL
 
         
 class Tube20000uL(Container):
@@ -688,7 +693,7 @@ class Tube20000uL(Container):
     """
 
     DEAD_VOL = 2000
-    MIN_HEIGHT = 1
+    MIN_HEIGHT = 4
 
     def __init__(self, name, deck_pos, loc, mass=6.6699, conc=1):
         '''
@@ -726,7 +731,7 @@ class Tube50000uL(Container):
     """
 
     DEAD_VOL = 5000
-    MIN_HEIGHT = 1
+    MIN_HEIGHT = 4
 
     def __init__(self, name, deck_pos, loc, mass=13.3950, conc=1):
         density_water_25C = 0.9970479 # g/mL
@@ -761,7 +766,7 @@ class Tube2000uL(Container):
     """
 
     DEAD_VOL = 250 #uL
-    MIN_HEIGHT = 1
+    MIN_HEIGHT = 4
 
     def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
         density_water_4C = 0.9998395 # g/mL
@@ -1517,7 +1522,7 @@ class OT2Controller():
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
-        assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {}uL'.format(src,vol,dst,src_cont.vol)
+        assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {}uL'.format(src,vol,dst,src_cont.aspiratible_vol)
         #It is not necessary to check that the dst will not overflow because this is done when
         #containers are initialized
         #set aspiration height

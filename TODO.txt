@@ -26,3 +26,4 @@ With regard to the platereader interface? Make sense? No. You should go through 
 4 milimeter start for tube depth
 Header for input Template?
 We have the capacity to not pickup new tip on each transfer if same reagent if you wish
+Would love a picture of each labware type
