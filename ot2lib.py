@@ -24,10 +24,6 @@ from boltons.socketutils import BufferedSocket
 
 import Armchair.armchair as armchair
 
-#For Debugging
-USE_CACHE = False
-#USE_CACHE = True
-CACHE_PATH = 
 
 
 #VISUALIZATION
@@ -49,7 +45,7 @@ class ProtocolExecutor():
 #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
 #reader given a regular loc for a 96well plate.
 #Please do not read this. paste it into a nice json viewer.
-PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3":"p4", "A4":"p4", "A5":"p4", "A13":"platereader7", "A11":"p7", "A10":"p7", "A9":"p7", "A8":"p7", "A7":"p7", "A6":"p7", "B1":"p4", "B2":"p4", "B3":"p4", "B4":"p4", "B5":"p4", "B6":"p7", "B7":"p7", "B8":"p7", "B9":"p7", "B10":"p7", "B11":"p7", "B12":"p7", "C1":"p4", "C2":"p4", "C3":"p4", "C4":"p4", "C5":"p4", "C6":"p7", "C7":"p7", "C8":"p7", "C9":"p7", "C10":"p7", "C11":"p7", "C12":"p7", "D1":"p4", "D2":"p4", "D3":"p4", "D4":"p4", "D5":"p4", "D6":"p7", "D7":"p7", "D8":"p7", "D9":"p7", "D10":"p7", "D11":"p7", "D12":"p7", "E1":"p4", "E2":"p4", "E3":"p4", "E4":"p4", "E5":"p4", "E6":"p7", "E7":"p7", "E8":"p7", "E9":"p7", "E10":"p7", "E11":"p7", "E12":"p7", "F1":"p4", "F2":"p4", "F3":"p4", "F4":"p4", "F5":"p4", "F6":"p7", "F7":"p7", "F8":"p7", "F9":"p7", "F10":"p7", "F11":"p7", "F12":"p7", "G1":"p4", "G2":"p4", "G3":"p4", "G4":"p4", "G5":"p4", "G6":"p7", "G7":"p7", "G8":"p7", "G9":"p7", "G10":"p7", "G11":"p7", "G12":"p7", "H1":"p4", "H2":"p4", "H3":"p4", "H4":"p4", "H5":"p4", "H6":"p7", "H7":"p7", "H8":"p7", "H9":"p7", "H10":"p7", "H11":"p7", "H12":"p7" }, "loc":{ "A1":"E1", "A2":"D1", "A3":"C1", "A4":"B1", "A5":"A1", "A13":"A1", "A11":"B1", "A10":"C1", "A9":"D1", "A8":"E1", "A7":"F1", "A6":"G1", "B1":"E2", "B2":"D2", "B3":"C2", "B4":"B2", "B5":"A2", "B6":"G2", "B7":"F2", "B8":"E2", "B9":"D2", "B10":"C2", "B11":"B2", "B12":"A2", "C1":"E3", "C2":"D3", "C3":"C3", "C4":"B3", "C5":"A3", "C6":"G3", "C7":"F3", "C8":"E3", "C9":"D3", "C10":"C3", "C11":"B3", "C12":"A3", "D1":"E4", "D2":"D4", "D3":"C4", "D4":"B4", "D5":"A4", "D6":"G4", "D7":"F4", "D8":"E4", "D9":"D4", "D10":"C4", "D11":"B4", "D12":"A4", "E1":"E5", "E2":"D5", "E3":"C5", "E4":"B5", "E5":"A5", "E6":"G5", "E7":"F5", "E8":"E5", "E9":"D5", "E10":"C5", "E11":"B5", "E12":"A5", "F1":"E6", "F2":"D6", "F3":"C6", "F4":"B6", "F5":"A6", "F6":"G6", "F7":"F6", "F8":"E6", "F9":"D6", "F10":"C6", "F11":"B6", "F12":"A6", "G1":"E7", "G2":"D7", "G3":"C7", "G4":"B7", "G5":"A7", "G6":"G7", "G7":"F7", "G8":"E7", "G9":"D7", "G10":"C7", "G11":"B7", "G12":"A7", "H1":"E8", "H2":"D8", "H3":"C8", "H4":"B8", "H5":"A8", "H6":"G8", "H7":"F8", "H8":"E8", "H9":"D8", "H10":"C8", "H11":"B8", "H12":"A8" }}
+    PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3":"p4", "A4":"p4", "A5":"p4", "A13":"platereader7", "A11":"p7", "A10":"p7", "A9":"p7", "A8":"p7", "A7":"p7", "A6":"p7", "B1":"p4", "B2":"p4", "B3":"p4", "B4":"p4", "B5":"p4", "B6":"p7", "B7":"p7", "B8":"p7", "B9":"p7", "B10":"p7", "B11":"p7", "B12":"p7", "C1":"p4", "C2":"p4", "C3":"p4", "C4":"p4", "C5":"p4", "C6":"p7", "C7":"p7", "C8":"p7", "C9":"p7", "C10":"p7", "C11":"p7", "C12":"p7", "D1":"p4", "D2":"p4", "D3":"p4", "D4":"p4", "D5":"p4", "D6":"p7", "D7":"p7", "D8":"p7", "D9":"p7", "D10":"p7", "D11":"p7", "D12":"p7", "E1":"p4", "E2":"p4", "E3":"p4", "E4":"p4", "E5":"p4", "E6":"p7", "E7":"p7", "E8":"p7", "E9":"p7", "E10":"p7", "E11":"p7", "E12":"p7", "F1":"p4", "F2":"p4", "F3":"p4", "F4":"p4", "F5":"p4", "F6":"p7", "F7":"p7", "F8":"p7", "F9":"p7", "F10":"p7", "F11":"p7", "F12":"p7", "G1":"p4", "G2":"p4", "G3":"p4", "G4":"p4", "G5":"p4", "G6":"p7", "G7":"p7", "G8":"p7", "G9":"p7", "G10":"p7", "G11":"p7", "G12":"p7", "H1":"p4", "H2":"p4", "H3":"p4", "H4":"p4", "H5":"p4", "H6":"p7", "H7":"p7", "H8":"p7", "H9":"p7", "H10":"p7", "H11":"p7", "H12":"p7" }, "loc":{ "A1":"E1", "A2":"D1", "A3":"C1", "A4":"B1", "A5":"A1", "A13":"A1", "A11":"B1", "A10":"C1", "A9":"D1", "A8":"E1", "A7":"F1", "A6":"G1", "B1":"E2", "B2":"D2", "B3":"C2", "B4":"B2", "B5":"A2", "B6":"G2", "B7":"F2", "B8":"E2", "B9":"D2", "B10":"C2", "B11":"B2", "B12":"A2", "C1":"E3", "C2":"D3", "C3":"C3", "C4":"B3", "C5":"A3", "C6":"G3", "C7":"F3", "C8":"E3", "C9":"D3", "C10":"C3", "C11":"B3", "C12":"A3", "D1":"E4", "D2":"D4", "D3":"C4", "D4":"B4", "D5":"A4", "D6":"G4", "D7":"F4", "D8":"E4", "D9":"D4", "D10":"C4", "D11":"B4", "D12":"A4", "E1":"E5", "E2":"D5", "E3":"C5", "E4":"B5", "E5":"A5", "E6":"G5", "E7":"F5", "E8":"E5", "E9":"D5", "E10":"C5", "E11":"B5", "E12":"A5", "F1":"E6", "F2":"D6", "F3":"C6", "F4":"B6", "F5":"A6", "F6":"G6", "F7":"F6", "F8":"E6", "F9":"D6", "F10":"C6", "F11":"B6", "F12":"A6", "G1":"E7", "G2":"D7", "G3":"C7", "G4":"B7", "G5":"A7", "G6":"G7", "G7":"F7", "G8":"E7", "G9":"D7", "G10":"C7", "G11":"B7", "G12":"A7", "H1":"E8", "H2":"D8", "H3":"C8", "H4":"B8", "H5":"A8", "H6":"G8", "H7":"F8", "H8":"E8", "H9":"D8", "H10":"C8", "H11":"B8", "H12":"A8" }}
 
     '''
     class to execute a protocol from the docs
@@ -62,33 +58,35 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
           to locs on the opentrons object. Use a json viewer for more structural info
     '''
-    def __init__(portal, rxn_sheet_name, use_cache=False, cache_path='Cache'):
+    def __init__(self, portal, rxn_sheet_name, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         #set according to input
         self.cache_path = cache_path
         self.use_cache = use_cache
+        self.portal = portal
+        self._make_out_dirs(out_path)
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
-        credentials = self.init_credentials(rxn_sheet_name)
-        wks_key = self.get_wks_key(credentials, rxn_sheet_name)
-        rxn_spreadsheet = self.open_sheet(rxn_sheet_name, credentials)
+        credentials = self._init_credentials(rxn_sheet_name)
+        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
+        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
-        self.init_robo_header_params(header_data)
-        self.rxn_df = self.load_rxn_df(input_data)
-        self.query_reagents(wks_key, credentials)
-        raw_reagent_df = self.download_reagent_data(wks_key, credentials)#will be replaced soon
+        self._init_robo_header_params(header_data)
+        self.rxn_df = self._load_rxn_df(input_data)
+        self._query_reagents(wks_key, credentials)
+        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
         #with a parsed reagent_df. This is exactly as is pulled from gsheets
-        empty_containers = self.get_empty_containers(raw_reagent_df)
-        products_to_labware = self.get_products_to_labware(input_data)
-        self.robo_params['reagent_df'] = self.parse_raw_reagent_df(raw_reagent_df)
-        self.robo_params['instruments'] = self.get_instrument_dict(deck_data)
-        self.robo_params['labware_df'] = self.get_labware_df(deck_data, empty_containers)
-        self.robo_params['product_df'] = self.get_product_df(products_to_labware)
+        empty_containers = self._get_empty_containers(raw_reagent_df)
+        products_to_labware = self._get_products_to_labware(input_data)
+        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
+        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
+        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+        self.robo_params['product_df'] = self._get_product_df(products_to_labware)
 
 
-    def init_credentials(rxn_sheet_name):
+    def _init_credentials(self, rxn_sheet_name):
         '''
         this function reads a local json file to get the credentials needed to access other funcs
         params:
@@ -103,7 +101,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
 
-    def get_wks_key(credentials, rxn_sheet_name):
+    def _get_wks_key(self, credentials, rxn_sheet_name):
         '''
         open and search a sheet that tells you which sheet is associated with the reaction
         params:
@@ -112,7 +110,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         returns:
             str wks_key: the key associated with the sheet. It functions similar to a url
         '''
-        name_key_pairs = self.get_wks_key_pairs(credentials, rxn_sheet_name)
+        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         try:
             i=0
             wks_key = None
@@ -127,7 +125,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             spreadsheet.')
         return wks_key
 
-    def open_sheet(rxn_sheet_name, credentials):
+    def _open_sheet(self, rxn_sheet_name, credentials):
         '''
         open the google sheet
         params:
@@ -144,7 +142,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
         return wks
 
-    def get_wks_key_pairs(credentials, rxn_sheet_name):
+    def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
         open and search a sheet that tells you which sheet is associated with the reaction
         Or read from cache if cache is enabled
@@ -173,7 +171,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
-    def _download_sheet(rxn_spreadsheet, index)
+    def _download_sheet(self, rxn_spreadsheet, index):
         '''
         pulls down the sheet at the index
         params:
@@ -193,7 +191,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         return data
 
 
-    def load_rxn_df(input_data):
+    def _load_rxn_df(self, input_data):
         '''
         reaches out to google sheets and loads the reaction protocol into a df and formats the df
         adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
@@ -210,7 +208,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
         #rename chemical names
-        rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self.get_chemical_name,axis=1)
+        rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
         #go back for some non numeric columns
         rxn_df['callbacks'].fillna('',inplace=True)
@@ -221,13 +219,14 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
     
         return rxn_df
     
-    def _rename_products(rxn_df):
+    def _rename_products(self, rxn_df):
         '''
         renames dilutions acording to the reagent that created them
         and renames rxns to have a concentration
         Preconditions:
             dilution cols are named dilution_1/2 etc
             callback is the last column in the dataframe
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization
         params:
             df rxn_df: the dataframe with all the reactions
         Postconditions:
@@ -249,7 +248,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
     
         rxn_df.rename(rename_key, axis=1, inplace=True)
 
-    def get_products_to_labware(input_data):
+    def _get_products_to_labware(self, input_data):
         '''
         create a dictionary mapping products to their requested labware/containers
         Preconditions:
@@ -263,13 +262,13 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         products = product_names(self.rxn_df)
         cols = self.rxn_df.columns.to_list()
         product_start_i = cols.index('reagent')+1
-        requested_containers = data[2][product_start_i+1:]
-        requested_labware = data[1][product_start_i+1:]#add one to account for the first col (labware)
+        requested_containers = input_data[2][product_start_i+1:]
+        requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
         #in df this is an index, so size cols is one less
         products_to_labware = {product:[labware,container] for product, labware, container in zip(products, requested_labware,requested_containers)}
         return products_to_labware
 
-    def _get_chemical_name(row):
+    def _get_chemical_name(self,row):
         '''
         create a chemical name
         from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])
@@ -290,7 +289,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
         return pd.Series(new_cols)
 
-    def get_instrument_dict(deck_data):
+    def _get_instrument_dict(self, deck_data):
         '''
         uses data from deck sheet to return the instrument params
         Preconditions:
@@ -309,7 +308,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
 
         return instruments
     
-    def get_labware_df(deck_data, empty_containers):
+    def _get_labware_df(self, deck_data, empty_containers):
         '''
         uses data from deck sheet to get information about labware locations, first tip, etc.
         Preconditions:
@@ -338,8 +337,8 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
                 (labware_df['name'] == 'platereader4')]
         platereader_input_first_usable = platereader_rows.loc[\
                 platereader_rows['first_usable'].astype(bool), 'first_usable'].iloc[0]
-        platereader_name = PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
-        platereader_first_usable = PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
+        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
         if platereader_name == 'platereader7':
             platereader4_first_usable = 'F8'
             platereader7_firstusable = platereader_first_usable
@@ -363,7 +362,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
     
         return labware_df
 
-    def query_reagents(spreadsheet_key, credentials):
+    def _query_reagents(self, spreadsheet_key, credentials):
         '''
         query the user with a reagent sheet asking for more details on locations of reagents, mass
         etc
@@ -375,14 +374,14 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         PostConditions:
             reagent_sheet has been constructed
         '''
-        rxn_names = rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
-        reagent_df = rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
+        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
         reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
         reagent_df[['loc', 'deck_pos', 'mass', 'comments']] = ''
         if not self.use_cache:
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
-    def download_reagent_data(spreadsheet_key, credentials):
+    def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
         params:
             str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
@@ -404,12 +403,13 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             #DEBUG
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        return reagent_info
 
-    def get_empty_containers(raw_reagent_df):
+    def _get_empty_containers(self, raw_reagent_df):
         '''
         only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df
         params:
-            df raw_reagents_df: as in reagent_info of excel
+            df raw_reagent_df: as in reagent_info of excel
         returns:
             df empty_containers:
                 INDEX:
@@ -417,9 +417,9 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
                 COLS:
                 str loc: location on the labware
         '''
-        return raw_reagents_df.loc['empty' == raw_reagents_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
+        return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
     
-    def parse_raw_reagent_df(raw_reagents_df):
+    def _parse_raw_reagent_df(self, raw_reagent_df):
         '''
         parses the raw_reagent_df into final form for reagent_df
         params:
@@ -427,11 +427,11 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         returns:
             df reagent_df: empties ignored, columns with correct types
         '''
-        reagent_df = reagent_info.drop(['empty'], errors='ignore') # incase not on axis
-        reagent_df = reagents.astype({'conc':float,'deck_pos':int,'mass':float})
+        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
+        reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
         return reagent_df
 
-    def get_product_df(products_to_labware):
+    def _get_product_df(self, products_to_labware):
         '''
         Creates a df to be used by robot to initialize containers for the products it will make
         params:
@@ -446,12 +446,12 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         TODO great place to catch not enough liquid errors
         '''
         products = products_to_labware.keys()
-        max_vols = [self.get_rxn_max_vol(product, products) for product in products]
+        max_vols = [self._get_rxn_max_vol(product, products) for product in products]
         product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
         product_df['max_vol'] = max_vols
         return product_df
 
-    def init_robo_header_params(header_data):
+    def _init_robo_header_params(self, header_data):
         '''
         loads the header data into self.robo_params
         params:
@@ -460,12 +460,12 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             simulate, using_temp_ctrl, and temp have been initialized according to values in 
             excel
         '''
-        header_dict = {key:val for key, val in header_data[1:][:2]}
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params['simulate'] = header_dict['simulate'] == 'yes'
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
 
-    def get_rxn_max_vol(name, products):
+    def _get_rxn_max_vol(self, name, products):
         '''
         Preconditions:
             volume in a container can change only during a 'transfer' or 'dilution'. Easy to add more
@@ -482,12 +482,12 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         #TODO handle dilutions into
         #current solution is to assume a solution is never aspirated during a dilution which
         #will assume larger than necessary volumes
-        vol_change_rows = self.rxn_df.loc[rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
+        vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
         aspirations = vol_change_rows['chemical_name'] == name
         max_vol = 0
         current_vol = 0
         for i, is_aspiration in aspirations.iteritems():
-            if is_aspiration and rxn_df.loc[i,'op'] == 'transfer':
+            if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
                 #This is a row where we're transfering from this well
                 current_vol -= self.rxn_df.loc[i, products].sum()
             else:
@@ -495,11 +495,10 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
                 max_vol = max(max_vol, current_vol)
         return max_vol
 
-    def run_protocol(portal, buff_size=4):
+    def run_protocol(self, buff_size=4):
         '''
         takes a protocol df and sends every step to robot to execute
         params:
-            Armchair portal: the Armchair object to communicate with the robot
             int buff: the number of commands allowed in flight at a time
         Postconditions:
             every step in the protocol has been sent to the robot
@@ -514,7 +513,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             elif row['op'] == 'pause':
                 #read through the inflight packets
                 while inflight_packs:
-                    self.block_on_ready(inflight_packs)
+                    self._block_on_ready(inflight_packs)
                 input('<<controller>> paused. Please press enter when you\'re ready to continue')
             elif row['op'] == 'scan':
                 #TODO implement scans
@@ -526,9 +525,9 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
                 raise Exception('invalid operation {}'.format(row['op']))
             #check buffer
             if len(inflight_packs) >= buff_size:
-                self.block_on_ready(inflight_packs)
+                self._block_on_ready(inflight_packs)
     
-    def send_transfer_command(row, product_cols):
+    def send_transfer_command(self, row, product_cols):
         '''
         params:
             pd.Series row: a row of self.rxn_df
@@ -545,7 +544,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         return cid
     
     
-    def block_on_ready(inflight_packs):
+    def _block_on_ready(self, inflight_packs):
         '''
         used to block until the server responds with a 'ready' packet
         Preconditions: inflight_packs contains cids of packets that have been sent to server, but
@@ -566,18 +565,31 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
             raise Exception('invalid packet type {}'.format(pack_type))
             
     
-    def close_connection(ip, path='./Eve_Files'):
+    def _make_out_dirs(self, out_path):
+        '''
+        params:
+            str out_path: the path for all files output by controller
+        Postconditions:
+            All paths used by this class have been initialized if they were not before
+            They are not overwritten if they already exist
+        '''
+        self.eve_files_path = os.path.join(out_path, 'Eve_Files')
+        self.debug_path = os.path.join(out_path, 'Debug')
+        paths = [out_path, self.eve_files_path, self.debug_path]
+        for path in paths:
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+    def close_connection(self, ip):
         '''
         runs through closing procedure with robot
         params:
             TODO update
         Postconditions:
-            Log files have been written to path
+            Log files have been written to self.out_path
             Connection has been closed
         '''
         print('<<controller>> initializing breakdown')
-        if not os.path.exists(path):
-            os.mkdir(path)
         self.portal.send_pack('close')
         #server will initiate file transfer
         pack_type, cid, arguments = self.portal.recv_pack()
@@ -591,7 +603,7 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         sock.connect((ip, port))
         buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
         for filename in filenames:
-            with open(os.path.join(path,filename), 'wb') as write_file:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
                 data = buffered_sock.recv_until(armchair.FTP_EOF)
                 write_file.write(data)
         print('<<controller>> files recieved')
@@ -602,35 +614,237 @@ PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3
         print('<<controller>> shutting down')
         self.portal.close()
     
-    def error_handler():
+    def error_handler(self):
         pass
     
-    def init_robot():
+    def init_robot(self, simulate):
         '''
         this does the dirty work of sending accumulated params over network to the robot
         Postconditions:
             robot has been initialized with necessary params
         '''
         #send robot data to initialize itself
-        cid = portal.send_pack('init', self.robo_params['simulate'], 
+        cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'], self.robo_params['instruments'],
                 self.robo_params['reagent_df'])
         inflight_packs = [cid]
-        block_on_ready(inflight_packs, portal)
+        self._block_on_ready(inflight_packs)
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
-        cid = self.portal.send_pack('init_containers', product_df)
+        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'])
         inflight_packs.append(cid)
-        block_on_ready(inflight_packs)
+        self._block_on_ready(inflight_packs)
         return
+
+    
+    #TESTING
+    def run_all_tests(self):
+        '''
+        runs all post rxn tests
+        '''
+        print('<<controller>> running post execution tests')
+        self.test_vol_lab_cont()
+        self.test_contents()
+
+    def test_vol_lab_cont(self):
+        '''
+        tests that vol, labware, and containers are correct for a row of a side by side df with
+        those attributes
+        Preconditions:
+            labware_df, reagents_df, and products_df are all initialized as vals in robo_params
+            self.rxn_df is initialized
+            df labware_df:
+            df rxn_df: as from excel
+            df reagents_df: info on reagents. columns from sheet. See excel specification
+            df product_df:
+            self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
+              over in close step
+        Postconditions:
+            Any errors will be printed to the screen.
+            If errors were found, a pkl of the sbs will be written and you will have an
+            opportunity to explore the sbs with pdb
+        '''
+        sbs =self._get_vol_lab_cont_sbs()
+        sbs['flag'] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
+        filtered_sbs = sbs.loc[~sbs['flag']]
+        if filtered_sbs.empty:
+            print('<<controller>> congrats! Volumes, labware, containers, and deck_poses look good!')
+        else:
+            print('<<controller>> volume/deck pos/labware/container errors')
+            with open(os.path.join(self.debug_path,'vol_lab_cont_sbs.pkl'), 'wb') as sbs_pkl:
+                dill.dump(sbs, sbs_pkl)
+            if input('<<controller>> would you like to enter the debugger to view the full sbs? [yn] ').lower() == 'y':
+                print(sbs)
+                breakpoint()
+
+    def test_contents(self):
+        '''
+        tests to ensure that the contents of each container is correct
+        note does not work for dilutions, and does not check reagents
+        params:
+            df rxn_df: from excel
+            bool use_cache: True if data is cached
+            str eve_logpath: the path to the eve logfiles
+        Postconditions:
+            if a difference was found it will be displayed,
+            if no differences are found, a friendly print message will be displayed
+        '''
+        sbs = self._create_contents_sbs()
+        sbs['flag'] = sbs.apply(self._is_valid_contents_sbs,axis=1)
+        filtered_sbs = sbs.loc[~sbs['flag']]
+        if filtered_sbs.empty:
+            print('<<controller>> congrats! Contents are correct!')
+        else:
+            print('<<controller>> there ere some content errors')
+            with open(os.path.join(self.debug_path,'contents_sbs.pkl'), 'wb') as sbs_pkl:
+                dill.dump(sbs, sbs_pkl)
+            if input('<<controller>> would you like to enter the debugger to view the full sbs? [yn] ').lower() == 'y':
+                print(sbs)
+                breakpoint()
+
+    def _is_valid_vol_lab_cont_sbs(self, row):
+        '''
+        params:
+            pd.Series row: a row of a sbs dataframe:
+        returns:
+            Bool: True if it is a valid row
+        '''
+        if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
+            print('<<controller>> deck_pos_error:')
+            print(row.to_frame().T)
+            print()
+            return False
+        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
+            print('<<controller>> volume error:')
+            print(row.to_frame().T)
+            print()
+            return False
+        if row['container_t'] != 'any' and not row['container'] == row['container_t']:
+            print('<<controller>> container error:')
+            print(row.to_frame().T)
+            print()
+            return False
+        if row['loc_t'] != 'any' and not row['loc'] == row['loc_t']:
+            print('<<controller>> loc error:')
+            print(row.to_frame().T)
+            print()
+            return False
+        return True
+    
+    def _get_vol_lab_cont_sbs(self):
+        '''
+        This is for comparing the volumes, labwares, and containers
+        params:
+        Preconditions:
+            labware_df, reagents_df, and products_df are all initialized as vals in robo_params
+            self.rxn_df is initialized
+            df labware_df:
+            df rxn_df: as from excel
+            df reagents_df: info on reagents. columns from sheet. See excel specification
+            df product_df:
+            self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
+              over in close step
+        returns
+            df
+                INDEX
+                chemical_name: the containers name
+                COLS: symmetric. Theoretical are suffixed _t
+                str deck_pos: position on deck
+                float vol: the volume in the container
+                list<tuple<str, float>> history: the chem_name paired with the amount or
+                  keyword 'aspirate' and vol
+        '''
+        self.robo_params['labware_df'] = self.robo_params['labware_df'].set_index('name'\
+                ).rename(index={'platereader7':'platereader',
+                'platereader4':'platereader'}) #converting to dict like
+        def get_deck_pos(labware):
+            if labware:
+                deck_pos = self.robo_params['labware_df'].loc[labware,'deck_pos']
+                if isinstance(deck_pos,np.int64):
+                    return [deck_pos]
+                else:
+                    #for platereader with two indices
+                    return deck_pos.to_list()
+            else:
+                return 'any'
+        self.robo_params['product_df']['deck_pos'] = self.robo_params['product_df']['labware'].apply(get_deck_pos)
+        self.robo_params['product_df']['vol'] = [self._vol_calc(name,self.rxn_df) for name in self.robo_params['product_df'].index]
+        self.robo_params['product_df']['loc'] = 'any'
+        self.robo_params['product_df'].replace('','any', inplace=True)
+        self.robo_params['reagent_df']['deck_pos'] = self.robo_params['reagent_df']['deck_pos'].apply(lambda x: [x])
+        self.robo_params['reagent_df']['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
+        self.robo_params['reagent_df']['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
+        theoretical_df = pd.concat((self.robo_params['reagent_df'].loc[:,['loc', 'deck_pos',\
+                'vol','container']], self.robo_params['product_df'\
+                ].loc[:,['loc', 'deck_pos','vol','container']]))
+        result_df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t').set_index('chem_name')
+        sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
+        return sbs
+
+    def _vol_calc(self, name, rxn_df):
+        '''
+        params:
+            str name: chem_name
+            df rxn_df: from excel
+        returns:
+            volume at end in that name
+        '''
+        dispenses = rxn_df[name].sum()
+        aspirations = rxn_df.loc[(rxn_df['op']=='transfer') &\
+                (rxn_df['chemical_name'] == name),product_names(rxn_df)].sum().sum()
+        return dispenses - aspirations
+    
+    def _is_valid_contents_sbs(self, row):
+        '''
+        tests if a row of contents sbs is valid
+        params:
+            pd.Series row: has vol_t and vol
+        returns:
+            False if vol_t!=vol else True
+        Postconditions:
+            If vol_t!=vol the row will be printed
+            
+        '''
+        if not math.isclose(row['vol_t'], row['vol']):
+            print('<<controller>> contents error:')
+            print(row.to_frame().T)
+            print()
+            return False
+        return True
+
+
+        if not sbs.loc[~sbs['flag']].empty:
+            print('<<controller>> found some invalid contents. Displaying rows')
+            container_index = sbs.loc[~sbs['flag']].index.get_level_values('container')
+            print(sbs.loc[container_index])
+        else:
+            print('<<controller>> Well done! Product have correct ratios of reagents')
+
+    def _create_contents_sbs(self):
+        '''
+        '''
+        history = pd.read_csv(os.path.join(self.eve_files_path, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
+        disp_hist = history.loc[history['chem_name'].astype(bool)]
+        contents = disp_hist.groupby(['container','chem_name']).sum()
+        products = self.rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        theoretical_his_list = []
+        for _, row in self.rxn_df.loc[self.rxn_df['op']=='transfer'].iterrows():
+            for product in products:
+                theoretical_his_list.append((product, row[product], row['chemical_name']))
+        theoretical_his = pd.DataFrame(theoretical_his_list, columns=['container', 'vol', 'chem_name'])
+        theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
+        theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
+                math.isclose(x,0))]
+        sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
+        return sbs
     #WORKING
 
 
 
 def get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, products_to_labware):
-'''
+    '''
     params:
         Armchair portal: the armchair object connected to robot
         gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
@@ -736,7 +950,7 @@ class Container(ABC):
 
     @property
     def aspiratible_vol(self):
-        return self.vol - DEAD_VOL
+        return self.vol - self.DEAD_VOL
 
         
 class Tube20000uL(Container):
@@ -1721,103 +1935,6 @@ def make_unique(s):
             return name
     return s.apply(_get_new_name)
 
-#TESTING
-def vol_calc(name):
-    return rxn_df[name].sum() - rxn_df.loc[rxn_df['chemical_name'] == name, index].sum().sum()
-
-def get_side_by_side_df(use_cache=False, labware_df=None, rxn_df=None, reagents_df=None, product_df=None, eve_logpath='Eve_Files'):
-    '''
-    This is for comparing the volumes, labwares, and containers
-    params:
-        df labware_df:
-            str name: the common name of the labware
-            str first_usable: the first tip/well to use
-            int deck_pos: the position on the deck of this labware
-            str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-              order
-        df rxn_df: as from excel
-        df reagents_df: info on reagents. columns from sheet. See excel specification
-        df product_df:
-            INDEX
-            str chem_name
-            COLS
-            str labware: requested labware
-            float max_vol: the maximum volume that this container will ever hold
-        str eve_logpath: the path to the eve's logfiles
-    returns
-        df
-            INDEX
-            chemical_name: the containers name
-            COLS: symmetric. Theoretical are suffixed _t
-            str deck_pos: position on deck
-            float vol: the volume in the container
-            list<tuple<str, float>> history: the chem_name paired with the amount or
-              keyword 'aspirate' and vol
-    '''
-    if use_cache:
-        with open(os.path.join(CACHE_PATH,'robo_init_params.pkl'),'rb') as robo_cache:
-            arguments = dill.load(robo_cache)
-            labware_df = arguments[3]
-            reagents_df = arguments[5]
-        rxn_df, product_dict = load_rxn_table(None,None) #USE_CACHE must be active
-        product_df = construct_product_df(rxn_df, product_dict)
-        theoretical_df = build_theoretical_df(labware_df, rxn_df, reagents_df, product_df)
-        result_df = pd.read_csv('Eve_Files/wellmap.tsv', sep='\t').set_index('chem_name')
-        sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
-        return sbs
-
-def build_theoretical_df(labware_df, rxn_df, reagent_df, product_df):
-    '''
-    params:
-        NOTE: As passed to get_side_by_side_df
-        df labware_df: info on labware
-        df rxn_df: rxn protocol
-        df reagent_df: info on reagents
-        df product_df: has the labware requested for product
-    returns:
-        df
-            INDEX
-            chemical_name: the containers name
-            COLS
-            str deck_pos: position on deck
-            float vol: the volume in the container
-    '''
-    labware_df = labware_df.set_index('name').rename(index={'platereader7':'platereader',
-            'platereader4':'platereader'}) #converting to dict like
-    def get_deck_pos(labware):
-        if labware:
-            deck_pos = labware_df.loc[labware,'deck_pos']
-            if isinstance(deck_pos,np.int64):
-                return [deck_pos]
-            else:
-                #for platereader with two indices
-                return deck_pos.to_list()
-        else:
-            return 'any'
-    product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
-    product_df['vol'] = [vol_calc(name,rxn_df) for name in product_df.index]
-    product_df['container']
-    product_df['loc'] = 'any'
-    product_df.replace('','any', inplace=True)
-    reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
-    reagent_df['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
-    reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
-    theoretical_df = pd.concat((reagent_df.loc[:,['loc', 'deck_pos','vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
-    return theoretical_df
-
-def vol_calc(name, rxn_df):
-    '''
-    params:
-        str name: chem_name
-        df rxn_df: from excel
-    returns:
-        volume at end in that name
-    '''
-    dispenses = rxn_df[name].sum()
-    aspirations = rxn_df.loc[(rxn_df['op']=='transfer') &\
-            (rxn_df['chemical_name'] == name),product_names(rxn_df)].sum().sum()
-    return dispenses - aspirations
-
 def product_names(rxn_df):
     '''
     handy accessor method to get the products of rxn_df
@@ -1829,66 +1946,4 @@ def product_names(rxn_df):
         index: the products
     '''
     return rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
-def is_valid_sbs(row):
-    '''
-    params:
-        pd.Series row: a row of a sbs dataframe:
-    returns:
-        Bool: True if it is a valid row
-    '''
-    if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
-        print('deck_pos_error:')
-        print(row.to_frame().T)
-        print()
-        return False
-    if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
-        print('volume error:')
-        print(row.to_frame().T)
-        print()
-        return False
-    if row['container_t'] != 'any' and not row['container'] == row['container_t']:
-        print('container error:')
-        print(row.to_frame().T)
-        print()
-        return False
-    if row['loc_t'] != 'any' and not row['loc'] == row['loc_t']:
-        print('loc error:')
-        print(row.to_frame().T)
-        print()
-        return False
-    return True
 
-def has_correct_contents(rxn_df=None, use_cache=True, eve_logpath='Eve_Files'):
-    '''
-    tests to ensure that the contents of each container is correct
-    note does not work for dilutions, and does not check reagents
-    params:
-        df rxn_df: from excel
-        bool use_cache: True if data is cached
-        str eve_logpath: the path to the eve logfiles
-    Postconditions:
-        if a difference was found it will be displayed,
-        if no differences are found, a friendly print message will be displayed
-    '''
-    if use_cache:
-        rxn_df, product_dict = load_rxn_table(None,None) #USE_CACHE must be active
-    history = pd.read_csv(os.path.join(eve_logpath, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
-    disp_hist = history.loc[history['chem_name'].astype(bool)]
-    contents = disp_hist.groupby(['container','chem_name']).sum()
-    products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
-    theoretical_his_list = []
-    for _, row in rxn_df.loc[rxn_df['op']=='transfer'].iterrows():
-        for product in products:
-            theoretical_his_list.append((product, row[product], row['chemical_name']))
-    theoretical_his = pd.DataFrame(theoretical_his_list, columns=['container', 'vol', 'chem_name'])
-    theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
-    theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
-            math.isclose(x,0))]
-    sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
-    sbs['flag'] = (sbs.apply(lambda r: math.isclose(r['vol_t'], r['vol']),axis=1))
-    if not sbs.loc[~sbs['flag']].empty:
-        print('found some invalid contents. Displaying rows')
-        container_index = sbs.loc[~sbs['flag']].index.get_level_values('container')
-        print(sbs.loc[container_index])
-    else:
-        print('Well done! Product have correct ratios of reagents')
