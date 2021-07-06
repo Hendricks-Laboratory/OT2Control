@@ -123,9 +123,8 @@ class ProtocolExecutor():
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run
         '''
-        serveraddr = '127.0.0.1'
-        port = 50000
         print('<<controller>> RUNNING PROTOCOL')
+        breakpoint()
         self._run(serveraddr, port, simulate=True)
         print('<<controller>> EXITING PROTOCOL')
         
@@ -141,7 +140,7 @@ class ProtocolExecutor():
         self.portal = Armchair(sock,'controller','Armchair_Logs')
 
         self.init_robot(simulate)
-        self.run_protocol()
+        self.execute_protocol_df()
         self.close_connection(serveraddr)
         return
         
@@ -555,7 +554,7 @@ class ProtocolExecutor():
                 max_vol = max(max_vol, current_vol)
         return max_vol
 
-    def run_protocol(self, buff_size=4):
+    def execute_protocol_df(self, buff_size=4):
         '''
         takes a protocol df and sends every step to robot to execute
         params:

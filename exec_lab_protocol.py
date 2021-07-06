@@ -11,7 +11,7 @@ import ot2lib
 from Armchair.armchair import Armchair
 import eve_server
 
-SERVERADDR = "127.0.0.1"
+SERVERADDR = "10.25.19.212"
 
 
 def main():
