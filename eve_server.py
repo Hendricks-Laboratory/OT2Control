@@ -5,11 +5,6 @@ import socket
 
 import ot2lib
 
-if __name__ == '__main__':
-    my_ip = hack_to_get_ip()
-    ot2lib.launch_eve_server(my_ip=my_ip, barrier=None)
-
-
 def hack_to_get_ip():
     '''
     author @zags from stack overflow
@@ -19,3 +14,9 @@ def hack_to_get_ip():
     s.connect(("8.8.8.8", 80))
     print(s.getsockname()[0])
     s.close()
+
+if __name__ == '__main__':
+    my_ip = hack_to_get_ip()
+    ot2lib.launch_eve_server(my_ip=my_ip, barrier=None)
+
+
