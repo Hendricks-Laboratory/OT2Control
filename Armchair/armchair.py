@@ -1,6 +1,7 @@
 from bidict import bidict
 from datetime import datetime
 import os
+import dill
 
 #used for armchair file transfer initialized from armchair instructions
 FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
@@ -69,6 +70,8 @@ class Armchair():
         header_type = self.get_type(header)
         header_cid = self.get_cid(header)
         payload = self.sock.recv(header_len)
+        if payload: #if there were arguments
+            payload = dill.loads(payload)
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
             armchair_log.write("{}\trecieved {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'),header_type,self.cid))
         return header_type, header_cid, payload
@@ -85,6 +88,8 @@ class Armchair():
             An armchair packet has been constructed and sent over the socket
             has created log entry of send
         '''
+        if args:
+            payload = dill.dumps(args)
             n_bytes = len(payload)
             header = self.construct_head(n_bytes, pack_type)
             self.sock.send(header+payload)
