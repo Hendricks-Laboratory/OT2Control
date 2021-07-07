@@ -1,4 +1,5 @@
 CRITICAL
+Fix Robot python
 
 PRIORITY
 build in some error checking
