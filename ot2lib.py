@@ -124,7 +124,7 @@ class ProtocolExecutor():
         The real deal. Input a server addr and port if you choose and protocol will be run
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(serveraddr, port, simulate=True)
+        self._run(serveraddr, port, simulate=False)
         print('<<controller>> EXITING PROTOCOL')
         
     def _run(self, serveraddr, port, simulate):
