@@ -14,8 +14,6 @@ build in some error checking
     THROW ERRORS WITHIN CONTAINERS
     platereader should have 200 ul. Check at each scan]
     make sure you have enough to run reaction
-Implement the Pause
-Block_On_Ready should probably be part of Armchair
 
 FUTURE
 Use logger to log messages
@@ -23,6 +21,7 @@ Error Exits
     implement server side error handle
     implement client side error handle
 Update UML diagram and review protected vars/funcs
+Block_On_Ready should probably be part of Armchair
 
 NOTES
 We've mostly fixed the tube problem, but for ML, where you really just want a container 

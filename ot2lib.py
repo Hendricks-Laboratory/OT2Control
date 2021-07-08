@@ -109,6 +109,7 @@ class ProtocolExecutor():
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+        self.run_all_checks()
 
     def run_simulation(self):
         '''
@@ -422,8 +423,9 @@ class ProtocolExecutor():
         #slots
         platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
                 (labware_df['name'] == 'platereader4')]
-        platereader_input_first_usable = platereader_rows.loc[\
-                platereader_rows['first_usable'].astype(bool), 'first_usable'].iloc[0]
+        usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
+        assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
+        platereader_input_first_usable = usable_rows.iloc[0]
         platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
         platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
         if platereader_name == 'platereader7':
@@ -515,7 +517,10 @@ class ProtocolExecutor():
             df reagent_df: empties ignored, columns with correct types
         '''
         reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
-        reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        try:
+            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        except ValueError as e:
+            raise ValueError("Your reagent info could not be parsed. Likeley you left out a required field, or you did not specify a concentration on the input sheet")
         return reagent_df
 
     def _get_product_df(self, products_to_labware):
@@ -803,6 +808,128 @@ class ProtocolExecutor():
 
     
     #TESTING
+    #PRE Simulation
+    def run_all_checks(self):
+        found_errors = 0
+        found_errors = max(found_errors, self.check_rxn_df())
+        found_errors = max(found_errors, self.check_labware())
+        found_errors = max(found_errors, self.check_reagents())
+        found_errors = max(found_errors, self.check_products())
+        if found_errors == 0:
+            print("<<controller>> All prechecks passed!")
+            return
+        elif found_errors == 1:
+            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
+                return
+            else:
+                raise Exception('Aborting base on user input')
+        elif found_errors == 2:
+            raise Exception('Critical Errors encountered during prechecks. Aborting')
+
+    def check_rxn_df(self):
+        '''
+        Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
+        Advised options are printed and if an error code is returned
+        Will run through and check all rows, even if errors are found
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        products = product_names(self.rxn_df)
+        for i, r in self.rxn_df.iterrows():
+            r_num = i+1
+            #check pauses
+            if (not ('pause' in r['op'] or 'pause' in r['callbacks'])) == (not pd.isna(r['pause_time'])):
+                print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
+                found_errors = max(found_errors, 2)
+            #check that there's always a volume when you transfer
+            if (r['op'] == 'transfer' and math.isclose(r[products].sum(), 0,abs_tol=1e-7)):
+                print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
+                found_errors = max(found_errors, 1)
+            #check that you have a reagent if you're transfering
+            if r['op'] == 'transfer' and not r['reagent']:
+                print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+        return found_errors
+                
+    def check_labware(self):
+        '''
+        checks to ensure that the labware has been correctly initialized
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['labware_df'].iterrows():
+            #check that everything has afirst well if it's not a tube
+            if not 'tube' in r['name'] and not r['first_usable']:
+                print('<<controller>> specified labware {} on deck_pos {}, but did not specify first usable tip/well.'.format(r['name'], r['deck_pos']))
+                found_errors = max(found_errors,2)
+            #if you're not a tube and you have an empty_list, that's also bad
+            if not 'tube' in r['name'] and r['empty_list']:
+                print('<<controller>> An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.'.format(r['name'], r['deck_pos'], r['name']))
+                found_errors = max(found_errors,2)
+            #check for no duplicates in the empty list
+            if r['empty_list']:
+                locs = r['empty_list'].replace(' ','').split(',')
+                if len(set(locs)) < len(locs):
+                    print('<<controller>> empty list for {} on deck pos {} had duplicates. List was {}'.format(r['name'],r['deck_pos'], r['empty_list']))
+                    found_errors = max(found_errors,2)
+        return found_errors 
+
+    def check_products(self):
+        '''
+        checks to ensure that the products were correctly initialized
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['product_df'].loc[~(self.robo_params['product_df']['labware'].astype(bool) & self.robo_params['product_df']['container'].astype(bool))].iterrows():
+            found_errors = max(found_errors,1)
+            print('<<controller>> {} has no specified labware or container. It could ent up in anything that has enough volume to contain it. Are you sure that\'s what you want?'.format(i))
+        return found_errors
+
+    def check_reagents(self):
+        '''
+        checks to ensure that you've specified reagents correctly, and also checks that
+        you did not double book empty containers onto reagents
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        #This is a little hefty. We're checking to see if any reagents/empty containers 
+        #were double booked onto the same location on the same deck position
+        labware_w_empties = self.robo_params['labware_df'].loc[self.robo_params['labware_df']['empty_list'].astype(bool)]
+        loc_pos_empty_pairs = [] # will become series
+        for i, row in labware_w_empties.iterrows():
+            for loc in row['empty_list'].replace(' ','').split(','):
+                loc_pos_empty_pairs.append((loc, row['deck_pos']))
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+        loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
+        loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
+        val_counts = loc_deck_pos_pairs.value_counts()
+        for i in val_counts.loc[val_counts > 2].index:
+            print('<<controller>> location {} on deck position has multiple reagents/empty containers assigned to it')
+            found_errors = max(found_errors,2)
+        return found_errors
+
+
+    #POST Simulation
     def run_all_tests(self):
         '''
         runs all post rxn tests

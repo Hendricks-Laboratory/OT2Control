@@ -17,10 +17,11 @@ SERVERADDR = "10.25.19.212"
 
 def main():
     #instantiate a controller
-    #rxn_sheet_name = input('<<controller>> please input the sheet name')
+    rxn_sheet_name = input('<<controller>> please input the sheet name')
     #using the cache bypasses google docs communication and uses the last rxn you loaded
     use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
-    rxn_sheet_name = 'test_callbacks'
+    #use_cache = True
+    #rxn_sheet_name = 'test_Oh_the_horrible_things_I_can_do'
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ot2lib.ProtocolExecutor(rxn_sheet_name, my_ip, SERVERADDR, use_cache=use_cache)
 
