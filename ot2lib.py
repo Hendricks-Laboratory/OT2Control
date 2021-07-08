@@ -13,6 +13,7 @@ from tempfile import NamedTemporaryFile
 import logging
 import asyncio
 import threading
+import time
 
 import gspread
 from df2gspread import df2gspread as d2g
@@ -56,11 +57,24 @@ class ProtocolExecutor():
         rxn_sheet_name: the name of the reaction sheet
         str cache_path: path to a directory for all cache files
         bool use_cache: read from cache if possible
+        df rxn_df: the reaction df. Not passed in, but created in init
+        str my_ip: the ip of this controller
+        str server_ip: the ip of the server. This is modified for simulation, but returned to 
+          original state at the end of simulation
+        dict<str:object> robo_params: convenient place for the parameters for the robot
+            TODO update this documentation
+            df reagent_df
+            dict instruments
+            df labware_df
+            df product_df
+        bool simulate: whether a simulation is being run or not. False by default. changed true 
+          temporarily when simulating
+
     CONSTANTS:
         dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
           to locs on the opentrons object. Use a json viewer for more structural info
     '''
-    def __init__(self, rxn_sheet_name, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -71,6 +85,10 @@ class ProtocolExecutor():
         self.cache_path = cache_path
         self.use_cache = use_cache
         self._make_out_dirs(out_path)
+        self._inflight_packs = []
+        self.my_ip = my_ip
+        self.server_ip = server_ip
+        self.simulate = False #by default will be changed if a simulation is run
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -95,11 +113,18 @@ class ProtocolExecutor():
     def run_simulation(self):
         '''
         runs a full simulation of the protocol with
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function
         Returns:
             bool: True if all tests were passed
         '''
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        self.server_ip = '127.0.0.1'
+        self.simulate = True
+
         print('<<controller>> ENTERING SIMULATION')
-        serveraddr = '127.0.0.1'
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
@@ -108,7 +133,7 @@ class ProtocolExecutor():
 
         #do create a connection
         b.wait()
-        self._run(serveraddr, port, simulate=True)
+        self._run(port, simulate=True)
 
         #run post execution tests
         tests_passed = self.run_all_tests()
@@ -116,6 +141,9 @@ class ProtocolExecutor():
         #collect the eve thread
         eve_thread.join()
 
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
         return tests_passed
 
@@ -124,23 +152,23 @@ class ProtocolExecutor():
         The real deal. Input a server addr and port if you choose and protocol will be run
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(serveraddr, port, simulate=False)
+        self._run(port, simulate=False)
         print('<<controller>> EXITING PROTOCOL')
         
-    def _run(self, serveraddr, port, simulate):
+    def _run(self, port, simulate):
         '''
         Returns:
             bool: True if all tests were passed
         '''
         #create a connection
         sock = socket.socket(socket.AF_INET)
-        sock.connect((serveraddr, port))
+        sock.connect((self.server_ip, port))
         print("<<controller>> connected")
         self.portal = Armchair(sock,'controller','Armchair_Logs')
 
         self.init_robot(simulate)
         self.execute_protocol_df()
-        self.close_connection(serveraddr)
+        self.close_connection()
         return
         
 
@@ -262,9 +290,10 @@ class ProtocolExecutor():
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'Pause before addition?':'pause', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
+        rxn_df['pause_time'] = rxn_df['pause_time'].astype(float)
         #rename chemical names
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
@@ -274,7 +303,7 @@ class ProtocolExecutor():
         #make the reagent columns floats
         rxn_df.loc[:,products] =  rxn_df[products].astype(float)
         rxn_df.loc[:,products] = rxn_df[products].fillna(0)
-    
+
         return rxn_df
     
     def _rename_products(self, rxn_df):
@@ -561,18 +590,18 @@ class ProtocolExecutor():
         Postconditions:
             every step in the protocol has been sent to the robot
         '''
-        inflight_packs = []
-        product_cols = self.rxn_df.loc[:,'reagent':'chemical_name'].drop(
-                columns=['reagent','chemical_name']).columns
-        for _, row in self.rxn_df.iterrows():
+        for i, row in self.rxn_df.iterrows():
             if row['op'] == 'transfer':
-                cid = self.send_transfer_command(row, product_cols)
-                inflight_packs.append(cid)
+                cid = self.send_transfer_command(row,i)
+                self._inflight_packs.append(cid)
             elif row['op'] == 'pause':
+                cid = self.portal.send_pack('pause',row['pause_time'])
+                self._inflight_packs.append(cid)
+            elif row['op'] == 'stop':
                 #read through the inflight packets
-                while inflight_packs:
-                    self._block_on_ready(inflight_packs)
-                input('<<controller>> paused. Please press enter when you\'re ready to continue')
+                cid = self.portal.send_pack('stop')
+                self._stop(i)
+                self._inflight_packs.append(cid)
             elif row['op'] == 'scan':
                 #TODO implement scans
                 pass
@@ -582,43 +611,119 @@ class ProtocolExecutor():
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
             #check buffer
-            if len(inflight_packs) >= buff_size:
-                self._block_on_ready(inflight_packs)
-    
-    def send_transfer_command(self, row, product_cols):
+            if len(self._inflight_packs) >= buff_size:
+                self._block_on_ready()
+
+    def _stop(self, i):
+        '''
+        used to execute a stop operation. reads through buffer and then waits on user input
+        params:
+            int i: the index of the row in the protocol you're stopped on
+        Postconditions:
+            self._inflight_packs has been cleaned
+        '''
+        #create a socket
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.my_ip, 50003))
+        sock.listen(5)
+        eve_sock, eve_addr = sock.accept()
+        message = eve_sock.recv(1)
+        assert (message == b'\01'), "controller was waiting on stop for robot to continue, but robot sent invalid code {}".format(message)
+        if not self.simulate:
+            input('<<controller>> stopped: encountered stop at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
+        eve_sock.send(b'\x01')
+        message = eve_sock.recv(1)
+        assert (message == b'\02'), "controller was waiting for robot to terminate stop link, but robot sent invalid code {}".format(message)
+        sock.close()
+        return
+
+
+    def send_transfer_command(self, row, i):
         '''
         params:
             pd.Series row: a row of self.rxn_df
+            int i: index of this row
         returns:
             int: the cid of this command
         Postconditions:
             a transfer command has been sent to the robot
         '''
+        product_cols = product_names(self.rxn_df)
         src = row['chemical_name']
         containers = row[product_cols].loc[row[product_cols] != 0]
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
-        callbacks = row['callbacks'].split(',')
+        #temporarilly just the raw callbacks
+        callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
+        has_stop = 'stop' in callbacks
+        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
         cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
+        if has_stop:
+            #burn through buffer
+            while self._inflight_packs:
+                self._block_on_ready()
+            #stop on any incoming continues
+            self._block_on_continue(i)
         return cid
+
+    def _block_on_continue(self, i):
+        '''
+        recieves stop packets, gets user input, and sends continues until a ready is recieved
+        at which point the cid will be removed from self.inflight_packs, and control will be
+        returned
+        NOTE: this function breaks some of the 'rules' of the Armchair protocol. an inflight pack,
+        the 
+        params:
+            int i: the index of this row
+        Preconditions:
+            There must be only one inflight_packet, and that packet should alter control,
+            i.e. the robot is going to respond with a stop
+        Postconditions:
+            The inflight packet has been removed
+        '''
+        #create a socket
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.my_ip, 50003))
+        sock.listen(5)
+        eve_sock, eve_addr = sock.accept()
+        message = eve_sock.recv(1)
+        while b'\x01' == message:
+            if not self.simulate:
+                input('<<controller>> stopped: encountered stop callback at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
+            eve_sock.send(b'\x01')
+            message = eve_sock.recv(1)
+        assert (message == b'\x02'), 'something went wrong during stop communication on protocol line {}'.format(i)
+        sock.close()
+        return
     
+    def _get_callback_args(self, row, callback):
+        '''
+        params:
+            pd.Series row: a row of self.rxn_df
+        returns:
+            list<object>: the arguments associated with the callback or None if no arguments
+        '''
+        if callback == 'pause':
+            return [row['pause_time']]
+        return None
+
     
-    def _block_on_ready(self, inflight_packs):
+    def _block_on_ready(self):
         '''
         used to block until the server responds with a 'ready' packet
-        Preconditions: inflight_packs contains cids of packets that have been sent to server, but
+        Preconditions: self.inflight_packs contains cids of packets that have been sent to server, but
         not yet acknowledged
-        params:
-            list<int> inflight_packs: list of cids of send packets that have not been acked yet
         Postconditions:
             has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from inflight_packs
+            The cid in the ready command has been removed from self.inflight_packs
         '''
         pack_type, _, arguments = self.portal.recv_pack()
         if pack_type == 'error':
             error_handler()
         elif pack_type == 'ready':
             cid = arguments[0]
-            inflight_packs.remove(cid)
+            self._inflight_packs.remove(cid)
         else:
             raise Exception('invalid packet type {}'.format(pack_type))
             
@@ -638,7 +743,7 @@ class ProtocolExecutor():
             if not os.path.exists(path):
                 os.makedirs(path)
 
-    def close_connection(self, ip):
+    def close_connection(self):
         '''
         runs through closing procedure with robot
         params:
@@ -658,7 +763,7 @@ class ProtocolExecutor():
         port = arguments[0]
         filenames = arguments[1]
         sock = socket.socket(socket.AF_INET)
-        sock.connect((ip, port))
+        sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
         for filename in filenames:
             with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
@@ -685,15 +790,15 @@ class ProtocolExecutor():
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'], self.robo_params['instruments'],
-                self.robo_params['reagent_df'])
-        inflight_packs = [cid]
-        self._block_on_ready(inflight_packs)
+                self.robo_params['reagent_df'], self.my_ip)
+        self._inflight_packs.append(cid)
+        self._block_on_ready()
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
         cid = self.portal.send_pack('init_containers', self.robo_params['product_df'])
-        inflight_packs.append(cid)
-        self._block_on_ready(inflight_packs)
+        self._inflight_packs.append(cid)
+        self._block_on_ready()
         return
 
     
@@ -1411,7 +1516,7 @@ class OT2Controller():
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, ip, portal):
+    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal):
         '''
         params:
             bool simulate: if true, the robot will run in simulation mode only
@@ -1426,7 +1531,8 @@ class OT2Controller():
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
               are the pipette names filled in
             df reagent_df: info on reagents. columns from sheet. See excel specification
-            str: ip
+            str my_ip: the ip address of the robot
+            bool simulate: whether to simulate protocol or not
                 
         postconditions:
             protocol has been initialzied
@@ -1438,8 +1544,10 @@ class OT2Controller():
         '''
         self.containers = {}
         self.pipettes = {}
-        self.ip = ip
+        self.my_ip = my_ip
         self.portal = portal
+        self.controller_ip = controller_ip
+        self.simulate = simulate
 
         #self.log = logging.getLogger('eve_logger')
         #self.log.addHandler(logging.FileHandler('.eve.log',encoding='utf8'))
@@ -1747,11 +1855,19 @@ class OT2Controller():
             the command has been executed
         '''
         if command_type == 'transfer':
-            self._exec_tranfer(*arguments)
+            self._exec_transfer(*arguments)
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'init_containers':
             self._exec_init_containers(arguments[0])
+            self.portal.send_pack('ready', cid)
+            return 1
+        elif command_type == 'pause':
+            self._exec_pause(arguments[0])
+            self.portal.send_pack('ready', cid)
+            return 1
+        elif command_type == 'stop':
+            self._exec_stop()
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'close':
@@ -1760,8 +1876,21 @@ class OT2Controller():
         else:
             raise Exception("Unidenified command {}".format(pack_type))
 
-    def _exec_tranfer(self, src, transfer_steps, callbacks):
+    def _exec_pause(self,pause_time):
         '''
+        executes a pause command by waiting for 'time' seconds
+        params:
+            float pause_time: time to wait in seconds
+        '''
+        #no need to pause for a simulation
+        if not self.simulate:
+            time.sleep(pause_time)
+
+    def _exec_transfer(self, src, transfer_steps, callbacks):
+        '''
+        this command executes a transfer. It's usually pretty simple, unless you have
+        a stop callback. If you have a stop callback it launches a new TCP connection and
+        stops to wait for user input at each transfer
         params:
             str src: the chem_name of the source well
             list<tuple<str,float>> transfer_steps: each element is a dst, vol pair
@@ -1769,20 +1898,76 @@ class OT2Controller():
         '''
         #we want to pick up new tip at the start
         new_tip=True
+        callback_types = [callback for callback, _ in callbacks]
+        #if you're going to be altering flow, you need to create a seperate connection with the
+        #controller
+        if 'stop' in callback_types:
+            sock = socket.socket(socket.AF_INET)
+            fail_count=0
+            connected = False
+            while not connected and fail_count < 3:
+                try:
+                    sock.connect((self.controller_ip, 50003))
+                    connected = True
+                except ConnectionRefusedError:
+                    fail_count += 1
+                    time.sleep(2**fail_count)
         for dst, vol in transfer_steps:
             self._transfer_step(src,dst,vol)
             new_tip=False #don't want to use a new tip_next_time
             if callbacks:
-                for callback in callbacks:
-                    #call the callback
-                    pass
+                for callback, args in callbacks:
+                    if callback == 'pause':
+                        self._exec_pause(args[0])
+                    elif callback == 'stop':
+                        self._stop(sock)
+        #if you created a connection, you indicate you're done and close it
+        if 'stop' in callback_types:
+            sock.send(b'\02')
+            sock.close()
         return
 
+    def _exec_stop(self):
+        '''
+        executes a stop command by creating a TCP connection, telling the controller to get
+        user input, and then waiting for controller response
+        '''
+        sock = socket.socket(socket.AF_INET)
+        fail_count=0
+        connected = False
+        while not connected and fail_count < 3:
+            try:
+                sock.connect((self.controller_ip, 50003))
+                connected = True
+            except ConnectionRefusedError:
+                fail_count += 1
+                time.sleep(2**fail_count)
+        self._stop(sock)
+        sock.send(b'\02')
+        sock.close()
+
+    def _stop(self, sock):
+        '''
+        sends a stop signal to the controller and blocks until it recieves a continue
+        params:
+            socket sock: connected to the controller for purpose of communicating stop information
+        Preconditions:
+            Controller must be expecting a b'\x01' on this stream
+        '''
+        sock.send(b'\x01')
+        message = sock.recv(1)
+        assert (message == b'\x01'), "recieved invalid response '{}' from controller while waiting on stop for continue".format(message)
+        return
+        
     def _transfer_step(self, src, dst, vol):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
         appropriately sized pipettes. dropping tip if it's a new chemical. If you need
         more than 1 step, will facilitate that
+        params:
+            str src: the chemical name to pipette from
+            str dst: thec chemical name to pipette into
+            float vol: the volume to pipette
         '''
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
@@ -1801,6 +1986,8 @@ class OT2Controller():
     def _get_new_tip(self, arm):
         '''
         replaces the tip with a new one
+        params:
+            str arm: 'left' or 'right' to differentiate pipetes
         TODO: Michael found it necessary to test if has_tip. I don't think this is needed
           but revert to it if you run into trouble
         TODO: pickup tip on init
@@ -1970,7 +2157,7 @@ class OT2Controller():
         self.portal.send_pack('sending_files', port, filenames)
         sock = socket.socket(socket.AF_INET)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.ip, port))
+        sock.bind((self.my_ip, port))
         sock.listen(5)
         client_sock, client_addr = sock.accept()
         for filepath in filepaths:
@@ -2007,11 +2194,11 @@ def launch_eve_server(**kwargs):
     eve = None
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
-        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df = args
+        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip = args
         #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
         #like to be run from a thread
         asyncio.set_event_loop(asyncio.new_event_loop())
-        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, portal)
+        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:

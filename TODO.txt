@@ -22,6 +22,7 @@ Use logger to log messages
 Error Exits
     implement server side error handle
     implement client side error handle
+Update UML diagram and review protected vars/funcs
 
 NOTES
 We've mostly fixed the tube problem, but for ML, where you really just want a container 

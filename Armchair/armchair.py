@@ -11,7 +11,7 @@ class Armchair():
         self.sock = socket
         self.cid = 0
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06'})
+        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09'})
         self.name = name
         self.log_path = log_path
         if not os.path.exists(self.log_path):

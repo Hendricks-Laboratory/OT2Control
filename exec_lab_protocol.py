@@ -18,8 +18,11 @@ SERVERADDR = "10.25.19.212"
 def main():
     #instantiate a controller
     #rxn_sheet_name = input('<<controller>> please input the sheet name')
-    rxn_sheet_name = 'test_inLab01'
-    controller = ot2lib.ProtocolExecutor(rxn_sheet_name, use_cache=True)
+    #using the cache bypasses google docs communication and uses the last rxn you loaded
+    use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
+    rxn_sheet_name = 'test_callbacks'
+    my_ip = socket.gethostbyname(socket.gethostname())
+    controller = ot2lib.ProtocolExecutor(rxn_sheet_name, my_ip, SERVERADDR, use_cache=use_cache)
 
     tests_passed = controller.run_simulation()
 
