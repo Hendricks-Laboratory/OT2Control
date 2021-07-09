@@ -2,20 +2,9 @@ CRITICAL
 Fix Robot python
 
 PRIORITY
-build in some error checking
-    what does michael's code do? just checking if you have enough reagent? I can proabaly
-    run and try/except at the end
-
-    check to make sure you don't end up with two reagents in same container
-    check also that the user never specified an undefined deck position
-    check also that the mass always provided. Just throw a lot of assertions at the sheet loading
-    Check that stock solutions exist by the time you call them
-
-    THROW ERRORS WITHIN CONTAINERS
-    platereader should have 200 ul. Check at each scan]
-    make sure you have enough to run reaction
 
 FUTURE
+platereader should have 200 ul. Check at each scan]
 Use logger to log messages
 Error Exits
     implement server side error handle
