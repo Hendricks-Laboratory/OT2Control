@@ -48,8 +48,9 @@ x00: 'init'
         bool simulate: True is simulating   
         bool using_temp_ctrl: True if using temperature control
         float temp: the temperature to keep unit at
-        df labware: labware information see OT2Controller.__init__
-        df reagents: reagents information see excel spec
+        dict labware: labware information see OT2Controller.__init__ (should be a 
+	  dataframe with.to_dict())
+        dict reagents: reagents information see excel spec DataFrame.to_dict()
 	str controller_ip: the ip address of the controller
 
 x01: 'close'
@@ -78,7 +79,7 @@ x05: 'init_containers'
     controller->robot
     Description: This is used to initialize container(s) for a new reaction.
     Args:
-        df product_df:
+        dict product_df: (DataFrame called .to_dict())
             INDEX:
             str chemical_name: the name of the rxn. initializes container for each row
             COLS:

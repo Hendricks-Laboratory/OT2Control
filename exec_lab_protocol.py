@@ -17,11 +17,11 @@ SERVERADDR = "10.25.19.212"
 
 def main():
     #instantiate a controller
-    rxn_sheet_name = input('<<controller>> please input the sheet name')
-    #using the cache bypasses google docs communication and uses the last rxn you loaded
-    use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
-    #use_cache = True
-    #rxn_sheet_name = 'test_Oh_the_horrible_things_I_can_do'
+    #rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    ##using the cache bypasses google docs communication and uses the last rxn you loaded
+    #use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
+    use_cache = True
+    rxn_sheet_name = 'test_inLab01'
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ot2lib.ProtocolExecutor(rxn_sheet_name, my_ip, SERVERADDR, use_cache=use_cache)
 
@@ -29,7 +29,7 @@ def main():
 
     if tests_passed:
         if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol(SERVERADDR)
+            controller.run_protocol()
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 

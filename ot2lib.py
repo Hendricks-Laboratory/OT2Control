@@ -148,12 +148,18 @@ class ProtocolExecutor():
         print('<<controller>> EXITING SIMULATION')
         return tests_passed
 
-    def run_protocol(self, serveraddr, port=50000):
+    def run_protocol(self, simulate=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run
+        params:
+            str simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(port, simulate=False)
+        self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
     def _run(self, port, simulate):
@@ -164,8 +170,9 @@ class ProtocolExecutor():
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(sock,'controller','Armchair_Logs')
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs')
 
         self.init_robot(simulate)
         self.execute_protocol_df()
@@ -195,7 +202,10 @@ class ProtocolExecutor():
             ServiceAccountCredentials credentials: to access the sheets
             str rxn_sheet_name: the name of sheet
         returns:
-            str wks_key: the key associated with the sheet. It functions similar to a url
+            if self.use_cache:
+                str wks_key: the key associated with the sheet. It functions similar to a url
+            else:
+                None: this is ok because the wks key will not be used if caching
         '''
         name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         try:
@@ -219,12 +229,19 @@ class ProtocolExecutor():
             str rxn_sheet_name: the title of the sheet to be opened
             oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
         returns:
-            gspread.Spreadsheet the spreadsheet (probably of all the reactions)
+            if self.use_cache:
+                gspread.Spreadsheet the spreadsheet (probably of all the reactions)
+            else:
+                None: this is fine because the wks should never be used if cache is true
+
     
         '''
         gc = gspread.authorize(credentials)
         try:
-            wks = gc.open(rxn_sheet_name)
+            if self.use_cache:
+                wks = None
+            else:
+                wks = gc.open(rxn_sheet_name)
         except: 
             raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
         return wks
@@ -794,14 +811,14 @@ class ProtocolExecutor():
         #send robot data to initialize itself
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
-                self.robo_params['labware_df'], self.robo_params['instruments'],
-                self.robo_params['reagent_df'], self.my_ip)
+                self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
+                self.robo_params['reagent_df'].to_dict(), self.my_ip)
         self._inflight_packs.append(cid)
         self._block_on_ready()
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
-        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'])
+        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
         self._inflight_packs.append(cid)
         self._block_on_ready()
         return
@@ -1669,6 +1686,9 @@ class OT2Controller():
               it is the client's responsibility to make sure that these are initialized prior
               to operating with them
         '''
+        #convert args back to df
+        labware_df = pd.DataFrame(labware_df)
+        reagent_df = pd.DataFrame(reagent_df)
         self.containers = {}
         self.pipettes = {}
         self.my_ip = my_ip
@@ -1986,7 +2006,7 @@ class OT2Controller():
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'init_containers':
-            self._exec_init_containers(arguments[0])
+            self._exec_init_containers(pd.DataFrame(arguments[0]))
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'pause':
@@ -2331,6 +2351,7 @@ def launch_eve_server(**kwargs):
     while connection_open:
         pack_type, cid, payload = portal.recv_pack()
         connection_open = eve.execute(pack_type, cid, payload)
+    sock.close()
 
 def make_unique(s):
     '''
