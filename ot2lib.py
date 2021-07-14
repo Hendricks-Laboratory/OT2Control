@@ -570,7 +570,6 @@ class ProtocolExecutor():
             excel
         '''
         header_dict = {row[0]:row[1] for row in header_data[1:]}
-        self.robo_params['simulate'] = header_dict['simulate'] == 'yes'
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
 
@@ -784,6 +783,7 @@ class ProtocolExecutor():
         assert(pack_type == 'sending_files')
         port = arguments[0]
         filenames = arguments[1]
+        #TODO race condition exists here. ConnectionRefusedError
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
@@ -2299,13 +2299,15 @@ class OT2Controller():
             int port: the port number to ship the files out of
             list<str> filepaths: the filepaths to ship
         '''
-        print('<<eve>> initializing filetransfer')
-        filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_pack('sending_files', port, filenames)
+        #setting up a socket for FTP
         sock = socket.socket(socket.AF_INET)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((self.my_ip, port))
         sock.listen(5)
+        #send ok to server that you are ready to accept
+        print('<<eve>> initializing filetransfer')
+        filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
+        self.portal.send_pack('sending_files', port, filenames)
         client_sock, client_addr = sock.accept()
         for filepath in filepaths:
             with open(filepath,'rb') as local_file:
