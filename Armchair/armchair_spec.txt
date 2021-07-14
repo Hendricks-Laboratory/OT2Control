@@ -113,5 +113,9 @@ x09: 'continue'
     Description: Odd command because it does not correspond to an operation. It is used on stop
         callbacks to signal the robot that the user has signaled safe to continue to next
 
+x0A: 'dilution'
+    controller->robot:
+    Description: used to execute a dilution
+
 UNFINISHED
 error x02

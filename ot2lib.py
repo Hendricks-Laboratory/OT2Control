@@ -69,12 +69,15 @@ class ProtocolExecutor():
             df product_df
         bool simulate: whether a simulation is being run or not. False by default. changed true 
           temporarily when simulating
+        int buff_size: this is the size of the buffer between Armchair commands. It's size
+          corresponds to the number of commands you want to pile up in the socket buffer.
+          Really more for developers
 
     CONSTANTS:
         dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
           to locs on the opentrons object. Use a json viewer for more structural info
     '''
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -311,7 +314,7 @@ class ProtocolExecutor():
         rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df['pause_time'] = rxn_df['pause_time'].astype(float)
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
         #rename chemical names
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
@@ -346,10 +349,10 @@ class ProtocolExecutor():
             if 'dilution_placeholder' in col:
                 row = rxn_df.loc[~rxn_df[col].isna()].squeeze()
                 reagent_name = row['chemical_name']
-                name = reagent_name[:reagent_name.rfind('C')+1]+row['dilution_conc']
+                name = reagent_name[:reagent_name.rfind('C')+1]+str(row['dilution_conc'])
                 rename_key[col] = name
             else:
-                rename_key[col] = "{}C1".format(col).replace(' ','_')
+                rename_key[col] = "{}C1.0".format(col).replace(' ','_')
     
         rxn_df.rename(rename_key, axis=1, inplace=True)
 
@@ -537,7 +540,7 @@ class ProtocolExecutor():
         try:
             reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
         except ValueError as e:
-            raise ValueError("Your reagent info could not be parsed. Likeley you left out a required field, or you did not specify a concentration on the input sheet")
+            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
         return reagent_df
 
     def _get_product_df(self, products_to_labware):
@@ -603,7 +606,7 @@ class ProtocolExecutor():
                 max_vol = max(max_vol, current_vol)
         return max_vol
 
-    def execute_protocol_df(self, buff_size=4):
+    def execute_protocol_df(self):
         '''
         takes a protocol df and sends every step to robot to execute
         params:
@@ -628,12 +631,87 @@ class ProtocolExecutor():
                 pass
             elif row['op'] == 'dilution':
                 #TODO implement dilutions
-                pass
+                cid = self.send_dilution_commands(row, i)
+                self._inflight_packs.append(cid)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
             #check buffer
-            if len(self._inflight_packs) >= buff_size:
+            if len(self._inflight_packs) >= self.buff_size:
                 self._block_on_ready()
+
+    def send_dilution_commands(self,row,i):
+        '''
+        used to execute a dilution. This is analogous to microcode. This function will send two
+          commands. Water is always added first.
+            transfer: transfer water into the container
+            transfer: transfer reagent into the container
+        params:
+            pd.Series row: a row of self.rxn_df
+            int i: index of this row
+        returns:
+            int: the cid of this command
+        Postconditions:
+            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
+            Will block on ready if the buffer is filled
+        Preconditions:
+            The buffer has room for at least one command
+        '''
+        reagent = row['chemical_name']
+        reagent_conc = row['conc']
+        products = product_names(self.rxn_df)
+        product_cols = row.loc[products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
+        total_vol = dilution_name_vol.iloc[0]
+        target_name = dilution_name_vol.index[0]
+        target_conc = row['dilution_conc']
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
+        transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
+        cid = self.send_transfer_command(transfer_row, i)
+        self._inflight_packs.append(cid)
+        if len(self._inflight_packs) >= buff_size:
+            self._block_on_ready()
+        transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        cid = self.send_transfer_command(transfer_row, i)
+
+    def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
+        '''
+        The transfer command expects a nicely formated row of the rxn_df, so here we create a row
+        with everything in it to ship to the transfer command.
+        params:
+            str reagent_name: used as the chemical_name field
+            str target_name: used as the product_name field
+            str vol: the volume to transfer
+        returns:
+            pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
+              op] have been initialized. The other fields are empty/NaN
+        '''
+        template = self.rxn_df.iloc[0].copy()
+        products = product_names(self.rxn_df)
+        template[:] = np.nan
+        template[products] = 0.0
+        template['op'] = 'transfer'
+        template['chemical_name'] = reagent_name
+        template[target_name] = vol
+        template['callbacks'] = ''
+        return template
+
+    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
+        '''
+        calculates the amount of reagent volume needed for a dilution
+        params:
+            float target_conc: the concentration desired at the end
+            float reagent_conc: the concentration of the reagent
+            float total_vol: the total volume requested
+        returns:
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer
+        '''
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
 
     def _stop(self, i):
         '''
@@ -664,6 +742,7 @@ class ProtocolExecutor():
         '''
         params:
             pd.Series row: a row of self.rxn_df
+              uses the chemical_name, callbacks (and associated args), product_columns
             int i: index of this row
         returns:
             int: the cid of this command
@@ -864,7 +943,7 @@ class ProtocolExecutor():
                 print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
                 found_errors = max(found_errors, 2)
             #check that there's always a volume when you transfer
-            if (r['op'] == 'transfer' and math.isclose(r[products].sum(), 0,abs_tol=1e-7)):
+            if (r['op'] == 'transfer' and math.isclose(r[products].sum(), 0,abs_tol=1e-9)):
                 print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you're transfering
@@ -1032,7 +1111,7 @@ class ProtocolExecutor():
             print(row.to_frame().T)
             print()
             return False
-        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
+        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e-9):
             print('<<controller>> volume error:')
             print(row.to_frame().T)
             print()
