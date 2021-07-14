@@ -19,5 +19,5 @@ We've mostly fixed the tube problem, but for ML, where you really just want a co
   a new class LabwareType that has a list of labware objects and finds the best one
 
 DISCUSSION POINTS
-We have the capacity to not pickup new tip on each transfer if same reagent if you wish
+We have the capacity to not pickup new tip on each transfer if same reagent if you wish. Sure Implement it
 Would love a picture of each labware type
