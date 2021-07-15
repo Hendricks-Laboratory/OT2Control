@@ -91,6 +91,7 @@ class ProtocolExecutor():
         self._inflight_packs = []
         self.my_ip = my_ip
         self.server_ip = server_ip
+        self.buff_size=4
         self.simulate = False #by default will be changed if a simulation is run
         #this will be gradually filled
         self.robo_params = {}
@@ -616,8 +617,7 @@ class ProtocolExecutor():
         '''
         for i, row in self.rxn_df.iterrows():
             if row['op'] == 'transfer':
-                cid = self.send_transfer_command(row,i)
-                self._inflight_packs.append(cid)
+                self.send_transfer_command(row,i)
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
                 self._inflight_packs.append(cid)
@@ -631,8 +631,7 @@ class ProtocolExecutor():
                 pass
             elif row['op'] == 'dilution':
                 #TODO implement dilutions
-                cid = self.send_dilution_commands(row, i)
-                self._inflight_packs.append(cid)
+                self.send_dilution_commands(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
             #check buffer
@@ -650,11 +649,28 @@ class ProtocolExecutor():
             int i: index of this row
         returns:
             int: the cid of this command
+        Preconditions:
+            The buffer has room for at least one command
         Postconditions:
             Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
             Will block on ready if the buffer is filled
-        Preconditions:
-            The buffer has room for at least one command
+            Both cid's will be appended to self._inflight_packs
+        '''
+        water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        self.send_transfer_command(water_transfer_row, i)
+        if len(self._inflight_packs) >= self.buff_size:
+            self._block_on_ready()
+        self.send_transfer_command(reagent_transfer_row, i)
+
+    def _get_dilution_transfer_rows(self, row):
+        '''
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command
+        params:
+            pd.Series row: a row of self.rxn_df
+        returns:
+            tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
+              reagent
+              see self._construct_dilution_transfer_row for details
         '''
         reagent = row['chemical_name']
         reagent_conc = row['conc']
@@ -666,13 +682,9 @@ class ProtocolExecutor():
         target_name = dilution_name_vol.index[0]
         target_conc = row['dilution_conc']
         vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
-        transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
-        cid = self.send_transfer_command(transfer_row, i)
-        self._inflight_packs.append(cid)
-        if len(self._inflight_packs) >= buff_size:
-            self._block_on_ready()
-        transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
-        cid = self.send_transfer_command(transfer_row, i)
+        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
+        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        return water_transfer_row, reagent_transfer_row
 
     def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
         '''
@@ -695,6 +707,7 @@ class ProtocolExecutor():
         template[target_name] = vol
         template['callbacks'] = ''
         return template
+
 
     def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
         '''
@@ -748,6 +761,7 @@ class ProtocolExecutor():
             int: the cid of this command
         Postconditions:
             a transfer command has been sent to the robot
+            and it's cid has been appended to self._inflight_packs
         '''
         product_cols = product_names(self.rxn_df)
         src = row['chemical_name']
@@ -764,7 +778,7 @@ class ProtocolExecutor():
                 self._block_on_ready()
             #stop on any incoming continues
             self._block_on_continue(i)
-        return cid
+        self._inflight_packs.append(cid)
 
     def _block_on_continue(self, i):
         '''
@@ -1166,7 +1180,7 @@ class ProtocolExecutor():
             else:
                 return 'any'
         product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
-        product_df['vol'] = [self._vol_calc(name,self.rxn_df) for name in product_df.index]
+        product_df['vol'] = [self._vol_calc(name) for name in product_df.index]
         product_df['loc'] = 'any'
         product_df.replace('','any', inplace=True)
         reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
@@ -1178,18 +1192,29 @@ class ProtocolExecutor():
         sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
         return sbs
 
-    def _vol_calc(self, name, rxn_df):
+    def _vol_calc(self, name):
         '''
         params:
             str name: chem_name
-            df rxn_df: from excel
         returns:
             volume at end in that name
         '''
-        dispenses = rxn_df[name].sum()
-        aspirations = rxn_df.loc[(rxn_df['op']=='transfer') &\
-                (rxn_df['chemical_name'] == name),product_names(rxn_df)].sum().sum()
-        return dispenses - aspirations
+        products = product_names(self.rxn_df)
+        dispenses = self.rxn_df[name].sum()
+        transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
+                (self.rxn_df['chemical_name'] == name),products].sum().sum()
+        dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
+                (self.rxn_df['chemical_name'] == name),:]
+        def calc_dilution_vol(row):
+            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
+            return reagent_transfer_row[products].sum()
+
+        if dilution_rows.empty:
+            dilution_aspirations = 0.0
+        else:
+            dilution_vols = dilution_rows.apply(lambda r: calc_dilution_vol(r),axis=1)
+            dilution_aspirations = dilution_vols.sum()
+        return dispenses - transfer_aspirations - dilution_aspirations
     
     def _is_valid_contents_sbs(self, row):
         '''
@@ -1219,58 +1244,39 @@ class ProtocolExecutor():
 
     def _create_contents_sbs(self):
         '''
+        constructs a side by side frame from the history in well_history.tsv and the reaction
+        df
         '''
         history = pd.read_csv(os.path.join(self.eve_files_path, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
         disp_hist = history.loc[history['chem_name'].astype(bool)]
         contents = disp_hist.groupby(['container','chem_name']).sum()
-        products = self.rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        products = self.rxn_df.loc[:,'reagent':'chemical_name'].drop( \
+                columns=['reagent','chemical_name']).columns
         theoretical_his_list = []
-        for _, row in self.rxn_df.loc[self.rxn_df['op']=='transfer'].iterrows():
-            for product in products:
-                theoretical_his_list.append((product, row[product], row['chemical_name']))
-        theoretical_his = pd.DataFrame(theoretical_his_list, columns=['container', 'vol', 'chem_name'])
+        for _, row in self.rxn_df.loc[(self.rxn_df['op'] == 'transfer') | \
+                (self.rxn_df['op'] == 'dilution')].iterrows():
+            if row['op'] == 'transfer':
+                for product in products:
+                    theoretical_his_list.append((product, row[product], row['chemical_name']))
+            else: #row['op'] == 'dilution'
+                #TODO Works for using products?
+                water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
+                product_vols = water_transfer_row[products]
+                target_reagent = product_vols.loc[~product_vols.apply(lambda x: \
+                        math.isclose(x,0,abs_tol=1e-9))].index[0]
+                theoretical_his_list.append((target_reagent, water_transfer_row[target_reagent], \
+                        'WaterC1.0'))
+                theoretical_his_list.append((target_reagent, \
+                        reagent_transfer_row[target_reagent], \
+                        reagent_transfer_row['chemical_name']))
+        theoretical_his = pd.DataFrame(theoretical_his_list, \
+                columns=['container', 'vol', 'chem_name'])
         theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
         theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
                 math.isclose(x,0))]
         sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
+        breakpoint()
         return sbs
-    #WORKING
-
-
-
-def get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, products_to_labware):
-    '''
-    params:
-        Armchair portal: the armchair object connected to robot
-        gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
-          deck positions
-        df rxn_df: the input df read from sheets
-        bool simulate: if the robot is to simulate or execute
-        str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-        ServiceAccount Credentials credentials: to access sheets
-        bool using_temp_ctrl: true if temp control should be used
-        float temp: the temperature to keep the module at
-        Dict<str, str>: maps rxns to prefered labware
-    returns:
-        df reagent_df: info on reagents. columns from sheet. See excel specification
-        df labware_df:
-            str name: the common name of the labware
-            str first_usable: the first tip/well to use
-            int deck_pos: the position on the deck of this labware
-            str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-              order
-        Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
-          are the pipette names filled in
-        df product_df:
-            INDEX
-            the chemical names of the products
-            COLS
-            str labware: type of labware to use
-            float max_vol: the maximum volume that will be in this container at any time
-    '''
-
-
-
 
 #SERVER
 #CONTAINERS
