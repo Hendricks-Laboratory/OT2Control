@@ -308,6 +308,8 @@ class ProtocolExecutor():
             list<list<str>> input_data: as recieved in excel
         returns:
             pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
+        Postconditions:
+            self._products has been initialized to hold the names of all the products
         '''
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
@@ -321,10 +323,10 @@ class ProtocolExecutor():
         self._rename_products(rxn_df)
         #go back for some non numeric columns
         rxn_df['callbacks'].fillna('',inplace=True)
-        products = product_names(rxn_df)
+        self._products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
         #make the reagent columns floats
-        rxn_df.loc[:,products] =  rxn_df[products].astype(float)
-        rxn_df.loc[:,products] = rxn_df[products].fillna(0)
+        rxn_df.loc[:,self._products] =  rxn_df[self._products].astype(float)
+        rxn_df.loc[:,self._products] = rxn_df[self._products].fillna(0)
 
         return rxn_df
     
@@ -368,13 +370,12 @@ class ProtocolExecutor():
             Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
                     labware and container preferences for products
         '''
-        products = product_names(self.rxn_df)
         cols = self.rxn_df.columns.to_list()
         product_start_i = cols.index('reagent')+1
         requested_containers = input_data[2][product_start_i+1:]
         requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
         #in df this is an index, so size cols is one less
-        products_to_labware = {product:[labware,container] for product, labware, container in zip(products, requested_labware,requested_containers)}
+        products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
         return products_to_labware
 
     def _get_chemical_name(self,row):
@@ -674,8 +675,7 @@ class ProtocolExecutor():
         '''
         reagent = row['chemical_name']
         reagent_conc = row['conc']
-        products = product_names(self.rxn_df)
-        product_cols = row.loc[products]
+        product_cols = row.loc[self._products]
         dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
         #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
         total_vol = dilution_name_vol.iloc[0]
@@ -699,9 +699,8 @@ class ProtocolExecutor():
               op] have been initialized. The other fields are empty/NaN
         '''
         template = self.rxn_df.iloc[0].copy()
-        products = product_names(self.rxn_df)
         template[:] = np.nan
-        template[products] = 0.0
+        template[self._products] = 0.0
         template['op'] = 'transfer'
         template['chemical_name'] = reagent_name
         template[target_name] = vol
@@ -763,9 +762,8 @@ class ProtocolExecutor():
             a transfer command has been sent to the robot
             and it's cid has been appended to self._inflight_packs
         '''
-        product_cols = product_names(self.rxn_df)
         src = row['chemical_name']
-        containers = row[product_cols].loc[row[product_cols] != 0]
+        containers = row[self._products].loc[row[self._products] != 0]
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
@@ -949,7 +947,6 @@ class ProtocolExecutor():
                 2: Critical. Abort
         '''
         found_errors = 0
-        products = product_names(self.rxn_df)
         for i, r in self.rxn_df.iterrows():
             r_num = i+1
             #check pauses
@@ -957,7 +954,7 @@ class ProtocolExecutor():
                 print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
                 found_errors = max(found_errors, 2)
             #check that there's always a volume when you transfer
-            if (r['op'] == 'transfer' and math.isclose(r[products].sum(), 0,abs_tol=1e-9)):
+            if (r['op'] == 'transfer' and math.isclose(r[self._products].sum(), 0,abs_tol=1e-9)):
                 print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you're transfering
@@ -1199,15 +1196,14 @@ class ProtocolExecutor():
         returns:
             volume at end in that name
         '''
-        products = product_names(self.rxn_df)
         dispenses = self.rxn_df[name].sum()
         transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
-                (self.rxn_df['chemical_name'] == name),products].sum().sum()
+                (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
         dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
                 (self.rxn_df['chemical_name'] == name),:]
         def calc_dilution_vol(row):
             _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-            return reagent_transfer_row[products].sum()
+            return reagent_transfer_row[self._products].sum()
 
         if dilution_rows.empty:
             dilution_aspirations = 0.0
@@ -1246,22 +1242,21 @@ class ProtocolExecutor():
         '''
         constructs a side by side frame from the history in well_history.tsv and the reaction
         df
+        NOTE: completely ignores aspiration, but if all of your dispenses are correct, and your
+        final contents are correct you're looking pretty good
         '''
         history = pd.read_csv(os.path.join(self.eve_files_path, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
         disp_hist = history.loc[history['chem_name'].astype(bool)]
         contents = disp_hist.groupby(['container','chem_name']).sum()
-        products = self.rxn_df.loc[:,'reagent':'chemical_name'].drop( \
-                columns=['reagent','chemical_name']).columns
         theoretical_his_list = []
         for _, row in self.rxn_df.loc[(self.rxn_df['op'] == 'transfer') | \
                 (self.rxn_df['op'] == 'dilution')].iterrows():
             if row['op'] == 'transfer':
-                for product in products:
+                for product in self._products:
                     theoretical_his_list.append((product, row[product], row['chemical_name']))
             else: #row['op'] == 'dilution'
-                #TODO Works for using products?
                 water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-                product_vols = water_transfer_row[products]
+                product_vols = water_transfer_row[self._products]
                 target_reagent = product_vols.loc[~product_vols.apply(lambda x: \
                         math.isclose(x,0,abs_tol=1e-9))].index[0]
                 theoretical_his_list.append((target_reagent, water_transfer_row[target_reagent], \
@@ -1275,7 +1270,6 @@ class ProtocolExecutor():
         theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
                 math.isclose(x,0))]
         sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
-        breakpoint()
         return sbs
 
 #SERVER
@@ -2461,16 +2455,3 @@ def make_unique(s):
         else:
             return name
     return s.apply(_get_new_name)
-
-def product_names(rxn_df):
-    '''
-    handy accessor method to get the products of rxn_df
-    Preconditions:
-        reagent is the first column before the products, 'chemical_name' is the last col
-    params:
-        df rxn_df: as in excel
-    returns:
-        index: the products
-    '''
-    return rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
-
