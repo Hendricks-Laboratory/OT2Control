@@ -13,10 +13,11 @@ class PlateReader():
         self.server = dde.CreateServer()
         self.server.Create('MyDataProxy')
         self.conversation = dde.CreateConversation(self.server)
-        #self.conversation.ConnectTo("SPECTROstar_Nano", "DDEServerConv1")
-        #self.conversation.Exec('Dummy')
-        conv2 = self.conversation.ConnectTo("SPECTROstar_Nano","SZDDESYS_TOPIC")
+        self.conversation.ConnectTo("SPECTROstar_Nano", "DDEServerConv1")
+        self.conversation.Exec('Dummy')
+        #conv2 = self.conversation.ConnectTo("SPECTROstar_Nano","System")
         breakpoint()
+        self.conversation.Request('')
         self.conversation.Request('DdeServerStatus')
 
     def platein(self):
