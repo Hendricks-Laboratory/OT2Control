@@ -1,7 +1,8 @@
 CRITICAL
-Fix Robot python
+Fix errors
 
 PRIORITY
+platereader implementation
 
 FUTURE
 platereader should have 200 ul. Check at each scan]
@@ -21,3 +22,4 @@ We've mostly fixed the tube problem, but for ML, where you really just want a co
 DISCUSSION POINTS
 We have the capacity to not pickup new tip on each transfer if same reagent if you wish. Sure Implement it
 Would love a picture of each labware type
+Would be nice to implement some timing calculator that prints expected time at end of simulation
