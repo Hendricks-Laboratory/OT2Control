@@ -15,6 +15,7 @@ import asyncio
 import threading
 import time
 
+from bidict import bidict
 import gspread
 from df2gspread import df2gspread as d2g
 from df2gspread import gspread2df as g2d
@@ -48,8 +49,7 @@ class ProtocolExecutor():
 #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
 #reader given a regular loc for a 96well plate.
 #Please do not read this. paste it into a nice json viewer.
-    PLATEREADER_INDEX_TRANSLATOR = {"loc": {"A1": "E1", "A2": "D1", "A3": "C1", "A4": "B1", "A5": "A1", "A12": "A1", "A11": "B1", "A10": "C1", "A9": "D1", "A8": "E1", "A7": "F1", "A6": "G1", "B1": "E2", "B2": "D2", "B3": "C2", "B4": "B2", "B5": "A2", "B6": "G2", "B7": "F2", "B8": "E2", "B9": "D2", "B10": "C2", "B11": "B2", "B12": "A2", "C1": "E3", "C2": "D3", "C3": "C3", "C4": "B3", "C5": "A3", "C6": "G3", "C7": "F3", "C8": "E3", "C9": "D3", "C10": "C3", "C11": "B3", "C12": "A3", "D1": "E4", "D2": "D4", "D3": "C4", "D4": "B4", "D5": "A4", "D6": "G4", "D7": "F4", "D8": "E4", "D9": "D4", "D10": "C4", "D11": "B4", "D12": "A4", "E1": "E5", "E2": "D5", "E3": "C5", "E4": "B5", "E5": "A5", "E6": "G5", "E7": "F5", "E8": "E5", "E9": "D5", "E10": "C5", "E11": "B5", "E12": "A5", "F1": "E6", "F2": "D6", "F3": "C6", "F4": "B6", "F5": "A6", "F6": "G6", "F7": "F6", "F8": "E6", "F9": "D6", "F10": "C6", "F11": "B6", "F12": "A6", "G1": "E7", "G2": "D7", "G3": "C7", "G4": "B7", "G5": "A7", "G6": "G7", "G7": "F7", "G8": "E7", "G9": "D7", "G10": "C7", "G11": "B7", "G12": "A7", "H1": "E8", "H2": "D8", "H3": "C8", "H4": "B8", "H5": "A8", "H6": "G8", "H7": "F8", "H8": "E8", "H9": "D8", "H10": "C8", "H11": "B8", "H12": "A8"}, "platereader": {"A1": "p4", "A2": "p4", "A3": "p4", "A4": "p4", "A5": "p4", "A12": "p7", "A11": "p7", "A10": "p7", "A9": "p7", "A8": "p7", "A7": "p7", "A6": "p7", "B1": "p4", "B2": "p4", "B3": "p4", "B4": "p4", "B5": "p4", "B6": "p7", "B7": "p7", "B8": "p7", "B9": "p7", "B10": "p7", "B11": "p7", "B12": "p7", "C1": "p4", "C2": "p4", "C3": "p4", "C4": "p4", "C5": "p4", "C6": "p7", "C7": "p7", "C8": "p7", "C9": "p7", "C10": "p7", "C11": "p7", "C12": "p7", "D1": "p4", "D2": "p4", "D3": "p4", "D4": "p4", "D5": "p4", "D6": "p7", "D7": "p7", "D8": "p7", "D9": "p7", "D10": "p7", "D11": "p7", "D12": "p7", "E1": "p4", "E2": "p4", "E3": "p4", "E4": "p4", "E5": "p4", "E6": "p7", "E7": "p7", "E8": "p7", "E9": "p7", "E10": "p7", "E11": "p7", "E12": "p7", "F1": "p4", "F2": "p4", "F3": "p4", "F4": "p4", "F5": "p4", "F6": "p7", "F7": "p7", "F8": "p7", "F9": "p7", "F10": "p7", "F11": "p7", "F12": "p7", "G1": "p4", "G2": "p4", "G3": "p4", "G4": "p4", "G5": "p4", "G6": "p7", "G7": "p7", "G8": "p7", "G9": "p7", "G10": "p7", "G11": "p7", "G12": "p7", "H1": "p4", "H2": "p4", "H3": "p4", "H4": "p4", "H5": "p4", "H6": "p7", "H7": "p7", "H8": "p7", "H9": "p7", "H10": "p7", "H11": "p7", "H12": "p7"}}
-
+    PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'p4'), 'A2': ('D1', 'p4'), 'A3': ('C1', 'p4'), 'A4': ('B1', 'p4'), 'A5': ('A1', 'p4'), 'A12': ('A1', 'p7'), 'A11': ('B1', 'p7'), 'A10': ('C1', 'p7'), 'A9': ('D1', 'p7'), 'A8': ('E1', 'p7'), 'A7': ('F1', 'p7'), 'A6': ('G1', 'p7'), 'B1': ('E2', 'p4'), 'B2': ('D2', 'p4'), 'B3': ('C2', 'p4'), 'B4': ('B2', 'p4'), 'B5': ('A2', 'p4'), 'B6': ('G2', 'p7'), 'B7': ('F2', 'p7'), 'B8': ('E2', 'p7'), 'B9': ('D2', 'p7'), 'B10': ('C2', 'p7'), 'B11': ('B2', 'p7'), 'B12': ('A2', 'p7'), 'C1': ('E3', 'p4'), 'C2': ('D3', 'p4'), 'C3': ('C3', 'p4'), 'C4': ('B3', 'p4'), 'C5': ('A3', 'p4'), 'C6': ('G3', 'p7'), 'C7': ('F3', 'p7'), 'C8': ('E3', 'p7'), 'C9': ('D3', 'p7'), 'C10': ('C3', 'p7'), 'C11': ('B3', 'p7'), 'C12': ('A3', 'p7'), 'D1': ('E4', 'p4'), 'D2': ('D4', 'p4'), 'D3': ('C4', 'p4'), 'D4': ('B4', 'p4'), 'D5': ('A4', 'p4'), 'D6': ('G4', 'p7'), 'D7': ('F4', 'p7'), 'D8': ('E4', 'p7'), 'D9': ('D4', 'p7'), 'D10': ('C4', 'p7'), 'D11': ('B4', 'p7'), 'D12': ('A4', 'p7'), 'E1': ('E5', 'p4'), 'E2': ('D5', 'p4'), 'E3': ('C5', 'p4'), 'E4': ('B5', 'p4'), 'E5': ('A5', 'p4'), 'E6': ('G5', 'p7'), 'E7': ('F5', 'p7'), 'E8': ('E5', 'p7'), 'E9': ('D5', 'p7'), 'E10': ('C5', 'p7'), 'E11': ('B5', 'p7'), 'E12': ('A5', 'p7'), 'F1': ('E6', 'p4'), 'F2': ('D6', 'p4'), 'F3': ('C6', 'p4'), 'F4': ('B6', 'p4'), 'F5': ('A6', 'p4'), 'F6': ('G6', 'p7'), 'F7': ('F6', 'p7'), 'F8': ('E6', 'p7'), 'F9': ('D6', 'p7'), 'F10': ('C6', 'p7'), 'F11': ('B6', 'p7'), 'F12': ('A6', 'p7'), 'G1': ('E7', 'p4'), 'G2': ('D7', 'p4'), 'G3': ('C7', 'p4'), 'G4': ('B7', 'p4'), 'G5': ('A7', 'p4'), 'G6': ('G7', 'p7'), 'G7': ('F7', 'p7'), 'G8': ('E7', 'p7'), 'G9': ('D7', 'p7'), 'G10': ('C7', 'p7'), 'G11': ('B7', 'p7'), 'G12': ('A7', 'p7'), 'H1': ('E8', 'p4'), 'H2': ('D8', 'p4'), 'H3': ('C8', 'p4'), 'H4': ('B8', 'p4'), 'H5': ('A8', 'p4'), 'H6': ('G8', 'p7'), 'H7': ('F8', 'p7'), 'H8': ('E8', 'p7'), 'H9': ('D8', 'p7'), 'H10': ('C8', 'p7'), 'H11': ('B8', 'p7'), 'H12': ('A8', 'p7')})
     '''
     class to execute a protocol from the docs
     ATTRIBUTES:
@@ -447,15 +447,17 @@ class ProtocolExecutor():
                 (labware_df['name'] == 'platereader4')]
         usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
         assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
+        #TODO assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
+        #check if that works
         platereader_input_first_usable = usable_rows.iloc[0]
-        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['platereader'][platereader_input_first_usable]
-        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
+        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
         if platereader_name == 'platereader7':
-            platereader4_first_usable = 'F8'
+            platereader4_first_usable = 'F8' #anything larger than what is on plate
             platereader7_firstusable = platereader_first_usable
         else:
             platereader4_first_usable = platereader_first_usable
-            platereader7_first_usable = 'A1'
+            platereader7_first_usable = 'G1'
         labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
         labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
         labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
@@ -882,6 +884,7 @@ class ProtocolExecutor():
             with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
                 data = buffered_sock.recv_until(armchair.FTP_EOF)
                 write_file.write(data)
+        self.translate_wellmap()
         print('<<controller>> files recieved')
         sock.close()
         #server should now send a close command
@@ -890,6 +893,19 @@ class ProtocolExecutor():
         print('<<controller>> shutting down')
         self.portal.close()
     
+    def translate_wellmap(self):
+        '''
+        Preconditions:
+            there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+            machine labels
+        Postconditions:
+            translated_wellmap.tsv has been created. translated is a copy of wellmap with 
+            it's locations translated to human locs, but the labware pos remains the same
+        '''
+        df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
+        df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'p'+str(r['deck_pos']))],axis=1)
+        df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
+
     def error_handler(self):
         pass
     
@@ -1002,9 +1018,11 @@ class ProtocolExecutor():
                 2: Critical. Abort
         '''
         found_errors = 0
-        for i, r in self.robo_params['product_df'].loc[~(self.robo_params['product_df']['labware'].astype(bool) & self.robo_params['product_df']['container'].astype(bool))].iterrows():
+        for i, r in self.robo_params['product_df'].loc[\
+                ~self.robo_params['product_df']['labware'].astype(bool) & \
+                ~self.robo_params['product_df']['container'].astype(bool)].iterrows():
             found_errors = max(found_errors,1)
-            print('<<controller>> {} has no specified labware or container. It could ent up in anything that has enough volume to contain it. Are you sure that\'s what you want?'.format(i))
+            print('<<controller>> {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\'s what you want? '.format(i))
         return found_errors
 
     def check_reagents(self):
@@ -1678,10 +1696,11 @@ class WellPlate(Labware):
     def __init__(self, labware, first_well, deck_pos):
         super().__init__(labware, deck_pos)
         #allow for none initialization
-        n_rows = len(labware.columns()[0])
-        col = first_well[:1]#alpha part
-        row = first_well[1:]#numeric part
-        self.current_well = (ord(col)-64)*n_rows #transform alpha num to num
+        all_wells = labware.wells()
+        self.current_well = 0
+        while self.current_well < len(all_wells) and all_wells[self.current_well]._impl._name != first_well:
+            self.current_well += 1
+        #if you overflowed you'll be correted here
         self.full = self.current_well >= len(labware.wells())
 
     def pop_next_well(self, vol=None,container_type=None):

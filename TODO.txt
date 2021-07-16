@@ -12,6 +12,8 @@ Error Exits
     implement client side error handle
 Update UML diagram and review protected vars/funcs
 Block_On_Ready should probably be part of Armchair
+OT2Controller should be renamed to OT2
+Git needs to be cleaned up. Random files are lying around
 
 NOTES
 We've mostly fixed the tube problem, but for ML, where you really just want a container 
