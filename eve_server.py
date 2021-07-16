@@ -18,6 +18,7 @@ def hack_to_get_ip():
 
 if __name__ == '__main__':
     my_ip = hack_to_get_ip()
-    ot2lib.launch_eve_server(my_ip=my_ip, barrier=None)
+    while True:
+        ot2lib.launch_eve_server(my_ip=my_ip, barrier=None)
 
 

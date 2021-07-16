@@ -48,7 +48,7 @@ class ProtocolExecutor():
 #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
 #reader given a regular loc for a 96well plate.
 #Please do not read this. paste it into a nice json viewer.
-    PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3":"p4", "A4":"p4", "A5":"p4", "A13":"platereader7", "A11":"p7", "A10":"p7", "A9":"p7", "A8":"p7", "A7":"p7", "A6":"p7", "B1":"p4", "B2":"p4", "B3":"p4", "B4":"p4", "B5":"p4", "B6":"p7", "B7":"p7", "B8":"p7", "B9":"p7", "B10":"p7", "B11":"p7", "B12":"p7", "C1":"p4", "C2":"p4", "C3":"p4", "C4":"p4", "C5":"p4", "C6":"p7", "C7":"p7", "C8":"p7", "C9":"p7", "C10":"p7", "C11":"p7", "C12":"p7", "D1":"p4", "D2":"p4", "D3":"p4", "D4":"p4", "D5":"p4", "D6":"p7", "D7":"p7", "D8":"p7", "D9":"p7", "D10":"p7", "D11":"p7", "D12":"p7", "E1":"p4", "E2":"p4", "E3":"p4", "E4":"p4", "E5":"p4", "E6":"p7", "E7":"p7", "E8":"p7", "E9":"p7", "E10":"p7", "E11":"p7", "E12":"p7", "F1":"p4", "F2":"p4", "F3":"p4", "F4":"p4", "F5":"p4", "F6":"p7", "F7":"p7", "F8":"p7", "F9":"p7", "F10":"p7", "F11":"p7", "F12":"p7", "G1":"p4", "G2":"p4", "G3":"p4", "G4":"p4", "G5":"p4", "G6":"p7", "G7":"p7", "G8":"p7", "G9":"p7", "G10":"p7", "G11":"p7", "G12":"p7", "H1":"p4", "H2":"p4", "H3":"p4", "H4":"p4", "H5":"p4", "H6":"p7", "H7":"p7", "H8":"p7", "H9":"p7", "H10":"p7", "H11":"p7", "H12":"p7" }, "loc":{ "A1":"E1", "A2":"D1", "A3":"C1", "A4":"B1", "A5":"A1", "A13":"A1", "A11":"B1", "A10":"C1", "A9":"D1", "A8":"E1", "A7":"F1", "A6":"G1", "B1":"E2", "B2":"D2", "B3":"C2", "B4":"B2", "B5":"A2", "B6":"G2", "B7":"F2", "B8":"E2", "B9":"D2", "B10":"C2", "B11":"B2", "B12":"A2", "C1":"E3", "C2":"D3", "C3":"C3", "C4":"B3", "C5":"A3", "C6":"G3", "C7":"F3", "C8":"E3", "C9":"D3", "C10":"C3", "C11":"B3", "C12":"A3", "D1":"E4", "D2":"D4", "D3":"C4", "D4":"B4", "D5":"A4", "D6":"G4", "D7":"F4", "D8":"E4", "D9":"D4", "D10":"C4", "D11":"B4", "D12":"A4", "E1":"E5", "E2":"D5", "E3":"C5", "E4":"B5", "E5":"A5", "E6":"G5", "E7":"F5", "E8":"E5", "E9":"D5", "E10":"C5", "E11":"B5", "E12":"A5", "F1":"E6", "F2":"D6", "F3":"C6", "F4":"B6", "F5":"A6", "F6":"G6", "F7":"F6", "F8":"E6", "F9":"D6", "F10":"C6", "F11":"B6", "F12":"A6", "G1":"E7", "G2":"D7", "G3":"C7", "G4":"B7", "G5":"A7", "G6":"G7", "G7":"F7", "G8":"E7", "G9":"D7", "G10":"C7", "G11":"B7", "G12":"A7", "H1":"E8", "H2":"D8", "H3":"C8", "H4":"B8", "H5":"A8", "H6":"G8", "H7":"F8", "H8":"E8", "H9":"D8", "H10":"C8", "H11":"B8", "H12":"A8" }}
+    PLATEREADER_INDEX_TRANSLATOR = {"loc": {"A1": "E1", "A2": "D1", "A3": "C1", "A4": "B1", "A5": "A1", "A12": "A1", "A11": "B1", "A10": "C1", "A9": "D1", "A8": "E1", "A7": "F1", "A6": "G1", "B1": "E2", "B2": "D2", "B3": "C2", "B4": "B2", "B5": "A2", "B6": "G2", "B7": "F2", "B8": "E2", "B9": "D2", "B10": "C2", "B11": "B2", "B12": "A2", "C1": "E3", "C2": "D3", "C3": "C3", "C4": "B3", "C5": "A3", "C6": "G3", "C7": "F3", "C8": "E3", "C9": "D3", "C10": "C3", "C11": "B3", "C12": "A3", "D1": "E4", "D2": "D4", "D3": "C4", "D4": "B4", "D5": "A4", "D6": "G4", "D7": "F4", "D8": "E4", "D9": "D4", "D10": "C4", "D11": "B4", "D12": "A4", "E1": "E5", "E2": "D5", "E3": "C5", "E4": "B5", "E5": "A5", "E6": "G5", "E7": "F5", "E8": "E5", "E9": "D5", "E10": "C5", "E11": "B5", "E12": "A5", "F1": "E6", "F2": "D6", "F3": "C6", "F4": "B6", "F5": "A6", "F6": "G6", "F7": "F6", "F8": "E6", "F9": "D6", "F10": "C6", "F11": "B6", "F12": "A6", "G1": "E7", "G2": "D7", "G3": "C7", "G4": "B7", "G5": "A7", "G6": "G7", "G7": "F7", "G8": "E7", "G9": "D7", "G10": "C7", "G11": "B7", "G12": "A7", "H1": "E8", "H2": "D8", "H3": "C8", "H4": "B8", "H5": "A8", "H6": "G8", "H7": "F8", "H8": "E8", "H9": "D8", "H10": "C8", "H11": "B8", "H12": "A8"}, "platereader": {"A1": "p4", "A2": "p4", "A3": "p4", "A4": "p4", "A5": "p4", "A12": "p7", "A11": "p7", "A10": "p7", "A9": "p7", "A8": "p7", "A7": "p7", "A6": "p7", "B1": "p4", "B2": "p4", "B3": "p4", "B4": "p4", "B5": "p4", "B6": "p7", "B7": "p7", "B8": "p7", "B9": "p7", "B10": "p7", "B11": "p7", "B12": "p7", "C1": "p4", "C2": "p4", "C3": "p4", "C4": "p4", "C5": "p4", "C6": "p7", "C7": "p7", "C8": "p7", "C9": "p7", "C10": "p7", "C11": "p7", "C12": "p7", "D1": "p4", "D2": "p4", "D3": "p4", "D4": "p4", "D5": "p4", "D6": "p7", "D7": "p7", "D8": "p7", "D9": "p7", "D10": "p7", "D11": "p7", "D12": "p7", "E1": "p4", "E2": "p4", "E3": "p4", "E4": "p4", "E5": "p4", "E6": "p7", "E7": "p7", "E8": "p7", "E9": "p7", "E10": "p7", "E11": "p7", "E12": "p7", "F1": "p4", "F2": "p4", "F3": "p4", "F4": "p4", "F5": "p4", "F6": "p7", "F7": "p7", "F8": "p7", "F9": "p7", "F10": "p7", "F11": "p7", "F12": "p7", "G1": "p4", "G2": "p4", "G3": "p4", "G4": "p4", "G5": "p4", "G6": "p7", "G7": "p7", "G8": "p7", "G9": "p7", "G10": "p7", "G11": "p7", "G12": "p7", "H1": "p4", "H2": "p4", "H3": "p4", "H4": "p4", "H5": "p4", "H6": "p7", "H7": "p7", "H8": "p7", "H9": "p7", "H10": "p7", "H11": "p7", "H12": "p7"}}
 
     '''
     class to execute a protocol from the docs
@@ -448,7 +448,7 @@ class ProtocolExecutor():
         usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
         assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
         platereader_input_first_usable = usable_rows.iloc[0]
-        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['platereader'][platereader_input_first_usable]
         platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
         if platereader_name == 'platereader7':
             platereader4_first_usable = 'F8'
@@ -1868,8 +1868,8 @@ class OT2Controller():
         '''
         TODO: if this still just initializes speed when we're done, it should be named such
         '''
-        self.protocol.max_speeds['X'] = 100
-        self.protocol.max_speeds['Y'] = 100
+        self.protocol.max_speeds['X'] = 250
+        self.protocol.max_speeds['Y'] = 250
 
     def _init_temp_mod(self, name, using_temp_ctrl, temp, deck_pos, empty_tubes):
         '''
@@ -2122,8 +2122,10 @@ class OT2Controller():
             list<tuple<str,float>> transfer_steps: each element is a dst, vol pair
             list<str> callbacks: the ordered callbacks to perform after each transfer or None
         '''
-        #we want to pick up new tip at the start
-        new_tip=True
+        #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
+        for arm in self.pipettes.keys():
+            if src != self.pipettes[arm]['last_used'] and self.pipettes[arm]['last_used'] != 'clean':
+                self._get_new_tip(arm)
         callback_types = [callback for callback, _ in callbacks]
         #if you're going to be altering flow, you need to create a seperate connection with the
         #controller
@@ -2188,7 +2190,7 @@ class OT2Controller():
     def _transfer_step(self, src, dst, vol):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
-        appropriately sized pipettes. dropping tip if it's a new chemical. If you need
+        appropriately sized pipettes. If you need
         more than 1 step, will facilitate that
         params:
             str src: the chemical name to pipette from
@@ -2200,10 +2202,6 @@ class OT2Controller():
         n_substeps = int(vol // self.pipettes[arm]['size']) + 1
         substep_vol = vol / n_substeps
         
-        #if you need a new tip, get one 
-        if src != self.pipettes[arm]['last_used'] and src != 'clean':
-            self._get_new_tip(arm)
-
         #transfer the liquid in as many steps are necessary
         for i in range(n_substeps):
             self._liquid_transfer(src, dst, substep_vol, arm)
@@ -2216,7 +2214,6 @@ class OT2Controller():
             str arm: 'left' or 'right' to differentiate pipetes
         TODO: Michael found it necessary to test if has_tip. I don't think this is needed
           but revert to it if you run into trouble
-        TODO: pickup tip on init
         TODO: Wrap in try for running out of tips
         '''
         pipette = self.pipettes[arm]['pipette']
@@ -2270,7 +2267,13 @@ class OT2Controller():
             vol uL of src has been transfered to dst
             pipette has been adjusted to be dirty with src
             volumes of src and dst have been updated
+        Preconditions:
+            Both pipettes are clean or of same type
         '''
+        for arm_to_check in self.pipettes.keys():
+            #this is really easy to fix, but it should not be fixed here, it should be fixed in a
+            #higher level function call. This is minimal step for maximum speed.
+            assert (src == self.pipettes[arm_to_check]['last_used'] or self.pipettes[arm_to_check]['last_used'] == 'clean'), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
@@ -2315,7 +2318,7 @@ class OT2Controller():
             labware = self.lab_deck[container.deck_pos]
             return labware.get_container_type(container.loc)
         container_types = [lookup_container_type(name) for name in names]
-        well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 
+        well_map = pd.DataFrame({'chem_name':list(names), 'loc':locs, 'deck_pos':deck_poses, 
                 'vol':vols,'container':container_types})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
         well_map.to_csv(path, index=False, sep='\t')
@@ -2358,6 +2361,7 @@ class OT2Controller():
         close the connection in a nice way
         '''
         print('<<eve>> initializing breakdown')
+        self.protocol.home()
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
@@ -2433,6 +2437,7 @@ def launch_eve_server(**kwargs):
         pack_type, cid, payload = portal.recv_pack()
         connection_open = eve.execute(pack_type, cid, payload)
     sock.close()
+    return
 
 def make_unique(s):
     '''
