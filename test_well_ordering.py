@@ -1,4 +1,5 @@
 import pandas as pd
+pd.options.display.max_rows = 100
 
 wellmap = pd.read_csv('Eve_Files/Eve_Files/translated_wellmap.tsv', '\t')
 ind = wellmap.loc[wellmap['chem_name'] == 'WaterC1.0'].index
