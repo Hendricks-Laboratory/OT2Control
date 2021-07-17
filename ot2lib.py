@@ -641,6 +641,25 @@ class ProtocolExecutor():
             if len(self._inflight_packs) >= self.buff_size:
                 self._block_on_ready()
 
+    def execute_scan(self,row,i):
+        '''
+        There are a few things entailed in a scan command
+        1) block until you run out of waits
+        2) figure out what wells you want to scan
+        3) query the robot for those wells, or use cache if you have it
+            a) if you had to query robot, send request of reagents
+            b) wait on robot response
+            c) translate robot response to human readable
+        4) update layout to scanner
+        5) scan
+        params:
+            pd.Series row: a row of self.rxn_df
+            int i: index of this row
+        returns:
+            int: the cid of this command
+        '''
+        pass
+
     def send_dilution_commands(self,row,i):
         '''
         used to execute a dilution. This is analogous to microcode. This function will send two
@@ -650,8 +669,6 @@ class ProtocolExecutor():
         params:
             pd.Series row: a row of self.rxn_df
             int i: index of this row
-        returns:
-            int: the cid of this command
         Preconditions:
             The buffer has room for at least one command
         Postconditions:
