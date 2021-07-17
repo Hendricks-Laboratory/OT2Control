@@ -1,7 +1,6 @@
 from spectro_interface import PlateReader
 
 pr = PlateReader()
-pr.exec_macro('PlateIn')
 #pr.shake_protocol()
 print("running  synthesis kinetics (60s stir)")
 pr.run_protocol('NC synthesis kinetics (60s stir)', layout=['A1','A2','A3'])

@@ -8,7 +8,7 @@ class PlateReader():
     This class handles all platereader interactions
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program\\ Files/SPECTROstar\\ Nano\\ V5.50/"
-    PROTOCOL_PATH = r"'C:\Program Files\SPECTROstar Nano V5.50\User\Definit'"
+    PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
 
     def __init__(self):
         self.exec_macro("dummy")
@@ -28,9 +28,9 @@ class PlateReader():
         exec_str = "{}Cln/DDEClient.exe {}".format(self.SPECTRO_ROOT_PATH, macro)
         #add arguments
         for arg in args:
-            exec_str += ' {}'.format(arg)
+            exec_str += " '{}'".format(arg)
+        print(exec_str)
         exit_code = os.system(exec_str)
-        print(exit_code)
         try:
             assert (exit_code == 0)
         except:
@@ -58,8 +58,8 @@ class PlateReader():
         executes  '60s shake'
         '''
         macro = 'run'
-        protocol_name = "'60s shake'"
-        data_path = r"'C:\Program Files\SPECTROstar Nano V5.50\User\Data'"
+        protocol_name = "60s shake"
+        data_path = r"C:\Program Files\SPECTROstar Nano V5.50\User\Data"
         self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path)
 
     def edit_layout(self, protocol_name, layout):
@@ -73,12 +73,13 @@ class PlateReader():
         '''
         well_entries = []
         for i, well in enumerate(layout):
-            well_entries.append("{}=X{}".format(well, i))
-        well_arg = "'EmptyLayout {}'".format(' '.join(well_entries))
+            well_entries.append("{}=X{}".format(well, i+1))
+        well_arg = "EmptyLayout {}".format(' '.join(well_entries))
+        print(protocol_name)
         self.exec_macro('EditLayout', protocol_name, self.PROTOCOL_PATH, well_arg)
 
-
-    def run_protocol(self, protocol_name, data_path=r"'C:\Program Files\SPECTROstar Nano V5.50\User\Data'", layout=None):
+    def run_protocol(self, protocol_name, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
+, layout=None):
         r'''
         params:
             str protocol_name: the name of the protocol that will be edited
@@ -90,9 +91,8 @@ class PlateReader():
         if layout:
             self.edit_layout(protocol_name, layout)
         macro = 'run'
-        protocol_name = "'{}'".format(protocol_name)
-        data_path = "'{}'".format(data_path)
-        self.exec_macro(macro, protocol-name, self.PROTOCOL_PATH, data_path)
+        data_path = data_path
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path)
 
     def shutdown(self):
         '''
