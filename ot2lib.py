@@ -2381,6 +2381,10 @@ class OT2Controller():
         '''
         print('<<eve>> initializing breakdown')
         self.protocol.home()
+        for arm_dict in self.pipettes.values():
+            pipette = arm_dict['pipette']
+            pipette.drop_tip()
+        self.
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
