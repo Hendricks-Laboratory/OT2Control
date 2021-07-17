@@ -11,7 +11,7 @@ class Armchair():
         self.sock = socket
         self.cid = 0
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06'})
+        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09'})
         self.name = name
         self.log_path = log_path
         if not os.path.exists(self.log_path):
@@ -65,13 +65,15 @@ class Armchair():
         returns: else
             (None,None)
         '''
-        header = self.sock.recv(17)
+        header = self.sock.recv_size(17)
         header_len = self.get_len(header)
         header_type = self.get_type(header)
         header_cid = self.get_cid(header)
-        payload = self.sock.recv(header_len)
-        if payload: #if there were arguments
+        if header_len > 0: #if there were arguments
+            payload = self.sock.recv_size(header_len)
             payload = dill.loads(payload)
+        else:
+            payload = None
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
             armchair_log.write("{}\trecieved {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'),header_type,self.cid))
         return header_type, header_cid, payload

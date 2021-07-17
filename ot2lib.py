@@ -13,7 +13,9 @@ from tempfile import NamedTemporaryFile
 import logging
 import asyncio
 import threading
+import time
 
+from bidict import bidict
 import gspread
 from df2gspread import df2gspread as d2g
 from df2gspread import gspread2df as g2d
@@ -47,8 +49,7 @@ class ProtocolExecutor():
 #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
 #reader given a regular loc for a 96well plate.
 #Please do not read this. paste it into a nice json viewer.
-    PLATEREADER_INDEX_TRANSLATOR = { "deck_pos":{ "A1":"platreader4", "A2":"p4", "A3":"p4", "A4":"p4", "A5":"p4", "A13":"platereader7", "A11":"p7", "A10":"p7", "A9":"p7", "A8":"p7", "A7":"p7", "A6":"p7", "B1":"p4", "B2":"p4", "B3":"p4", "B4":"p4", "B5":"p4", "B6":"p7", "B7":"p7", "B8":"p7", "B9":"p7", "B10":"p7", "B11":"p7", "B12":"p7", "C1":"p4", "C2":"p4", "C3":"p4", "C4":"p4", "C5":"p4", "C6":"p7", "C7":"p7", "C8":"p7", "C9":"p7", "C10":"p7", "C11":"p7", "C12":"p7", "D1":"p4", "D2":"p4", "D3":"p4", "D4":"p4", "D5":"p4", "D6":"p7", "D7":"p7", "D8":"p7", "D9":"p7", "D10":"p7", "D11":"p7", "D12":"p7", "E1":"p4", "E2":"p4", "E3":"p4", "E4":"p4", "E5":"p4", "E6":"p7", "E7":"p7", "E8":"p7", "E9":"p7", "E10":"p7", "E11":"p7", "E12":"p7", "F1":"p4", "F2":"p4", "F3":"p4", "F4":"p4", "F5":"p4", "F6":"p7", "F7":"p7", "F8":"p7", "F9":"p7", "F10":"p7", "F11":"p7", "F12":"p7", "G1":"p4", "G2":"p4", "G3":"p4", "G4":"p4", "G5":"p4", "G6":"p7", "G7":"p7", "G8":"p7", "G9":"p7", "G10":"p7", "G11":"p7", "G12":"p7", "H1":"p4", "H2":"p4", "H3":"p4", "H4":"p4", "H5":"p4", "H6":"p7", "H7":"p7", "H8":"p7", "H9":"p7", "H10":"p7", "H11":"p7", "H12":"p7" }, "loc":{ "A1":"E1", "A2":"D1", "A3":"C1", "A4":"B1", "A5":"A1", "A13":"A1", "A11":"B1", "A10":"C1", "A9":"D1", "A8":"E1", "A7":"F1", "A6":"G1", "B1":"E2", "B2":"D2", "B3":"C2", "B4":"B2", "B5":"A2", "B6":"G2", "B7":"F2", "B8":"E2", "B9":"D2", "B10":"C2", "B11":"B2", "B12":"A2", "C1":"E3", "C2":"D3", "C3":"C3", "C4":"B3", "C5":"A3", "C6":"G3", "C7":"F3", "C8":"E3", "C9":"D3", "C10":"C3", "C11":"B3", "C12":"A3", "D1":"E4", "D2":"D4", "D3":"C4", "D4":"B4", "D5":"A4", "D6":"G4", "D7":"F4", "D8":"E4", "D9":"D4", "D10":"C4", "D11":"B4", "D12":"A4", "E1":"E5", "E2":"D5", "E3":"C5", "E4":"B5", "E5":"A5", "E6":"G5", "E7":"F5", "E8":"E5", "E9":"D5", "E10":"C5", "E11":"B5", "E12":"A5", "F1":"E6", "F2":"D6", "F3":"C6", "F4":"B6", "F5":"A6", "F6":"G6", "F7":"F6", "F8":"E6", "F9":"D6", "F10":"C6", "F11":"B6", "F12":"A6", "G1":"E7", "G2":"D7", "G3":"C7", "G4":"B7", "G5":"A7", "G6":"G7", "G7":"F7", "G8":"E7", "G9":"D7", "G10":"C7", "G11":"B7", "G12":"A7", "H1":"E8", "H2":"D8", "H3":"C8", "H4":"B8", "H5":"A8", "H6":"G8", "H7":"F8", "H8":"E8", "H9":"D8", "H10":"C8", "H11":"B8", "H12":"A8" }}
-
+    PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
     '''
     class to execute a protocol from the docs
     ATTRIBUTES:
@@ -56,11 +57,27 @@ class ProtocolExecutor():
         rxn_sheet_name: the name of the reaction sheet
         str cache_path: path to a directory for all cache files
         bool use_cache: read from cache if possible
+        df rxn_df: the reaction df. Not passed in, but created in init
+        str my_ip: the ip of this controller
+        str server_ip: the ip of the server. This is modified for simulation, but returned to 
+          original state at the end of simulation
+        dict<str:object> robo_params: convenient place for the parameters for the robot
+            TODO update this documentation
+            df reagent_df
+            dict instruments
+            df labware_df
+            df product_df
+        bool simulate: whether a simulation is being run or not. False by default. changed true 
+          temporarily when simulating
+        int buff_size: this is the size of the buffer between Armchair commands. It's size
+          corresponds to the number of commands you want to pile up in the socket buffer.
+          Really more for developers
+
     CONSTANTS:
         dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
           to locs on the opentrons object. Use a json viewer for more structural info
     '''
-    def __init__(self, rxn_sheet_name, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -71,6 +88,11 @@ class ProtocolExecutor():
         self.cache_path = cache_path
         self.use_cache = use_cache
         self._make_out_dirs(out_path)
+        self._inflight_packs = []
+        self.my_ip = my_ip
+        self.server_ip = server_ip
+        self.buff_size=4
+        self.simulate = False #by default will be changed if a simulation is run
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -91,15 +113,23 @@ class ProtocolExecutor():
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+        self.run_all_checks()
 
     def run_simulation(self):
         '''
         runs a full simulation of the protocol with
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function
         Returns:
             bool: True if all tests were passed
         '''
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        self.server_ip = '127.0.0.1'
+        self.simulate = True
+
         print('<<controller>> ENTERING SIMULATION')
-        serveraddr = '127.0.0.1'
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
@@ -108,7 +138,7 @@ class ProtocolExecutor():
 
         #do create a connection
         b.wait()
-        self._run(serveraddr, port, simulate=True)
+        self._run(port, simulate=True)
 
         #run post execution tests
         tests_passed = self.run_all_tests()
@@ -116,31 +146,41 @@ class ProtocolExecutor():
         #collect the eve thread
         eve_thread.join()
 
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
         return tests_passed
 
-    def run_protocol(self, serveraddr, port=50000):
+    def run_protocol(self, simulate=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run
+        params:
+            str simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(serveraddr, port, simulate=True)
+        self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
-    def _run(self, serveraddr, port, simulate):
+    def _run(self, port, simulate):
         '''
         Returns:
             bool: True if all tests were passed
         '''
         #create a connection
         sock = socket.socket(socket.AF_INET)
-        sock.connect((serveraddr, port))
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(sock,'controller','Armchair_Logs')
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs')
 
         self.init_robot(simulate)
         self.execute_protocol_df()
-        self.close_connection(serveraddr)
+        self.close_connection()
         return
         
 
@@ -166,7 +206,10 @@ class ProtocolExecutor():
             ServiceAccountCredentials credentials: to access the sheets
             str rxn_sheet_name: the name of sheet
         returns:
-            str wks_key: the key associated with the sheet. It functions similar to a url
+            if self.use_cache:
+                str wks_key: the key associated with the sheet. It functions similar to a url
+            else:
+                None: this is ok because the wks key will not be used if caching
         '''
         name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         try:
@@ -190,12 +233,19 @@ class ProtocolExecutor():
             str rxn_sheet_name: the title of the sheet to be opened
             oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
         returns:
-            gspread.Spreadsheet the spreadsheet (probably of all the reactions)
+            if self.use_cache:
+                gspread.Spreadsheet the spreadsheet (probably of all the reactions)
+            else:
+                None: this is fine because the wks should never be used if cache is true
+
     
         '''
         gc = gspread.authorize(credentials)
         try:
-            wks = gc.open(rxn_sheet_name)
+            if self.use_cache:
+                wks = None
+            else:
+                wks = gc.open(rxn_sheet_name)
         except: 
             raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
         return wks
@@ -258,23 +308,26 @@ class ProtocolExecutor():
             list<list<str>> input_data: as recieved in excel
         returns:
             pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
+        Postconditions:
+            self._products has been initialized to hold the names of all the products
         '''
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'Pause before addition?':'pause', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
         #rename chemical names
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
         #go back for some non numeric columns
         rxn_df['callbacks'].fillna('',inplace=True)
-        products = product_names(rxn_df)
+        self._products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
         #make the reagent columns floats
-        rxn_df.loc[:,products] =  rxn_df[products].astype(float)
-        rxn_df.loc[:,products] = rxn_df[products].fillna(0)
-    
+        rxn_df.loc[:,self._products] =  rxn_df[self._products].astype(float)
+        rxn_df.loc[:,self._products] = rxn_df[self._products].fillna(0)
+
         return rxn_df
     
     def _rename_products(self, rxn_df):
@@ -299,10 +352,10 @@ class ProtocolExecutor():
             if 'dilution_placeholder' in col:
                 row = rxn_df.loc[~rxn_df[col].isna()].squeeze()
                 reagent_name = row['chemical_name']
-                name = reagent_name[:reagent_name.rfind('C')+1]+row['dilution_conc']
+                name = reagent_name[:reagent_name.rfind('C')+1]+str(row['dilution_conc'])
                 rename_key[col] = name
             else:
-                rename_key[col] = "{}C1".format(col).replace(' ','_')
+                rename_key[col] = "{}C1.0".format(col).replace(' ','_')
     
         rxn_df.rename(rename_key, axis=1, inplace=True)
 
@@ -317,13 +370,12 @@ class ProtocolExecutor():
             Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
                     labware and container preferences for products
         '''
-        products = product_names(self.rxn_df)
         cols = self.rxn_df.columns.to_list()
         product_start_i = cols.index('reagent')+1
         requested_containers = input_data[2][product_start_i+1:]
         requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
         #in df this is an index, so size cols is one less
-        products_to_labware = {product:[labware,container] for product, labware, container in zip(products, requested_labware,requested_containers)}
+        products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
         return products_to_labware
 
     def _get_chemical_name(self,row):
@@ -393,16 +445,19 @@ class ProtocolExecutor():
         #slots
         platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
                 (labware_df['name'] == 'platereader4')]
-        platereader_input_first_usable = platereader_rows.loc[\
-                platereader_rows['first_usable'].astype(bool), 'first_usable'].iloc[0]
-        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR['deck_pos'][platereader_input_first_usable]
-        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR['loc'][platereader_input_first_usable]
+        usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
+        assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
+        #TODO assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
+        #check if that works
+        platereader_input_first_usable = usable_rows.iloc[0]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
+        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
         if platereader_name == 'platereader7':
-            platereader4_first_usable = 'F8'
-            platereader7_firstusable = platereader_first_usable
+            platereader4_first_usable = 'F8' #anything larger than what is on plate
+            platereader7_first_usable = platereader_first_usable
         else:
             platereader4_first_usable = platereader_first_usable
-            platereader7_first_usable = 'A1'
+            platereader7_first_usable = 'G1'
         labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
         labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
         labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
@@ -486,7 +541,10 @@ class ProtocolExecutor():
             df reagent_df: empties ignored, columns with correct types
         '''
         reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
-        reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        try:
+            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        except ValueError as e:
+            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
         return reagent_df
 
     def _get_product_df(self, products_to_labware):
@@ -519,7 +577,6 @@ class ProtocolExecutor():
             excel
         '''
         header_dict = {row[0]:row[1] for row in header_data[1:]}
-        self.robo_params['simulate'] = header_dict['simulate'] == 'yes'
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
 
@@ -553,7 +610,7 @@ class ProtocolExecutor():
                 max_vol = max(max_vol, current_vol)
         return max_vol
 
-    def execute_protocol_df(self, buff_size=4):
+    def execute_protocol_df(self):
         '''
         takes a protocol df and sends every step to robot to execute
         params:
@@ -561,64 +618,226 @@ class ProtocolExecutor():
         Postconditions:
             every step in the protocol has been sent to the robot
         '''
-        inflight_packs = []
-        product_cols = self.rxn_df.loc[:,'reagent':'chemical_name'].drop(
-                columns=['reagent','chemical_name']).columns
-        for _, row in self.rxn_df.iterrows():
+        for i, row in self.rxn_df.iterrows():
             if row['op'] == 'transfer':
-                cid = self.send_transfer_command(row, product_cols)
-                inflight_packs.append(cid)
+                self.send_transfer_command(row,i)
             elif row['op'] == 'pause':
+                cid = self.portal.send_pack('pause',row['pause_time'])
+                self._inflight_packs.append(cid)
+            elif row['op'] == 'stop':
                 #read through the inflight packets
-                while inflight_packs:
-                    self._block_on_ready(inflight_packs)
-                input('<<controller>> paused. Please press enter when you\'re ready to continue')
+                cid = self.portal.send_pack('stop')
+                self._stop(i)
+                self._inflight_packs.append(cid)
             elif row['op'] == 'scan':
                 #TODO implement scans
                 pass
             elif row['op'] == 'dilution':
                 #TODO implement dilutions
-                pass
+                self.send_dilution_commands(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
             #check buffer
-            if len(inflight_packs) >= buff_size:
-                self._block_on_ready(inflight_packs)
-    
-    def send_transfer_command(self, row, product_cols):
+            if len(self._inflight_packs) >= self.buff_size:
+                self._block_on_ready()
+
+    def send_dilution_commands(self,row,i):
+        '''
+        used to execute a dilution. This is analogous to microcode. This function will send two
+          commands. Water is always added first.
+            transfer: transfer water into the container
+            transfer: transfer reagent into the container
+        params:
+            pd.Series row: a row of self.rxn_df
+            int i: index of this row
+        returns:
+            int: the cid of this command
+        Preconditions:
+            The buffer has room for at least one command
+        Postconditions:
+            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
+            Will block on ready if the buffer is filled
+            Both cid's will be appended to self._inflight_packs
+        '''
+        water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        self.send_transfer_command(water_transfer_row, i)
+        if len(self._inflight_packs) >= self.buff_size:
+            self._block_on_ready()
+        self.send_transfer_command(reagent_transfer_row, i)
+
+    def _get_dilution_transfer_rows(self, row):
+        '''
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command
+        params:
+            pd.Series row: a row of self.rxn_df
+        returns:
+            tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
+              reagent
+              see self._construct_dilution_transfer_row for details
+        '''
+        reagent = row['chemical_name']
+        reagent_conc = row['conc']
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
+        total_vol = dilution_name_vol.iloc[0]
+        target_name = dilution_name_vol.index[0]
+        target_conc = row['dilution_conc']
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
+        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
+        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        return water_transfer_row, reagent_transfer_row
+
+    def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
+        '''
+        The transfer command expects a nicely formated row of the rxn_df, so here we create a row
+        with everything in it to ship to the transfer command.
+        params:
+            str reagent_name: used as the chemical_name field
+            str target_name: used as the product_name field
+            str vol: the volume to transfer
+        returns:
+            pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
+              op] have been initialized. The other fields are empty/NaN
+        '''
+        template = self.rxn_df.iloc[0].copy()
+        template[:] = np.nan
+        template[self._products] = 0.0
+        template['op'] = 'transfer'
+        template['chemical_name'] = reagent_name
+        template[target_name] = vol
+        template['callbacks'] = ''
+        return template
+
+
+    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
+        '''
+        calculates the amount of reagent volume needed for a dilution
+        params:
+            float target_conc: the concentration desired at the end
+            float reagent_conc: the concentration of the reagent
+            float total_vol: the total volume requested
+        returns:
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer
+        '''
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
+
+    def _stop(self, i):
+        '''
+        used to execute a stop operation. reads through buffer and then waits on user input
+        params:
+            int i: the index of the row in the protocol you're stopped on
+        Postconditions:
+            self._inflight_packs has been cleaned
+        '''
+        #create a socket
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.my_ip, 50003))
+        sock.listen(5)
+        eve_sock, eve_addr = sock.accept()
+        message = eve_sock.recv(1)
+        assert (message == b'\01'), "controller was waiting on stop for robot to continue, but robot sent invalid code {}".format(message)
+        if not self.simulate:
+            input('<<controller>> stopped: encountered stop at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
+        eve_sock.send(b'\x01')
+        message = eve_sock.recv(1)
+        assert (message == b'\02'), "controller was waiting for robot to terminate stop link, but robot sent invalid code {}".format(message)
+        sock.close()
+        return
+
+
+    def send_transfer_command(self, row, i):
         '''
         params:
             pd.Series row: a row of self.rxn_df
+              uses the chemical_name, callbacks (and associated args), product_columns
+            int i: index of this row
         returns:
             int: the cid of this command
         Postconditions:
             a transfer command has been sent to the robot
+            and it's cid has been appended to self._inflight_packs
         '''
         src = row['chemical_name']
-        containers = row[product_cols].loc[row[product_cols] != 0]
+        containers = row[self._products].loc[row[self._products] != 0]
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
-        callbacks = row['callbacks'].split(',')
+        #temporarilly just the raw callbacks
+        callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
+        has_stop = 'stop' in callbacks
+        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
         cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
-        return cid
+        if has_stop:
+            #burn through buffer
+            while self._inflight_packs:
+                self._block_on_ready()
+            #stop on any incoming continues
+            self._block_on_continue(i)
+        self._inflight_packs.append(cid)
+
+    def _block_on_continue(self, i):
+        '''
+        recieves stop packets, gets user input, and sends continues until a ready is recieved
+        at which point the cid will be removed from self.inflight_packs, and control will be
+        returned
+        NOTE: this function breaks some of the 'rules' of the Armchair protocol. an inflight pack,
+        the 
+        params:
+            int i: the index of this row
+        Preconditions:
+            There must be only one inflight_packet, and that packet should alter control,
+            i.e. the robot is going to respond with a stop
+        Postconditions:
+            The inflight packet has been removed
+        '''
+        #create a socket
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.my_ip, 50003))
+        sock.listen(5)
+        eve_sock, eve_addr = sock.accept()
+        message = eve_sock.recv(1)
+        while b'\x01' == message:
+            if not self.simulate:
+                input('<<controller>> stopped: encountered stop callback at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
+            eve_sock.send(b'\x01')
+            message = eve_sock.recv(1)
+        assert (message == b'\x02'), 'something went wrong during stop communication on protocol line {}'.format(i)
+        sock.close()
+        return
     
+    def _get_callback_args(self, row, callback):
+        '''
+        params:
+            pd.Series row: a row of self.rxn_df
+        returns:
+            list<object>: the arguments associated with the callback or None if no arguments
+        '''
+        if callback == 'pause':
+            return [row['pause_time']]
+        return None
+
     
-    def _block_on_ready(self, inflight_packs):
+    def _block_on_ready(self):
         '''
         used to block until the server responds with a 'ready' packet
-        Preconditions: inflight_packs contains cids of packets that have been sent to server, but
+        Preconditions: self.inflight_packs contains cids of packets that have been sent to server, but
         not yet acknowledged
-        params:
-            list<int> inflight_packs: list of cids of send packets that have not been acked yet
         Postconditions:
             has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from inflight_packs
+            The cid in the ready command has been removed from self.inflight_packs
         '''
         pack_type, _, arguments = self.portal.recv_pack()
         if pack_type == 'error':
             error_handler()
         elif pack_type == 'ready':
             cid = arguments[0]
-            inflight_packs.remove(cid)
+            self._inflight_packs.remove(cid)
         else:
             raise Exception('invalid packet type {}'.format(pack_type))
             
@@ -638,7 +857,7 @@ class ProtocolExecutor():
             if not os.path.exists(path):
                 os.makedirs(path)
 
-    def close_connection(self, ip):
+    def close_connection(self):
         '''
         runs through closing procedure with robot
         params:
@@ -657,13 +876,15 @@ class ProtocolExecutor():
         assert(pack_type == 'sending_files')
         port = arguments[0]
         filenames = arguments[1]
+        #TODO race condition exists here. ConnectionRefusedError
         sock = socket.socket(socket.AF_INET)
-        sock.connect((ip, port))
+        sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
         for filename in filenames:
             with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
                 data = buffered_sock.recv_until(armchair.FTP_EOF)
                 write_file.write(data)
+        self.translate_wellmap()
         print('<<controller>> files recieved')
         sock.close()
         #server should now send a close command
@@ -672,6 +893,19 @@ class ProtocolExecutor():
         print('<<controller>> shutting down')
         self.portal.close()
     
+    def translate_wellmap(self):
+        '''
+        Preconditions:
+            there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+            machine labels
+        Postconditions:
+            translated_wellmap.tsv has been created. translated is a copy of wellmap with 
+            it's locations translated to human locs, but the labware pos remains the same
+        '''
+        df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
+        df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
+        df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
+
     def error_handler(self):
         pass
     
@@ -684,20 +918,143 @@ class ProtocolExecutor():
         #send robot data to initialize itself
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
-                self.robo_params['labware_df'], self.robo_params['instruments'],
-                self.robo_params['reagent_df'])
-        inflight_packs = [cid]
-        self._block_on_ready(inflight_packs)
+                self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
+                self.robo_params['reagent_df'].to_dict(), self.my_ip)
+        self._inflight_packs.append(cid)
+        self._block_on_ready()
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
-        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'])
-        inflight_packs.append(cid)
-        self._block_on_ready(inflight_packs)
+        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
+        self._inflight_packs.append(cid)
+        self._block_on_ready()
         return
 
     
     #TESTING
+    #PRE Simulation
+    def run_all_checks(self):
+        found_errors = 0
+        found_errors = max(found_errors, self.check_rxn_df())
+        found_errors = max(found_errors, self.check_labware())
+        found_errors = max(found_errors, self.check_reagents())
+        found_errors = max(found_errors, self.check_products())
+        if found_errors == 0:
+            print("<<controller>> All prechecks passed!")
+            return
+        elif found_errors == 1:
+            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
+                return
+            else:
+                raise Exception('Aborting base on user input')
+        elif found_errors == 2:
+            raise Exception('Critical Errors encountered during prechecks. Aborting')
+
+    def check_rxn_df(self):
+        '''
+        Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
+        Advised options are printed and if an error code is returned
+        Will run through and check all rows, even if errors are found
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        for i, r in self.rxn_df.iterrows():
+            r_num = i+1
+            #check pauses
+            if (not ('pause' in r['op'] or 'pause' in r['callbacks'])) == (not pd.isna(r['pause_time'])):
+                print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
+                found_errors = max(found_errors, 2)
+            #check that there's always a volume when you transfer
+            if (r['op'] == 'transfer' and math.isclose(r[self._products].sum(), 0,abs_tol=1e-9)):
+                print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
+                found_errors = max(found_errors, 1)
+            #check that you have a reagent if you're transfering
+            if r['op'] == 'transfer' and not r['reagent']:
+                print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+        return found_errors
+                
+    def check_labware(self):
+        '''
+        checks to ensure that the labware has been correctly initialized
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['labware_df'].iterrows():
+            #check that everything has afirst well if it's not a tube
+            if not 'tube' in r['name'] and not r['first_usable']:
+                print('<<controller>> specified labware {} on deck_pos {}, but did not specify first usable tip/well.'.format(r['name'], r['deck_pos']))
+                found_errors = max(found_errors,2)
+            #if you're not a tube and you have an empty_list, that's also bad
+            if not 'tube' in r['name'] and r['empty_list']:
+                print('<<controller>> An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.'.format(r['name'], r['deck_pos'], r['name']))
+                found_errors = max(found_errors,2)
+            #check for no duplicates in the empty list
+            if r['empty_list']:
+                locs = r['empty_list'].replace(' ','').split(',')
+                if len(set(locs)) < len(locs):
+                    print('<<controller>> empty list for {} on deck pos {} had duplicates. List was {}'.format(r['name'],r['deck_pos'], r['empty_list']))
+                    found_errors = max(found_errors,2)
+        return found_errors 
+
+    def check_products(self):
+        '''
+        checks to ensure that the products were correctly initialized
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['product_df'].loc[\
+                ~self.robo_params['product_df']['labware'].astype(bool) & \
+                ~self.robo_params['product_df']['container'].astype(bool)].iterrows():
+            found_errors = max(found_errors,1)
+            print('<<controller>> {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\'s what you want? '.format(i))
+        return found_errors
+
+    def check_reagents(self):
+        '''
+        checks to ensure that you've specified reagents correctly, and also checks that
+        you did not double book empty containers onto reagents
+        returns
+            int found_errors:
+                code:
+                0: OK.
+                1: Some Errors, but could run
+                2: Critical. Abort
+        '''
+        found_errors = 0
+        #This is a little hefty. We're checking to see if any reagents/empty containers 
+        #were double booked onto the same location on the same deck position
+        labware_w_empties = self.robo_params['labware_df'].loc[self.robo_params['labware_df']['empty_list'].astype(bool)]
+        loc_pos_empty_pairs = [] # will become series
+        for i, row in labware_w_empties.iterrows():
+            for loc in row['empty_list'].replace(' ','').split(','):
+                loc_pos_empty_pairs.append((loc, row['deck_pos']))
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+        loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
+        loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
+        val_counts = loc_deck_pos_pairs.value_counts()
+        for i in val_counts.loc[val_counts > 2].index:
+            print('<<controller>> location {} on deck position has multiple reagents/empty containers assigned to it')
+            found_errors = max(found_errors,2)
+        return found_errors
+
+
+    #POST Simulation
     def run_all_tests(self):
         '''
         runs all post rxn tests
@@ -783,7 +1140,7 @@ class ProtocolExecutor():
             print(row.to_frame().T)
             print()
             return False
-        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e9):
+        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e-9):
             print('<<controller>> volume error:')
             print(row.to_frame().T)
             print()
@@ -838,7 +1195,7 @@ class ProtocolExecutor():
             else:
                 return 'any'
         product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
-        product_df['vol'] = [self._vol_calc(name,self.rxn_df) for name in product_df.index]
+        product_df['vol'] = [self._vol_calc(name) for name in product_df.index]
         product_df['loc'] = 'any'
         product_df.replace('','any', inplace=True)
         reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
@@ -850,18 +1207,28 @@ class ProtocolExecutor():
         sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
         return sbs
 
-    def _vol_calc(self, name, rxn_df):
+    def _vol_calc(self, name):
         '''
         params:
             str name: chem_name
-            df rxn_df: from excel
         returns:
             volume at end in that name
         '''
-        dispenses = rxn_df[name].sum()
-        aspirations = rxn_df.loc[(rxn_df['op']=='transfer') &\
-                (rxn_df['chemical_name'] == name),product_names(rxn_df)].sum().sum()
-        return dispenses - aspirations
+        dispenses = self.rxn_df[name].sum()
+        transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
+                (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
+        dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
+                (self.rxn_df['chemical_name'] == name),:]
+        def calc_dilution_vol(row):
+            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
+            return reagent_transfer_row[self._products].sum()
+
+        if dilution_rows.empty:
+            dilution_aspirations = 0.0
+        else:
+            dilution_vols = dilution_rows.apply(lambda r: calc_dilution_vol(r),axis=1)
+            dilution_aspirations = dilution_vols.sum()
+        return dispenses - transfer_aspirations - dilution_aspirations
     
     def _is_valid_contents_sbs(self, row):
         '''
@@ -891,58 +1258,37 @@ class ProtocolExecutor():
 
     def _create_contents_sbs(self):
         '''
+        constructs a side by side frame from the history in well_history.tsv and the reaction
+        df
+        NOTE: completely ignores aspiration, but if all of your dispenses are correct, and your
+        final contents are correct you're looking pretty good
         '''
         history = pd.read_csv(os.path.join(self.eve_files_path, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
         disp_hist = history.loc[history['chem_name'].astype(bool)]
         contents = disp_hist.groupby(['container','chem_name']).sum()
-        products = self.rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
         theoretical_his_list = []
-        for _, row in self.rxn_df.loc[self.rxn_df['op']=='transfer'].iterrows():
-            for product in products:
-                theoretical_his_list.append((product, row[product], row['chemical_name']))
-        theoretical_his = pd.DataFrame(theoretical_his_list, columns=['container', 'vol', 'chem_name'])
+        for _, row in self.rxn_df.loc[(self.rxn_df['op'] == 'transfer') | \
+                (self.rxn_df['op'] == 'dilution')].iterrows():
+            if row['op'] == 'transfer':
+                for product in self._products:
+                    theoretical_his_list.append((product, row[product], row['chemical_name']))
+            else: #row['op'] == 'dilution'
+                water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
+                product_vols = water_transfer_row[self._products]
+                target_reagent = product_vols.loc[~product_vols.apply(lambda x: \
+                        math.isclose(x,0,abs_tol=1e-9))].index[0]
+                theoretical_his_list.append((target_reagent, water_transfer_row[target_reagent], \
+                        'WaterC1.0'))
+                theoretical_his_list.append((target_reagent, \
+                        reagent_transfer_row[target_reagent], \
+                        reagent_transfer_row['chemical_name']))
+        theoretical_his = pd.DataFrame(theoretical_his_list, \
+                columns=['container', 'vol', 'chem_name'])
         theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
         theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
                 math.isclose(x,0))]
         sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
         return sbs
-    #WORKING
-
-
-
-def get_robot_params(rxn_spreadsheet, rxn_df, spreadsheet_key, credentials, products_to_labware):
-    '''
-    params:
-        Armchair portal: the armchair object connected to robot
-        gspread.Spreadsheet rxn_spreadsheet: a spreadsheet object with second sheet having
-          deck positions
-        df rxn_df: the input df read from sheets
-        bool simulate: if the robot is to simulate or execute
-        str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-        ServiceAccount Credentials credentials: to access sheets
-        bool using_temp_ctrl: true if temp control should be used
-        float temp: the temperature to keep the module at
-        Dict<str, str>: maps rxns to prefered labware
-    returns:
-        df reagent_df: info on reagents. columns from sheet. See excel specification
-        df labware_df:
-            str name: the common name of the labware
-            str first_usable: the first tip/well to use
-            int deck_pos: the position on the deck of this labware
-            str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-              order
-        Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
-          are the pipette names filled in
-        df product_df:
-            INDEX
-            the chemical names of the products
-            COLS
-            str labware: type of labware to use
-            float max_vol: the maximum volume that will be in this container at any time
-    '''
-
-
-
 
 #SERVER
 #CONTAINERS
@@ -1350,10 +1696,11 @@ class WellPlate(Labware):
     def __init__(self, labware, first_well, deck_pos):
         super().__init__(labware, deck_pos)
         #allow for none initialization
-        n_rows = len(labware.columns()[0])
-        col = first_well[:1]#alpha part
-        row = first_well[1:]#numeric part
-        self.current_well = (ord(col)-64)*n_rows #transform alpha num to num
+        all_wells = labware.wells()
+        self.current_well = 0
+        while self.current_well < len(all_wells) and all_wells[self.current_well]._impl._name != first_well:
+            self.current_well += 1
+        #if you overflowed you'll be correted here
         self.full = self.current_well >= len(labware.wells())
 
     def pop_next_well(self, vol=None,container_type=None):
@@ -1411,7 +1758,7 @@ class OT2Controller():
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, ip, portal):
+    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal):
         '''
         params:
             bool simulate: if true, the robot will run in simulation mode only
@@ -1426,7 +1773,8 @@ class OT2Controller():
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
               are the pipette names filled in
             df reagent_df: info on reagents. columns from sheet. See excel specification
-            str: ip
+            str my_ip: the ip address of the robot
+            bool simulate: whether to simulate protocol or not
                 
         postconditions:
             protocol has been initialzied
@@ -1436,10 +1784,15 @@ class OT2Controller():
               it is the client's responsibility to make sure that these are initialized prior
               to operating with them
         '''
+        #convert args back to df
+        labware_df = pd.DataFrame(labware_df)
+        reagent_df = pd.DataFrame(reagent_df)
         self.containers = {}
         self.pipettes = {}
-        self.ip = ip
+        self.my_ip = my_ip
         self.portal = portal
+        self.controller_ip = controller_ip
+        self.simulate = simulate
 
         #self.log = logging.getLogger('eve_logger')
         #self.log.addHandler(logging.FileHandler('.eve.log',encoding='utf8'))
@@ -1534,8 +1887,8 @@ class OT2Controller():
         '''
         TODO: if this still just initializes speed when we're done, it should be named such
         '''
-        self.protocol.max_speeds['X'] = 100
-        self.protocol.max_speeds['Y'] = 100
+        self.protocol.max_speeds['X'] = 250
+        self.protocol.max_speeds['Y'] = 250
 
     def _init_temp_mod(self, name, using_temp_ctrl, temp, deck_pos, empty_tubes):
         '''
@@ -1747,11 +2100,19 @@ class OT2Controller():
             the command has been executed
         '''
         if command_type == 'transfer':
-            self._exec_tranfer(*arguments)
+            self._exec_transfer(*arguments)
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'init_containers':
-            self._exec_init_containers(arguments[0])
+            self._exec_init_containers(pd.DataFrame(arguments[0]))
+            self.portal.send_pack('ready', cid)
+            return 1
+        elif command_type == 'pause':
+            self._exec_pause(arguments[0])
+            self.portal.send_pack('ready', cid)
+            return 1
+        elif command_type == 'stop':
+            self._exec_stop()
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'close':
@@ -1760,39 +2121,106 @@ class OT2Controller():
         else:
             raise Exception("Unidenified command {}".format(pack_type))
 
-    def _exec_tranfer(self, src, transfer_steps, callbacks):
+    def _exec_pause(self,pause_time):
         '''
+        executes a pause command by waiting for 'time' seconds
+        params:
+            float pause_time: time to wait in seconds
+        '''
+        #no need to pause for a simulation
+        if not self.simulate:
+            time.sleep(pause_time)
+
+    def _exec_transfer(self, src, transfer_steps, callbacks):
+        '''
+        this command executes a transfer. It's usually pretty simple, unless you have
+        a stop callback. If you have a stop callback it launches a new TCP connection and
+        stops to wait for user input at each transfer
         params:
             str src: the chem_name of the source well
             list<tuple<str,float>> transfer_steps: each element is a dst, vol pair
             list<str> callbacks: the ordered callbacks to perform after each transfer or None
         '''
-        #we want to pick up new tip at the start
-        new_tip=True
+        #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
+        for arm in self.pipettes.keys():
+            if src != self.pipettes[arm]['last_used'] and self.pipettes[arm]['last_used'] != 'clean':
+                self._get_new_tip(arm)
+        callback_types = [callback for callback, _ in callbacks]
+        #if you're going to be altering flow, you need to create a seperate connection with the
+        #controller
+        if 'stop' in callback_types:
+            sock = socket.socket(socket.AF_INET)
+            fail_count=0
+            connected = False
+            while not connected and fail_count < 3:
+                try:
+                    sock.connect((self.controller_ip, 50003))
+                    connected = True
+                except ConnectionRefusedError:
+                    fail_count += 1
+                    time.sleep(2**fail_count)
         for dst, vol in transfer_steps:
             self._transfer_step(src,dst,vol)
             new_tip=False #don't want to use a new tip_next_time
             if callbacks:
-                for callback in callbacks:
-                    #call the callback
-                    pass
+                for callback, args in callbacks:
+                    if callback == 'pause':
+                        self._exec_pause(args[0])
+                    elif callback == 'stop':
+                        self._stop(sock)
+        #if you created a connection, you indicate you're done and close it
+        if 'stop' in callback_types:
+            sock.send(b'\02')
+            sock.close()
         return
 
+    def _exec_stop(self):
+        '''
+        executes a stop command by creating a TCP connection, telling the controller to get
+        user input, and then waiting for controller response
+        '''
+        sock = socket.socket(socket.AF_INET)
+        fail_count=0
+        connected = False
+        while not connected and fail_count < 3:
+            try:
+                sock.connect((self.controller_ip, 50003))
+                connected = True
+            except ConnectionRefusedError:
+                fail_count += 1
+                time.sleep(2**fail_count)
+        self._stop(sock)
+        sock.send(b'\02')
+        sock.close()
+
+    def _stop(self, sock):
+        '''
+        sends a stop signal to the controller and blocks until it recieves a continue
+        params:
+            socket sock: connected to the controller for purpose of communicating stop information
+        Preconditions:
+            Controller must be expecting a b'\x01' on this stream
+        '''
+        sock.send(b'\x01')
+        message = sock.recv(1)
+        assert (message == b'\x01'), "recieved invalid response '{}' from controller while waiting on stop for continue".format(message)
+        return
+        
     def _transfer_step(self, src, dst, vol):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
-        appropriately sized pipettes. dropping tip if it's a new chemical. If you need
+        appropriately sized pipettes. If you need
         more than 1 step, will facilitate that
+        params:
+            str src: the chemical name to pipette from
+            str dst: thec chemical name to pipette into
+            float vol: the volume to pipette
         '''
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
         n_substeps = int(vol // self.pipettes[arm]['size']) + 1
         substep_vol = vol / n_substeps
         
-        #if you need a new tip, get one 
-        if src != self.pipettes[arm]['last_used'] and src != 'clean':
-            self._get_new_tip(arm)
-
         #transfer the liquid in as many steps are necessary
         for i in range(n_substeps):
             self._liquid_transfer(src, dst, substep_vol, arm)
@@ -1801,9 +2229,10 @@ class OT2Controller():
     def _get_new_tip(self, arm):
         '''
         replaces the tip with a new one
+        params:
+            str arm: 'left' or 'right' to differentiate pipetes
         TODO: Michael found it necessary to test if has_tip. I don't think this is needed
           but revert to it if you run into trouble
-        TODO: pickup tip on init
         TODO: Wrap in try for running out of tips
         '''
         pipette = self.pipettes[arm]['pipette']
@@ -1857,7 +2286,13 @@ class OT2Controller():
             vol uL of src has been transfered to dst
             pipette has been adjusted to be dirty with src
             volumes of src and dst have been updated
+        Preconditions:
+            Both pipettes are clean or of same type
         '''
+        for arm_to_check in self.pipettes.keys():
+            #this is really easy to fix, but it should not be fixed here, it should be fixed in a
+            #higher level function call. This is minimal step for maximum speed.
+            assert (src == self.pipettes[arm_to_check]['last_used'] or self.pipettes[arm_to_check]['last_used'] == 'clean'), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
@@ -1902,7 +2337,7 @@ class OT2Controller():
             labware = self.lab_deck[container.deck_pos]
             return labware.get_container_type(container.loc)
         container_types = [lookup_container_type(name) for name in names]
-        well_map = pd.DataFrame({'chem_name':names, 'loc':locs, 'deck_pos':deck_poses, 
+        well_map = pd.DataFrame({'chem_name':list(names), 'loc':locs, 'deck_pos':deck_poses, 
                 'vol':vols,'container':container_types})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
         well_map.to_csv(path, index=False, sep='\t')
@@ -1945,6 +2380,11 @@ class OT2Controller():
         close the connection in a nice way
         '''
         print('<<eve>> initializing breakdown')
+        self.protocol.home()
+        for arm_dict in self.pipettes.values():
+            pipette = arm_dict['pipette']
+            pipette.drop_tip()
+        self.
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
@@ -1965,13 +2405,15 @@ class OT2Controller():
             int port: the port number to ship the files out of
             list<str> filepaths: the filepaths to ship
         '''
+        #setting up a socket for FTP
+        sock = socket.socket(socket.AF_INET)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((self.my_ip, port))
+        sock.listen(5)
+        #send ok to server that you are ready to accept
         print('<<eve>> initializing filetransfer')
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
         self.portal.send_pack('sending_files', port, filenames)
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.ip, port))
-        sock.listen(5)
         client_sock, client_addr = sock.accept()
         for filepath in filepaths:
             with open(filepath,'rb') as local_file:
@@ -2007,16 +2449,18 @@ def launch_eve_server(**kwargs):
     eve = None
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
-        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df = args
+        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip = args
         #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
         #like to be run from a thread
         asyncio.set_event_loop(asyncio.new_event_loop())
-        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, portal)
+        eve = OT2Controller(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:
         pack_type, cid, payload = portal.recv_pack()
         connection_open = eve.execute(pack_type, cid, payload)
+    sock.close()
+    return
 
 def make_unique(s):
     '''
@@ -2039,16 +2483,3 @@ def make_unique(s):
         else:
             return name
     return s.apply(_get_new_name)
-
-def product_names(rxn_df):
-    '''
-    handy accessor method to get the products of rxn_df
-    Preconditions:
-        reagent is the first column before the products, 'chemical_name' is the last col
-    params:
-        df rxn_df: as in excel
-    returns:
-        index: the products
-    '''
-    return rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
-
