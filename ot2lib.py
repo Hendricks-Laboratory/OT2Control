@@ -2384,7 +2384,6 @@ class OT2Controller():
         for arm_dict in self.pipettes.values():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
-        self.
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
