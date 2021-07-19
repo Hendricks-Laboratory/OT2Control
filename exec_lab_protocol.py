@@ -27,7 +27,7 @@ def main():
 
     if tests_passed:
         if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol()
+            controller.run_protocol(simulate=True)
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 

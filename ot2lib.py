@@ -2142,7 +2142,10 @@ class OT2Controller():
             list<str> callbacks: the ordered callbacks to perform after each transfer or None
         '''
         #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
-        self._get_clean_tips([src])
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
+                self._get_clean_tips()
+                break; #cause now they're clean
         callback_types = [callback for callback, _ in callbacks]
         #if you're going to be altering flow, you need to create a seperate connection with the
         #controller
@@ -2224,7 +2227,7 @@ class OT2Controller():
             self._liquid_transfer(src, dst, substep_vol, arm)
         return
 
-    def _get_clean_tips(self, ok_chems):
+    def _get_clean_tips(self):
         '''
         checks if the both tips to see if they're dirty. Drops anything that's dirty, then picks
         up clean tips
@@ -2234,7 +2237,7 @@ class OT2Controller():
         '''
         drop_list = [] #holds the pipettes that were dirty
         #drop first so no sprinkles get on rack while picking up
-        ok_list = ['clean','WaterC1.0'] + ok_chems
+        ok_list = ['clean','WaterC1.0']
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ok_list:
                 self.pipettes[arm]['pipette'].drop_tip()
