@@ -2142,9 +2142,7 @@ class OT2Controller():
             list<str> callbacks: the ordered callbacks to perform after each transfer or None
         '''
         #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
-        for arm in self.pipettes.keys():
-            if src != self.pipettes[arm]['last_used'] and self.pipettes[arm]['last_used'] != 'clean':
-                self._get_new_tip(arm)
+        self._get_clean_tips([src])
         callback_types = [callback for callback, _ in callbacks]
         #if you're going to be altering flow, you need to create a seperate connection with the
         #controller
@@ -2226,19 +2224,25 @@ class OT2Controller():
             self._liquid_transfer(src, dst, substep_vol, arm)
         return
 
-    def _get_new_tip(self, arm):
+    def _get_clean_tips(self, ok_chems):
         '''
-        replaces the tip with a new one
+        checks if the both tips to see if they're dirty. Drops anything that's dirty, then picks
+        up clean tips
         params:
-            str arm: 'left' or 'right' to differentiate pipetes
-        TODO: Michael found it necessary to test if has_tip. I don't think this is needed
-          but revert to it if you run into trouble
+            str ok_chems: if you're ok reusing the same tip for this chemical, no need to replace
         TODO: Wrap in try for running out of tips
         '''
-        pipette = self.pipettes[arm]['pipette']
-        pipette.drop_tip()
-        pipette.pick_up_tip()
-        self.pipettes[arm]['last_used'] = 'clean'
+        drop_list = [] #holds the pipettes that were dirty
+        #drop first so no sprinkles get on rack while picking up
+        ok_list = ['clean','WaterC1.0'] + ok_chems
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm]['last_used'] not in ok_list:
+                self.pipettes[arm]['pipette'].drop_tip()
+                drop_list.append(arm)
+        #now that you're clean, you can pick up new tips
+        for arm in drop_list:
+            self.pipettes[arm]['pipette'].pick_up_tip()
+            self.pipettes[arm]['last_used'] = 'clean'
 
     def _get_preffered_pipette(self, vol):
         '''
@@ -2292,7 +2296,7 @@ class OT2Controller():
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
             #higher level function call. This is minimal step for maximum speed.
-            assert (src == self.pipettes[arm_to_check]['last_used'] or self.pipettes[arm_to_check]['last_used'] == 'clean'), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
+            assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
@@ -2380,10 +2384,10 @@ class OT2Controller():
         close the connection in a nice way
         '''
         print('<<eve>> initializing breakdown')
-        self.protocol.home()
         for arm_dict in self.pipettes.values():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
+        self.protocol.home()
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
