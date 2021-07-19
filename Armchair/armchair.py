@@ -7,9 +7,10 @@ import dill
 FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
 
 class Armchair():
-    def __init__(self, socket, name, log_path=''):
+    def __init__(self, socket, name, log_path='', buffsize=4):
         self.sock = socket
         self.cid = 0
+        self._inflight_packs = []
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
         self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09'})
         self.name = name
@@ -59,27 +60,31 @@ class Armchair():
     def recv_pack(self):
         '''
         processes the next packet and returns None if nothing to read
+        If the next packet was a ready packet it will be ignored and the 
         returns: if packet in buffer
             str: type of packet
             bytes: the argmuents/payload
         returns: else
             (None,None)
         '''
-        header = self.sock.recv_size(17)
-        header_len = self.get_len(header)
-        header_type = self.get_type(header)
-        header_cid = self.get_cid(header)
-        if header_len > 0: #if there were arguments
-            payload = self.sock.recv_size(header_len)
-            payload = dill.loads(payload)
-        else:
-            payload = None
-        with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
-            armchair_log.write("{}\trecieved {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'),header_type,self.cid))
+        header_type == 'ready' #do while
+        while header_type == 'ready':
+            header = self.sock.recv_size(17)
+            header_len = self.get_len(header)
+            header_type = self.get_type(header)
+            header_cid = self.get_cid(header)
+            if header_len > 0: #if there were arguments
+                payload = self.sock.recv_size(header_len)
+                payload = dill.loads(payload)
+            else:
+                payload = None
+            with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
+                armchair_log.write("{}\trecieved {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'),header_type,self.cid))
         return header_type, header_cid, payload
         
     def send_pack(self, pack_type, *args):
         '''
+        will first check the buffer. If buffer size is exceded will wait on a ready
         constructs a packet and sends it over network
         params:
             str pack_type: the type of packet being sent (string form)
@@ -89,7 +94,10 @@ class Armchair():
         Postconditions:
             An armchair packet has been constructed and sent over the socket
             has created log entry of send
+            cid has been appended to self._inflight_packs
         '''
+        if len(self._inflight_packs) > self.buffsize:
+            self._block_on_ready()
         if args:
             payload = dill.dumps(args)
             n_bytes = len(payload)
@@ -101,7 +109,22 @@ class Armchair():
             self.sock.send(header)
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
             armchair_log.write("{}\tsending {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'), pack_type,self.cid))
+        self._inflight_packs.append(self.cid)
         return self.cid
+
+    def _block_on_ready(self):
+        '''
+        used to block until the other side responds with a 'ready' packet
+        Preconditions: self._inflight_packs contains cids of packets that have been sent 
+        not yet acknowledged
+        Postconditions:
+            has stalled until a ready command was recieved.
+            The cid in the ready command has been removed from self.inflight_packs
+        '''
+        pack_type, _, arguments = self.recv_pack()
+        assert (pack_type == 'ready'), "was expecting a ready packet, but instead recieved a {}".format(pack_type)
+        cid = arguments[0]
+        self._inflight_packs.remove(cid)
 
     def close(self):
         self.sock.close()
