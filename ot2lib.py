@@ -88,7 +88,6 @@ class ProtocolExecutor():
         self.cache_path = cache_path
         self.use_cache = use_cache
         self._make_out_dirs(out_path)
-        self._inflight_packs = []
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size=4
@@ -623,12 +622,10 @@ class ProtocolExecutor():
                 self.send_transfer_command(row,i)
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
-                self._inflight_packs.append(cid)
             elif row['op'] == 'stop':
                 #read through the inflight packets
                 cid = self.portal.send_pack('stop')
                 self._stop(i)
-                self._inflight_packs.append(cid)
             elif row['op'] == 'scan':
                 #TODO implement scans
                 pass
@@ -637,9 +634,6 @@ class ProtocolExecutor():
                 self.send_dilution_commands(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
-            #check buffer
-            if len(self._inflight_packs) >= self.buff_size:
-                self._block_on_ready()
 
     def send_dilution_commands(self,row,i):
         '''
@@ -657,12 +651,9 @@ class ProtocolExecutor():
         Postconditions:
             Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
             Will block on ready if the buffer is filled
-            Both cid's will be appended to self._inflight_packs
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
         self.send_transfer_command(water_transfer_row, i)
-        if len(self._inflight_packs) >= self.buff_size:
-            self._block_on_ready()
         self.send_transfer_command(reagent_transfer_row, i)
 
     def _get_dilution_transfer_rows(self, row):
@@ -762,7 +753,6 @@ class ProtocolExecutor():
             int: the cid of this command
         Postconditions:
             a transfer command has been sent to the robot
-            and it's cid has been appended to self._inflight_packs
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
@@ -778,7 +768,6 @@ class ProtocolExecutor():
                 self._block_on_ready()
             #stop on any incoming continues
             self._block_on_continue(i)
-        self._inflight_packs.append(cid)
 
     def _block_on_continue(self, i):
         '''
@@ -822,26 +811,6 @@ class ProtocolExecutor():
             return [row['pause_time']]
         return None
 
-    
-    def _block_on_ready(self):
-        '''
-        used to block until the server responds with a 'ready' packet
-        Preconditions: self.inflight_packs contains cids of packets that have been sent to server, but
-        not yet acknowledged
-        Postconditions:
-            has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from self.inflight_packs
-        '''
-        pack_type, _, arguments = self.portal.recv_pack()
-        if pack_type == 'error':
-            error_handler()
-        elif pack_type == 'ready':
-            cid = arguments[0]
-            self._inflight_packs.remove(cid)
-        else:
-            raise Exception('invalid packet type {}'.format(pack_type))
-            
-    
     def _make_out_dirs(self, out_path):
         '''
         params:
@@ -920,15 +889,10 @@ class ProtocolExecutor():
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
                 self.robo_params['reagent_df'].to_dict(), self.my_ip)
-        self._inflight_packs.append(cid)
-        self._block_on_ready()
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
-        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
-        self._inflight_packs.append(cid)
-        self._block_on_ready()
-        return
+        self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
 
     
     #TESTING
@@ -1387,6 +1351,7 @@ class Tube20000uL(Container):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass15 = 6.6699 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
@@ -1422,7 +1387,7 @@ class Tube50000uL(Container):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass50 = 13.3950 # grams
         self.mass = mass - avg_tube_mass50 # N = 1 (in grams) 
-        assert (self.mass > 0),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
@@ -1454,10 +1419,11 @@ class Tube2000uL(Container):
     DEAD_VOL = 250 #uL
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
+    def __init__(self, name, deck_pos, loc, mass=1.4, conc=2):
         density_water_4C = 0.9998395 # g/mL
         avg_tube_mass2 =  1.4        # grams
         self.mass = mass - avg_tube_mass2 # N = 1 (in grams) 
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
            
