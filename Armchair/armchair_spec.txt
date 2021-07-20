@@ -117,5 +117,20 @@ x0A: 'dilution'
     controller->robot:
     Description: used to execute a dilution
 
+x0B: 'loc_req'
+    conroller->robot:
+    Description: Since the controller does not know where the robot put things, it must query
+        those wells in order to get their locations and labware. Note if you get platereader wells
+        you'll have to translate them back to human readable
+    Args:
+        list<str> wellnames: the names of the wells to be queried
+
+x0C: 'loc_resp'
+    robot->controller:
+    Description: the response to a loc_req
+    Args:
+        list<tuple<str,str,int>>: 1st element is the chem name, 2nd element is the well loc, 3rd
+	    element is the labware deck_pos
+
 UNFINISHED
 error x02

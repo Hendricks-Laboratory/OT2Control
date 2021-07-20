@@ -103,5 +103,14 @@ class Armchair():
             armchair_log.write("{}\tsending {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'), pack_type,self.cid))
         return self.cid
 
+    def burn_pipe(self):
+        '''
+        burns through the pipe by reading all of the ready commands
+        Postconditions:
+            Nothing left in the inflight packets buffer
+        '''
+        while self._inflight_packets:
+            self._block_on_ready()
+
     def close(self):
         self.sock.close()

@@ -93,6 +93,7 @@ class ProtocolExecutor():
         self.server_ip = server_ip
         self.buff_size=4
         self.simulate = False #by default will be changed if a simulation is run
+        self.cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -658,7 +659,20 @@ class ProtocolExecutor():
         returns:
             int: the cid of this command
         '''
-        pass
+        self.portal.burn_pipe()
+        wellnames #todo parse
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self.cached_reader_locs]
+        self.portal.send_pack('loc_req', unknown_wellnames)
+        pack_type, _, well_locs = self.portal.recv_pack()
+        #update the cache
+        for well_entry in well_locs:
+            self.cache_reader_locs[well_entry[0]] = (well_entry[1], well_entry[2])
+        #update the locs on the well
+        well_locs = []
+        for well, entry in [(well, self.cache_reader_locs[well]) for well in wellnames]:
+            assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
+            well_locs.append(entry[0])
+        breakpoint()
 
     def send_dilution_commands(self,row,i):
         '''
