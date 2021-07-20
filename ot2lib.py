@@ -728,7 +728,8 @@ class ProtocolExecutor():
         '''
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
-        input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+        if not self.simulate:
+            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
     def send_transfer_command(self, row, i):
