@@ -29,8 +29,9 @@ class PlateReader():
         #add arguments
         for arg in args:
             exec_str += " '{}'".format(arg)
-        print(exec_str)
         exit_code = os.system(exec_str)
+        print(exec_str)
+        print()
         try:
             assert (exit_code == 0)
         except:
@@ -67,19 +68,20 @@ class PlateReader():
         params:
             str protocol_name: the name of the protocol that will be edited
             list<str> wells: the wells that you want to be used for the protocol ordered.
-              (first will be X1, second X2 etc.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X
         Postcondtions:
             The protocol has had it's layout updated to include only the wells specified
         '''
+        if layout == 'all':
+            #get a list of all the wellanmes
+            layout = [a+str(i) for a in list('ABCDEFGH') for i in range(1,13,1)]
         well_entries = []
         for i, well in enumerate(layout):
             well_entries.append("{}=X{}".format(well, i+1))
         well_arg = "EmptyLayout {}".format(' '.join(well_entries))
-        print(protocol_name)
         self.exec_macro('EditLayout', protocol_name, self.PROTOCOL_PATH, well_arg)
 
-    def run_protocol(self, protocol_name, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
-, layout=None):
+    def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
         r'''
         params:
             str protocol_name: the name of the protocol that will be edited
@@ -92,7 +94,8 @@ class PlateReader():
             self.edit_layout(protocol_name, layout)
         macro = 'run'
         data_path = data_path
-        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path)
+        #three '' are plate ids to pad. data_path specified once for ascii and once for other
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path, '', '', '', '', filename)
 
     def shutdown(self):
         '''
