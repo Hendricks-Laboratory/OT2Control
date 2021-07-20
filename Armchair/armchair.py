@@ -7,13 +7,22 @@ import dill
 FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
 
 class Armchair():
+    '''
+    TODO this docstring
+    NOTE that buffer is not a hardware constraint. GHOST items can slip through
+    '''
+
+    GHOST_TYPES = ['continue', 'stopped'] #These are necessary because we never want to wait on a
+    #buffer. These packs should be send as soon as possible
+    #They also do not require ready's / are not added to inflight packs. Do not modify CID.
+
     def __init__(self, socket, name, log_path='', buffsize=4):
         self.sock = socket
         self.cid = 0
         self.buffsize = buffsize
         self._inflight_packs = []
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09'})
+        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A'})
         self.name = name
         self.log_path = log_path
         if not os.path.exists(self.log_path):
@@ -55,7 +64,8 @@ class Armchair():
             int n_bytes: the number of bytes in the payload
             str pack_type: the type of the packet
         '''
-        self.cid+=1
+        if pack_type not in self.GHOST_TYPES:
+            self.cid+=1
         return n_bytes.to_bytes(8,'big') + self.pack_types[pack_type] + self.cid.to_bytes(8,'big')
 
     def recv(self):
@@ -63,6 +73,10 @@ class Armchair():
         If you're looking at this, you probably want recv_pack. recv is a lower level command that
         will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
         next significant thing
+        returns: if packet in buffer
+            str: type of packet
+            int: the cid of the recived packet
+            bytes: the argmuents/payload
         '''
         header = self.sock.recv_size(17)
         header_len = self.get_len(header)
@@ -82,13 +96,11 @@ class Armchair():
         processes the next packet and returns None if nothing to read
         If the next packet was a ready packet it will be ignored and corresponding send will be
         removed
-        returns: if packet in buffer
+        returns:
             str: type of packet
+            int: the cid of the recived packet
             bytes: the argmuents/payload
-        returns: else
-            (None,None)
         '''
-        print("reciveing. curr buff is {}".format(self._inflight_packs))
         header_type = 'ready' #do while
         while header_type == 'ready':
             header_type, header_cid, payload = self.recv()
@@ -110,8 +122,7 @@ class Armchair():
             has created log entry of send
             cid has been appended to self._inflight_packs
         '''
-        print(self._inflight_packs)
-        if len(self._inflight_packs) > self.buffsize:
+        if len(self._inflight_packs) > self.buffsize and pack_type not in self.GHOST_TYPES:
             self._block_on_ready()
         if args:
             payload = dill.dumps(args)
@@ -124,20 +135,9 @@ class Armchair():
             self.sock.send(header)
         with open(os.path.join(self.log_path, '{}_armchair.log'.format(self.name)), 'a+') as armchair_log:
             armchair_log.write("{}\tsending {}, cid {}\n".format(datetime.now().strftime('%H:%M:%S:%f'), pack_type,self.cid))
-        if pack_type != 'ready':
+        if pack_type != 'ready' and pack_type not in self.GHOST_TYPES:
             self._inflight_packs.append(self.cid)
         return self.cid
-
-#prob not necessary
-#
-#    def burn_inflight(self):
-#        '''
-#        used to burn through the list of inflight packets.
-#        Postconditions:
-#            there are no more inflight packets. Everything has been acknowledged
-#        '''
-#        while self._inflight_packs:
-#            self._block_on_ready()
 
     def _block_on_ready(self):
         '''

@@ -175,7 +175,7 @@ class ProtocolExecutor():
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs')
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
 
         self.init_robot(simulate)
         self.execute_protocol_df()
@@ -624,7 +624,7 @@ class ProtocolExecutor():
                 cid = self.portal.send_pack('pause',row['pause_time'])
             elif row['op'] == 'stop':
                 #read through the inflight packets
-                cid = self.portal.send_pack('stop')
+                self.portal.send_pack('stop')
                 self._stop(i)
             elif row['op'] == 'scan':
                 #TODO implement scans
@@ -726,22 +726,10 @@ class ProtocolExecutor():
         Postconditions:
             self._inflight_packs has been cleaned
         '''
-        #create a socket
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, 50003))
-        sock.listen(5)
-        eve_sock, eve_addr = sock.accept()
-        message = eve_sock.recv(1)
-        assert (message == b'\01'), "controller was waiting on stop for robot to continue, but robot sent invalid code {}".format(message)
-        if not self.simulate:
-            input('<<controller>> stopped: encountered stop at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
-        eve_sock.send(b'\x01')
-        message = eve_sock.recv(1)
-        assert (message == b'\02'), "controller was waiting for robot to terminate stop link, but robot sent invalid code {}".format(message)
-        sock.close()
-        return
-
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
+        input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+        self.portal.send_pack('continue')
 
     def send_transfer_command(self, row, i):
         '''
@@ -763,42 +751,10 @@ class ProtocolExecutor():
         callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
         cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
         if has_stop:
-            #burn through buffer
-            while self._inflight_packs:
-                self._block_on_ready()
-            #stop on any incoming continues
-            self._block_on_continue(i)
+            n_stops = containers.shape[0]
+            for _ in range(n_stops):
+                self._stop(i)
 
-    def _block_on_continue(self, i):
-        '''
-        recieves stop packets, gets user input, and sends continues until a ready is recieved
-        at which point the cid will be removed from self.inflight_packs, and control will be
-        returned
-        NOTE: this function breaks some of the 'rules' of the Armchair protocol. an inflight pack,
-        the 
-        params:
-            int i: the index of this row
-        Preconditions:
-            There must be only one inflight_packet, and that packet should alter control,
-            i.e. the robot is going to respond with a stop
-        Postconditions:
-            The inflight packet has been removed
-        '''
-        #create a socket
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, 50003))
-        sock.listen(5)
-        eve_sock, eve_addr = sock.accept()
-        message = eve_sock.recv(1)
-        while b'\x01' == message:
-            if not self.simulate:
-                input('<<controller>> stopped: encountered stop callback at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
-            eve_sock.send(b'\x01')
-            message = eve_sock.recv(1)
-        assert (message == b'\x02'), 'something went wrong during stop communication on protocol line {}'.format(i)
-        sock.close()
-        return
     
     def _get_callback_args(self, row, callback):
         '''
@@ -2134,45 +2090,17 @@ class OT2Controller():
                     if callback == 'pause':
                         self._exec_pause(args[0])
                     elif callback == 'stop':
-                        self._stop(sock)
-        #if you created a connection, you indicate you're done and close it
-        if 'stop' in callback_types:
-            sock.send(b'\02')
-            sock.close()
-        return
+                        self._exec_stop()
 
     def _exec_stop(self):
         '''
         executes a stop command by creating a TCP connection, telling the controller to get
         user input, and then waiting for controller response
         '''
-        sock = socket.socket(socket.AF_INET)
-        fail_count=0
-        connected = False
-        while not connected and fail_count < 3:
-            try:
-                sock.connect((self.controller_ip, 50003))
-                connected = True
-            except ConnectionRefusedError:
-                fail_count += 1
-                time.sleep(2**fail_count)
-        self._stop(sock)
-        sock.send(b'\02')
-        sock.close()
+        self.portal.send_pack('stopped')
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'continue'), "Was stopped waiting for continue, but recieved, {}".format(pack_type)
 
-    def _stop(self, sock):
-        '''
-        sends a stop signal to the controller and blocks until it recieves a continue
-        params:
-            socket sock: connected to the controller for purpose of communicating stop information
-        Preconditions:
-            Controller must be expecting a b'\x01' on this stream
-        '''
-        sock.send(b'\x01')
-        message = sock.recv(1)
-        assert (message == b'\x01'), "recieved invalid response '{}' from controller while waiting on stop for continue".format(message)
-        return
-        
     def _transfer_step(self, src, dst, vol):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting

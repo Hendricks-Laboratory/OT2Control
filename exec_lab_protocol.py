@@ -18,8 +18,8 @@ def main():
 #    rxn_sheet_name = input('<<controller>> please input the sheet name ')
 #    #using the cache bypasses google docs communication and uses the last rxn you loaded
 #    use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
-    use_cache = False
-    rxn_sheet_name = 'test_dilutions_sane'
+    use_cache = True
+    rxn_sheet_name = 'test_callbacks'
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ot2lib.ProtocolExecutor(rxn_sheet_name, my_ip, SERVERADDR, use_cache=use_cache)
 
