@@ -1,10 +1,11 @@
 CRITICAL
-Fix errors
 
 PRIORITY
 platereader implementation
+stops
 
 FUTURE
+inputs should all be wrapped in while loops
 platereader should have 200 ul. Check at each scan]
 Use logger to log messages
 Error Exits

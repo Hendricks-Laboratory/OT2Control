@@ -104,18 +104,19 @@ x07: 'pause'
         float pause_time: the time to wait before continuing execution in seconds
 
 x08: 'stop'
-    robot->controller:
-    Description: This is used during stop callbacks for the robot to signal the controller to stop
-        Note that the stop operation is never actually sent to the robot
+    controller->robot:
+    Description: tells the robot to stop and wait for user input
 
 x09: 'continue'
     controller->robot:
-    Description: Odd command because it does not correspond to an operation. It is used on stop
-        callbacks to signal the robot that the user has signaled safe to continue to next
+    PRIORITY: this packet will be sent as soon as recieved without blocking
+    Description: used to continue after a stop
 
-x0A: 'dilution'
-    controller->robot:
-    Description: used to execute a dilution
+x0A: 'stopped'
+    robot->controller:
+    PRIORITY: this packet will be sent as soon as recieved without blocking
+    Description: used to signal that the robot is stopped, either from a stop command or from a 
+        callback
 
 x0B: 'loc_req'
     conroller->robot:

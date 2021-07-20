@@ -88,7 +88,6 @@ class ProtocolExecutor():
         self.cache_path = cache_path
         self.use_cache = use_cache
         self._make_out_dirs(out_path)
-        self._inflight_packs = []
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size=4
@@ -177,7 +176,7 @@ class ProtocolExecutor():
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs')
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
 
         self.init_robot(simulate)
         self.execute_protocol_df()
@@ -624,12 +623,10 @@ class ProtocolExecutor():
                 self.send_transfer_command(row,i)
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
-                self._inflight_packs.append(cid)
             elif row['op'] == 'stop':
                 #read through the inflight packets
-                cid = self.portal.send_pack('stop')
+                self.portal.send_pack('stop')
                 self._stop(i)
-                self._inflight_packs.append(cid)
             elif row['op'] == 'scan':
                 #TODO implement scans
                 pass
@@ -638,9 +635,6 @@ class ProtocolExecutor():
                 self.send_dilution_commands(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
-            #check buffer
-            if len(self._inflight_packs) >= self.buff_size:
-                self._block_on_ready()
 
     def execute_scan(self,row,i):
         '''
@@ -688,12 +682,9 @@ class ProtocolExecutor():
         Postconditions:
             Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
             Will block on ready if the buffer is filled
-            Both cid's will be appended to self._inflight_packs
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
         self.send_transfer_command(water_transfer_row, i)
-        if len(self._inflight_packs) >= self.buff_size:
-            self._block_on_ready()
         self.send_transfer_command(reagent_transfer_row, i)
 
     def _get_dilution_transfer_rows(self, row):
@@ -766,22 +757,11 @@ class ProtocolExecutor():
         Postconditions:
             self._inflight_packs has been cleaned
         '''
-        #create a socket
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, 50003))
-        sock.listen(5)
-        eve_sock, eve_addr = sock.accept()
-        message = eve_sock.recv(1)
-        assert (message == b'\01'), "controller was waiting on stop for robot to continue, but robot sent invalid code {}".format(message)
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
         if not self.simulate:
-            input('<<controller>> stopped: encountered stop at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
-        eve_sock.send(b'\x01')
-        message = eve_sock.recv(1)
-        assert (message == b'\02'), "controller was waiting for robot to terminate stop link, but robot sent invalid code {}".format(message)
-        sock.close()
-        return
-
+            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+        self.portal.send_pack('continue')
 
     def send_transfer_command(self, row, i):
         '''
@@ -793,7 +773,6 @@ class ProtocolExecutor():
             int: the cid of this command
         Postconditions:
             a transfer command has been sent to the robot
-            and it's cid has been appended to self._inflight_packs
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
@@ -804,43 +783,10 @@ class ProtocolExecutor():
         callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
         cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
         if has_stop:
-            #burn through buffer
-            while self._inflight_packs:
-                self._block_on_ready()
-            #stop on any incoming continues
-            self._block_on_continue(i)
-        self._inflight_packs.append(cid)
+            n_stops = containers.shape[0]
+            for _ in range(n_stops):
+                self._stop(i)
 
-    def _block_on_continue(self, i):
-        '''
-        recieves stop packets, gets user input, and sends continues until a ready is recieved
-        at which point the cid will be removed from self.inflight_packs, and control will be
-        returned
-        NOTE: this function breaks some of the 'rules' of the Armchair protocol. an inflight pack,
-        the 
-        params:
-            int i: the index of this row
-        Preconditions:
-            There must be only one inflight_packet, and that packet should alter control,
-            i.e. the robot is going to respond with a stop
-        Postconditions:
-            The inflight packet has been removed
-        '''
-        #create a socket
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, 50003))
-        sock.listen(5)
-        eve_sock, eve_addr = sock.accept()
-        message = eve_sock.recv(1)
-        while b'\x01' == message:
-            if not self.simulate:
-                input('<<controller>> stopped: encountered stop callback at step {} in protocol. Please press enter when you\'re ready to continue'.format(i+1))
-            eve_sock.send(b'\x01')
-            message = eve_sock.recv(1)
-        assert (message == b'\x02'), 'something went wrong during stop communication on protocol line {}'.format(i)
-        sock.close()
-        return
     
     def _get_callback_args(self, row, callback):
         '''
@@ -853,26 +799,6 @@ class ProtocolExecutor():
             return [row['pause_time']]
         return None
 
-    
-    def _block_on_ready(self):
-        '''
-        used to block until the server responds with a 'ready' packet
-        Preconditions: self.inflight_packs contains cids of packets that have been sent to server, but
-        not yet acknowledged
-        Postconditions:
-            has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from self.inflight_packs
-        '''
-        pack_type, _, arguments = self.portal.recv_pack()
-        if pack_type == 'error':
-            error_handler()
-        elif pack_type == 'ready':
-            cid = arguments[0]
-            self._inflight_packs.remove(cid)
-        else:
-            raise Exception('invalid packet type {}'.format(pack_type))
-            
-    
     def _make_out_dirs(self, out_path):
         '''
         params:
@@ -951,15 +877,10 @@ class ProtocolExecutor():
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
                 self.robo_params['reagent_df'].to_dict(), self.my_ip)
-        self._inflight_packs.append(cid)
-        self._block_on_ready()
     
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
-        cid = self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
-        self._inflight_packs.append(cid)
-        self._block_on_ready()
-        return
+        self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
 
     
     #TESTING
@@ -1418,6 +1339,7 @@ class Tube20000uL(Container):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass15 = 6.6699 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
@@ -1453,7 +1375,7 @@ class Tube50000uL(Container):
         density_water_25C = 0.9970479 # g/mL
         avg_tube_mass50 = 13.3950 # grams
         self.mass = mass - avg_tube_mass50 # N = 1 (in grams) 
-        assert (self.mass > 0),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
        # 15mm diameter for 15 ml tube  -5: Five mL mark is 19 mm high for the base/noncylindrical protion of tube 
@@ -1485,10 +1407,11 @@ class Tube2000uL(Container):
     DEAD_VOL = 250 #uL
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, mass=1.4, conc=1):
+    def __init__(self, name, deck_pos, loc, mass=1.4, conc=2):
         density_water_4C = 0.9998395 # g/mL
         avg_tube_mass2 =  1.4        # grams
         self.mass = mass - avg_tube_mass2 # N = 1 (in grams) 
+        assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
         super().__init__(name, deck_pos, loc, vol, conc)
            
@@ -2174,8 +2097,9 @@ class OT2Controller():
         '''
         #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
         for arm in self.pipettes.keys():
-            if src != self.pipettes[arm]['last_used'] and self.pipettes[arm]['last_used'] != 'clean':
-                self._get_new_tip(arm)
+            if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
+                self._get_clean_tips()
+                break; #cause now they're clean
         callback_types = [callback for callback, _ in callbacks]
         #if you're going to be altering flow, you need to create a seperate connection with the
         #controller
@@ -2198,45 +2122,17 @@ class OT2Controller():
                     if callback == 'pause':
                         self._exec_pause(args[0])
                     elif callback == 'stop':
-                        self._stop(sock)
-        #if you created a connection, you indicate you're done and close it
-        if 'stop' in callback_types:
-            sock.send(b'\02')
-            sock.close()
-        return
+                        self._exec_stop()
 
     def _exec_stop(self):
         '''
         executes a stop command by creating a TCP connection, telling the controller to get
         user input, and then waiting for controller response
         '''
-        sock = socket.socket(socket.AF_INET)
-        fail_count=0
-        connected = False
-        while not connected and fail_count < 3:
-            try:
-                sock.connect((self.controller_ip, 50003))
-                connected = True
-            except ConnectionRefusedError:
-                fail_count += 1
-                time.sleep(2**fail_count)
-        self._stop(sock)
-        sock.send(b'\02')
-        sock.close()
+        self.portal.send_pack('stopped')
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'continue'), "Was stopped waiting for continue, but recieved, {}".format(pack_type)
 
-    def _stop(self, sock):
-        '''
-        sends a stop signal to the controller and blocks until it recieves a continue
-        params:
-            socket sock: connected to the controller for purpose of communicating stop information
-        Preconditions:
-            Controller must be expecting a b'\x01' on this stream
-        '''
-        sock.send(b'\x01')
-        message = sock.recv(1)
-        assert (message == b'\x01'), "recieved invalid response '{}' from controller while waiting on stop for continue".format(message)
-        return
-        
     def _transfer_step(self, src, dst, vol):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
@@ -2257,19 +2153,25 @@ class OT2Controller():
             self._liquid_transfer(src, dst, substep_vol, arm)
         return
 
-    def _get_new_tip(self, arm):
+    def _get_clean_tips(self):
         '''
-        replaces the tip with a new one
+        checks if the both tips to see if they're dirty. Drops anything that's dirty, then picks
+        up clean tips
         params:
-            str arm: 'left' or 'right' to differentiate pipetes
-        TODO: Michael found it necessary to test if has_tip. I don't think this is needed
-          but revert to it if you run into trouble
+            str ok_chems: if you're ok reusing the same tip for this chemical, no need to replace
         TODO: Wrap in try for running out of tips
         '''
-        pipette = self.pipettes[arm]['pipette']
-        pipette.drop_tip()
-        pipette.pick_up_tip()
-        self.pipettes[arm]['last_used'] = 'clean'
+        drop_list = [] #holds the pipettes that were dirty
+        #drop first so no sprinkles get on rack while picking up
+        ok_list = ['clean','WaterC1.0']
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm]['last_used'] not in ok_list:
+                self.pipettes[arm]['pipette'].drop_tip()
+                drop_list.append(arm)
+        #now that you're clean, you can pick up new tips
+        for arm in drop_list:
+            self.pipettes[arm]['pipette'].pick_up_tip()
+            self.pipettes[arm]['last_used'] = 'clean'
 
     def _get_preffered_pipette(self, vol):
         '''
@@ -2323,7 +2225,7 @@ class OT2Controller():
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
             #higher level function call. This is minimal step for maximum speed.
-            assert (src == self.pipettes[arm_to_check]['last_used'] or self.pipettes[arm_to_check]['last_used'] == 'clean'), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
+            assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
@@ -2411,11 +2313,10 @@ class OT2Controller():
         close the connection in a nice way
         '''
         print('<<eve>> initializing breakdown')
-        self.protocol.home()
         for arm_dict in self.pipettes.values():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
-        self.
+        self.protocol.home()
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
