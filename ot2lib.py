@@ -2146,6 +2146,7 @@ class OT2Controller():
             return 1
         elif command_type == 'home':
             self.protocol.home()
+            self.portal.send_pack('ready',cid)
             return 1
         elif command_type == 'close':
             self._exec_close()
