@@ -174,7 +174,7 @@ class ProtocolExecutor():
             bool: True if all tests were passed
         '''
         try:
-            self.pr = PlateReader(simulate=False)
+            self.pr = PlateReader(simulate)
         except:
             print('<<controller>> failed to initialize platereader, initializing dummy reader')
             self.pr = DummyReader()
