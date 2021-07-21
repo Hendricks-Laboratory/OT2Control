@@ -174,7 +174,7 @@ class ProtocolExecutor():
             bool: True if all tests were passed
         '''
         try:
-            self.pr = PlateReader(simulate)
+            self.pr = PlateReader(simulate=False)
         except:
             print('<<controller>> failed to initialize platereader, initializing dummy reader')
             self.pr = DummyReader()
@@ -2550,6 +2550,7 @@ class PlateReader(AbstractPlateReader):
     This class handles all platereader interactions
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
+    SPECTRO_ROOT_PATH_WIN = "C:\Program Files\SPECTROstar Nano V5.50"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
 
     def __init__(self, simulate=False):
@@ -2603,6 +2604,11 @@ class PlateReader(AbstractPlateReader):
 
     def edit_layout(self, protocol_name, layout):
         '''
+        This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
+        in the SPECTROstar root. It is also possible (theoretically) to 
+        send a literal 'edit_layout' command, but this fails for long
+        strings. (not sure why, maybe windows limited sized strings?
+        but the file works). It removes the file after importing
         params:
             str protocol_name: the name of the protocol that will be edited
             list<str> wells: the wells that you want to be used for the protocol ordered.
@@ -2616,8 +2622,14 @@ class PlateReader(AbstractPlateReader):
         well_entries = []
         for i, well in enumerate(layout):
             well_entries.append("{}=X{}".format(well, i+1))
-        well_arg = "EmptyLayout {}".format(' '.join(well_entries))
-        self.exec_macro('EditLayout', protocol_name, self.PROTOCOL_PATH, well_arg)
+        filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,'.temp_ot2_bmg_layout.lb')
+        filepath_win = os.path.join(self.SPECTRO_ROOT_PATH_WIN,'.temp_ot2_bmg_layout.lb')
+        with open(filepath_lin, 'w+') as layout:
+            layout.write('EmptyLayout')
+            for entry in well_entries:
+                layout.write("\n{}".format(entry))
+        self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
+        os.remove(filepath_lin)
 
     def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
         r'''
