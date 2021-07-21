@@ -93,6 +93,11 @@ class ProtocolExecutor():
         self.buff_size=4
         self.simulate = False #by default will be changed if a simulation is run
         self.cached_reader_locs = {} #maps wellname to loc on platereader
+        try:
+            self.pr = PlateReader()
+        except:
+            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+            self.pr = DummyReader()
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -215,7 +220,7 @@ class ProtocolExecutor():
         try:
             i=0
             wks_key = None
-            while not wks_key and i < len(name_key_pairs):
+            while not wks_key and i <= len(name_key_pairs):
                 row = name_key_pairs[i]
                 if row[0] == rxn_sheet_name:
                     wks_key = row[1]
@@ -314,7 +319,7 @@ class ProtocolExecutor():
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
         rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
@@ -628,11 +633,12 @@ class ProtocolExecutor():
                 self.portal.send_pack('stop')
                 self._stop(i)
             elif row['op'] == 'scan':
-                #TODO implement scans
-                pass
+                self.execute_scan(row, i)
             elif row['op'] == 'dilution':
                 #TODO implement dilutions
                 self.send_dilution_commands(row, i)
+            elif row['op'] == 'mix':
+                self.mix(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
@@ -653,20 +659,42 @@ class ProtocolExecutor():
         returns:
             int: the cid of this command
         '''
+        #1)
         self.portal.burn_pipe()
-        wellnames #todo parse
+        #2)
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        #3)
         unknown_wellnames = [wellname for wellname in wellnames if wellname not in self.cached_reader_locs]
-        self.portal.send_pack('loc_req', unknown_wellnames)
-        pack_type, _, well_locs = self.portal.recv_pack()
-        #update the cache
-        for well_entry in well_locs:
-            self.cache_reader_locs[well_entry[0]] = (well_entry[1], well_entry[2])
+        if unknown_wellnames:
+            #3a
+            #couldn't find in the cache, so we got to make a query
+            self.portal.send_pack('loc_req', unknown_wellnames)
+            #3b
+            pack_type, _, payload = self.portal.recv_pack()
+            #3c
+            returned_well_locs = payload[0]
+            #TODO think about where you want to implement the scan volume check
+            #update the cache
+            for well_entry in returned_well_locs:
+                self.cached_reader_locs[well_entry[0]] = (well_entry[1], well_entry[2])
         #update the locs on the well
         well_locs = []
-        for well, entry in [(well, self.cache_reader_locs[well]) for well in wellnames]:
+        for well, entry in [(well, self.cached_reader_locs[well]) for well in wellnames]:
             assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
             well_locs.append(entry[0])
-        breakpoint()
+        #4,5
+        self.pr.exec_macro('PlateIn')
+        self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
+        self.pr.exec_macro('PlateOut')
+
+    def mix(self,row,i):
+        '''
+        For now this function just shakes the whole plate.
+        In the future, we may want to mix
+        things that aren't on the platereader, in which case a new argument should be made in 
+        excel for the wells to scan, and we should make a function to pipette mix.
+        '''
+        self.pr.shake()
 
     def send_dilution_commands(self,row,i):
         '''
@@ -1166,7 +1194,8 @@ class ProtocolExecutor():
         returns:
             volume at end in that name
         '''
-        dispenses = self.rxn_df[name].sum()
+        dispenses = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution') |
+                (self.rxn_df['op'] == 'transfer')][name].sum()
         transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
                 (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
         dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
@@ -2069,13 +2098,27 @@ class OT2Controller():
             self._exec_stop()
             self.portal.send_pack('ready', cid)
             return 1
+        elif command_type == 'loc_req':
+            self._exec_loc_req(arguments[0])
+            return 1
         elif command_type == 'close':
             self._exec_close()
             return 0
         else:
             raise Exception("Unidenified command {}".format(pack_type))
 
-    def _exec_pause(self,pause_time):
+    def _exec_loc_req(self, wellnames):
+        '''
+        processes a request for locations of wellnames and sends a response with their locations
+        params:
+            list<str> wellnames: requested wells as specified in armchair documentation
+        returns:
+            list<tuple<str,str,int>: chem_name, well_loc, deck_pos. see armchair specs
+        '''
+        response = [(name, self.containers[name].loc, self.containers[name].deck_pos) for name in wellnames]
+        self.portal.send_pack('loc_resp', response)
+
+    def _exec_pause(self, pause_time):
         '''
         executes a pause command by waiting for 'time' seconds
         params:
@@ -2415,3 +2458,177 @@ def make_unique(s):
         else:
             return name
     return s.apply(_get_new_name)
+
+class AbstractPlateReader(ABC):
+    '''
+    This class handles all platereader interactions
+    '''
+    SPECTRO_ROOT_PATH = None
+    PROTOCOL_PATH = None
+
+    def __init__(self):
+        pass
+        
+    def exec_macro(self, macro, *args):
+        '''
+        sends a macro command to the platereader and blocks waiting for response. If response
+        not ok, it'll crash and burn
+        params:
+            str macro: should be a macro from the documentation
+            *args: associated arguments of the macto
+        Postconditions:
+            The command has been sent to the PlateReader, if the return status was not 0 (good)
+            an error will be thrown
+        '''
+        pass
+
+    def shake(self):
+        '''
+        executes a shake
+        '''
+        pass
+
+    def edit_layout(self, protocol_name, layout):
+        '''
+        params:
+            str protocol_name: the name of the protocol that will be edited
+            list<str> wells: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X
+        Postcondtions:
+            The protocol has had it's layout updated to include only the wells specified
+        '''
+        pass
+
+    def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
+        r'''
+        params:
+            str protocol_name: the name of the protocol that will be edited
+            str data_path: windows path raw string. no quotes on outside. e.g.
+              C:\Program Files\SPECTROstar Nano V5.50\User
+            list<str> layout: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If not specified will not alter layout)
+        '''
+        pass
+
+    def shutdown(self):
+        '''
+        closes connection. Use this if you're done with this object at cleanup stage
+        '''
+        pass
+
+    def set_simulate(self, simulate):
+        '''
+        modifies the value of the platereader init file to be in similation mode
+        '''
+        #TODO simulate should read into SPECTROstar Nano.ini and insert. If false you probably 
+        #want to change that?
+        '''
+        [Configuration]
+        SimulationMode=1
+        '''
+        pass
+
+class DummyReader(AbstractPlateReader):
+    pass
+
+class PlateReader(AbstractPlateReader):
+    '''
+    This class handles all platereader interactions
+    '''
+    SPECTRO_ROOT_PATH = "/mnt/c/Program\\ Files/SPECTROstar\\ Nano\\ V5.50/"
+    PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
+
+    def __init__(self, simulate=False):
+        self.exec_macro("dummy")
+        self.exec_macro("init")
+        self.exec_macro('PlateOut')
+        
+    def exec_macro(self, macro, *args):
+        '''
+        sends a macro command to the platereader and blocks waiting for response. If response
+        not ok, it'll crash and burn
+        params:
+            str macro: should be a macro from the documentation
+            *args: associated arguments of the macto
+        Postconditions:
+            The command has been sent to the PlateReader, if the return status was not 0 (good)
+            an error will be thrown
+        '''
+        exec_str = "{}Cln/DDEClient.exe {}".format(self.SPECTRO_ROOT_PATH, macro)
+        #add arguments
+        for arg in args:
+            exec_str += " '{}'".format(arg)
+        exit_code = os.system(exec_str)
+        try:
+            assert (exit_code == 0)
+        except:
+            if exit_code < 1000:
+                raise Exception("PlateReader rejected command Error")
+            elif exit_code == 1000:
+                raise Exception("PlateReader Nonexistent Protocol Name Error")
+            elif exit_code == 2000:
+                raise Exception("PlateReader Communication Error")
+            else:
+                raise Exception("PlateReader Error. Exited with code {}".format(exit_code))
+
+    def shake(self):
+        '''
+        executes a shake
+        '''
+        macro = "Shake"
+        shake_type = 2
+        shake_freq = 300
+        shake_time = 60
+        self.exec_macro(macro, shake_type, shake_freq, shake_time)
+
+    def edit_layout(self, protocol_name, layout):
+        '''
+        params:
+            str protocol_name: the name of the protocol that will be edited
+            list<str> wells: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X
+        Postcondtions:
+            The protocol has had it's layout updated to include only the wells specified
+        '''
+        if layout == 'all':
+            #get a list of all the wellanmes
+            layout = [a+str(i) for a in list('ABCDEFGH') for i in range(1,13,1)]
+        well_entries = []
+        for i, well in enumerate(layout):
+            well_entries.append("{}=X{}".format(well, i+1))
+        well_arg = "EmptyLayout {}".format(' '.join(well_entries))
+        self.exec_macro('EditLayout', protocol_name, self.PROTOCOL_PATH, well_arg)
+
+    def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
+        r'''
+        params:
+            str protocol_name: the name of the protocol that will be edited
+            str data_path: windows path raw string. no quotes on outside. e.g.
+              C:\Program Files\SPECTROstar Nano V5.50\User
+            list<str> layout: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If not specified will not alter layout)
+        '''
+        if layout:
+            self.edit_layout(protocol_name, layout)
+        macro = 'run'
+        data_path = data_path
+        #three '' are plate ids to pad. data_path specified once for ascii and once for other
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path, '', '', '', '', filename)
+
+    def shutdown(self):
+        '''
+        closes connection. Use this if you're done with this object at cleanup stage
+        '''
+        self.exec_macro('Terminate')
+
+    
+    def set_simulate(self, simulate):
+        '''
+        modifies the value of the platereader init file to be in similation mode
+        '''
+        #TODO simulate should read into SPECTROstar Nano.ini and insert. If false you probably 
+        #want to change that?
+        '''
+        [Configuration]
+        SimulationMode=1
+        '''

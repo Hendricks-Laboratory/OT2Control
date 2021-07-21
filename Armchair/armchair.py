@@ -12,7 +12,7 @@ class Armchair():
     NOTE that buffer is not a hardware constraint. GHOST items can slip through
     '''
 
-    GHOST_TYPES = ['continue', 'stopped'] #These are necessary because we never want to wait on a
+    GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req'] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready's / are not added to inflight packs. Do not modify CID.
 
@@ -22,7 +22,7 @@ class Armchair():
         self.buffsize = buffsize
         self._inflight_packs = []
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A'})
+        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C'})
         self.name = name
         self.log_path = log_path
         if not os.path.exists(self.log_path):
@@ -145,7 +145,7 @@ class Armchair():
         Postconditions:
             Nothing left in the inflight packets buffer
         '''
-        while self._inflight_packets:
+        while self._inflight_packs:
             self._block_on_ready()
 
     def _block_on_ready(self):
