@@ -141,5 +141,10 @@ x0C: 'loc_resp'
 	    4th element is the volume
 	    5th element is the aspirable volumeFalse
 
+x0D: 'home'
+    robot->controller:
+    Description: before scanning, the robot needs to get the pipette out of the way of the reader
+      hence we tell it to home
+
 UNFINISHED
 error x02

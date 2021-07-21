@@ -147,7 +147,6 @@ class ProtocolExecutor():
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
-        breakpoint()
         self.run_all_checks()
 
     def run_simulation(self):
@@ -681,14 +680,14 @@ class ProtocolExecutor():
     def _execute_scan(self,row,i):
         '''
         There are a few things entailed in a scan command
-        1) block until you run out of waits
-        2) figure out what wells you want to scan
-        3) query the robot for those wells, or use cache if you have it
+        1) send home to robot
+        2) block until you run out of waits
+        3) figure out what wells you want to scan
+        4) query the robot for those wells, or use cache if you have it
             a) if you had to query robot, send request of reagents
             b) wait on robot response
             c) translate robot response to human readable
-        4) update layout to scanner
-        5) scan
+        5) update layout to scanner and scan
         params:
             pd.Series row: a row of self.rxn_df
             int i: index of this row
@@ -696,19 +695,21 @@ class ProtocolExecutor():
             int: the cid of this command
         '''
         #1)
-        self.portal.burn_pipe()
+        self.portal.send_pack('home')
         #2)
-        wellnames = row[self._products][row[self._products].astype(bool)].index
+        self.portal.burn_pipe()
         #3)
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        #4)
         unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
         if unknown_wellnames:
-            #3a
+            #4a
             #couldn't find in the cache, so we got to make a query
             self.portal.send_pack('loc_req', unknown_wellnames)
-            #3b
+            #4b
             pack_type, _, payload = self.portal.recv_pack()
             assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
-            #3c
+            #4c
             returned_well_locs = payload[0]
             #TODO think about where you want to implement the scan volume check
             #update the cache
@@ -720,7 +721,7 @@ class ProtocolExecutor():
             assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
             assert (math.isclose(entry[2], 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry[2])
             well_locs.append(entry[0])
-        #4,5
+        #5
         self.pr.exec_macro('PlateIn')
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
         self.pr.exec_macro('PlateOut')
@@ -732,6 +733,8 @@ class ProtocolExecutor():
         things that aren't on the platereader, in which case a new argument should be made in 
         excel for the wells to scan, and we should make a function to pipette mix.
         '''
+        self.portal.send_pack('home')
+        self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
         self.pr.exec_macro('PlateIn')
         self.pr.shake()
         self.pr.exec_macro('PlateOut')
@@ -2141,6 +2144,9 @@ class OT2Controller():
         elif command_type == 'loc_req':
             self._exec_loc_req(arguments[0])
             return 1
+        elif command_type == 'home':
+            self.protocol.home()
+            return 1
         elif command_type == 'close':
             self._exec_close()
             return 0
@@ -2219,6 +2225,7 @@ class OT2Controller():
         executes a stop command by creating a TCP connection, telling the controller to get
         user input, and then waiting for controller response
         '''
+        self.protocol.home()
         self.portal.send_pack('stopped')
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'continue'), "Was stopped waiting for continue, but recieved, {}".format(pack_type)
