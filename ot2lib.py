@@ -83,6 +83,8 @@ class ProtocolExecutor():
         a run function that creates a portal. The portal is not passed to init because although
         the code must not use more than one portal at a time, the portal may change over the 
         lifetime of the class
+        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        is instantiated in run
         '''
         #set according to input
         self.cache_path = cache_path
@@ -93,11 +95,6 @@ class ProtocolExecutor():
         self.buff_size=4
         self.simulate = False #by default will be changed if a simulation is run
         self.cached_reader_locs = {} #maps wellname to loc on platereader
-        try:
-            self.pr = PlateReader()
-        except:
-            print('<<controller>> failed to initialize platereader, initializing dummy reader')
-            self.pr = DummyReader()
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -176,6 +173,11 @@ class ProtocolExecutor():
         Returns:
             bool: True if all tests were passed
         '''
+        try:
+            self.pr = PlateReader(simulate)
+        except:
+            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+            self.pr = DummyReader()
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -186,6 +188,7 @@ class ProtocolExecutor():
         self.init_robot(simulate)
         self.execute_protocol_df()
         self.close_connection()
+        self.pr.shutdown()
         return
         
 
@@ -671,16 +674,18 @@ class ProtocolExecutor():
             self.portal.send_pack('loc_req', unknown_wellnames)
             #3b
             pack_type, _, payload = self.portal.recv_pack()
+            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
             #3c
             returned_well_locs = payload[0]
             #TODO think about where you want to implement the scan volume check
             #update the cache
             for well_entry in returned_well_locs:
-                self.cached_reader_locs[well_entry[0]] = (well_entry[1], well_entry[2])
+                self.cached_reader_locs[well_entry[0]] = well_entry[1:]
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self.cached_reader_locs[well]) for well in wellnames]:
             assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
+            assert (math.isclose(entry[2], 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry[2])
             well_locs.append(entry[0])
         #4,5
         self.pr.exec_macro('PlateIn')
@@ -694,7 +699,9 @@ class ProtocolExecutor():
         things that aren't on the platereader, in which case a new argument should be made in 
         excel for the wells to scan, and we should make a function to pipette mix.
         '''
+        self.pr.exec_macro('PlateIn')
         self.pr.shake()
+        self.pr.exec_macro('PlateOut')
 
     def send_dilution_commands(self,row,i):
         '''
@@ -2115,7 +2122,14 @@ class OT2Controller():
         returns:
             list<tuple<str,str,int>: chem_name, well_loc, deck_pos. see armchair specs
         '''
-        response = [(name, self.containers[name].loc, self.containers[name].deck_pos) for name in wellnames]
+        response = []
+        for name in wellnames:
+            cont = self.containers[name]
+            response.append((name,
+                    cont.loc,
+                    cont.deck_pos,
+                    cont.vol,
+                    cont.aspiratible_vol))
         self.portal.send_pack('loc_resp', response)
 
     def _exec_pause(self, pause_time):
@@ -2535,10 +2549,12 @@ class PlateReader(AbstractPlateReader):
     '''
     This class handles all platereader interactions
     '''
-    SPECTRO_ROOT_PATH = "/mnt/c/Program\\ Files/SPECTROstar\\ Nano\\ V5.50/"
+    SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
 
     def __init__(self, simulate=False):
+        self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
+        self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
@@ -2554,10 +2570,11 @@ class PlateReader(AbstractPlateReader):
             The command has been sent to the PlateReader, if the return status was not 0 (good)
             an error will be thrown
         '''
-        exec_str = "{}Cln/DDEClient.exe {}".format(self.SPECTRO_ROOT_PATH, macro)
+        exec_str = "'{}Cln/DDEClient.exe' {}".format(self.SPECTRO_ROOT_PATH, macro)
         #add arguments
         for arg in args:
             exec_str += " '{}'".format(arg)
+        print('<<Reader>> executing: {}'.format(exec_str))
         exit_code = os.system(exec_str)
         try:
             assert (exit_code == 0)
@@ -2574,6 +2591,9 @@ class PlateReader(AbstractPlateReader):
     def shake(self):
         '''
         executes a shake
+        automatically sucks the plate in
+        Postconditions:
+            Plate has been send out
         '''
         macro = "Shake"
         shake_type = 2
@@ -2619,16 +2639,49 @@ class PlateReader(AbstractPlateReader):
         '''
         closes connection. Use this if you're done with this object at cleanup stage
         '''
+        self.exec_macro('PlateIn')
         self.exec_macro('Terminate')
+        self._set_config_attr('ControlApp','AsDDEserver','False')
+        self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
+        self._set_config_attr('Configuration','SimulationMode', str(0))
 
-    
-    def set_simulate(self, simulate):
+        
+    def _set_config_attr(self, header, attr, val):
         '''
-        modifies the value of the platereader init file to be in similation mode
+        opens the Spectrostar nano config file and replaces the value of attr under header
+        with val
+        There are better ways to build this function, but it's not something you'll use much
+        so I'm leaving it here
         '''
-        #TODO simulate should read into SPECTROstar Nano.ini and insert. If false you probably 
-        #want to change that?
-        '''
-        [Configuration]
-        SimulationMode=1
-        '''
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r'SPECTROstar Nano.ini'), 'r') as config:
+            file_str = config.readlines()
+            write_str = ''
+            header_exists = False
+            i = 0
+            while i < len(file_str): #iterating through lines
+                line = file_str[i]
+                write_str += line
+                if line[1:-2] == header:
+                    header_exists = True#you found the appropriate header
+                    i += 1
+                    found_attr = False
+                    line = file_str[i] #do
+                    while '[' != line[0] and i < len(file_str): #not a header and not EOF
+                        if line[:line.find('=')] == attr:
+                            found_attr = True
+                            write_str += '{}={}\n'.format(attr, val)
+                        else:
+                            write_str += line
+                        i += 1
+                        if i < len(file_str):
+                            line = file_str[i]
+                    if not found_attr:
+                        write_str += '{}={}\n'.format(attr, val)
+                else:
+                    i += 1
+            if not header_exists:
+                write_str += '[{}]\n'.format(header)
+                write_str += '{}={}\n'.format(attr, val)
+
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r'SPECTROstar Nano.ini'), 'w+') as config:
+            config.write(write_str)

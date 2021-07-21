@@ -134,8 +134,12 @@ x0C: 'loc_resp'
         to inflight
     Description: the response to a loc_req
     Args:
-        list<tuple<str,str,int>>: 1st element is the chem name, 2nd element is the well loc, 3rd
-	    element is the labware deck_pos
+        list<tuple<str,str,int, float, float>>: 
+	    1st element is the chem name
+	    2nd element is the well loc
+	    3rd element is the labware deck_pos
+	    4th element is the volume
+	    5th element is the aspirable volumeFalse
 
 UNFINISHED
 error x02
