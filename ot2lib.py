@@ -46,10 +46,6 @@ def df_popout(df):
 #CLIENT
 
 class ProtocolExecutor(): 
-#this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
-#reader given a regular loc for a 96well plate.
-#Please do not read this. paste it into a nice json viewer.
-    PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
     '''
     class to execute a protocol from the docs
     ATTRIBUTES:
@@ -57,26 +53,62 @@ class ProtocolExecutor():
         rxn_sheet_name: the name of the reaction sheet
         str cache_path: path to a directory for all cache files
         bool use_cache: read from cache if possible
+        str eve_files_path: the path to put files from eve
+        str debug_path: the path to place debugging information
         df rxn_df: the reaction df. Not passed in, but created in init
         str my_ip: the ip of this controller
         str server_ip: the ip of the server. This is modified for simulation, but returned to 
           original state at the end of simulation
         dict<str:object> robo_params: convenient place for the parameters for the robot
-            TODO update this documentation
-            df reagent_df
-            dict instruments
+            bool using_temp_ctrl: True if the temperature control is being used
+            float temp: the temperature in celcius to keep the temp control at
+            df reagent_df: holds information about reagents
+                float conc: the concentration
+                str loc: location on labware
+                int deck_pos: the position on the deck
+                float mass: the mass of the tube with reagent and cap
+            dict<str:str> instruments: maps 'left' and 'right' to the pipette names
             df labware_df
-            df product_df
+                int deck_pos: the position of the labware on the deck
+                str name: the name of the labware
+                str first_usable: a location of the first usable tip/well on labware
+                list<str> empty_list: a list of locations on the labware that have empty tubes
+            df product_df: This information is used to figure out where to put chemicals
+                INDEX
+                str chemical_name: the name of the chemical
+                COLS
+                str labware: the requested labware you want to put it in
+                str container: the container you want to put it in
+                float max_vol: the maximum volume you will put in the container
         bool simulate: whether a simulation is being run or not. False by default. changed true 
           temporarily when simulating
         int buff_size: this is the size of the buffer between Armchair commands. It's size
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers
-
+    PRIVATE ATTRS:
+        dict<str:tuple<obj>> _cached_reader_locs: cache for chemical information from the robot
+            The tuple has following structure:
+            0 str chem_name: the name of the well
+            1 str well_loc: the loc of the well on it's labware (translated to human if on pr)
+            2 int deck_pos: the position of the labware it's on
+            3 float vol: the volume in the container
+            4 float aspiratible_vol: the volume minus dead vol
+        pd.index _products: the product columns
     CONSTANTS:
-        dict<dict<str:str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on wellplate
-          to locs on the opentrons object. Use a json viewer for more structural info
+        bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
+        wellplate to locs on the opentrons object. Use a json viewer for more structural info
+    METHODS:
+        run_simulation() int: runs a simulation on local machine. Tries plate reader, but
+          not necessary. returns an error code
+        run_protocol(simulate, port) void: both args have good defaults. simulate can be used to
+          simulate on the plate reader and robot, but generally you want false to actually run
+          the protocol. port can be configured, but 50000 is default
+        execute_protocol_df() void: used to execute a single row of the reaction df
     '''
+#this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
+#reader given a regular loc for a 96well plate.
+#Please do not read this. paste it into a nice json viewer.
+    PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
@@ -94,7 +126,7 @@ class ProtocolExecutor():
         self.server_ip = server_ip
         self.buff_size=4
         self.simulate = False #by default will be changed if a simulation is run
-        self.cached_reader_locs = {} #maps wellname to loc on platereader
+        self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
         #necessary helper params
@@ -115,6 +147,7 @@ class ProtocolExecutor():
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+        breakpoint()
         self.run_all_checks()
 
     def run_simulation(self):
@@ -636,16 +669,16 @@ class ProtocolExecutor():
                 self.portal.send_pack('stop')
                 self._stop(i)
             elif row['op'] == 'scan':
-                self.execute_scan(row, i)
+                self._execute_scan(row, i)
             elif row['op'] == 'dilution':
                 #TODO implement dilutions
-                self.send_dilution_commands(row, i)
+                self._send_dilution_commands(row, i)
             elif row['op'] == 'mix':
-                self.mix(row, i)
+                self._mix(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
-    def execute_scan(self,row,i):
+    def _execute_scan(self,row,i):
         '''
         There are a few things entailed in a scan command
         1) block until you run out of waits
@@ -667,7 +700,7 @@ class ProtocolExecutor():
         #2)
         wellnames = row[self._products][row[self._products].astype(bool)].index
         #3)
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self.cached_reader_locs]
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
         if unknown_wellnames:
             #3a
             #couldn't find in the cache, so we got to make a query
@@ -680,10 +713,10 @@ class ProtocolExecutor():
             #TODO think about where you want to implement the scan volume check
             #update the cache
             for well_entry in returned_well_locs:
-                self.cached_reader_locs[well_entry[0]] = well_entry[1:]
+                self._cached_reader_locs[well_entry[0]] = well_entry[1:]
         #update the locs on the well
         well_locs = []
-        for well, entry in [(well, self.cached_reader_locs[well]) for well in wellnames]:
+        for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
             assert (math.isclose(entry[2], 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry[2])
             well_locs.append(entry[0])
@@ -692,7 +725,7 @@ class ProtocolExecutor():
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
         self.pr.exec_macro('PlateOut')
 
-    def mix(self,row,i):
+    def _mix(self,row,i):
         '''
         For now this function just shakes the whole plate.
         In the future, we may want to mix
@@ -703,7 +736,7 @@ class ProtocolExecutor():
         self.pr.shake()
         self.pr.exec_macro('PlateOut')
 
-    def send_dilution_commands(self,row,i):
+    def _send_dilution_commands(self,row,i):
         '''
         used to execute a dilution. This is analogous to microcode. This function will send two
           commands. Water is always added first.
