@@ -104,6 +104,23 @@ class ProtocolExecutor():
           simulate on the plate reader and robot, but generally you want false to actually run
           the protocol. port can be configured, but 50000 is default
         execute_protocol_df() void: used to execute a single row of the reaction df
+        close_connection() void: automatically called by run_protocol. used to terminate a 
+          connection with eve
+        translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
+          that correspond to platereader
+        init_robot(simulate): used to initialize the robot. called automatically in run. simulate
+          is the same as used by the robot protocol
+        run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
+          run automatically when you run your simulation
+        CHECKS: all print messages for errors and return error codes
+        check_rxn_df() int: checks for errors in input.
+        check_labware() int: checks for errors in labware/labware assignments. 
+        check_products() int: checks for errors in the product placement.
+        check_reagents() int: checks for errors in the reagent_info tab.
+        TESTS: These are run after a reaction concludes to make sure things went well
+        run_all_tests() bool: True if you passed, else false. run when at end of simulation
+        test_vol_lab_cont() bool: tests that labware volume and containers are correct
+        test_contents() bool: tests that the contents of each container is ok
     '''
 #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
 #reader given a regular loc for a 96well plate.
@@ -660,7 +677,7 @@ class ProtocolExecutor():
         '''
         for i, row in self.rxn_df.iterrows():
             if row['op'] == 'transfer':
-                self.send_transfer_command(row,i)
+                self._send_transfer_command(row,i)
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
             elif row['op'] == 'stop':
@@ -714,7 +731,7 @@ class ProtocolExecutor():
             #TODO think about where you want to implement the scan volume check
             #update the cache
             for well_entry in returned_well_locs:
-                self._cached_reader_locs[well_entry[0]] = well_entry[1:]
+                self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:]
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
@@ -755,8 +772,8 @@ class ProtocolExecutor():
             Will block on ready if the buffer is filled
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
-        self.send_transfer_command(water_transfer_row, i)
-        self.send_transfer_command(reagent_transfer_row, i)
+        self._send_transfer_command(water_transfer_row, i)
+        self._send_transfer_command(reagent_transfer_row, i)
 
     def _get_dilution_transfer_rows(self, row):
         '''
@@ -834,7 +851,7 @@ class ProtocolExecutor():
             input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
-    def send_transfer_command(self, row, i):
+    def _send_transfer_command(self, row, i):
         '''
         params:
             pd.Series row: a row of self.rxn_df
@@ -1766,17 +1783,31 @@ class WellPlate(Labware):
 #Robot
 class OT2Controller():
     """
-    The big kahuna. This class contains all the functions for controlling the robot
+    This class is responsible for controlling the robot from the Raspberry Pi. 
     ATTRIBUTES:
-        str ip: IPv4 LAN address of this machine
         Dict<str, Container> containers: maps from a common name to a Container object
-        Dict<str, Obj> tip_racks: maps from a common name to a opentrons tiprack labware object
-        Dict<str, Obj> labware: maps from labware common names to opentrons labware objects. tip racks not included?
-        Dict<str:Dict<str:Obj>>: JSON style dict. First key is the arm_pos second is the attribute
+        Dict<str:Dict<str:Obj>> pipettes: JSON style dict. First key is the arm_pos 
+          second is the attribute
             'size' float: the size of this pipette in uL
             'last_used' str: the chem_name of the last chemical used. 'clean' is used to denote a
               clean pipette
+        str my_ip: IPv4 LAN address of this machine
+        Armchair.Armchair portal: the portal connected to the controller
+        str controller_ip: the ip of the controller
+        bool simulate: true if this protocol is being simulated. (different from the simulate in
+          the protocol. This is about whether we want to execute pauses.
+        np.array<Labware> lab_deck: shape (12,) custom labware objects indexed by their
+          locations on the deck. (so lab_deck[0] is not used and we live with that)
         Opentrons...ProtocolContext protocol: the protocol object of this session
+        str root_p: the path to the root output
+        str debug_p: the path for debuging
+        str logs_p: the path to the log outputs
+    METHODS:
+        execute(command_type, cid, arguments) int: Takes in the recieved output of an Armchair
+          recv_pack, and executes the command. Will usually send a ready (except for GHOST type)
+          Returns 1 in normal situation if active. Returns 0 for closing
+        dump_well_map() void: writes a wellmap to the wellmap.tsv
+        dump_well_histories() void: writes the histories of each well to well_history.tsv
     """
 
     #Don't try to read this. Use an online json formatter 
@@ -1799,9 +1830,9 @@ class OT2Controller():
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
               are the pipette names filled in
             df reagent_df: info on reagents. columns from sheet. See excel specification
-            str my_ip: the ip address of the robot
-            bool simulate: whether to simulate protocol or not
-                
+            str my_ip: the IP address of the robot
+            str controller_ip: the IP address of the controller
+            Armchair.Armchair portal: the Armchair object connected to the controller
         postconditions:
             protocol has been initialzied
             containers and tip_racks have been created
@@ -1819,10 +1850,6 @@ class OT2Controller():
         self.portal = portal
         self.controller_ip = controller_ip
         self.simulate = simulate
-
-        #self.log = logging.getLogger('eve_logger')
-        #self.log.addHandler(logging.FileHandler('.eve.log',encoding='utf8'))
-        #self.log.warning('uh oh')
 
         #like protocol.deck, but with custom labware wrappers
         self.lab_deck = np.full(12, None, dtype='object') #note first slot not used
@@ -2422,13 +2449,13 @@ class OT2Controller():
         #ship logs
         filenames = list(os.listdir(self.logs_p))
         port = 50001 #default port for ftp 
-        self.send_files(port, filenames)
+        self._send_files(port, filenames)
         #kill link
         print('<<eve>> shutting down')
         self.portal.send_pack('close')
         self.portal.close()
 
-    def send_files(self,port,filenames):
+    def _send_files(self,port,filenames):
         '''
         used to ship files back to server
         params:
