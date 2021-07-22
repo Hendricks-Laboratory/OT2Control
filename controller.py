@@ -10,8 +10,11 @@ The ProtocolExecutor uses a PlateReader.
 PlateReader is a custom class that is built for controlling the platereader. 
 In order to control the platereader, the software should be closed when PlateReader 
 is instantiated, and (obviously) the software should exist on the machine you're running
-This module also contains a main method for running a protocol with the ProtocolExecutor and 
-connecting to the server running on eve
+This module also contains two launchers.
+launch_protocol_exec runs a protocol from the sheets using a protocol executor
+launch_auto runs in automatic machine learning mode
+A main method is supplied that will run if you run this script. It will call one of the launchers
+based on command line ars. (run this script with -h)
 '''
 from abc import ABC
 from abc import abstractmethod
@@ -29,6 +32,7 @@ import logging
 import asyncio
 import threading
 import time
+import argparse
 
 from bidict import bidict
 import gspread
@@ -47,7 +51,32 @@ from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout
 
 
+def init_parser():
+    parser = argparse.ArgumentParser()
+    help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
+    parser.add_argument('-m','--mode',help=help_str,default='protocol')
+    return parser
+
 def main(serveraddr):
+    '''
+    prompts for input and then calls appropriate launcher
+    '''
+    parser = init_parser()
+    args = parser.parse_args()
+    if args.mode == 'protocol':
+        print('launching in protocol mode')
+        launch_protocol_exec(serveraddr)
+    elif args.mode == 'auto':
+        print('launching in auto mode')
+        launch_auto(serveraddr)
+    else:
+        print("invalid argument to mode, '{}'".format(args.mode))
+        parser.print_help()
+
+def launch_protocol_exec(serveraddr):
+    '''
+    main function to launch a controller and execute a protocol
+    '''
     #instantiate a controller
     rxn_sheet_name = input('<<controller>> please input the sheet name ')
     #using the cache bypasses google docs communication and uses the last rxn you loaded
@@ -66,9 +95,24 @@ def main(serveraddr):
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-class ProtocolExecutor(): 
+def launch_auto(serveraddr):
     '''
-    class to execute a protocol from the docs
+    main function to launch an auto scientist that designs it's own experiments
+    '''
+   # rxn_sheet_name = input('<<controller>> please input the sheet name ')
+   # #using the cache bypasses google docs communication and uses the last rxn you loaded
+   # use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
+    #debugging lines for me
+    use_cache = True
+    rxn_sheet_name = 'test_layout'
+    my_ip = socket.gethostbyname(socket.gethostname())
+    auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+    auto.run_simulation()
+
+
+class Controller(ABC):
+    '''
+    This class is a shared interface for the ProtocolExecutor and the ______AI__Executor___
     ATTRIBUTES:
         armchair.Armchair portal: the Armchair object to ship files across
         rxn_sheet_name: the name of the reaction sheet
@@ -76,7 +120,6 @@ class ProtocolExecutor():
         bool use_cache: read from cache if possible
         str eve_files_path: the path to put files from eve
         str debug_path: the path to place debugging information
-        df rxn_df: the reaction df. Not passed in, but created in init
         str my_ip: the ip of this controller
         str server_ip: the ip of the server. This is modified for simulation, but returned to 
           original state at the end of simulation
@@ -114,39 +157,27 @@ class ProtocolExecutor():
             2 int deck_pos: the position of the labware it's on
             3 float vol: the volume in the container
             4 float aspiratible_vol: the volume minus dead vol
-        pd.index _products: the product columns
     CONSTANTS:
         bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info
     METHODS:
-        run_simulation() int: runs a simulation on local machine. Tries plate reader, but
-          not necessary. returns an error code
         run_protocol(simulate, port) void: both args have good defaults. simulate can be used to
           simulate on the plate reader and robot, but generally you want false to actually run
           the protocol. port can be configured, but 50000 is default
-        execute_protocol_df() void: used to execute a single row of the reaction df
+        run_simulation() int: runs a simulation on local machine. Tries plate reader, but
+          not necessary. returns an error code
         close_connection() void: automatically called by run_protocol. used to terminate a 
           connection with eve
-        translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
-          that correspond to platereader
         init_robot(simulate): used to initialize the robot. called automatically in run. simulate
           is the same as used by the robot protocol
-        run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
-          run automatically when you run your simulation
-        CHECKS: all print messages for errors and return error codes
-        check_rxn_df() int: checks for errors in input.
-        check_labware() int: checks for errors in labware/labware assignments. 
-        check_products() int: checks for errors in the product placement.
-        check_reagents() int: checks for errors in the reagent_info tab.
-        TESTS: These are run after a reaction concludes to make sure things went well
-        run_all_tests() bool: True if you passed, else false. run when at end of simulation
-        test_vol_lab_cont() bool: tests that labware volume and containers are correct
-        test_contents() bool: tests that the contents of each container is ok
+        translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
+          that correspond to platereader
     '''
-#this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
-#reader given a regular loc for a 96well plate.
-#Please do not read this. paste it into a nice json viewer.
+    #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
+    #reader given a regular loc for a 96well plate.
+    #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
+
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
@@ -167,6 +198,494 @@ class ProtocolExecutor():
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
+
+    def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
+        '''
+        open and search a sheet that tells you which sheet is associated with the reaction
+        Or read from cache if cache is enabled
+        params:
+            ServiceAccountCredentials credentials: to access the sheets
+            str rxn_sheet_name: the name of sheet
+        returns:
+            list<list<str>> name_key_pairs: the data in the wks_key spreadsheet
+        Postconditions:
+            If cached data could not be found, will dump spreadsheet data to name_key_pairs.pkl 
+            in cache path
+        '''
+        if self.use_cache:
+            #load cache
+            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'rb') as name_key_pairs_cache:
+                name_key_pairs = dill.load(name_key_pairs_cache)
+        else:
+            #pull down data
+            gc = gspread.authorize(credentials)
+            name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
+            name_key_pairs = name_key_wks.get_all_values() #list<list<str name, str key>>
+            #Note the key is a unique identifier that can be used to access the sheet
+            #d2g uses it to access the worksheet
+            #dump to cache
+            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'wb') as name_key_pairs_cache:
+                dill.dump(name_key_pairs, name_key_pairs_cache)
+        return name_key_pairs
+
+
+    def _download_sheet(self, rxn_spreadsheet, index):
+        '''
+        pulls down the sheet at the index
+        params:
+            gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions
+            int index: the index of the sheet to pull down
+        returns:
+            list<list<str>> data: the input template sheet pulled down into a list
+        '''
+        if self.use_cache:
+            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)), 'rb') as rxn_wks_data_cache:
+                data = dill.load(rxn_wks_data_cache)
+        else:
+            rxn_wks = rxn_spreadsheet.get_worksheet(index)
+            data = rxn_wks.get_all_values()
+            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)),'wb') as rxn_wks_data_cache:
+                dill.dump(data, rxn_wks_data_cache)
+        return data
+
+
+    def _make_out_dirs(self, out_path):
+        '''
+        params:
+            str out_path: the path for all files output by controller
+        Postconditions:
+            All paths used by this class have been initialized if they were not before
+            They are not overwritten if they already exist
+        '''
+        self.eve_files_path = os.path.join(out_path, 'Eve_Files')
+        self.debug_path = os.path.join(out_path, 'Debug')
+        paths = [out_path, self.eve_files_path, self.debug_path]
+        for path in paths:
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+    def _init_credentials(self, rxn_sheet_name):
+        '''
+        this function reads a local json file to get the credentials needed to access other funcs
+        params:
+            str rxn_sheet_name: the name of the reaction sheet to run
+        returns:
+            ServiceAccountCredentials: the credentials to access that sheet
+        '''
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        #get login credentials from local file. Your json file here
+        path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
+        return credentials
+
+    def _get_wks_key(self, credentials, rxn_sheet_name):
+        '''
+        open and search a sheet that tells you which sheet is associated with the reaction
+        params:
+            ServiceAccountCredentials credentials: to access the sheets
+            str rxn_sheet_name: the name of sheet
+        returns:
+            if self.use_cache:
+                str wks_key: the key associated with the sheet. It functions similar to a url
+            else:
+                None: this is ok because the wks key will not be used if caching
+        '''
+        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        try:
+            i=0
+            wks_key = None
+            while not wks_key and i <= len(name_key_pairs):
+                row = name_key_pairs[i]
+                if row[0] == rxn_sheet_name:
+                    wks_key = row[1]
+                i+=1
+        except IndexError:
+            raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
+            and make sure the spreadsheet name is spelled exactly the same as the reaction \
+            spreadsheet.')
+        return wks_key
+
+    def _open_sheet(self, rxn_sheet_name, credentials):
+        '''
+        open the google sheet
+        params:
+            str rxn_sheet_name: the title of the sheet to be opened
+            oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
+        returns:
+            if self.use_cache:
+                gspread.Spreadsheet the spreadsheet (probably of all the reactions)
+            else:
+                None: this is fine because the wks should never be used if cache is true
+        '''
+        gc = gspread.authorize(credentials)
+        try:
+            if self.use_cache:
+                wks = None
+            else:
+                wks = gc.open(rxn_sheet_name)
+        except: 
+            raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
+        return wks
+
+    def _init_robo_header_params(self, header_data):
+        '''
+        loads the header data into self.robo_params
+        params:
+            list<list<str> header_data: as in gsheets
+        Postconditions:
+            simulate, using_temp_ctrl, and temp have been initialized according to values in 
+            excel
+        '''
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
+        self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
+
+    def _download_reagent_data(self, spreadsheet_key, credentials):
+        '''
+        params:
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
+            ServiceAccount Credentials credentials: to access sheets
+        returns:
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)
+        '''
+        
+        if self.use_cache:
+            #if you've already seen this don't pull it
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
+                reagent_info = dill.load(reagent_info_cache)
+        else:
+            #pull down from the cloud
+            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
+                row_names = True, credentials=credentials).drop(columns=['comments'])
+            #cache the data
+            #DEBUG
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
+                dill.dump(reagent_info, reagent_info_cache)
+        return reagent_info
+
+    def _get_empty_containers(self, raw_reagent_df):
+        '''
+        only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df
+        params:
+            df raw_reagent_df: as in reagent_info of excel
+        returns:
+            df empty_containers:
+                INDEX:
+                int deck_pos: the position on the deck
+                COLS:
+                str loc: location on the labware
+        '''
+        return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
+    
+    def _parse_raw_reagent_df(self, raw_reagent_df):
+        '''
+        parses the raw_reagent_df into final form for reagent_df
+        params:
+            df raw_reagent_df: as in excel
+        returns:
+            df reagent_df: empties ignored, columns with correct types
+        '''
+        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
+        try:
+            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        except ValueError as e:
+            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
+        return reagent_df
+
+    def _get_instrument_dict(self, deck_data):
+        '''
+        uses data from deck sheet to return the instrument params
+        Preconditions:
+            The second sheet in the worksheet must be initialized with where you've placed reagents 
+            and the first thing not being used
+        params:
+            list<list<str>>deck_data: the deck data as in excel
+        returns:
+            Dict<str:str>: key is 'left' or 'right' for the slots. val is the name of instrument
+        '''
+        #the format google fetches this in is funky, so we convert it into a nice df
+        #make instruments
+        instruments = {}
+        instruments['left'] = deck_data[13][0]
+        instruments['right'] = deck_data[13][1]
+        return instruments
+    
+    def _get_labware_df(self, deck_data, empty_containers):
+        '''
+        uses data from deck sheet to get information about labware locations, first tip, etc.
+        Preconditions:
+            The second sheet in the worksheet must be initialized with where you've placed reagents 
+            and the first thing not being used
+        params:
+            list<list<str>>deck_data: the deck data as in excel
+            df empty_containers: this is used for tubes. it holds the containers that can be used
+                int index: deck_pos
+                str position: the position of the empty container on the labware
+        returns:
+            df:
+                str name: the common name of the labware
+                str first_usable: the first tip/well to use
+                int deck_pos: the position on the deck of this labware
+                str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+                  order
+        '''
+        labware_dict = {'name':[], 'first_usable':[],'deck_pos':[]}
+        for row_i in range(0,10,3):
+            for col_i in range(3):
+                labware_dict['name'].append(deck_data[row_i+1][col_i])
+                labware_dict['first_usable'].append(deck_data[row_i+2][col_i])
+                labware_dict['deck_pos'].append(deck_data[row_i][col_i])
+        labware_df = pd.DataFrame(labware_dict)
+        #platereader positions need to be translated, and they shouldn't be put in both
+        #slots
+        platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
+                (labware_df['name'] == 'platereader4')]
+        usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
+        assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
+        assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
+        platereader_input_first_usable = usable_rows.iloc[0]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
+        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
+        if platereader_name == 'platereader7':
+            platereader4_first_usable = 'F8' #anything larger than what is on plate
+            platereader7_first_usable = platereader_first_usable
+        else:
+            platereader4_first_usable = platereader_first_usable
+            platereader7_first_usable = 'G1'
+        labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
+        labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
+        labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
+        labware_df.set_index('deck_pos', inplace=True)
+        #add empty containers in list form
+        #there's some fancy formating here that gets you a series with deck as the index and
+        #comma seperated loc strings eg 'A1,A3,B2' as values
+        grouped = empty_containers['loc'].apply(lambda pos: pos+',').groupby('deck_pos')
+        labware_locs = grouped.sum().apply(lambda pos: pos[:len(pos)-1])
+        labware_df = labware_df.join(labware_locs, how='left')
+        labware_df['loc'] = labware_df['loc'].fillna('')
+        labware_df.rename(columns={'loc':'empty_list'},inplace=True)
+        labware_df.reset_index(inplace=True)
+        labware_df['deck_pos'] = pd.to_numeric(labware_df['deck_pos'])
+        return labware_df
+
+    def _get_chemical_name(self,row):
+        '''
+        create a chemical name
+        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])
+        params:
+            pd.Series row: a row in the rxn_df
+        returns:
+            chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
+              has no concentration, or nan if no name
+        '''
+        if pd.isnull(row['reagent']):
+            #this must not be a transfer. this operation has no chemical name
+            return np.nan
+        elif pd.isnull(row['conc']):
+            #this uses a chemical, but the chemical doesn't have a concentration (probably a mix)
+            return row['reagent'].replace(' ', '_')
+        else:
+            #this uses a chemical with a conc. Probably a stock solution
+            return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
+        return pd.Series(new_cols)
+
+    def close_connection(self):
+        '''
+        runs through closing procedure with robot
+        Postconditions:
+            Log files have been written to self.out_path
+            Connection has been closed
+        '''
+        print('<<controller>> initializing breakdown')
+        self.portal.send_pack('close')
+        #server will initiate file transfer
+        pack_type, cid, arguments = self.portal.recv_pack()
+        while pack_type == 'ready':
+            #spin through all the queued ready packets
+            pack_type, cid, arguments = self.portal.recv_pack()
+        assert(pack_type == 'sending_files')
+        port = arguments[0]
+        filenames = arguments[1]
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
+        for filename in filenames:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+                data = buffered_sock.recv_until(armchair.FTP_EOF)
+                write_file.write(data)
+        self.translate_wellmap()
+        print('<<controller>> files recieved')
+        sock.close()
+        #server should now send a close command
+        pack_type, cid, arguments = self.portal.recv_pack()
+        assert(pack_type == 'close')
+        print('<<controller>> shutting down')
+        self.portal.close()
+    
+    def translate_wellmap(self):
+        '''
+        Preconditions:
+            there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+            machine labels
+        Postconditions:
+            translated_wellmap.tsv has been created. translated is a copy of wellmap with 
+            it's locations translated to human locs, but the labware pos remains the same
+        '''
+        df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
+        df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
+        df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
+
+    def init_robot(self, simulate):
+        '''
+        this does the dirty work of sending accumulated params over network to the robot
+        params:
+            bool simulate: whether the robot should run a simulation
+        Postconditions:
+            robot has been initialized with necessary params
+        '''
+        #send robot data to initialize itself
+        cid = self.portal.send_pack('init', simulate, 
+                self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
+                self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
+                self.robo_params['reagent_df'].to_dict(), self.my_ip)
+
+    @abstractmethod
+    def run_simulation():
+        pass
+    @abstractmethod
+    def run_protocol(simulate):
+        pass
+
+class AutoContr(Controller):
+    '''
+    This is a completely automated controller. It takes as input a layout sheet, and then does
+    it's own experiments, pulling data etc
+    '''
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+        '''
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        is instantiated in run
+        '''
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
+        #necessary helper params
+        credentials = self._init_credentials(rxn_sheet_name)
+        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
+        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
+        header_data = self._download_sheet(rxn_spreadsheet,0)
+        deck_data = self._download_sheet(rxn_spreadsheet, 1)
+        self._init_robo_header_params(header_data)
+        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
+        #with a parsed reagent_df. This is exactly as is pulled from gsheets
+        empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
+        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
+        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+
+    def run_simulation(self):
+        '''
+        runs a full simulation of the protocol on local machine
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function
+        Returns:
+            bool: True if all tests were passed
+        '''
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        self.server_ip = '127.0.0.1'
+        self.simulate = True
+
+        print('<<controller>> ENTERING SIMULATION')
+        port = 50000
+        #launch an eve server in background for simulation purposes
+        b = threading.Barrier(2,timeout=20)
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread.start()
+
+        #do create a connection
+        b.wait()
+        self._run(port, simulate=True)
+
+        #collect the eve thread
+        eve_thread.join()
+
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
+        print('<<controller>> EXITING SIMULATION')
+        return True
+
+    def run_protocol(simulate):
+        pass
+
+    def _run(self, port, simulate):
+        '''
+        Returns:
+            bool: True if all tests were passed
+        '''
+        try:
+            self.pr = PlateReader(simulate)
+        except:
+            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+            self.pr = DummyReader()
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, timeout=None)
+        print("<<controller>> connected")
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
+
+        self.init_robot(simulate)
+        self.close_connection()
+        self.pr.shutdown()
+        return
+
+class ProtocolExecutor(Controller): 
+    '''
+    class to execute a protocol from the docs
+    ATTRIBUTES:
+        df rxn_df: the reaction df. Not passed in, but created in init
+    INHERITED ATTRIBUTES:
+        armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache, 
+        str eve_files_path, str debug_path, str my_ip, str server_ip,
+        dict<str:object> robo_params, bool simulate, int buff_size
+    PRIVATE ATTRS:
+        pd.index _products: the product columns
+    INHERITED PRIVATE ATTRS:
+        dict<str:tuple<obj>> _cached_reader_locs
+    METHODS:
+        execute_protocol_df() void: used to execute a single row of the reaction df
+        run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
+          run automatically when you run your simulation
+        CHECKS: all print messages for errors and return error codes
+        check_rxn_df() int: checks for errors in input.
+        check_labware() int: checks for errors in labware/labware assignments. 
+        check_products() int: checks for errors in the product placement.
+        check_reagents() int: checks for errors in the reagent_info tab.
+        TESTS: These are run after a reaction concludes to make sure things went well
+        run_all_tests() bool: True if you passed, else false. run when at end of simulation
+        test_vol_lab_cont() bool: tests that labware volume and containers are correct
+        test_contents() bool: tests that the contents of each container is ok
+    INHERITED METHODS:
+        run_protocol(simulate, port) void, close_connection() void, init_robot(simulate), 
+        translate_wellmap() void, run_simulation() bool
+    '''
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+        '''
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        is instantiated in run
+        '''
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
         #necessary helper params
         credentials = self._init_credentials(rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -260,122 +779,32 @@ class ProtocolExecutor():
         self.close_connection()
         self.pr.shutdown()
         return
+
+    def _download_reagent_data(self, spreadsheet_key, credentials):
+        '''
+        This is almost line for line inherited, but we need to input in the middle. 
+        What can you do?
+        params:
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
+            ServiceAccount Credentials credentials: to access sheets
+        returns:
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)
+        '''
         
-
-    def _init_credentials(self, rxn_sheet_name):
-        '''
-        this function reads a local json file to get the credentials needed to access other funcs
-        params:
-            str rxn_sheet_name: the name of the reaction sheet to run
-        returns:
-            ServiceAccountCredentials: the credentials to access that sheet
-        '''
-        scope = ['https://spreadsheets.google.com/feeds',
-                 'https://www.googleapis.com/auth/drive']
-        #get login credentials from local file. Your json file here
-        path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
-        credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
-        return credentials
-
-    def _get_wks_key(self, credentials, rxn_sheet_name):
-        '''
-        open and search a sheet that tells you which sheet is associated with the reaction
-        params:
-            ServiceAccountCredentials credentials: to access the sheets
-            str rxn_sheet_name: the name of sheet
-        returns:
-            if self.use_cache:
-                str wks_key: the key associated with the sheet. It functions similar to a url
-            else:
-                None: this is ok because the wks key will not be used if caching
-        '''
-        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
-        try:
-            i=0
-            wks_key = None
-            while not wks_key and i <= len(name_key_pairs):
-                row = name_key_pairs[i]
-                if row[0] == rxn_sheet_name:
-                    wks_key = row[1]
-                i+=1
-        except IndexError:
-            raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
-            and make sure the spreadsheet name is spelled exactly the same as the reaction \
-            spreadsheet.')
-        return wks_key
-
-    def _open_sheet(self, rxn_sheet_name, credentials):
-        '''
-        open the google sheet
-        params:
-            str rxn_sheet_name: the title of the sheet to be opened
-            oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
-        returns:
-            if self.use_cache:
-                gspread.Spreadsheet the spreadsheet (probably of all the reactions)
-            else:
-                None: this is fine because the wks should never be used if cache is true
-
-    
-        '''
-        gc = gspread.authorize(credentials)
-        try:
-            if self.use_cache:
-                wks = None
-            else:
-                wks = gc.open(rxn_sheet_name)
-        except: 
-            raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
-        return wks
-
-    def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
-        '''
-        open and search a sheet that tells you which sheet is associated with the reaction
-        Or read from cache if cache is enabled
-        params:
-            ServiceAccountCredentials credentials: to access the sheets
-            str rxn_sheet_name: the name of sheet
-        returns:
-            list<list<str>> name_key_pairs: the data in the wks_key spreadsheet
-        Postconditions:
-            If cached data could not be found, will dump spreadsheet data to name_key_pairs.pkl 
-            in cache path
-        '''
         if self.use_cache:
-            #load cache
-            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'rb') as name_key_pairs_cache:
-                name_key_pairs = dill.load(name_key_pairs_cache)
+            #if you've already seen this don't pull it
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
+                reagent_info = dill.load(reagent_info_cache)
         else:
-            #pull down data
-            gc = gspread.authorize(credentials)
-            name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
-            name_key_pairs = name_key_wks.get_all_values() #list<list<str name, str key>>
-            #Note the key is a unique identifier that can be used to access the sheet
-            #d2g uses it to access the worksheet
-            #dump to cache
-            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'wb') as name_key_pairs_cache:
-                dill.dump(name_key_pairs, name_key_pairs_cache)
-        return name_key_pairs
-
-    def _download_sheet(self, rxn_spreadsheet, index):
-        '''
-        pulls down the sheet at the index
-        params:
-            gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions
-            int index: the index of the sheet to pull down
-        returns:
-            list<list<str>> data: the input template sheet pulled down into a list
-        '''
-        if self.use_cache:
-            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)), 'rb') as rxn_wks_data_cache:
-                data = dill.load(rxn_wks_data_cache)
-        else:
-            rxn_wks = rxn_spreadsheet.get_worksheet(index)
-            data = rxn_wks.get_all_values()
-            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)),'wb') as rxn_wks_data_cache:
-                dill.dump(data, rxn_wks_data_cache)
-        return data
-
+            input("<<controller>> please press enter when you've completed the reagent sheet")
+            #pull down from the cloud
+            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
+                row_names = True, credentials=credentials).drop(columns=['comments'])
+            #cache the data
+            #DEBUG
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
+                dill.dump(reagent_info, reagent_info_cache)
+        return reagent_info
 
     def _load_rxn_df(self, input_data):
         '''
@@ -456,105 +885,6 @@ class ProtocolExecutor():
         products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
         return products_to_labware
 
-    def _get_chemical_name(self,row):
-        '''
-        create a chemical name
-        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])
-        params:
-            pd.Series row: a row in the rxn_df
-        returns:
-            chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
-              has no concentration, or nan if no name
-        '''
-        if pd.isnull(row['reagent']):
-            #this must not be a transfer. this operation has no chemical name
-            return np.nan
-        elif pd.isnull(row['conc']):
-            #this uses a chemical, but the chemical doesn't have a concentration (probably a mix)
-            return row['reagent'].replace(' ', '_')
-        else:
-            #this uses a chemical with a conc. Probably a stock solution
-            return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
-        return pd.Series(new_cols)
-
-    def _get_instrument_dict(self, deck_data):
-        '''
-        uses data from deck sheet to return the instrument params
-        Preconditions:
-            The second sheet in the worksheet must be initialized with where you've placed reagents 
-            and the first thing not being used
-        params:
-            list<list<str>>deck_data: the deck data as in excel
-        returns:
-            Dict<str:str>: key is 'left' or 'right' for the slots. val is the name of instrument
-        '''
-        #the format google fetches this in is funky, so we convert it into a nice df
-        #make instruments
-        instruments = {}
-        instruments['left'] = deck_data[13][0]
-        instruments['right'] = deck_data[13][1]
-
-        return instruments
-    
-    def _get_labware_df(self, deck_data, empty_containers):
-        '''
-        uses data from deck sheet to get information about labware locations, first tip, etc.
-        Preconditions:
-            The second sheet in the worksheet must be initialized with where you've placed reagents 
-            and the first thing not being used
-        params:
-            list<list<str>>deck_data: the deck data as in excel
-            df empty_containers: this is used for tubes. it holds the containers that can be used
-                int index: deck_pos
-                str position: the position of the empty container on the labware
-        returns:
-            df:
-                str name: the common name of the labware
-                str first_usable: the first tip/well to use
-                int deck_pos: the position on the deck of this labware
-                str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-                  order
-        '''
-        labware_dict = {'name':[], 'first_usable':[],'deck_pos':[]}
-        for row_i in range(0,10,3):
-            for col_i in range(3):
-                labware_dict['name'].append(deck_data[row_i+1][col_i])
-                labware_dict['first_usable'].append(deck_data[row_i+2][col_i])
-                labware_dict['deck_pos'].append(deck_data[row_i][col_i])
-        labware_df = pd.DataFrame(labware_dict)
-        #platereader positions need to be translated, and they shouldn't be put in both
-        #slots
-        platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
-                (labware_df['name'] == 'platereader4')]
-        usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
-        assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
-        assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
-        platereader_input_first_usable = usable_rows.iloc[0]
-        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
-        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
-        if platereader_name == 'platereader7':
-            platereader4_first_usable = 'F8' #anything larger than what is on plate
-            platereader7_first_usable = platereader_first_usable
-        else:
-            platereader4_first_usable = platereader_first_usable
-            platereader7_first_usable = 'G1'
-        labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
-        labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
-        labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
-        labware_df.set_index('deck_pos', inplace=True)
-        #add empty containers in list form
-        #there's some fancy formating here that gets you a series with deck as the index and
-        #comma seperated loc strings eg 'A1,A3,B2' as values
-        grouped = empty_containers['loc'].apply(lambda pos: pos+',').groupby('deck_pos')
-        labware_locs = grouped.sum().apply(lambda pos: pos[:len(pos)-1])
-        labware_df = labware_df.join(labware_locs, how='left')
-        labware_df['loc'] = labware_df['loc'].fillna('')
-        labware_df.rename(columns={'loc':'empty_list'},inplace=True)
-        labware_df.reset_index(inplace=True)
-        labware_df['deck_pos'] = pd.to_numeric(labware_df['deck_pos'])
-    
-        return labware_df
-
     def _query_reagents(self, spreadsheet_key, credentials):
         '''
         query the user with a reagent sheet asking for more details on locations of reagents, mass
@@ -574,59 +904,6 @@ class ProtocolExecutor():
         if not self.use_cache:
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
-    def _download_reagent_data(self, spreadsheet_key, credentials):
-        '''
-        params:
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-            ServiceAccount Credentials credentials: to access sheets
-        returns:
-            df reagent_info: dataframe as pulled from gsheets (with comments dropped)
-        '''
-        
-        if self.use_cache:
-            #if you've already seen this don't pull it
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
-                reagent_info = dill.load(reagent_info_cache)
-        else:
-            input("<<controller>> please press enter when you've completed the reagent sheet")
-            #pull down from the cloud
-            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
-                row_names = True, credentials=credentials).drop(columns=['comments'])
-            #cache the data
-            #DEBUG
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
-                dill.dump(reagent_info, reagent_info_cache)
-        return reagent_info
-
-    def _get_empty_containers(self, raw_reagent_df):
-        '''
-        only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df
-        params:
-            df raw_reagent_df: as in reagent_info of excel
-        returns:
-            df empty_containers:
-                INDEX:
-                int deck_pos: the position on the deck
-                COLS:
-                str loc: location on the labware
-        '''
-        return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
-    
-    def _parse_raw_reagent_df(self, raw_reagent_df):
-        '''
-        parses the raw_reagent_df into final form for reagent_df
-        params:
-            df raw_reagent_df: as in excel
-        returns:
-            df reagent_df: empties ignored, columns with correct types
-        '''
-        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
-        try:
-            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
-        except ValueError as e:
-            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
-        return reagent_df
-
     def _get_product_df(self, products_to_labware):
         '''
         Creates a df to be used by robot to initialize containers for the products it will make
@@ -645,19 +922,6 @@ class ProtocolExecutor():
         product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
         product_df['max_vol'] = max_vols
         return product_df
-
-    def _init_robo_header_params(self, header_data):
-        '''
-        loads the header data into self.robo_params
-        params:
-            list<list<str> header_data: as in gsheets
-        Postconditions:
-            simulate, using_temp_ctrl, and temp have been initialized according to values in 
-            excel
-        '''
-        header_dict = {row[0]:row[1] for row in header_data[1:]}
-        self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
-        self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
 
     def _get_rxn_max_vol(self, name, products):
         '''
@@ -907,83 +1171,15 @@ class ProtocolExecutor():
         if callback == 'pause':
             return [row['pause_time']]
         return None
-
-    def _make_out_dirs(self, out_path):
+    
+    def init_robot(self,simulate):
         '''
+        calls super init robot, and then sends an init_containers command to initialize all the
+        prodcuts
         params:
-            str out_path: the path for all files output by controller
-        Postconditions:
-            All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist
+            bool simulate: whether the robot should run a simulation
         '''
-        self.eve_files_path = os.path.join(out_path, 'Eve_Files')
-        self.debug_path = os.path.join(out_path, 'Debug')
-        paths = [out_path, self.eve_files_path, self.debug_path]
-        for path in paths:
-            if not os.path.exists(path):
-                os.makedirs(path)
-
-    def close_connection(self):
-        '''
-        runs through closing procedure with robot
-        Postconditions:
-            Log files have been written to self.out_path
-            Connection has been closed
-        '''
-        print('<<controller>> initializing breakdown')
-        self.portal.send_pack('close')
-        #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        while pack_type == 'ready':
-            #spin through all the queued ready packets
-            pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'sending_files')
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
-            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
-        self.translate_wellmap()
-        print('<<controller>> files recieved')
-        sock.close()
-        #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'close')
-        print('<<controller>> shutting down')
-        self.portal.close()
-    
-    def translate_wellmap(self):
-        '''
-        Preconditions:
-            there exists a file wellmap.tsv in self.eve_files, and that file has eve level
-            machine labels
-        Postconditions:
-            translated_wellmap.tsv has been created. translated is a copy of wellmap with 
-            it's locations translated to human locs, but the labware pos remains the same
-        '''
-        df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
-        df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
-        df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
-
-    def error_handler(self):
-        pass
-    
-    def init_robot(self, simulate):
-        '''
-        this does the dirty work of sending accumulated params over network to the robot
-        Postconditions:
-            robot has been initialized with necessary params
-        '''
-        #send robot data to initialize itself
-        cid = self.portal.send_pack('init', simulate, 
-                self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
-                self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
-                self.robo_params['reagent_df'].to_dict(), self.my_ip)
-    
+        super().init_robot(simulate)
         #send robot data to initialize empty product containers. Because we know things like total
         #vol and desired labware, this makes sense for a planned experiment
         self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
