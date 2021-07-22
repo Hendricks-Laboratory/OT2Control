@@ -2622,7 +2622,7 @@ class PlateReader(AbstractPlateReader):
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
 
     def __init__(self, simulate=False):
-        self.exec_macro('Terminate')
+        input('<<reader>> initializing. Please ensure that the software is closed. Press enter to continue')
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
