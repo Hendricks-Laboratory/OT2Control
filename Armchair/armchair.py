@@ -8,10 +8,41 @@ FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
 
 class Armchair():
     '''
-    TODO this docstring
-    NOTE that buffer is not a hardware constraint. GHOST items can slip through
+    This class facilitates all Armchair interactions over socket. Detailed documentation on the
+    protocol can be found in acompanying armchair_specs.txt
+    The class maintains a buffer of packets in a conversation, and if the buffer is full, it will
+    block until the buffer is emptied. Note however that this abstraction is broken in the case
+    of GHOST packets, which are sent without waiting for a ready response and without changing the
+    cid
+    ATTRIBUTES:
+        socket sock: a connected socket
+        int buffsize: this is the number of allowed inflight packets (i.e. the number of packets
+          to send to the reciever before waiting for a ready response)
+        int cid: the current command id. This is a constantly increasing number. It is used to 
+          communicate between Armchair objects about where the other end is in terms of processing
+          packages.
+        pack_ty
+        str name: the name of this armchair object. Used for loging purposes
+        str log_path: the path to the log file for this Armchair
+    CONSTANTS:
+        bidict PACK_TYPES: this is a key for translating between byte codes and string labels
+          for different packet types
+        GHOST_TYPES: this is a list of all str types that classify as GHOST packets. i.e. they do
+          not go to the buffer, are sent immediately without waiting for a ready. The responses to
+          these packets are controlled outside of the Armchair class by the user
+    METHODS:
+        recv() tuple<str,int,Obj>: this should almost never be used by a user. It recieves a
+          packet, but without any checking for buffer requirements
+        recv_pack() tuple<str,int,Obj>: this is a wrapped version of recv for user. It will make
+          sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
+          payload
+        send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
+          of pack_type with args.
+        burn_pipe() void: This command waits until the pipe is clear
+        close() void: terminate the connection
     '''
 
+    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D'})
     GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req'] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready's / are not added to inflight packs. Do not modify CID.
@@ -22,7 +53,6 @@ class Armchair():
         self.buffsize = buffsize
         self._inflight_packs = []
         #bidirectional dictionary for conversions from byte codes to string names for commands and back
-        self.pack_types = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D'})
         self.name = name
         self.log_path = log_path
         if not os.path.exists(self.log_path):
@@ -47,7 +77,7 @@ class Armchair():
         returns:
             str: the string name of the command type
         '''
-        return self.pack_types.inv[header[8:9]]
+        return self.PACK_TYPES.inv[header[8:9]]
 
     def get_cid(self,header):
         '''
@@ -66,7 +96,7 @@ class Armchair():
         '''
         if pack_type not in self.GHOST_TYPES:
             self.cid+=1
-        return n_bytes.to_bytes(8,'big') + self.pack_types[pack_type] + self.cid.to_bytes(8,'big')
+        return n_bytes.to_bytes(8,'big') + self.PACK_TYPES[pack_type] + self.cid.to_bytes(8,'big')
 
     def recv(self):
         '''
@@ -76,7 +106,7 @@ class Armchair():
         returns: if packet in buffer
             str: type of packet
             int: the cid of the recived packet
-            bytes: the argmuents/payload
+            Obj: the argmuents/payload
         '''
         header = self.sock.recv_size(17)
         header_len = self.get_len(header)
@@ -99,7 +129,7 @@ class Armchair():
         returns:
             str: type of packet
             int: the cid of the recived packet
-            bytes: the argmuents/payload
+            Obj: the argmuents/payload
         '''
         header_type = 'ready' #do while
         while header_type == 'ready':
@@ -163,4 +193,7 @@ class Armchair():
         self._inflight_packs.remove(cid)
 
     def close(self):
+        '''
+        shutsdown this Armchair
+        '''
         self.sock.close()

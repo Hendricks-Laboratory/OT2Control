@@ -1,8 +1,0 @@
-still have well problem
-drop tips when you're done
-F5, F4, F3, F2, F1, G5, G4, G3, G2
-96WellPlate is reading one later
-
-
-The problem: platereader labware indices are different from the kinds of indices that we want to deal with for scans and general use
-There must be a layer of abstraction that translates from human_i to machine_i. Ideally this is as low down as possible, so create a platereader labware class that handles index translation, but then if you ever try to bypass the abstraction by looking at the labware, which I do allow because I have not made the labware private, you will get terrible TERRIBLE errors. The likes of which will keep you debugging for days. To avoid this fate, I backtrack and keep the level of abstraction at the layer of the controller. 

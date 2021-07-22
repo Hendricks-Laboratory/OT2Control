@@ -10,27 +10,6 @@ the rules of these conversations are detailed here
         Invoked by: 'close'
 	    Port: 50001
 
-    STOP:
-        Description: This connection is initialized when the robot is stopping and waiting for
-          user input. It cannot simply ask for input on it's terminal because the user will not
-          be looking at that screen. A TCP connection is required for the robot to send requests
-          for the user to stop and display, and for the controller to relay the users response.
-          This probably should have been done over armchair, but because I overthunk it, it
-          now happens over this seperate TCP connection. 
-          There is a special place in Hell for engineers who violate KISS in the way that this
-          connection does. (Sorry)
-          Procedure:
-          The Controller begins by initializing a socket.
-          The robot then creates a connection to that socket. It is possible that a race condition
-          will ensue here, so the robot is given 3 tries waiting 2, 4, and 8 seconds between each.
-          After they have connected, the robot sends a code of b'\x01' indicating it is stopped
-          The controller will wait for user input, and then respond with b'\x01'
-          The robot waits for this response and then continues this pattern
-          When the robot is done, it sends a code b'\x02', closes connection, and returns control
-          When the client recieves b'\x02' it closes connection and returns control
-        Invoked by: 'stop' and 'transfer' with stop callback
-        Port: 50003
-
 PACKET FIELDS
 Header
     8B body_len: the length of the packet minus the header
@@ -145,6 +124,3 @@ x0D: 'home'
     robot->controller:
     Description: before scanning, the robot needs to get the pipette out of the way of the reader
       hence we tell it to home
-
-UNFINISHED
-error x02

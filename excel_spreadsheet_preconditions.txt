@@ -1,24 +1,65 @@
+HEADER
+The first sheet is always the header. 
+The first row is ignored syntactically. It is expected that you use this as a header comment 
+for your reaction
+the remaining rows are syntactically significant (the program reads them), but it is flexible.
+The only hard constraints are:
+    one row must have the string "using_temp_ctrl" in the A column, and 'yes' or 'no' 
+    in the B column. (yes if you want to use module)
+    one row must have the string "temp" in the A column, and a float, 
+    the temperature in celcius, if you are using temp mod, else anything (recommend blank)
+It is recommended that you only use these two rows, but I do not guarentee that the code 
+will crash if you do other strange things 
+
 INPUT TEMPlATE
 The second sheet in the worksheet must be the input template
-Every operation is one of the values ['transfer', 'scan', 'pause']
-any element that is transfered shall be renamed with spaces replaced with underscores, and it's concentration appended in the format '<name>C<conc>', e.g. PotassiumC0.03
+Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix']
+chemical that appears in the reagent column shall be renamed with spaces replaced with underscores,
+and it's concentration appended in the format '<name>C<conc>', e.g. PotassiumC0.03
 If a reagent is not a product, it will be queried later. If it is a product it will not be queried.
 This implies that the robot cannot put things into solutions that you made and put on the deck
-The order of columns is unimportant with the exception that the reagent column must come before the products and there must be no other columns after it that are not products. (This is used to determine what rows are not parameters)
-Please do not write concentrations in different ways. It's not nice. e.g. .050 sodium hydroxide and 0.05 sodium hydroxide are distinct names to the robot. It will treat them as different chemicals
-It's really not expected that you 'transfer' liquid into yourself. I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do.
-The Labware row is used to specify labware for a chemical. Choose from the dropdown menu if you have a preffered type of labware (e.g. temp controller) for that reaction. This can be left blank if you don't care the labware you want to use
-The Container row is used to specify the container you want the reagent in. (e.g. Tube2000uL) This can also be left blank if you don't care what you put this reaction in.
-You can specify both/either/no Container and Labware. Eve will satisfy all conditions you supply (if possible).
+The order of columns is unimportant with the exception that the reagent column must come before 
+the products and there must be no other columns after it that are not products.
+(This is used to determine what rows are not parameters)
+Please do not write concentrations in different ways. It's not nice. e.g. .050 sodium hydroxide 
+and 0.05 sodium hydroxide are distinct names to the robot. It will treat them as 
+different chemicals
+It's really not expected that you 'transfer' liquid into yourself. 
+I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do.
+The Labware row is used to specify labware for a chemical. 
+Choose from the dropdown menu if you have a preffered type of labware (e.g. temp controller) 
+for that reaction. This can be left blank if you don't care the labware you want to use
+The Container row is used to specify the container you want the reagent in. (e.g. Tube2000uL) 
+This can also be left blank if you don't care what you put this reaction in.
+You can specify both/either/neither Container and Labware. 
+Eve will satisfy all conditions you supply (if possible).
 Every row after the first 3 is interpreted as an operation, and should have an entry in that col
 When using products the concentration is always 1 unless diluted
-One of the reagents should be Water if you expect to do any dilutions (Duh?)
+One of the reagents should be 'Water' named with uppercase W if you expect to do any dilutions
+transfer:
+    Specify volum in uL under the columns you want to transfer into
+dilution:
+    specify 'dilution concentration' for desired concentration. specify concentration and reagent
+    to tell what you want to use as the reagent. Finally, mark a column 'dilution_placeholder' and
+    put the desired final volume in that column
+stop:
+    thats it. no args. program will grind to a halt
+pause:
+    must add pause time in seconds. Will pause that long before continuing
+scan:
+    must specify the protocol on scanner you wish to run, and the filename without exetension that
+    you want to save the data as. Mark the wells you wish to scan with a 1. mark 0 or blank in
+    others
+mix:
+    specify wells to mix with a 1. This is redundant for now because only platereader wells can be
+    mixed, but for anything that's not on the plate reader future features would pipette mix it
 
 REAGENTS INFO
 This tab is generated by the robot with the chemical name (in <name>C<conc> format) and the concentration
 You are responsible for inserting a loc (location on labware e.g. A1), deck_pos (deck_position of labware), and mass of container with reagent
 empty tubes can also be added to TubeHolder objects at this stage.
-an empty tube is specified with the keyword 'empty' as the chemical_name, a loc, and a deck_pos. The other fields may be left blank
+an empty tube is specified with the keyword 'empty' as the chemical_name, a loc, and a deck_pos. 
+The other fields may be left blank
 
 DECK POSITIONS
 You must choose from the dropdown menu. platereader4,platreader7 are fixed, but the rest can go in any open space, and you can have as many duplicates as you want
@@ -26,17 +67,12 @@ For tubes leave the below field blank. For plates/tip racks, you must always put
 It is assumed that that tip/well specified and every tip/well after that is usable
 Left and Right are the robot arms. specify which pipete you are using. 
 NOTE it is assumed that for a tip rack is 20, 300, or 1000 ul, and that these are in the name.
-It is also assumed that you never have two partially used tip racks of the same size on the deck at the same time
-It is also excpected that the name of the pipette be of the form <size>ul_<name>. This is required for parsing to get size
-The code is written to expect pipettes as instruments. If other instruments are chosen, the code to change will be OT2Controller._init_labware_and_pipettes
-Only one platereader needs a first well/tip argument. It doesn't matter which one. Leave the other blank
-
-HEADER
-The first sheet is always the header. 
-The first row is ignored syntactically. It is expected that you use this as a header comment for your reaction
-the remaining rows are syntactically significant (the program reads them), but it is flexible.
-The only hard constraints are:
-    one row must have the string "using_temp_ctrl" in the A column, and 'yes' or 'no' in the B column. (yes if you want to use module)
-    one row must have the string "temp" in the A column, and a float, the temperature in celcius, if you are using temp mod, else anything (recommend blank)
-It is recommended that you only use these two rows, but I do not guarentee that the code will crash if you do other strange things 
+It is also assumed that you never have two partially used tip racks of the same size on the deck 
+at the same time
+It is also excpected that the name of the pipette be of the form <size>ul_<name>. 
+This is required for parsing to get size
+The code is written to expect pipettes as instruments. If other instruments are chosen, 
+the code to change will be OT2Controller._init_labware_and_pipettes
+Only one platereader needs a first well/tip argument. It doesn't matter which one. 
+Leave the other blank
 
