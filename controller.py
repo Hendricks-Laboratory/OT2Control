@@ -112,66 +112,67 @@ def launch_auto(serveraddr):
 
 class Controller(ABC):
     '''
-    This class is a shared interface for the ProtocolExecutor and the ______AI__Executor___
-    ATTRIBUTES:
-        armchair.Armchair portal: the Armchair object to ship files across
-        rxn_sheet_name: the name of the reaction sheet
-        str cache_path: path to a directory for all cache files
-        bool use_cache: read from cache if possible
-        str eve_files_path: the path to put files from eve
-        str debug_path: the path to place debugging information
-        str my_ip: the ip of this controller
+    This class is a shared interface for the ProtocolExecutor and the ______AI__Executor___  
+
+    ATTRIBUTES:  
+        armchair.Armchair portal: the Armchair object to ship files across  
+        rxn_sheet_name: the name of the reaction sheet  
+        str cache_path: path to a directory for all cache files  
+        bool use_cache: read from cache if possible  
+        str eve_files_path: the path to put files from eve  
+        str debug_path: the path to place debugging information  
+        str my_ip: the ip of this controller  
         str server_ip: the ip of the server. This is modified for simulation, but returned to 
-          original state at the end of simulation
-        dict<str:object> robo_params: convenient place for the parameters for the robot
-            bool using_temp_ctrl: True if the temperature control is being used
-            float temp: the temperature in celcius to keep the temp control at
-            df reagent_df: holds information about reagents
-                float conc: the concentration
-                str loc: location on labware
-                int deck_pos: the position on the deck
-                float mass: the mass of the tube with reagent and cap
-            dict<str:str> instruments: maps 'left' and 'right' to the pipette names
-            df labware_df
-                int deck_pos: the position of the labware on the deck
-                str name: the name of the labware
-                str first_usable: a location of the first usable tip/well on labware
-                list<str> empty_list: a list of locations on the labware that have empty tubes
-            df product_df: This information is used to figure out where to put chemicals
-                INDEX
-                str chemical_name: the name of the chemical
-                COLS
-                str labware: the requested labware you want to put it in
-                str container: the container you want to put it in
-                float max_vol: the maximum volume you will put in the container
+          original state at the end of simulation  
+        dict<str:object> robo_params: convenient place for the parameters for the robot  
+            + bool using_temp_ctrl: True if the temperature control is being used  
+            + float temp: the temperature in celcius to keep the temp control at  
+            + df reagent_df: holds information about reagents  
+                + float conc: the concentration  
+                + str loc: location on labware  
+                + int deck_pos: the position on the deck  
+                + float mass: the mass of the tube with reagent and cap  
+            dict<str:str> instruments: maps 'left' and 'right' to the pipette names  
+            df labware_df  
+                + int deck_pos: the position of the labware on the deck  
+                + str name: the name of the labware  
+                + str first_usable: a location of the first usable tip/well on labware  
+                + list<str> empty_list: a list of locations on the labware that have empty tubes  
+            df product_df: This information is used to figure out where to put chemicals  
+                + INDEX  
+                + str chemical_name: the name of the chemical  
+                + COLS  
+                + str labware: the requested labware you want to put it in  
+                + str container: the container you want to put it in  
+                + float max_vol: the maximum volume you will put in the container  
         bool simulate: whether a simulation is being run or not. False by default. changed true 
-          temporarily when simulating
+          temporarily when simulating  
         int buff_size: this is the size of the buffer between Armchair commands. It's size
           corresponds to the number of commands you want to pile up in the socket buffer.
-          Really more for developers
-    PRIVATE ATTRS:
-        dict<str:tuple<obj>> _cached_reader_locs: cache for chemical information from the robot
-            The tuple has following structure:
-            0 str chem_name: the name of the well
-            1 str well_loc: the loc of the well on it's labware (translated to human if on pr)
-            2 int deck_pos: the position of the labware it's on
-            3 float vol: the volume in the container
-            4 float aspiratible_vol: the volume minus dead vol
-    CONSTANTS:
+          Really more for developers  
+    PRIVATE ATTRS:  
+        dict<str:tuple<obj>> _cached_reader_locs: cache for chemical information from the robot  
+            The tuple has following structure:  
+            0 str chem_name: the name of the well  
+            1 str well_loc: the loc of the well on it's labware (translated to human if on pr)  
+            2 int deck_pos: the position of the labware it's on  
+            3 float vol: the volume in the container  
+            4 float aspiratible_vol: the volume minus dead vol  
+    CONSTANTS:  
         bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
-        wellplate to locs on the opentrons object. Use a json viewer for more structural info
-    METHODS:
+        wellplate to locs on the opentrons object. Use a json viewer for more structural info  
+    METHODS:  
         run_protocol(simulate, port) void: both args have good defaults. simulate can be used to
           simulate on the plate reader and robot, but generally you want false to actually run
-          the protocol. port can be configured, but 50000 is default
+          the protocol. port can be configured, but 50000 is default  
         run_simulation() int: runs a simulation on local machine. Tries plate reader, but
-          not necessary. returns an error code
+          not necessary. returns an error code  
         close_connection() void: automatically called by run_protocol. used to terminate a 
-          connection with eve
+          connection with eve  
         init_robot(simulate): used to initialize the robot. called automatically in run. simulate
-          is the same as used by the robot protocol
+          is the same as used by the robot protocol  
         translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
-          that correspond to platereader
+          that correspond to platereader  
     '''
     #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
     #reader given a regular loc for a 96well plate.
@@ -202,15 +203,15 @@ class Controller(ABC):
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
         open and search a sheet that tells you which sheet is associated with the reaction
-        Or read from cache if cache is enabled
-        params:
-            ServiceAccountCredentials credentials: to access the sheets
-            str rxn_sheet_name: the name of sheet
-        returns:
-            list<list<str>> name_key_pairs: the data in the wks_key spreadsheet
-        Postconditions:
+        Or read from cache if cache is enabled  
+        params:  
+            ServiceAccountCredentials credentials: to access the sheets  
+            str rxn_sheet_name: the name of sheet  
+        returns:  
+            list<list<str>> name_key_pairs: the data in the wks_key spreadsheet  
+        Postconditions:  
             If cached data could not be found, will dump spreadsheet data to name_key_pairs.pkl 
-            in cache path
+            in cache path  
         '''
         if self.use_cache:
             #load cache
@@ -231,12 +232,12 @@ class Controller(ABC):
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
-        pulls down the sheet at the index
-        params:
-            gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions
-            int index: the index of the sheet to pull down
-        returns:
-            list<list<str>> data: the input template sheet pulled down into a list
+        pulls down the sheet at the index  
+        params:  
+            gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions  
+            int index: the index of the sheet to pull down  
+        returns:  
+            list<list<str>> data: the input template sheet pulled down into a list  
         '''
         if self.use_cache:
             with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)), 'rb') as rxn_wks_data_cache:
@@ -251,11 +252,11 @@ class Controller(ABC):
 
     def _make_out_dirs(self, out_path):
         '''
-        params:
-            str out_path: the path for all files output by controller
-        Postconditions:
+        params:  
+            str out_path: the path for all files output by controller  
+        Postconditions:  
             All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist
+            They are not overwritten if they already exist  
         '''
         self.eve_files_path = os.path.join(out_path, 'Eve_Files')
         self.debug_path = os.path.join(out_path, 'Debug')
@@ -266,11 +267,11 @@ class Controller(ABC):
 
     def _init_credentials(self, rxn_sheet_name):
         '''
-        this function reads a local json file to get the credentials needed to access other funcs
-        params:
-            str rxn_sheet_name: the name of the reaction sheet to run
-        returns:
-            ServiceAccountCredentials: the credentials to access that sheet
+        this function reads a local json file to get the credentials needed to access other funcs  
+        params:  
+            str rxn_sheet_name: the name of the reaction sheet to run  
+        returns:  
+            ServiceAccountCredentials: the credentials to access that sheet  
         '''
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
@@ -281,15 +282,15 @@ class Controller(ABC):
 
     def _get_wks_key(self, credentials, rxn_sheet_name):
         '''
-        open and search a sheet that tells you which sheet is associated with the reaction
-        params:
-            ServiceAccountCredentials credentials: to access the sheets
-            str rxn_sheet_name: the name of sheet
-        returns:
-            if self.use_cache:
-                str wks_key: the key associated with the sheet. It functions similar to a url
-            else:
-                None: this is ok because the wks key will not be used if caching
+        open and search a sheet that tells you which sheet is associated with the reaction  
+        params:  
+            ServiceAccountCredentials credentials: to access the sheets  
+            str rxn_sheet_name: the name of sheet  
+        returns:  
+            if self.use_cache:  
+                str wks_key: the key associated with the sheet. It functions similar to a url  
+            else:  
+                None: this is ok because the wks key will not be used if caching  
         '''
         name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         try:
@@ -308,15 +309,15 @@ class Controller(ABC):
 
     def _open_sheet(self, rxn_sheet_name, credentials):
         '''
-        open the google sheet
-        params:
-            str rxn_sheet_name: the title of the sheet to be opened
-            oauth2client.ServiceAccountCredentials credentials: credentials read from a local json
-        returns:
-            if self.use_cache:
-                gspread.Spreadsheet the spreadsheet (probably of all the reactions)
-            else:
-                None: this is fine because the wks should never be used if cache is true
+        open the google sheet  
+        params:  
+            str rxn_sheet_name: the title of the sheet to be opened  
+            oauth2client.ServiceAccountCredentials credentials: credentials read from a local json  
+        returns:  
+            if self.use_cache:  
+                gspread.Spreadsheet the spreadsheet (probably of all the reactions)  
+            else:  
+                None: this is fine because the wks should never be used if cache is true  
         '''
         gc = gspread.authorize(credentials)
         try:
@@ -330,12 +331,12 @@ class Controller(ABC):
 
     def _init_robo_header_params(self, header_data):
         '''
-        loads the header data into self.robo_params
-        params:
-            list<list<str> header_data: as in gsheets
-        Postconditions:
+        loads the header data into self.robo_params  
+        params:  
+            list<list<str> header_data: as in gsheets  
+        Postconditions:  
             simulate, using_temp_ctrl, and temp have been initialized according to values in 
-            excel
+            excel  
         '''
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
@@ -343,11 +344,11 @@ class Controller(ABC):
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
-        params:
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-            ServiceAccount Credentials credentials: to access sheets
-        returns:
-            df reagent_info: dataframe as pulled from gsheets (with comments dropped)
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
+            ServiceAccount Credentials credentials: to access sheets  
+        returns:  
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
         '''
         
         if self.use_cache:
@@ -366,25 +367,25 @@ class Controller(ABC):
 
     def _get_empty_containers(self, raw_reagent_df):
         '''
-        only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df
-        params:
-            df raw_reagent_df: as in reagent_info of excel
-        returns:
-            df empty_containers:
-                INDEX:
-                int deck_pos: the position on the deck
-                COLS:
-                str loc: location on the labware
+        only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df  
+        params:  
+            df raw_reagent_df: as in reagent_info of excel  
+        returns:  
+            df empty_containers:  
+                + INDEX:  
+                + int deck_pos: the position on the deck  
+                + COLS:  
+                + str loc: location on the labware  
         '''
         return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
     
     def _parse_raw_reagent_df(self, raw_reagent_df):
         '''
-        parses the raw_reagent_df into final form for reagent_df
-        params:
-            df raw_reagent_df: as in excel
-        returns:
-            df reagent_df: empties ignored, columns with correct types
+        parses the raw_reagent_df into final form for reagent_df  
+        params:  
+            df raw_reagent_df: as in excel  
+        returns:  
+            df reagent_df: empties ignored, columns with correct types  
         '''
         reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
         try:
@@ -395,14 +396,14 @@ class Controller(ABC):
 
     def _get_instrument_dict(self, deck_data):
         '''
-        uses data from deck sheet to return the instrument params
-        Preconditions:
+        uses data from deck sheet to return the instrument params  
+        Preconditions:  
             The second sheet in the worksheet must be initialized with where you've placed reagents 
-            and the first thing not being used
-        params:
-            list<list<str>>deck_data: the deck data as in excel
-        returns:
-            Dict<str:str>: key is 'left' or 'right' for the slots. val is the name of instrument
+            and the first thing not being used  
+        params:  
+            list<list<str>>deck_data: the deck data as in excel  
+        returns:  
+            Dict<str:str>: key is 'left' or 'right' for the slots. val is the name of instrument  
         '''
         #the format google fetches this in is funky, so we convert it into a nice df
         #make instruments
@@ -413,22 +414,22 @@ class Controller(ABC):
     
     def _get_labware_df(self, deck_data, empty_containers):
         '''
-        uses data from deck sheet to get information about labware locations, first tip, etc.
-        Preconditions:
+        uses data from deck sheet to get information about labware locations, first tip, etc.  
+        Preconditions:  
             The second sheet in the worksheet must be initialized with where you've placed reagents 
-            and the first thing not being used
-        params:
-            list<list<str>>deck_data: the deck data as in excel
-            df empty_containers: this is used for tubes. it holds the containers that can be used
-                int index: deck_pos
-                str position: the position of the empty container on the labware
-        returns:
-            df:
-                str name: the common name of the labware
-                str first_usable: the first tip/well to use
-                int deck_pos: the position on the deck of this labware
-                str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-                  order
+            and the first thing not being used  
+        params:  
+            list<list<str>>deck_data: the deck data as in excel  
+            df empty_containers: this is used for tubes. it holds the containers that can be used  
+                + int index: deck_pos  
+                + str position: the position of the empty container on the labware  
+        returns:  
+            df:  
+                + str name: the common name of the labware  
+                + str first_usable: the first tip/well to use  
+                + int deck_pos: the position on the deck of this labware  
+                + str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+                  order  
         '''
         labware_dict = {'name':[], 'first_usable':[],'deck_pos':[]}
         for row_i in range(0,10,3):
@@ -472,12 +473,12 @@ class Controller(ABC):
     def _get_chemical_name(self,row):
         '''
         create a chemical name
-        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])
-        params:
-            pd.Series row: a row in the rxn_df
-        returns:
+        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])  
+        params:  
+            pd.Series row: a row in the rxn_df  
+        returns:  
             chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
-              has no concentration, or nan if no name
+              has no concentration, or nan if no name  
         '''
         if pd.isnull(row['reagent']):
             #this must not be a transfer. this operation has no chemical name
@@ -492,10 +493,10 @@ class Controller(ABC):
 
     def close_connection(self):
         '''
-        runs through closing procedure with robot
-        Postconditions:
-            Log files have been written to self.out_path
-            Connection has been closed
+        runs through closing procedure with robot    
+        Postconditions:    
+            Log files have been written to self.out_path  
+            Connection has been closed  
         '''
         print('<<controller>> initializing breakdown')
         self.portal.send_pack('close')
@@ -525,12 +526,12 @@ class Controller(ABC):
     
     def translate_wellmap(self):
         '''
-        Preconditions:
+        Preconditions:  
             there exists a file wellmap.tsv in self.eve_files, and that file has eve level
-            machine labels
-        Postconditions:
-            translated_wellmap.tsv has been created. translated is a copy of wellmap with 
-            it's locations translated to human locs, but the labware pos remains the same
+            machine labels  
+        Postconditions:  
+            translated_wellmap.tsv has been created. translated is a copy of wellmap with   
+            it's locations translated to human locs, but the labware pos remains the same  
         '''
         df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
         df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
@@ -538,11 +539,11 @@ class Controller(ABC):
 
     def init_robot(self, simulate):
         '''
-        this does the dirty work of sending accumulated params over network to the robot
-        params:
-            bool simulate: whether the robot should run a simulation
-        Postconditions:
-            robot has been initialized with necessary params
+        this does the dirty work of sending accumulated params over network to the robot  
+        params:  
+            bool simulate: whether the robot should run a simulation  
+        Postconditions:  
+            robot has been initialized with necessary params  
         '''
         #send robot data to initialize itself
         cid = self.portal.send_pack('init', simulate, 
@@ -560,7 +561,7 @@ class Controller(ABC):
 class AutoContr(Controller):
     '''
     This is a completely automated controller. It takes as input a layout sheet, and then does
-    it's own experiments, pulling data etc
+    it's own experiments, pulling data etc  
     '''
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
         '''
@@ -590,9 +591,9 @@ class AutoContr(Controller):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
-        end of function
-        Returns:
-            bool: True if all tests were passed
+        end of function  
+        Returns:  
+            bool: True if all tests were passed  
         '''
         #cache some things before you overwrite them for the simulation
         stored_server_ip = self.server_ip
@@ -625,8 +626,8 @@ class AutoContr(Controller):
 
     def _run(self, port, simulate):
         '''
-        Returns:
-            bool: True if all tests were passed
+        Returns:  
+            bool: True if all tests were passed  
         '''
         try:
             self.pr = PlateReader(simulate)
@@ -647,33 +648,33 @@ class AutoContr(Controller):
 
 class ProtocolExecutor(Controller): 
     '''
-    class to execute a protocol from the docs
-    ATTRIBUTES:
-        df rxn_df: the reaction df. Not passed in, but created in init
-    INHERITED ATTRIBUTES:
-        armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache, 
-        str eve_files_path, str debug_path, str my_ip, str server_ip,
-        dict<str:object> robo_params, bool simulate, int buff_size
-    PRIVATE ATTRS:
-        pd.index _products: the product columns
-    INHERITED PRIVATE ATTRS:
-        dict<str:tuple<obj>> _cached_reader_locs
-    METHODS:
-        execute_protocol_df() void: used to execute a single row of the reaction df
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+        df rxn_df: the reaction df. Not passed in, but created in init  
+    INHERITED ATTRIBUTES:  
+        armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache,   
+        str eve_files_path, str debug_path, str my_ip, str server_ip,  
+        dict<str:object> robo_params, bool simulate, int buff_size  
+    PRIVATE ATTRS:  
+        pd.index _products: the product columns  
+    INHERITED PRIVATE ATTRS:  
+        dict<str:tuple<obj>> _cached_reader_locs  
+    METHODS:  
+        execute_protocol_df() void: used to execute a single row of the reaction df  
         run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
-          run automatically when you run your simulation
-        CHECKS: all print messages for errors and return error codes
-        check_rxn_df() int: checks for errors in input.
-        check_labware() int: checks for errors in labware/labware assignments. 
-        check_products() int: checks for errors in the product placement.
-        check_reagents() int: checks for errors in the reagent_info tab.
-        TESTS: These are run after a reaction concludes to make sure things went well
-        run_all_tests() bool: True if you passed, else false. run when at end of simulation
-        test_vol_lab_cont() bool: tests that labware volume and containers are correct
-        test_contents() bool: tests that the contents of each container is ok
-    INHERITED METHODS:
+          run automatically when you run your simulation  
+        CHECKS: all print messages for errors and return error codes  
+        check_rxn_df() int: checks for errors in input.  
+        check_labware() int: checks for errors in labware/labware assignments.   
+        check_products() int: checks for errors in the product placement.  
+        check_reagents() int: checks for errors in the reagent_info tab.  
+        TESTS: These are run after a reaction concludes to make sure things went well  
+        run_all_tests() bool: True if you passed, else false. run when at end of simulation  
+        test_vol_lab_cont() bool: tests that labware volume and containers are correct  
+        test_contents() bool: tests that the contents of each container is ok  
+    INHERITED METHODS:  
         run_protocol(simulate, port) void, close_connection() void, init_robot(simulate), 
-        translate_wellmap() void, run_simulation() bool
+        translate_wellmap() void, run_simulation() bool  
     '''
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
@@ -710,9 +711,9 @@ class ProtocolExecutor(Controller):
         '''
         runs a full simulation of the protocol with
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
-        end of function
-        Returns:
-            bool: True if all tests were passed
+        end of function  
+        Returns:  
+            bool: True if all tests were passed  
         '''
         #cache some things before you overwrite them for the simulation
         stored_server_ip = self.server_ip
@@ -745,10 +746,10 @@ class ProtocolExecutor(Controller):
 
     def run_protocol(self, simulate=False, port=50000):
         '''
-        The real deal. Input a server addr and port if you choose and protocol will be run
-        params:
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
             str simulate: (this should never be used in normal operation. It is for debugging
-              on the robot)
+              on the robot)  
         NOTE: the simulate here is a little different than running run_simulation(). This simulate
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
@@ -759,8 +760,8 @@ class ProtocolExecutor(Controller):
         
     def _run(self, port, simulate):
         '''
-        Returns:
-            bool: True if all tests were passed
+        Returns:  
+            bool: True if all tests were passed  
         '''
         try:
             self.pr = PlateReader(simulate)
@@ -783,12 +784,12 @@ class ProtocolExecutor(Controller):
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
         This is almost line for line inherited, but we need to input in the middle. 
-        What can you do?
-        params:
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-            ServiceAccount Credentials credentials: to access sheets
-        returns:
-            df reagent_info: dataframe as pulled from gsheets (with comments dropped)
+        What can you do?  
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
+            ServiceAccount Credentials credentials: to access sheets  
+        returns:  
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
         '''
         
         if self.use_cache:
@@ -810,13 +811,13 @@ class ProtocolExecutor(Controller):
         '''
         reaches out to google sheets and loads the reaction protocol into a df and formats the df
         adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
-        renames some columns to code friendly as opposed to human friendly names
-        params:
-            list<list<str>> input_data: as recieved in excel
-        returns:
-            pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols
-        Postconditions:
-            self._products has been initialized to hold the names of all the products
+        renames some columns to code friendly as opposed to human friendly names  
+        params:  
+            list<list<str>> input_data: as recieved in excel  
+        returns:  
+            pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols  
+        Postconditions:  
+            self._products has been initialized to hold the names of all the products  
         '''
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
@@ -840,16 +841,16 @@ class ProtocolExecutor(Controller):
     def _rename_products(self, rxn_df):
         '''
         renames dilutions acording to the reagent that created them
-        and renames rxns to have a concentration
-        Preconditions:
-            dilution cols are named dilution_1/2 etc
-            callback is the last column in the dataframe
-            rxn_df is not expected to be initialized yet. This is a helper for the initialization
-        params:
-            df rxn_df: the dataframe with all the reactions
-        Postconditions:
-            the df has had it's dilution columns renamed to the chemical used to produce it + C<conc>
-            rxn columns have C1 appended to them
+        and renames rxns to have a concentration  
+        Preconditions:  
+            dilution cols are named dilution_1/2 etc  
+            callback is the last column in the dataframe  
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization  
+        params:  
+            df rxn_df: the dataframe with all the reactions  
+        Postconditions:  
+            the df has had it's dilution columns renamed to the chemical used to produce it + C<conc>  
+            rxn columns have C1 appended to them  
         '''
         dilution_cols = [col for col in rxn_df.columns if 'dilution_placeholder' in col]
         #get the rxn col names
@@ -868,14 +869,14 @@ class ProtocolExecutor(Controller):
 
     def _get_products_to_labware(self, input_data):
         '''
-        create a dictionary mapping products to their requested labware/containers
-        Preconditions:
-            self.rxn_df must have been initialized already
-        params:
-            list<list<str>> input data: the data from the excel sheet
-        returns:
+        create a dictionary mapping products to their requested labware/containers  
+        Preconditions:  
+            self.rxn_df must have been initialized already  
+        params:  
+            list<list<str>> input data: the data from the excel sheet  
+        returns:  
             Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
-                    labware and container preferences for products
+                    labware and container preferences for products  
         '''
         cols = self.rxn_df.columns.to_list()
         product_start_i = cols.index('reagent')+1
@@ -888,14 +889,14 @@ class ProtocolExecutor(Controller):
     def _query_reagents(self, spreadsheet_key, credentials):
         '''
         query the user with a reagent sheet asking for more details on locations of reagents, mass
-        etc
-        Preconditions:
-            self.rxn_df should be initialized
-        params:
+        etc  
+        Preconditions:  
+            self.rxn_df should be initialized  
+        params:  
             str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-            ServiceAccount Credentials credentials: to access sheets
-        PostConditions:
-            reagent_sheet has been constructed
+            ServiceAccount Credentials credentials: to access sheets  
+        PostConditions:  
+            reagent_sheet has been constructed  
         '''
         rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
         reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
@@ -906,16 +907,16 @@ class ProtocolExecutor(Controller):
 
     def _get_product_df(self, products_to_labware):
         '''
-        Creates a df to be used by robot to initialize containers for the products it will make
-        params:
-            df products_to_labware: as passed to init_robot
-        returns:
-            df products:
-                INDEX:
-                str chemical_name: the name of this rxn
-                COLS:
-                str labware: the labware to put this rxn in or None if no preference
-                float max_vol: the maximum volume that will ever ocupy this container
+        Creates a df to be used by robot to initialize containers for the products it will make  
+        params:  
+            df products_to_labware: as passed to init_robot  
+        returns:  
+            df products:  
+                + INDEX:  
+                + str chemical_name: the name of this rxn  
+                + COLS:  
+                + str labware: the labware to put this rxn in or None if no preference  
+                + float max_vol: the maximum volume that will ever ocupy this container  
         '''
         products = products_to_labware.keys()
         max_vols = [self._get_rxn_max_vol(product, products) for product in products]
@@ -925,17 +926,17 @@ class ProtocolExecutor(Controller):
 
     def _get_rxn_max_vol(self, name, products):
         '''
-        Preconditions:
+        Preconditions:  
             volume in a container can change only during a 'transfer' or 'dilution'. Easy to add more
             by changing the vol_change_rows
-            self.rxn_df is initialized
-        params:
-            str name: the column name to be searched
+            self.rxn_df is initialized  
+        params:  
+            str name: the column name to be searched  
             list<str> products: the column names of all reagents (we could look this up in rxn_df, but
-              convenient to pass it in)
-        returns:
+              convenient to pass it in)  
+        returns:  
             float: the maximum volume that this container will ever hold at one time, not taking into 
-              account aspirations for dilutions
+              account aspirations for dilutions  
         '''
         vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
         aspirations = vol_change_rows['chemical_name'] == name
@@ -956,11 +957,11 @@ class ProtocolExecutor(Controller):
 
     def execute_protocol_df(self):
         '''
-        takes a protocol df and sends every step to robot to execute
-        params:
-            int buff: the number of commands allowed in flight at a time
-        Postconditions:
-            every step in the protocol has been sent to the robot
+        takes a protocol df and sends every step to robot to execute  
+        params:  
+            int buff: the number of commands allowed in flight at a time  
+        Postconditions:  
+            every step in the protocol has been sent to the robot  
         '''
         for i, row in self.rxn_df.iterrows():
             if row['op'] == 'transfer':
@@ -982,20 +983,20 @@ class ProtocolExecutor(Controller):
 
     def _execute_scan(self,row,i):
         '''
-        There are a few things entailed in a scan command
-        1) send home to robot
-        2) block until you run out of waits
-        3) figure out what wells you want to scan
-        4) query the robot for those wells, or use cache if you have it
-            a) if you had to query robot, send request of reagents
-            b) wait on robot response
-            c) translate robot response to human readable
-        5) update layout to scanner and scan
-        params:
-            pd.Series row: a row of self.rxn_df
-            int i: index of this row
-        returns:
-            int: the cid of this command
+        There are a few things entailed in a scan command  
+        1) send home to robot  
+        2) block until you run out of waits  
+        3) figure out what wells you want to scan  
+        4) query the robot for those wells, or use cache if you have it  
+            a) if you had to query robot, send request of reagents  
+            b) wait on robot response  
+            c) translate robot response to human readable  
+        5) update layout to scanner and scan  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        returns:  
+            int: the cid of this command  
         '''
         #1)
         self.portal.send_pack('home')
@@ -1046,15 +1047,15 @@ class ProtocolExecutor(Controller):
         used to execute a dilution. This is analogous to microcode. This function will send two
           commands. Water is always added first.
             transfer: transfer water into the container
-            transfer: transfer reagent into the container
-        params:
-            pd.Series row: a row of self.rxn_df
-            int i: index of this row
-        Preconditions:
-            The buffer has room for at least one command
-        Postconditions:
-            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.
-            Will block on ready if the buffer is filled
+            transfer: transfer reagent into the container  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        Preconditions:  
+            The buffer has room for at least one command  
+        Postconditions:  
+            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.  
+            Will block on ready if the buffer is filled  
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
         self._send_transfer_command(water_transfer_row, i)
@@ -1062,13 +1063,13 @@ class ProtocolExecutor(Controller):
 
     def _get_dilution_transfer_rows(self, row):
         '''
-        Takes in a dilution row and builds two transfer rows to be used by the transfer command
-        params:
-            pd.Series row: a row of self.rxn_df
-        returns:
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+        returns:  
             tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
               reagent
-              see self._construct_dilution_transfer_row for details
+              see self._construct_dilution_transfer_row for details  
         '''
         reagent = row['chemical_name']
         reagent_conc = row['conc']
@@ -1086,14 +1087,14 @@ class ProtocolExecutor(Controller):
     def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
         '''
         The transfer command expects a nicely formated row of the rxn_df, so here we create a row
-        with everything in it to ship to the transfer command.
-        params:
-            str reagent_name: used as the chemical_name field
-            str target_name: used as the product_name field
-            str vol: the volume to transfer
-        returns:
+        with everything in it to ship to the transfer command.  
+        params:  
+            str reagent_name: used as the chemical_name field  
+            str target_name: used as the product_name field  
+            str vol: the volume to transfer  
+        returns:  
             pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
-              op] have been initialized. The other fields are empty/NaN
+              op] have been initialized. The other fields are empty/NaN  
         '''
         template = self.rxn_df.iloc[0].copy()
         template[:] = np.nan
@@ -1107,15 +1108,15 @@ class ProtocolExecutor(Controller):
 
     def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
         '''
-        calculates the amount of reagent volume needed for a dilution
-        params:
-            float target_conc: the concentration desired at the end
-            float reagent_conc: the concentration of the reagent
-            float total_vol: the total volume requested
-        returns:
+        calculates the amount of reagent volume needed for a dilution  
+        params:  
+            float target_conc: the concentration desired at the end  
+            float reagent_conc: the concentration of the reagent  
+            float total_vol: the total volume requested  
+        returns:  
             tuple<float>: size 2
                 volume of water to transfer
-                volume of reagent to transfer
+                volume of reagent to transfer  
         '''
         mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
         vol_reagent = mols_reagent/reagent_conc
@@ -1124,11 +1125,11 @@ class ProtocolExecutor(Controller):
 
     def _stop(self, i):
         '''
-        used to execute a stop operation. reads through buffer and then waits on user input
-        params:
-            int i: the index of the row in the protocol you're stopped on
-        Postconditions:
-            self._inflight_packs has been cleaned
+        used to execute a stop operation. reads through buffer and then waits on user input  
+        params:  
+            int i: the index of the row in the protocol you're stopped on  
+        Postconditions:  
+            self._inflight_packs has been cleaned  
         '''
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
@@ -1138,14 +1139,14 @@ class ProtocolExecutor(Controller):
 
     def _send_transfer_command(self, row, i):
         '''
-        params:
+        params:  
             pd.Series row: a row of self.rxn_df
-              uses the chemical_name, callbacks (and associated args), product_columns
-            int i: index of this row
-        returns:
-            int: the cid of this command
-        Postconditions:
-            a transfer command has been sent to the robot
+              uses the chemical_name, callbacks (and associated args), product_columns  
+            int i: index of this row  
+        returns:  
+            int: the cid of this command  
+        Postconditions:  
+            a transfer command has been sent to the robot  
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
@@ -1163,10 +1164,10 @@ class ProtocolExecutor(Controller):
     
     def _get_callback_args(self, row, callback):
         '''
-        params:
-            pd.Series row: a row of self.rxn_df
-        returns:
-            list<object>: the arguments associated with the callback or None if no arguments
+        params:  
+            pd.Series row: a row of self.rxn_df  
+        returns:  
+            list<object>: the arguments associated with the callback or None if no arguments  
         '''
         if callback == 'pause':
             return [row['pause_time']]
@@ -1175,9 +1176,9 @@ class ProtocolExecutor(Controller):
     def init_robot(self,simulate):
         '''
         calls super init robot, and then sends an init_containers command to initialize all the
-        prodcuts
-        params:
-            bool simulate: whether the robot should run a simulation
+        prodcuts  
+        params:  
+            bool simulate: whether the robot should run a simulation  
         '''
         super().init_robot(simulate)
         #send robot data to initialize empty product containers. Because we know things like total
@@ -1209,12 +1210,12 @@ class ProtocolExecutor(Controller):
         Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
         Advised options are printed and if an error code is returned
         Will run through and check all rows, even if errors are found
-        returns
-            int found_errors:
-                code:
-                0: OK.
-                1: Some Errors, but could run
-                2: Critical. Abort
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
         '''
         found_errors = 0
         for i, r in self.rxn_df.iterrows():
@@ -1235,13 +1236,13 @@ class ProtocolExecutor(Controller):
                 
     def check_labware(self):
         '''
-        checks to ensure that the labware has been correctly initialized
-        returns
-            int found_errors:
-                code:
-                0: OK.
-                1: Some Errors, but could run
-                2: Critical. Abort
+        checks to ensure that the labware has been correctly initialized  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
         '''
         found_errors = 0
         for i, r in self.robo_params['labware_df'].iterrows():
@@ -1263,13 +1264,13 @@ class ProtocolExecutor(Controller):
 
     def check_products(self):
         '''
-        checks to ensure that the products were correctly initialized
-        returns
-            int found_errors:
-                code:
-                0: OK.
-                1: Some Errors, but could run
-                2: Critical. Abort
+        checks to ensure that the products were correctly initialized  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
         '''
         found_errors = 0
         for i, r in self.robo_params['product_df'].loc[\
@@ -1282,13 +1283,13 @@ class ProtocolExecutor(Controller):
     def check_reagents(self):
         '''
         checks to ensure that you've specified reagents correctly, and also checks that
-        you did not double book empty containers onto reagents
-        returns
-            int found_errors:
-                code:
-                0: OK.
-                1: Some Errors, but could run
-                2: Critical. Abort
+        you did not double book empty containers onto reagents  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
         '''
         found_errors = 0
         #This is a little hefty. We're checking to see if any reagents/empty containers 
@@ -1311,9 +1312,9 @@ class ProtocolExecutor(Controller):
     #POST Simulation
     def run_all_tests(self):
         '''
-        runs all post rxn tests
-        Returns:
-            bool: True if all tests were passed
+        runs all post rxn tests  
+        Returns:  
+            bool: True if all tests were passed  
         '''
         print('<<controller>> running post execution tests')
         valid = True
@@ -1324,21 +1325,21 @@ class ProtocolExecutor(Controller):
     def test_vol_lab_cont(self):
         '''
         tests that vol, labware, and containers are correct for a row of a side by side df with
-        those attributes
-        Preconditions:
-            labware_df, reagent_df, and products_df are all initialized as vals in robo_params
-            self.rxn_df is initialized
-            df labware_df:
-            df rxn_df: as from excel
-            df reagent_df: info on reagents. columns from sheet. See excel specification
-            df product_df:
+        those attributes  
+        Preconditions:  
+            labware_df, reagent_df, and products_df are all initialized as vals in robo_params  
+            self.rxn_df is initialized  
+            df labware_df:  
+            df rxn_df: as from excel  
+            df reagent_df: info on reagents. columns from sheet. See excel specification  
+            df product_df:  
             self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
-              over in close step
-        Postconditions:
-            Any errors will be printed to the screen.
-            If errors were found, a pkl of the sbs will be written
-        Returns:
-            bool: True if all tests were passed
+              over in close step  
+        Postconditions:  
+            Any errors will be printed to the screen.  
+            If errors were found, a pkl of the sbs will be written  
+        Returns:  
+            bool: True if all tests were passed  
         '''
         sbs =self._get_vol_lab_cont_sbs()
         sbs['flag'] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
@@ -1357,16 +1358,16 @@ class ProtocolExecutor(Controller):
     def test_contents(self):
         '''
         tests to ensure that the contents of each container is correct
-        note does not work for dilutions, and does not check reagents
-        params:
-            df rxn_df: from excel
-            bool use_cache: True if data is cached
-            str eve_logpath: the path to the eve logfiles
-        Postconditions:
-            if a difference was found it will be displayed,
-            if no differences are found, a friendly print message will be displayed
-        Returns:
-            bool: True if all tests were passed
+        note does not work for dilutions, and does not check reagents  
+        params:  
+            df rxn_df: from excel  
+            bool use_cache: True if data is cached  
+            str eve_logpath: the path to the eve logfiles  
+        Postconditions:  
+            if a difference was found it will be displayed,  
+            if no differences are found, a friendly print message will be displayed  
+        Returns:  
+            bool: True if all tests were passed  
         '''
         sbs = self._create_contents_sbs()
         sbs['flag'] = sbs.apply(self._is_valid_contents_sbs,axis=1)
@@ -1384,10 +1385,10 @@ class ProtocolExecutor(Controller):
 
     def _is_valid_vol_lab_cont_sbs(self, row):
         '''
-        params:
-            pd.Series row: a row of a sbs dataframe:
-        returns:
-            Bool: True if it is a valid row
+        params:  
+            pd.Series row: a row of a sbs dataframe:  
+        returns:  
+            Bool: True if it is a valid row  
         '''
         if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
             print('<<controller>> deck_pos_error:')
@@ -1413,25 +1414,25 @@ class ProtocolExecutor(Controller):
     
     def _get_vol_lab_cont_sbs(self):
         '''
-        This is for comparing the volumes, labwares, and containers
-        params:
-        Preconditions:
-            labware_df, reagent_df, and products_df are all initialized as vals in robo_params
-            self.rxn_df is initialized
-            df labware_df:
-            df rxn_df: as from excel
-            df reagent_df: info on reagents. columns from sheet. See excel specification
-            df product_df:
+        This is for comparing the volumes, labwares, and containers  
+        params:  
+        Preconditions:  
+            labware_df, reagent_df, and products_df are all initialized as vals in robo_params  
+            self.rxn_df is initialized  
+            df labware_df:  
+            df rxn_df: as from excel  
+            df reagent_df: info on reagents. columns from sheet. See excel specification  
+            df product_df:  
             self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
-              over in close step
-        returns
-            df
-                INDEX
-                chemical_name: the containers name
-                COLS: symmetric. Theoretical are suffixed _t
-                str deck_pos: position on deck
-                float vol: the volume in the container
-                list<tuple<str, float>> history: the chem_name paired with the amount or
+              over in close step  
+        returns  
+            df  
+                + INDEX
+                + chemical_name: the containers name
+                + COLS: symmetric. Theoretical are suffixed _t
+                + str deck_pos: position on deck
+                + float vol: the volume in the container
+                + list<tuple<str, float>> history: the chem_name paired with the amount or
                   keyword 'aspirate' and vol
         '''
         #copy the locals cause we're changing them
@@ -1488,12 +1489,12 @@ class ProtocolExecutor(Controller):
     def _is_valid_contents_sbs(self, row):
         '''
         tests if a row of contents sbs is valid
-        params:
-            pd.Series row: has vol_t and vol
-        returns:
-            False if vol_t!=vol else True
-        Postconditions:
-            If vol_t!=vol the row will be printed
+        params:  
+            pd.Series row: has vol_t and vol  
+        returns:  
+            False if vol_t!=vol else True  
+        Postconditions:  
+            If vol_t!=vol the row will be printed  
             
         '''
         if not math.isclose(row['vol_t'], row['vol']):
@@ -1548,14 +1549,14 @@ class ProtocolExecutor(Controller):
 class AbstractPlateReader(ABC):
     '''
     This class is responsible for executing platereader commands. When instantiated, this
-    class changes the config file
-    METHODS:
-        edit_layout(protocol_name, layout) void: changes the layout for a protocol
-        run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol
-        shutdown() void: kills the platereader and restores default config
-        shake() void: shakes the platereader
-        exec_macro(macro, *args) void: low level method to send a command to platereader with
-        arguments
+    class changes the config file  
+    METHODS:  
+        edit_layout(protocol_name, layout) void: changes the layout for a protocol  
+        run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
+        shutdown() void: kills the platereader and restores default config  
+        shake() void: shakes the platereader  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with  
+        arguments  
     '''
     SPECTRO_ROOT_PATH = None
     PROTOCOL_PATH = None
@@ -1566,13 +1567,13 @@ class AbstractPlateReader(ABC):
     def exec_macro(self, macro, *args):
         '''
         sends a macro command to the platereader and blocks waiting for response. If response
-        not ok, it'll crash and burn
-        params:
-            str macro: should be a macro from the documentation
-            *args: associated arguments of the macto
-        Postconditions:
-            The command has been sent to the PlateReader, if the return status was not 0 (good)
-            an error will be thrown
+        not ok, it'll crash and burn  
+        params:  
+            str macro: should be a macro from the documentation  
+            *args: associated arguments of the macto  
+        Postconditions:  
+            The command has been sent to the PlateReader, if the return status was not 0 (good)  
+            an error will be thrown  
         '''
         pass
 
@@ -1584,23 +1585,23 @@ class AbstractPlateReader(ABC):
 
     def edit_layout(self, protocol_name, layout):
         '''
-        params:
-            str protocol_name: the name of the protocol that will be edited
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
             list<str> wells: the wells that you want to be used for the protocol ordered.
-              (first will be X1, second X2 etc. If layout is all, all wells will be made X
-        Postcondtions:
-            The protocol has had it's layout updated to include only the wells specified
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+        Postcondtions:  
+            The protocol has had it's layout updated to include only the wells specified  
         '''
         pass
 
     def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
         r'''
-        params:
-            str protocol_name: the name of the protocol that will be edited
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
             str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User
+              C:\Program Files\SPECTROstar Nano V5.50\User  
             list<str> layout: the wells that you want to be used for the protocol ordered.
-              (first will be X1, second X2 etc. If not specified will not alter layout)
+              (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
         pass
 
@@ -1636,13 +1637,13 @@ class PlateReader(AbstractPlateReader):
     def exec_macro(self, macro, *args):
         '''
         sends a macro command to the platereader and blocks waiting for response. If response
-        not ok, it'll crash and burn
-        params:
-            str macro: should be a macro from the documentation
-            *args: associated arguments of the macto
-        Postconditions:
+        not ok, it'll crash and burn  
+        params:  
+            str macro: should be a macro from the documentation  
+            *args: associated arguments of the macto  
+        Postconditions:  
             The command has been sent to the PlateReader, if the return status was not 0 (good)
-            an error will be thrown
+            an error will be thrown  
         '''
         exec_str = "'{}Cln/DDEClient.exe' {}".format(self.SPECTRO_ROOT_PATH, macro)
         #add arguments
@@ -1665,9 +1666,6 @@ class PlateReader(AbstractPlateReader):
     def shake(self):
         '''
         executes a shake
-        automatically sucks the plate in
-        Postconditions:
-            Plate has been send out
         '''
         macro = "Shake"
         shake_type = 2
@@ -1681,13 +1679,13 @@ class PlateReader(AbstractPlateReader):
         in the SPECTROstar root. It is also possible (theoretically) to 
         send a literal 'edit_layout' command, but this fails for long
         strings. (not sure why, maybe windows limited sized strings?
-        but the file works). It removes the file after importing
-        params:
-            str protocol_name: the name of the protocol that will be edited
+        but the file works). It removes the file after importing  
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
             list<str> wells: the wells that you want to be used for the protocol ordered.
-              (first will be X1, second X2 etc. If layout is all, all wells will be made X
-        Postcondtions:
-            The protocol has had it's layout updated to include only the wells specified
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+        Postcondtions:  
+            The protocol has had it's layout updated to include only the wells specified  
         '''
         if layout == 'all':
             #get a list of all the wellanmes
@@ -1706,12 +1704,12 @@ class PlateReader(AbstractPlateReader):
 
     def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
         r'''
-        params:
-            str protocol_name: the name of the protocol that will be edited
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
             str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User
+              C:\Program Files\SPECTROstar Nano V5.50\User  
             list<str> layout: the wells that you want to be used for the protocol ordered.
-              (first will be X1, second X2 etc. If not specified will not alter layout)
+              (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
         if layout:
             self.edit_layout(protocol_name, layout)
@@ -1725,14 +1723,14 @@ class PlateReader(AbstractPlateReader):
         opens the Spectrostar nano config file and replaces the value of attr under header
         with val
         There are better ways to build this function, but it's not something you'll use much
-        so I'm leaving it here
-        params:
-            str header: the header in the config file [header]
-            str attr: the attribute you want to change
-            obj val: the value to set the attribute to
-        Postconditions:
+        so I'm leaving it here  
+        params:  
+            str header: the header in the config file [header]  
+            str attr: the attribute you want to change  
+            obj val: the value to set the attribute to  
+        Postconditions:  
             The SPECTROstar Nano.ini has had the attribute under the header overwritten with val
-            or appended to end if it wasn't found 
+            or appended to end if it wasn't found   
         '''
         with open(os.path.join(self.SPECTRO_ROOT_PATH, r'SPECTROstar Nano.ini'), 'r') as config:
             file_str = config.readlines()

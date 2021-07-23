@@ -49,26 +49,26 @@ import df_utils
 class Container(ABC):
     """
     
-    Abstract container class to be overwritten for well, tube, etc.
-    ABSTRACT ATTRIBUTES:
-        str name: the common name we use to refer to this container
-        float vol: the volume of the liquid in this container in uL
-        int deck_pos: the position on the deck
-        str loc: a location on the deck_pos object (e.g. 'A5')
-        float conc: the concentration of the substance
-        float disp_height: the height to dispense at
-        float asp_height: the height to aspirate from
+    Abstract container class to be overwritten for well, tube, etc.  
+    ABSTRACT ATTRIBUTES:  
+        str name: the common name we use to refer to this container  
+        float vol: the volume of the liquid in this container in uL  
+        int deck_pos: the position on the deck  
+        str loc: a location on the deck_pos object (e.g. 'A5')  
+        float conc: the concentration of the substance  
+        float disp_height: the height to dispense at  
+        float asp_height: the height to aspirate from  
         list<tup<timestamp, str, float> history: the history of this container. Contents:
           timestamp timestamp: the time of the addition/removal
           str chem_name: the name of the chemical added or blank if aspiration
-          float vol: the volume of chemical added/removed
-    CONSTANTS:
-        float DEAD_VOL: the volume at which this 
-        float MIN_HEIGHT: the minimum height at which to pipette from 
-    ABSTRACT METHODS:
-        _update_height void: updates self.height to height at which to pipet (a bit below water line)
-    IMPLEMENTED METHODS:
-        update_vol(float del_vol) void: updates the volume upon an aspiration
+          float vol: the volume of chemical added/removed  
+    CONSTANTS:  
+        float DEAD_VOL: the volume at which this  
+        float MIN_HEIGHT: the minimum height at which to pipette from   
+    ABSTRACT METHODS:  
+        _update_height void: updates self.height to height at which to pipet (a bit below water line)  
+    IMPLEMENTED METHODS:  
+        update_vol(float del_vol) void: updates the volume upon an aspiration  
     """
 
     def __init__(self, name, deck_pos, loc, vol=0,  conc=1):
@@ -93,12 +93,12 @@ class Container(ABC):
     def update_vol(self, del_vol,name=''):
         '''
         params:
-            float del_vol: the change in volume. -vol is an aspiration
-            str name: the thing coming in if it is a dispense
+            float del_vol: the change in volume. -vol is an aspiration  
+            str name: the thing coming in if it is a dispense  
         Postconditions:
-            the volume has been adjusted
-            height has been adjusted
-            the history has been updated
+            the volume has been adjusted  
+            height has been adjusted  
+            the history has been updated  
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
         assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without \
@@ -122,13 +122,13 @@ class Container(ABC):
         
 class Tube20000uL(Container):
     """
-    Spcific tube with measurements taken to provide implementations of abstract methods
-    INHERITED ATTRIBUTES
-        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
-    OVERRIDDEN CONSTANTS:
-        float DEAD_VOL: the volume at which this 
-    INHERITED METHODS
-        _update_height void, update_vol(float del_vol) void,
+    Spcific tube with measurements taken to provide implementations of abstract methods  
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this   
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     """
 
     DEAD_VOL = 2000
@@ -163,11 +163,11 @@ class Tube20000uL(Container):
             
 class Tube50000uL(Container):
     """
-    Spcific tube with measurements taken to provide implementations of abstract methods
-    INHERITED ATTRIBUTES
-        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
-    INHERITED METHODS
-        _update_height void, update_vol(float del_vol) void,
+    Spcific tube with measurements taken to provide implementations of abstract methods  
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     """
 
     DEAD_VOL = 5000
@@ -199,11 +199,11 @@ class Tube50000uL(Container):
 
 class Tube2000uL(Container):
     """
-    2000uL tube with measurements taken to provide implementations of abstract methods
-    INHERITED ATTRIBUTES
-         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
-    INHERITED METHODS
-        _update_height void, update_vol(float del_vol) void,
+    2000uL tube with measurements taken to provide implementations of abstract methods  
+    INHERITED ATTRIBUTES:  
+         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     """
 
     DEAD_VOL = 250 #uL
@@ -234,13 +234,13 @@ class Tube2000uL(Container):
 
 class Well96(Container):
     """
-        a well in a 96 well plate
-        INHERITED ATTRIBUTES
-             str name, float vol, int deck_pos, str loc, float disp_height, float asp_height
-        INHERITED CONSTANTS
-            int DEAD_VOL 
-        INHERITED METHODS
-            _update_height void, update_vol(float del_vol) void,
+        a well in a 96 well plate  
+        INHERITED ATTRIBUTES:  
+             str name, float vol, int deck_pos, str loc, float disp_height, float asp_height  
+        INHERITED CONSTANTS:  
+            int DEAD_VOL   
+        INHERITED METHODS:  
+            _update_height void, update_vol(float del_vol) void,  
     """
 
     MIN_HEIGHT = 1
@@ -269,18 +269,18 @@ class Labware(ABC):
     a method for removing tubes from the labware, which is what I need to do, hence this
     wrapper class to hold opentrons labware objects
     Note that tipracks are not included. The way we access them is normal enough that opentrons
-    API does everything we need for them
-    ATTRIBUTES:
-        Opentrons.Labware labware: the opentrons object
-        bool full: True if there are no more empty containers
-        int deck_pos: to map back to deck position
-        str name: the name associated with this labware
-    CONSTANTS
-        list<str> CONTAINERS_SERVICED: the container types on this labware
-    ABSTRACT METHODS:
-        get_container_type(loc) str: returns the type of container at that location
+    API does everything we need for them  
+    ATTRIBUTES:  
+        Opentrons.Labware labware: the opentrons object  
+        bool full: True if there are no more empty containers  
+        int deck_pos: to map back to deck position  
+        str name: the name associated with this labware  
+    CONSTANTS:  
+        list<str> CONTAINERS_SERVICED: the container types on this labware  
+    ABSTRACT METHODS:  
+        get_container_type(loc) str: returns the type of container at that location  
         pop_next_well(vol=None) str: returns the index of the next available well
-          If there are no available wells of the volume requested, return None
+          If there are no available wells of the volume requested, return None  
     '''
 
     CONTAINERS_SERVICED = []
@@ -303,18 +303,18 @@ class Labware(ABC):
     def get_container_type(self, loc):
         '''
         params:
-            str loc: the location on the labware. e.g. A1
+            str loc: the location on the labware. e.g. A1  
         returns:
-            str the type of container class
+            str the type of container class  
         '''
         pass
 
     def get_well(self,loc):
         '''
         params:
-            str loc: the location on the labaware e.g. A1
+            str loc: the location on the labaware e.g. A1  
         returns:
-            the opentrons well object at that location
+            the opentrons well object at that location  
         '''
         return self.labware.wells_by_name()[loc]
 
@@ -325,18 +325,18 @@ class Labware(ABC):
 class TubeHolder(Labware):
     '''
     Subclass of Labware object that may not have all containers filled, and allows for diff
-    sized containers
+    sized containers  
     INHERITED METHODS:
         pop_next_well(vol=None) str: Note vol is should be provided here, otherwise a random size
-          will be chosen
-        get_container_type(loc) str
+          will be chosen  
+        get_container_type(loc) str  
     INHERITED_ATTRIBUTES:
-        Opentrons.Labware labware, bool full, int deck_pos, str name
+        Opentrons.Labware labware, bool full, int deck_pos, str name  
     OVERRIDEN CONSTANTS
-        list<str> CONTAINERS_SERVICED
+        list<str> CONTAINERS_SERVICED  
     ATTRIBUTES:
         list<str> empty_tubes: contains locs of the empty tubes. Necessary because the user may
-          not put tubes into every slot. Sorted order smallest tube to largest
+          not put tubes into every slot. Sorted order smallest tube to largest  
     '''
 
     CONTAINERS_SERVICED = ['Tube50000uL', 'Tube20000uL', 'Tube2000uL']
@@ -356,13 +356,13 @@ class TubeHolder(Labware):
         Gets the next available tube. If vol is specified, will return an
         appropriately sized tube. Otherwise it will return a tube. It makes no guarentees that
         tube will be the correct size. It is not recommended this method be called without
-        a volume argument
+        a volume argument  
         params:
-            float vol: used to determine an appropriate sized tube
-            str container_type: the type of container requested
+            float vol: used to determine an appropriate sized tube  
+            str container_type: the type of container requested  
         returns:
-            str: loc the location of the smallest next tube that can accomodate the volume
-            None: if it can't be accomodated
+            str: loc the location of the smallest next tube that can accomodate the volume  
+            None: if it can't be accomodated  
         '''
         if not self.full:
             if container_type:
@@ -412,11 +412,11 @@ class TubeHolder(Labware):
         '''
         NOTE internally, this method is a little different, but the user should use as 
         outlined below
-        returns type of container
+        returns type of container  
         params:
-            str loc: the location on this labware
+            str loc: the location on this labware  
         returns:
-            str: the type of container at that loc
+            str: the type of container at that loc  
         '''
         if not vol:
             tube_capacity = self.labware.wells_by_name()[loc]._geometry._max_volume
@@ -431,17 +431,17 @@ class TubeHolder(Labware):
 
 class WellPlate(Labware):
     '''
-    subclass of labware for dealing with plates
-    INHERITED METHODS:
+    subclass of labware for dealing with plates  
+    INHERITED METHODS:  
         pop_next_well(vol=None,container_type=None) str: vol should be provided to 
-          check if well is big enough. container_type is for compatibility
-        get_container_type(loc) str
-    INHERITED_ATTRIBUTES:
-        Opentrons.Labware labware, bool full, int deck_pos, str name
-    OVERRIDEN CONSTANTS:
-        list<str> CONTAINERS_SERVICED
-    ATTRIBUTES:
-        int current_well: the well number your on (NOT loc!)
+          check if well is big enough. container_type is for compatibility  
+        get_container_type(loc) str  
+    INHERITED_ATTRIBUTES:  
+        Opentrons.Labware labware, bool full, int deck_pos, str name  
+    OVERRIDEN CONSTANTS:  
+        list<str> CONTAINERS_SERVICED  
+    ATTRIBUTES:  
+        int current_well: the well number your on (NOT loc!)  
     '''
 
     CONTAINERS_SERVICED = ['Well96']
@@ -458,13 +458,13 @@ class WellPlate(Labware):
 
     def pop_next_well(self, vol=None,container_type=None):
         '''
-        returns the next well if there is one, otherwise returns None
+        returns the next well if there is one, otherwise returns None  
         params:
-            float vol: used to determine if your reaction can be fit in a well
-            str container_type: should never be used. Here for compatibility
+            float vol: used to determine if your reaction can be fit in a well  
+            str container_type: should never be used. Here for compatibility  
         returns:
-            str: the well loc if it can accomadate the request
-            None: if can't accomodate request
+            str: the well loc if it can accomadate the request  
+            None: if can't accomodate request  
         '''
         if not self.full:
             well = self.labware.wells()[self.current_well] 
@@ -484,40 +484,40 @@ class WellPlate(Labware):
     def get_container_type(self, loc):
         '''
         params:
-            str loc: loc on the labware
+            str loc: loc on the labware  
         returns:
-            str: the type of container
+            str: the type of container  
         '''
         return 'Well96'
 
 #Robot
 class OT2Robot():
     """
-    This class is responsible for controlling the robot from the Raspberry Pi. 
-    ATTRIBUTES:
-        Dict<str, Container> containers: maps from a common name to a Container object
+    This class is responsible for controlling the robot from the Raspberry Pi.   
+    ATTRIBUTES:  
+        Dict<str, Container> containers: maps from a common name to a Container object  
         Dict<str:Dict<str:Obj>> pipettes: JSON style dict. First key is the arm_pos 
-          second is the attribute
-            'size' float: the size of this pipette in uL
+          second is the attribute  
+            'size' float: the size of this pipette in uL  
             'last_used' str: the chem_name of the last chemical used. 'clean' is used to denote a
-              clean pipette
-        str my_ip: IPv4 LAN address of this machine
-        Armchair.Armchair portal: the portal connected to the controller
-        str controller_ip: the ip of the controller
+              clean pipette  
+        str my_ip: IPv4 LAN address of this machine  
+        Armchair.Armchair portal: the portal connected to the controller  
+        str controller_ip: the ip of the controller  
         bool simulate: true if this protocol is being simulated. (different from the simulate in
-          the protocol. This is about whether we want to execute pauses.
+          the protocol. This is about whether we want to execute pauses.  
         np.array<Labware> lab_deck: shape (12,) custom labware objects indexed by their
-          locations on the deck. (so lab_deck[0] is not used and we live with that)
-        Opentrons...ProtocolContext protocol: the protocol object of this session
-        str root_p: the path to the root output
-        str debug_p: the path for debuging
-        str logs_p: the path to the log outputs
-    METHODS:
+          locations on the deck. (so lab_deck[0] is not used and we live with that)  
+        Opentrons...ProtocolContext protocol: the protocol object of this session  
+        str root_p: the path to the root output  
+        str debug_p: the path for debuging  
+        str logs_p: the path to the log outputs  
+    METHODS:  
         execute(command_type, cid, arguments) int: Takes in the recieved output of an Armchair
           recv_pack, and executes the command. Will usually send a ready (except for GHOST type)
-          Returns 1 in normal situation if active. Returns 0 for closing
-        dump_well_map() void: writes a wellmap to the wellmap.tsv
-        dump_well_histories() void: writes the histories of each well to well_history.tsv
+          Returns 1 in normal situation if active. Returns 0 for closing  
+        dump_well_map() void: writes a wellmap to the wellmap.tsv  
+        dump_well_histories() void: writes the histories of each well to well_history.tsv  
     """
 
     #Don't try to read this. Use an online json formatter 
@@ -527,29 +527,29 @@ class OT2Robot():
 
     def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal):
         '''
-        params:
-            bool simulate: if true, the robot will run in simulation mode only
-            bool using_temp_ctrl: true if you want to use the temperature control module
-            float temp: the temperature to keep the control module at.
-            df labware_df:
-                str name: the common name of the labware
-                str first_usable: the first tip/well to use
-                int deck_pos: the position on the deck of this labware
-                str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
-                  order
+        params:  
+            bool simulate: if true, the robot will run in simulation mode only  
+            bool using_temp_ctrl: true if you want to use the temperature control module  
+            float temp: the temperature to keep the control module at.  
+            df labware_df:  
+                + str name: the common name of the labware  
+                + str first_usable: the first tip/well to use  
+                + int deck_pos: the position on the deck of this labware  
+                + str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+                  order  
             Dict<str:str> instruments: keys are ['left', 'right'] corresponding to arm slots. vals
-              are the pipette names filled in
-            df reagent_df: info on reagents. columns from sheet. See excel specification
-            str my_ip: the IP address of the robot
-            str controller_ip: the IP address of the controller
-            Armchair.Armchair portal: the Armchair object connected to the controller
-        postconditions:
-            protocol has been initialzied
-            containers and tip_racks have been created
-            labware has been initialized
+              are the pipette names filled in  
+            df reagent_df: info on reagents. columns from sheet. See excel specification  
+            str my_ip: the IP address of the robot  
+            str controller_ip: the IP address of the controller  
+            Armchair.Armchair portal: the Armchair object connected to the controller  
+        postconditions:  
+            protocol has been initialzied  
+            containers and tip_racks have been created  
+            labware has been initialized  
             CAUTION: the values of tip_racks and containers must be sent from the client.
               it is the client's responsibility to make sure that these are initialized prior
-              to operating with them
+              to operating with them  
         '''
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
@@ -585,11 +585,11 @@ class OT2Robot():
         '''
         The debug/directory structure of the robot is not intended to be stored for long periods
         of time. This is becuase the files should be shipped over FTP to laptop. In the event
-        of an epic fail, e.g. where network went down and has no means to FTP back to laptop
+        of an epic fail, e.g. where network went down and has no means to FTP back to laptop  
         Postconditions: the following directory structure has been contstructed
-            Eve_Out: root
-                Debug: populated with error information. Used on crash
-                Logs: log files for eve
+            Eve_Out: root  
+                Debug: populated with error information. Used on crash  
+                Logs: log files for eve  
         '''
         #clean up last time
         if os.path.exists('Eve_Out'):
@@ -606,10 +606,10 @@ class OT2Robot():
     def _init_containers(self, reagent_df):
         '''
         params:
-            df reagent_df: as passed to init
+            df reagent_df: as passed to init  
         Postconditions:
             the dictionary, self.containers, has been initialized to have name keys to container
-              objects
+              objects  
         '''
         container_types = reagent_df['deck_pos'].apply(lambda d: self.lab_deck[d])
         container_types = reagent_df[['deck_pos','loc']].apply(lambda row: 
@@ -622,15 +622,15 @@ class OT2Robot():
     def _construct_container(self, container_type, name, deck_pos, loc, **kwargs):
         '''
         params:
-            str container_type: the type of container you want to instantiate
-            str name: the chemical name
-            int deck_pos: labware position on deck
-            str loc: the location on the labware
-          **kwargs:
-            float mass: the mass of the starting contents
-            float conc: the concentration of the starting components
+            str container_type: the type of container you want to instantiate  
+            str name: the chemical name  
+            int deck_pos: labware position on deck  
+            str loc: the location on the labware  
+          **kwargs:  
+            + float mass: the mass of the starting contents  
+            + float conc: the concentration of the starting components  
         returns:
-            Container: a container object of the type you specified
+            Container: a container object of the type you specified  
         '''
         if container_type == 'Tube2000uL':
             return Tube2000uL(name, deck_pos, loc, **kwargs)
@@ -655,17 +655,17 @@ class OT2Robot():
 
     def _init_temp_mod(self, name, using_temp_ctrl, temp, deck_pos, empty_tubes):
         '''
-        initializes the temperature module
+        initializes the temperature module  
         params:
-            str name: the common name of the labware
-            bool using_temp_ctrl: true if using temperature control
-            float temp: the temperature you want it at
-            int deck_pos: the deck_position of the temperature module
+            str name: the common name of the labware  
+            bool using_temp_ctrl: true if using temperature control  
+            float temp: the temperature you want it at  
+            int deck_pos: the deck_position of the temperature module  
             list<tup<str, float>> empty_tubes: the empty_tubes associated with this tube holder
-              the tuple holds the name of the tube and the volume associated with it
+              the tuple holds the name of the tube and the volume associated with it  
         Postconditions:
-            the temperature module has been initialized
-            the labware wrapper for these tubes has been initialized and added to the deck
+            the temperature module has been initialized  
+            the labware wrapper for these tubes has been initialized and added to the deck  
         '''
         if using_temp_ctrl:
             temp_module = self.protocol.load_module('temperature module gen2', 3)
@@ -679,15 +679,15 @@ class OT2Robot():
     def _init_custom_labware(self, name, deck_pos, **kwargs):
         '''
         initializes custom built labware by reading from json
-        initializes the labware_deck
+        initializes the labware_deck  
         params:
-            str name: the common name of the labware
-            str deck_pos: the position on the deck for the labware
+            str name: the common name of the labware  
+            str deck_pos: the position on the deck for the labware  
         kwargs:
-            NOTE this is really here for compatibility since it's just one keyword that should
-            always be passed. It's here in case we decide to use other types of labware in the
+            + NOTE this is really here for compatibility since it's just one keyword that should  
+            always be passed. It's here in case we decide to use other types of labware in the  
             future
-            str first_well: the first available well in the labware
+            + str first_well: the first available well in the labware  
         '''
         with open(self._LABWARE_TYPES[name]['definition_path'], 'r') as labware_def_file:
             labware_def = json.load(labware_def_file)
@@ -696,16 +696,16 @@ class OT2Robot():
 
     def _add_to_deck(self, name, deck_pos, labware, **kwargs):
         '''
-        constructs the appropriate labware object
+        constructs the appropriate labware object  
         params:
-            str name: the common name for the labware
-            int deck_pos: the deck position of the labware object
-            Opentrons.labware: labware
-            kwargs:
-                list empty_containers<str>: the list of the empty locations on the labware
-                str first_well: the first available well in the labware
+            str name: the common name for the labware  
+            int deck_pos: the deck position of the labware object  
+            Opentrons.labware: labware  
+            kwargs:  
+                + list empty_containers<str>: the list of the empty locations on the labware  
+                + str first_well: the first available well in the labware  
         Postconditions:
-            an entry has been added to the lab_deck
+            an entry has been added to the lab_deck  
         '''
         if 'tube_holder' in self._LABWARE_TYPES[name]['groups']:
             self.lab_deck[deck_pos] = TubeHolder(labware, kwargs['empty_containers'], deck_pos)
@@ -718,9 +718,9 @@ class OT2Robot():
         '''
         initializes the labware objects in the protocol and pipettes.
         params:
-            df labware_df: as recieved in __init__
+            df labware_df: as recieved in __init__  
         Postconditions:
-            The deck has been initialized with labware
+            The deck has been initialized with labware  
         '''
         for deck_pos, name, first_usable, empty_list in labware_df.itertuples(index=False):
             #diff types of labware need diff initializations
@@ -744,13 +744,13 @@ class OT2Robot():
         
     def _init_instruments(self,instruments, labware_df):
         '''
-        initializes the opentrons instruments (pipettes) and sets first tips for pipettes
+        initializes the opentrons instruments (pipettes) and sets first tips for pipettes  
         params:
-            Dict<str:str> instruments: as recieved in __init__
-            df labware_df: as recieved in __init__
+            Dict<str:str> instruments: as recieved in __init__  
+            df labware_df: as recieved in __init__  
         Postconditions:
-            the pipettes have been initialized and 
-            tip racks have been given first tips
+            the pipettes have been initialized and   
+            tip racks have been given first tips  
         '''
         for arm_pos, pipette_name in instruments.items():
             #lookup opentrons name
@@ -782,11 +782,11 @@ class OT2Robot():
 
     def _lexo_argmax(self, s):
         '''
-        pandas does not have a lexographic idxmax, so I have supplied one
+        pandas does not have a lexographic idxmax, so I have supplied one  
         Params:
-            pd.Series s: a series of strings to be compared lexographically
+            pd.Series s: a series of strings to be compared lexographically  
         returns:
-            Object: the pandas index associated with that string
+            Object: the pandas index associated with that string  
         '''
         max_str = ''
         max_idx = None
@@ -798,11 +798,11 @@ class OT2Robot():
     def _exec_init_containers(self, product_df):
         '''
         used to initialize empty containers, which is useful before transfer steps to new chemicals
-        especially if we have preferences for where those chemicals are put
+        especially if we have preferences for where those chemicals are put  
         Params:
-            df product_df: as generated in client init_robot
+            df product_df: as generated in client init_robot  
         Postconditions:
-            every container has been initialized according to the parameters specified
+            every container has been initialized according to the parameters specified  
         '''
         for chem_name, req_labware, req_container, max_vol in product_df.itertuples():
             container = None
@@ -852,15 +852,15 @@ class OT2Robot():
 
     def execute(self, command_type, cid, arguments):
         '''
-        takes the packet type and payload of an Armchair packet, and executes the command
+        takes the packet type and payload of an Armchair packet, and executes the command  
         params:
-            str command_type: the type of packet to execute
+            str command_type: the type of packet to execute  
             tuple<Obj> arguments: the arguments to this command 
-              (generally passed as list so no *args)
+              (generally passed as list so no *args)  
         returns:
-            int: 1=ready to recieve. 0=terminated
+            int: 1=ready to recieve. 0=terminated  
         Postconditions:
-            the command has been executed
+            the command has been executed  
         '''
         if command_type == 'transfer':
             self._exec_transfer(*arguments)
@@ -893,11 +893,11 @@ class OT2Robot():
 
     def _exec_loc_req(self, wellnames):
         '''
-        processes a request for locations of wellnames and sends a response with their locations
+        processes a request for locations of wellnames and sends a response with their locations  
         params:
-            list<str> wellnames: requested wells as specified in armchair documentation
+            list<str> wellnames: requested wells as specified in armchair documentation  
         returns:
-            list<tuple<str,str,int>: chem_name, well_loc, deck_pos. see armchair specs
+            list<tuple<str,str,int>: chem_name, well_loc, deck_pos. see armchair specs  
         '''
         response = []
         for name in wellnames:
@@ -911,9 +911,9 @@ class OT2Robot():
 
     def _exec_pause(self, pause_time):
         '''
-        executes a pause command by waiting for 'time' seconds
+        executes a pause command by waiting for 'time' seconds  
         params:
-            float pause_time: time to wait in seconds
+            float pause_time: time to wait in seconds  
         '''
         #no need to pause for a simulation
         if not self.simulate:
@@ -923,11 +923,11 @@ class OT2Robot():
         '''
         this command executes a transfer. It's usually pretty simple, unless you have
         a stop callback. If you have a stop callback it launches a new TCP connection and
-        stops to wait for user input at each transfer
+        stops to wait for user input at each transfer  
         params:
-            str src: the chem_name of the source well
-            list<tuple<str,float>> transfer_steps: each element is a dst, vol pair
-            list<str> callbacks: the ordered callbacks to perform after each transfer or None
+            str src: the chem_name of the source well  
+            list<tuple<str,float>> transfer_steps: each element is a dst, vol pair  
+            list<str> callbacks: the ordered callbacks to perform after each transfer or None  
         '''
         #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
         for arm in self.pipettes.keys():
@@ -972,11 +972,11 @@ class OT2Robot():
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
         appropriately sized pipettes. If you need
-        more than 1 step, will facilitate that
+        more than 1 step, will facilitate that  
         params:
-            str src: the chemical name to pipette from
-            str dst: thec chemical name to pipette into
-            float vol: the volume to pipette
+            str src: the chemical name to pipette from  
+            str dst: thec chemical name to pipette into  
+            float vol: the volume to pipette  
         '''
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
@@ -991,9 +991,9 @@ class OT2Robot():
     def _get_clean_tips(self):
         '''
         checks if the both tips to see if they're dirty. Drops anything that's dirty, then picks
-        up clean tips
+        up clean tips  
         params:
-            str ok_chems: if you're ok reusing the same tip for this chemical, no need to replace
+            str ok_chems: if you're ok reusing the same tip for this chemical, no need to replace  
         '''
         drop_list = [] #holds the pipettes that were dirty
         #drop first so no sprinkles get on rack while picking up
@@ -1009,11 +1009,11 @@ class OT2Robot():
 
     def _get_preffered_pipette(self, vol):
         '''
-        returns the pipette with size, or one smaller
+        returns the pipette with size, or one smaller  
         params:
-            float vol: the volume to be transfered in uL
+            float vol: the volume to be transfered in uL  
         returns:
-            str: in ['right', 'left'] the pipette arm you're to use
+            str: in ['right', 'left'] the pipette arm you're to use  
         '''
         preffered_size = 0
         if vol < 40.0:
@@ -1043,18 +1043,18 @@ class OT2Robot():
     def _liquid_transfer(self, src, dst, vol, arm):
         '''
         the lowest of the low. Transfer liquid from one container to another. And mark the tip
-        as dirty with src, and update the volumes of the containers it uses
+        as dirty with src, and update the volumes of the containers it uses  
         params:
-            str src: the chemical name of the source container
-            str dst: the chemical name of the destination container
-            float vol: the volume of liquid to be transfered
-            str arm: the robot arm to use for this transfer
+            str src: the chemical name of the source container  
+            str dst: the chemical name of the destination container  
+            float vol: the volume of liquid to be transfered  
+            str arm: the robot arm to use for this transfer  
         Postconditions:
-            vol uL of src has been transfered to dst
-            pipette has been adjusted to be dirty with src
-            volumes of src and dst have been updated
+            vol uL of src has been transfered to dst  
+            pipette has been adjusted to be dirty with src  
+            volumes of src and dst have been updated  
         Preconditions:
-            Both pipettes are clean or of same type
+            Both pipettes are clean or of same type  
         '''
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
@@ -1136,9 +1136,9 @@ class OT2Robot():
 
     def exception_handler(self, e):
         '''
-        code to handle all exceptions.
+        code to handle all exceptions.  
         Procedure:
-            Dump a locations of all of the chemicals
+            Dump a locations of all of the chemicals  
         '''
         pass
 
@@ -1166,10 +1166,10 @@ class OT2Robot():
 
     def _send_files(self,port,filenames):
         '''
-        used to ship files back to server
+        used to ship files back to server  
         params:
-            int port: the port number to ship the files out of
-            list<str> filepaths: the filepaths to ship
+            int port: the port number to ship the files out of  
+            list<str> filepaths: the filepaths to ship  
         '''
         #setting up a socket for FTP
         sock = socket.socket(socket.AF_INET)
@@ -1192,10 +1192,10 @@ class OT2Robot():
 
 def launch_eve_server(**kwargs):
     '''
-    launches an eve server to create robot, connect to controller etc
-    **kwargs:
-        str my_ip: the ip address to launch the server on. required arg
-        threading.Barrier barrier: if specified, will launch as a thread instead of a main
+    launches an eve server to create robot, connect to controller etc  
+    **kwargs:  
+        + str my_ip: the ip address to launch the server on. required arg  
+        + threading.Barrier barrier: if specified, will launch as a thread instead of a main  
     '''
     my_ip = kwargs['my_ip']
     PORT_NUM = 50000

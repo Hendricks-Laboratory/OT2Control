@@ -41,33 +41,32 @@ class Armchair():
     The class maintains a buffer of packets in a conversation, and if the buffer is full, it will
     block until the buffer is emptied. Note however that this abstraction is broken in the case
     of GHOST packets, which are sent without waiting for a ready response and without changing the
-    cid
-    ATTRIBUTES:
-        socket sock: a connected socket
+    cid  
+    ATTRIBUTES:  
+        socket sock: a connected socket  
         int buffsize: this is the number of allowed inflight packets (i.e. the number of packets
-          to send to the reciever before waiting for a ready response)
+          to send to the reciever before waiting for a ready response)  
         int cid: the current command id. This is a constantly increasing number. It is used to 
           communicate between Armchair objects about where the other end is in terms of processing
-          packages.
-        pack_ty
-        str name: the name of this armchair object. Used for loging purposes
-        str log_path: the path to the log file for this Armchair
-    CONSTANTS:
+          packages.  
+        str name: the name of this armchair object. Used for loging purposes  
+        str log_path: the path to the log file for this Armchair  
+    CONSTANTS:  
         bidict PACK_TYPES: this is a key for translating between byte codes and string labels
-          for different packet types
+          for different packet types  
         GHOST_TYPES: this is a list of all str types that classify as GHOST packets. i.e. they do
           not go to the buffer, are sent immediately without waiting for a ready. The responses to
-          these packets are controlled outside of the Armchair class by the user
-    METHODS:
+          these packets are controlled outside of the Armchair class by the user  
+    METHODS:  
         recv() tuple&lt;str,int,Obj&gt;: this should almost never be used by a user. It recieves a
-          packet, but without any checking for buffer requirements
+          packet, but without any checking for buffer requirements  
         recv_pack() tuple&lt;str,int,Obj&gt;: this is a wrapped version of recv for user. It will make
           sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
-          payload
+          payload  
         send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
-          of pack_type with args.
-        burn_pipe() void: This command waits until the pipe is clear
-        close() void: terminate the connection
+          of pack_type with args.  
+        burn_pipe() void: This command waits until the pipe is clear  
+        close() void: terminate the connection  
     &#39;&#39;&#39;
 
     PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;})
@@ -91,36 +90,36 @@ class Armchair():
 
     def get_len(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            int: the number of bytes in payload
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            int: the number of bytes in payload  
         &#39;&#39;&#39;
         return int.from_bytes(header[:8], &#39;big&#39;)
     
     def get_type(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            str: the string name of the command type
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            str: the string name of the command type  
         &#39;&#39;&#39;
         return self.PACK_TYPES.inv[header[8:9]]
 
     def get_cid(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            int: the cid of this command
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            int: the cid of this command  
         &#39;&#39;&#39;
         return int.from_bytes(header[9:17], &#39;big&#39;)
     
     def construct_head(self,n_bytes, pack_type):
         &#39;&#39;&#39;
-        params:
-            int n_bytes: the number of bytes in the payload
-            str pack_type: the type of the packet
+        params:  
+            int n_bytes: the number of bytes in the payload  
+            str pack_type: the type of the packet  
         &#39;&#39;&#39;
         if pack_type not in self.GHOST_TYPES:
             self.cid+=1
@@ -130,11 +129,11 @@ class Armchair():
         &#39;&#39;&#39;
         If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
         will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-        next significant thing
-        returns: if packet in buffer
-            str: type of packet
-            int: the cid of the recived packet
-            Obj: the argmuents/payload
+        next significant thing  
+        returns: if packet in buffer  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
         &#39;&#39;&#39;
         header = self.sock.recv_size(17)
         header_len = self.get_len(header)
@@ -153,11 +152,11 @@ class Armchair():
         &#39;&#39;&#39;
         processes the next packet and returns None if nothing to read
         If the next packet was a ready packet it will be ignored and corresponding send will be
-        removed
-        returns:
-            str: type of packet
-            int: the cid of the recived packet
-            Obj: the argmuents/payload
+        removed  
+        returns:  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
         &#39;&#39;&#39;
         header_type = &#39;ready&#39; #do while
         while header_type == &#39;ready&#39;:
@@ -169,16 +168,16 @@ class Armchair():
     def send_pack(self, pack_type, *args):
         &#39;&#39;&#39;
         will first check the buffer. If buffer size is exceded will wait on a ready
-        constructs a packet and sends it over network
-        params:
-            str pack_type: the type of packet being sent (string form)
-            args*: the objects to pickle
-        returns:
-            int: the cid of the sent packet
-        Postconditions:
-            An armchair packet has been constructed and sent over the socket
-            has created log entry of send
-            cid has been appended to self._inflight_packs
+        constructs a packet and sends it over network  
+        params:  
+            str pack_type: the type of packet being sent (string form)  
+            args*: the objects to pickle  
+        returns:  
+            int: the cid of the sent packet  
+        Postconditions:  
+            An armchair packet has been constructed and sent over the socket  
+            has created log entry of send  
+            cid has been appended to self._inflight_packs  
         &#39;&#39;&#39;
         if len(self._inflight_packs) &gt; self.buffsize and pack_type not in self.GHOST_TYPES:
             self._block_on_ready()
@@ -199,21 +198,21 @@ class Armchair():
 
     def burn_pipe(self):
         &#39;&#39;&#39;
-        burns through the pipe by reading all of the ready commands
-        Postconditions:
-            Nothing left in the inflight packets buffer
+        burns through the pipe by reading all of the ready commands  
+        Postconditions:  
+            Nothing left in the inflight packets buffer  
         &#39;&#39;&#39;
         while self._inflight_packs:
             self._block_on_ready()
 
     def _block_on_ready(self):
         &#39;&#39;&#39;
-        used to block until the other side responds with a &#39;ready&#39; packet
+        used to block until the other side responds with a &#39;ready&#39; packet  
         Preconditions: self._inflight_packs contains cids of packets that have been sent 
-        not yet acknowledged
-        Postconditions:
-            has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from self.inflight_packs
+        not yet acknowledged  
+        Postconditions:  
+            has stalled until a ready command was recieved.  
+            The cid in the ready command has been removed from self.inflight_packs  
         &#39;&#39;&#39;
         pack_type, _, arguments = self.recv()
         assert (pack_type == &#39;ready&#39;), &#34;was expecting a ready packet, but instead recieved a {}&#34;.format(pack_type)
@@ -246,32 +245,31 @@ protocol can be found in acompanying armchair_specs.txt
 The class maintains a buffer of packets in a conversation, and if the buffer is full, it will
 block until the buffer is emptied. Note however that this abstraction is broken in the case
 of GHOST packets, which are sent without waiting for a ready response and without changing the
-cid</p>
-<h2 id="attributes">Attributes</h2>
-<p>socket sock: a connected socket
+cid<br>
+ATTRIBUTES:<br>
+socket sock: a connected socket<br>
 int buffsize: this is the number of allowed inflight packets (i.e. the number of packets
-to send to the reciever before waiting for a ready response)
+to send to the reciever before waiting for a ready response)<br>
 int cid: the current command id. This is a constantly increasing number. It is used to
 communicate between Armchair objects about where the other end is in terms of processing
-packages.
-pack_ty
-str name: the name of this armchair object. Used for loging purposes
-str log_path: the path to the log file for this Armchair</p>
-<h2 id="constants">Constants</h2>
-<p>bidict PACK_TYPES: this is a key for translating between byte codes and string labels
-for different packet types
+packages.<br>
+str name: the name of this armchair object. Used for loging purposes<br>
+str log_path: the path to the log file for this Armchair<br>
+CONSTANTS:<br>
+bidict PACK_TYPES: this is a key for translating between byte codes and string labels
+for different packet types<br>
 GHOST_TYPES: this is a list of all str types that classify as GHOST packets. i.e. they do
 not go to the buffer, are sent immediately without waiting for a ready. The responses to
-these packets are controlled outside of the Armchair class by the user</p>
-<h2 id="methods">Methods</h2>
-<p>recv() tuple<str,int,Obj>: this should almost never be used by a user. It recieves a
-packet, but without any checking for buffer requirements
+these packets are controlled outside of the Armchair class by the user<br>
+METHODS:<br>
+recv() tuple<str,int,Obj>: this should almost never be used by a user. It recieves a
+packet, but without any checking for buffer requirements<br>
 recv_pack() tuple<str,int,Obj>: this is a wrapped version of recv for user. It will make
 sure that the buffer is managed appropriately if necessary. Returns type, cid, and
-payload
+payload<br>
 send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet
-of pack_type with args.
-burn_pipe() void: This command waits until the pipe is clear
+of pack_type with args.<br>
+burn_pipe() void: This command waits until the pipe is clear<br>
 close() void: terminate the connection</p></div>
 <details class="source">
 <summary>
@@ -284,33 +282,32 @@ close() void: terminate the connection</p></div>
     The class maintains a buffer of packets in a conversation, and if the buffer is full, it will
     block until the buffer is emptied. Note however that this abstraction is broken in the case
     of GHOST packets, which are sent without waiting for a ready response and without changing the
-    cid
-    ATTRIBUTES:
-        socket sock: a connected socket
+    cid  
+    ATTRIBUTES:  
+        socket sock: a connected socket  
         int buffsize: this is the number of allowed inflight packets (i.e. the number of packets
-          to send to the reciever before waiting for a ready response)
+          to send to the reciever before waiting for a ready response)  
         int cid: the current command id. This is a constantly increasing number. It is used to 
           communicate between Armchair objects about where the other end is in terms of processing
-          packages.
-        pack_ty
-        str name: the name of this armchair object. Used for loging purposes
-        str log_path: the path to the log file for this Armchair
-    CONSTANTS:
+          packages.  
+        str name: the name of this armchair object. Used for loging purposes  
+        str log_path: the path to the log file for this Armchair  
+    CONSTANTS:  
         bidict PACK_TYPES: this is a key for translating between byte codes and string labels
-          for different packet types
+          for different packet types  
         GHOST_TYPES: this is a list of all str types that classify as GHOST packets. i.e. they do
           not go to the buffer, are sent immediately without waiting for a ready. The responses to
-          these packets are controlled outside of the Armchair class by the user
-    METHODS:
+          these packets are controlled outside of the Armchair class by the user  
+    METHODS:  
         recv() tuple&lt;str,int,Obj&gt;: this should almost never be used by a user. It recieves a
-          packet, but without any checking for buffer requirements
+          packet, but without any checking for buffer requirements  
         recv_pack() tuple&lt;str,int,Obj&gt;: this is a wrapped version of recv for user. It will make
           sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
-          payload
+          payload  
         send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
-          of pack_type with args.
-        burn_pipe() void: This command waits until the pipe is clear
-        close() void: terminate the connection
+          of pack_type with args.  
+        burn_pipe() void: This command waits until the pipe is clear  
+        close() void: terminate the connection  
     &#39;&#39;&#39;
 
     PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;})
@@ -334,36 +331,36 @@ close() void: terminate the connection</p></div>
 
     def get_len(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            int: the number of bytes in payload
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            int: the number of bytes in payload  
         &#39;&#39;&#39;
         return int.from_bytes(header[:8], &#39;big&#39;)
     
     def get_type(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            str: the string name of the command type
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            str: the string name of the command type  
         &#39;&#39;&#39;
         return self.PACK_TYPES.inv[header[8:9]]
 
     def get_cid(self,header):
         &#39;&#39;&#39;
-        params:
-            bytes header: the header of the packet
-        returns:
-            int: the cid of this command
+        params:  
+            bytes header: the header of the packet  
+        returns:  
+            int: the cid of this command  
         &#39;&#39;&#39;
         return int.from_bytes(header[9:17], &#39;big&#39;)
     
     def construct_head(self,n_bytes, pack_type):
         &#39;&#39;&#39;
-        params:
-            int n_bytes: the number of bytes in the payload
-            str pack_type: the type of the packet
+        params:  
+            int n_bytes: the number of bytes in the payload  
+            str pack_type: the type of the packet  
         &#39;&#39;&#39;
         if pack_type not in self.GHOST_TYPES:
             self.cid+=1
@@ -373,11 +370,11 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
         will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-        next significant thing
-        returns: if packet in buffer
-            str: type of packet
-            int: the cid of the recived packet
-            Obj: the argmuents/payload
+        next significant thing  
+        returns: if packet in buffer  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
         &#39;&#39;&#39;
         header = self.sock.recv_size(17)
         header_len = self.get_len(header)
@@ -396,11 +393,11 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         processes the next packet and returns None if nothing to read
         If the next packet was a ready packet it will be ignored and corresponding send will be
-        removed
-        returns:
-            str: type of packet
-            int: the cid of the recived packet
-            Obj: the argmuents/payload
+        removed  
+        returns:  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
         &#39;&#39;&#39;
         header_type = &#39;ready&#39; #do while
         while header_type == &#39;ready&#39;:
@@ -412,16 +409,16 @@ close() void: terminate the connection</p></div>
     def send_pack(self, pack_type, *args):
         &#39;&#39;&#39;
         will first check the buffer. If buffer size is exceded will wait on a ready
-        constructs a packet and sends it over network
-        params:
-            str pack_type: the type of packet being sent (string form)
-            args*: the objects to pickle
-        returns:
-            int: the cid of the sent packet
-        Postconditions:
-            An armchair packet has been constructed and sent over the socket
-            has created log entry of send
-            cid has been appended to self._inflight_packs
+        constructs a packet and sends it over network  
+        params:  
+            str pack_type: the type of packet being sent (string form)  
+            args*: the objects to pickle  
+        returns:  
+            int: the cid of the sent packet  
+        Postconditions:  
+            An armchair packet has been constructed and sent over the socket  
+            has created log entry of send  
+            cid has been appended to self._inflight_packs  
         &#39;&#39;&#39;
         if len(self._inflight_packs) &gt; self.buffsize and pack_type not in self.GHOST_TYPES:
             self._block_on_ready()
@@ -442,21 +439,21 @@ close() void: terminate the connection</p></div>
 
     def burn_pipe(self):
         &#39;&#39;&#39;
-        burns through the pipe by reading all of the ready commands
-        Postconditions:
-            Nothing left in the inflight packets buffer
+        burns through the pipe by reading all of the ready commands  
+        Postconditions:  
+            Nothing left in the inflight packets buffer  
         &#39;&#39;&#39;
         while self._inflight_packs:
             self._block_on_ready()
 
     def _block_on_ready(self):
         &#39;&#39;&#39;
-        used to block until the other side responds with a &#39;ready&#39; packet
+        used to block until the other side responds with a &#39;ready&#39; packet  
         Preconditions: self._inflight_packs contains cids of packets that have been sent 
-        not yet acknowledged
-        Postconditions:
-            has stalled until a ready command was recieved.
-            The cid in the ready command has been removed from self.inflight_packs
+        not yet acknowledged  
+        Postconditions:  
+            has stalled until a ready command was recieved.  
+            The cid in the ready command has been removed from self.inflight_packs  
         &#39;&#39;&#39;
         pack_type, _, arguments = self.recv()
         assert (pack_type == &#39;ready&#39;), &#34;was expecting a ready packet, but instead recieved a {}&#34;.format(pack_type)
@@ -486,18 +483,18 @@ close() void: terminate the connection</p></div>
 <span>def <span class="ident">burn_pipe</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>burns through the pipe by reading all of the ready commands</p>
-<h2 id="postconditions">Postconditions</h2>
-<p>Nothing left in the inflight packets buffer</p></div>
+<div class="desc"><p>burns through the pipe by reading all of the ready commands<br>
+Postconditions:<br>
+Nothing left in the inflight packets buffer</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def burn_pipe(self):
     &#39;&#39;&#39;
-    burns through the pipe by reading all of the ready commands
-    Postconditions:
-        Nothing left in the inflight packets buffer
+    burns through the pipe by reading all of the ready commands  
+    Postconditions:  
+        Nothing left in the inflight packets buffer  
     &#39;&#39;&#39;
     while self._inflight_packs:
         self._block_on_ready()</code></pre>
@@ -523,8 +520,8 @@ close() void: terminate the connection</p></div>
 <span>def <span class="ident">construct_head</span></span>(<span>self, n_bytes, pack_type)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>params:
-int n_bytes: the number of bytes in the payload
+<div class="desc"><p>params:<br>
+int n_bytes: the number of bytes in the payload<br>
 str pack_type: the type of the packet</p></div>
 <details class="source">
 <summary>
@@ -532,9 +529,9 @@ str pack_type: the type of the packet</p></div>
 </summary>
 <pre><code class="python">def construct_head(self,n_bytes, pack_type):
     &#39;&#39;&#39;
-    params:
-        int n_bytes: the number of bytes in the payload
-        str pack_type: the type of the packet
+    params:  
+        int n_bytes: the number of bytes in the payload  
+        str pack_type: the type of the packet  
     &#39;&#39;&#39;
     if pack_type not in self.GHOST_TYPES:
         self.cid+=1
@@ -545,9 +542,9 @@ str pack_type: the type of the packet</p></div>
 <span>def <span class="ident">get_cid</span></span>(<span>self, header)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>params:
-bytes header: the header of the packet
-returns:
+<div class="desc"><p>params:<br>
+bytes header: the header of the packet<br>
+returns:<br>
 int: the cid of this command</p></div>
 <details class="source">
 <summary>
@@ -555,10 +552,10 @@ int: the cid of this command</p></div>
 </summary>
 <pre><code class="python">def get_cid(self,header):
     &#39;&#39;&#39;
-    params:
-        bytes header: the header of the packet
-    returns:
-        int: the cid of this command
+    params:  
+        bytes header: the header of the packet  
+    returns:  
+        int: the cid of this command  
     &#39;&#39;&#39;
     return int.from_bytes(header[9:17], &#39;big&#39;)</code></pre>
 </details>
@@ -567,9 +564,9 @@ int: the cid of this command</p></div>
 <span>def <span class="ident">get_len</span></span>(<span>self, header)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>params:
-bytes header: the header of the packet
-returns:
+<div class="desc"><p>params:<br>
+bytes header: the header of the packet<br>
+returns:<br>
 int: the number of bytes in payload</p></div>
 <details class="source">
 <summary>
@@ -577,10 +574,10 @@ int: the number of bytes in payload</p></div>
 </summary>
 <pre><code class="python">def get_len(self,header):
     &#39;&#39;&#39;
-    params:
-        bytes header: the header of the packet
-    returns:
-        int: the number of bytes in payload
+    params:  
+        bytes header: the header of the packet  
+    returns:  
+        int: the number of bytes in payload  
     &#39;&#39;&#39;
     return int.from_bytes(header[:8], &#39;big&#39;)</code></pre>
 </details>
@@ -589,9 +586,9 @@ int: the number of bytes in payload</p></div>
 <span>def <span class="ident">get_type</span></span>(<span>self, header)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>params:
-bytes header: the header of the packet
-returns:
+<div class="desc"><p>params:<br>
+bytes header: the header of the packet<br>
+returns:<br>
 str: the string name of the command type</p></div>
 <details class="source">
 <summary>
@@ -599,10 +596,10 @@ str: the string name of the command type</p></div>
 </summary>
 <pre><code class="python">def get_type(self,header):
     &#39;&#39;&#39;
-    params:
-        bytes header: the header of the packet
-    returns:
-        str: the string name of the command type
+    params:  
+        bytes header: the header of the packet  
+    returns:  
+        str: the string name of the command type  
     &#39;&#39;&#39;
     return self.PACK_TYPES.inv[header[8:9]]</code></pre>
 </details>
@@ -613,10 +610,10 @@ str: the string name of the command type</p></div>
 <dd>
 <div class="desc"><p>If you're looking at this, you probably want recv_pack. recv is a lower level command that
 will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-next significant thing
-returns: if packet in buffer
-str: type of packet
-int: the cid of the recived packet
+next significant thing<br>
+returns: if packet in buffer<br>
+str: type of packet<br>
+int: the cid of the recived packet<br>
 Obj: the argmuents/payload</p></div>
 <details class="source">
 <summary>
@@ -626,11 +623,11 @@ Obj: the argmuents/payload</p></div>
     &#39;&#39;&#39;
     If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
     will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-    next significant thing
-    returns: if packet in buffer
-        str: type of packet
-        int: the cid of the recived packet
-        Obj: the argmuents/payload
+    next significant thing  
+    returns: if packet in buffer  
+        str: type of packet  
+        int: the cid of the recived packet  
+        Obj: the argmuents/payload  
     &#39;&#39;&#39;
     header = self.sock.recv_size(17)
     header_len = self.get_len(header)
@@ -652,10 +649,10 @@ Obj: the argmuents/payload</p></div>
 <dd>
 <div class="desc"><p>processes the next packet and returns None if nothing to read
 If the next packet was a ready packet it will be ignored and corresponding send will be
-removed
-returns:
-str: type of packet
-int: the cid of the recived packet
+removed<br>
+returns:<br>
+str: type of packet<br>
+int: the cid of the recived packet<br>
 Obj: the argmuents/payload</p></div>
 <details class="source">
 <summary>
@@ -665,11 +662,11 @@ Obj: the argmuents/payload</p></div>
     &#39;&#39;&#39;
     processes the next packet and returns None if nothing to read
     If the next packet was a ready packet it will be ignored and corresponding send will be
-    removed
-    returns:
-        str: type of packet
-        int: the cid of the recived packet
-        Obj: the argmuents/payload
+    removed  
+    returns:  
+        str: type of packet  
+        int: the cid of the recived packet  
+        Obj: the argmuents/payload  
     &#39;&#39;&#39;
     header_type = &#39;ready&#39; #do while
     while header_type == &#39;ready&#39;:
@@ -684,15 +681,15 @@ Obj: the argmuents/payload</p></div>
 </code></dt>
 <dd>
 <div class="desc"><p>will first check the buffer. If buffer size is exceded will wait on a ready
-constructs a packet and sends it over network
-params:
-str pack_type: the type of packet being sent (string form)
-args*: the objects to pickle
-returns:
-int: the cid of the sent packet</p>
-<h2 id="postconditions">Postconditions</h2>
-<p>An armchair packet has been constructed and sent over the socket
-has created log entry of send
+constructs a packet and sends it over network<br>
+params:<br>
+str pack_type: the type of packet being sent (string form)<br>
+args*: the objects to pickle<br>
+returns:<br>
+int: the cid of the sent packet<br>
+Postconditions:<br>
+An armchair packet has been constructed and sent over the socket<br>
+has created log entry of send<br>
 cid has been appended to self._inflight_packs</p></div>
 <details class="source">
 <summary>
@@ -701,16 +698,16 @@ cid has been appended to self._inflight_packs</p></div>
 <pre><code class="python">def send_pack(self, pack_type, *args):
     &#39;&#39;&#39;
     will first check the buffer. If buffer size is exceded will wait on a ready
-    constructs a packet and sends it over network
-    params:
-        str pack_type: the type of packet being sent (string form)
-        args*: the objects to pickle
-    returns:
-        int: the cid of the sent packet
-    Postconditions:
-        An armchair packet has been constructed and sent over the socket
-        has created log entry of send
-        cid has been appended to self._inflight_packs
+    constructs a packet and sends it over network  
+    params:  
+        str pack_type: the type of packet being sent (string form)  
+        args*: the objects to pickle  
+    returns:  
+        int: the cid of the sent packet  
+    Postconditions:  
+        An armchair packet has been constructed and sent over the socket  
+        has created log entry of send  
+        cid has been appended to self._inflight_packs  
     &#39;&#39;&#39;
     if len(self._inflight_packs) &gt; self.buffsize and pack_type not in self.GHOST_TYPES:
         self._block_on_ready()
