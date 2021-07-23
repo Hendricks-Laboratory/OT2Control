@@ -53,8 +53,10 @@ from df_utils import make_unique, df_popout
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
-    parser.add_argument('-m','--mode',help=help_str,default='protocol')
+    mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
+    parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
+    parser.add_argument('-n','--name',help='the name of the google sheet')
+    parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
     return parser
 
 def main(serveraddr):
@@ -65,25 +67,24 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == 'protocol':
         print('launching in protocol mode')
-        launch_protocol_exec(serveraddr)
+        launch_protocol_exec(serveraddr,args.name,args.cache)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        launch_auto(serveraddr)
+        launch_auto(serveraddr,args.name,args.cache)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr):
+def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
     '''
     main function to launch a controller and execute a protocol
     '''
     #instantiate a controller
-    rxn_sheet_name = input('<<controller>> please input the sheet name ')
-    #using the cache bypasses google docs communication and uses the last rxn you loaded
-    use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
-#    #debugging lines for me
-#    use_cache = True
-#    rxn_sheet_name = 'test_dilutions_sane'
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
@@ -95,16 +96,15 @@ def launch_protocol_exec(serveraddr):
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-def launch_auto(serveraddr):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
-   # rxn_sheet_name = input('<<controller>> please input the sheet name ')
-   # #using the cache bypasses google docs communication and uses the last rxn you loaded
-   # use_cache = 'y' == input('<<controller>> would you like to use the spreadsheet cache? [yn] ')
-    #debugging lines for me
-    use_cache = True
-    rxn_sheet_name = 'test_layout'
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     auto.run_simulation()
@@ -363,6 +363,7 @@ class Controller(ABC):
             #DEBUG
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
         return reagent_info
 
     def _get_empty_containers(self, raw_reagent_df):
@@ -378,6 +379,32 @@ class Controller(ABC):
                 + str loc: location on the labware  
         '''
         return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
+
+    def _get_dry_containers(self, raw_reagent_df):
+        '''
+        params:  
+            df raw_reagent_df: the reagent dataframe as recieved from excel  
+        returns:  
+            df dry_containers:  
+                note: cannot be sent over pickle as is because the index has duplicates.
+                  solution is to reset the index for shipping
+                + str index: the chemical name
+                + float conc: the concentration once built
+                + str loc: the location on the labware
+                + int deck_pos: position on the deck
+                + float required_vol: the volume of water needed to turn this into a reagent
+        '''
+        #other rows will be empty str unless dry
+        dry_containers = raw_reagent_df.loc[raw_reagent_df['molar_mass'].astype(bool)].astype(
+                {'conc':float,'deck_pos':int,'mass':float,'molar_mass':float})
+        def _get_necessary_vol(row):
+            milimols = 1000 * row['mass']/row['molar_mass']
+            vol = milimols/row['conc'] * 1e6 #microliter conversion
+            return vol
+        dry_containers['required_vol'] = dry_containers.apply(_get_necessary_vol, axis=1)
+        return dry_containers.drop(columns=['mass','molar_mass']).reset_index()
+
+
     
     def _parse_raw_reagent_df(self, raw_reagent_df):
         '''
@@ -387,7 +414,10 @@ class Controller(ABC):
         returns:  
             df reagent_df: empties ignored, columns with correct types  
         '''
-        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore') # incase not on axis
+        # incase not on axis
+        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore')
+        reagent_df = reagent_df.loc[~reagent_df['molar_mass'].astype(bool)] #drop dry
+        reagent_df.drop(columns='molar_mass',inplace=True)
         try:
             reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
         except ValueError as e:
@@ -549,7 +579,8 @@ class Controller(ABC):
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
-                self.robo_params['reagent_df'].to_dict(), self.my_ip)
+                self.robo_params['reagent_df'].to_dict(), self.my_ip,
+                self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
     def run_simulation():
@@ -700,11 +731,13 @@ class ProtocolExecutor(Controller):
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
         #with a parsed reagent_df. This is exactly as is pulled from gsheets
         empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
         products_to_labware = self._get_products_to_labware(input_data)
         self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+        print(self.robo_params['reagent_df'])
         self.run_all_checks()
 
     def run_simulation(self):
@@ -805,6 +838,7 @@ class ProtocolExecutor(Controller):
             #DEBUG
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
         return reagent_info
 
     def _load_rxn_df(self, input_data):
@@ -901,7 +935,7 @@ class ProtocolExecutor(Controller):
         rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
         reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
         reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
-        reagent_df[['loc', 'deck_pos', 'mass', 'comments']] = ''
+        reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
         if not self.use_cache:
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
@@ -978,6 +1012,8 @@ class ProtocolExecutor(Controller):
                 self._send_dilution_commands(row, i)
             elif row['op'] == 'mix':
                 self._mix(row, i)
+            elif row['op'] == 'make':
+                pass
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 

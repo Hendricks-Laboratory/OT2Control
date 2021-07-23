@@ -512,6 +512,8 @@ class OT2Robot():
         str root_p: the path to the root output  
         str debug_p: the path for debuging  
         str logs_p: the path to the log outputs  
+        dict<str:tuple<Container,float>> dry_containers: maps container name to a container
+          object and a volume of water needed to turn it into a reagent  
     METHODS:  
         execute(command_type, cid, arguments) int: Takes in the recieved output of an Armchair
           recv_pack, and executes the command. Will usually send a ready (except for GHOST type)
@@ -525,7 +527,7 @@ class OT2Robot():
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal):
+    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
         '''
         params:  
             bool simulate: if true, the robot will run in simulation mode only  
@@ -543,6 +545,11 @@ class OT2Robot():
             str my_ip: the IP address of the robot  
             str controller_ip: the IP address of the controller  
             Armchair.Armchair portal: the Armchair object connected to the controller  
+            df dry_containers:
+                + float conc: concentration desired when finished
+                + str loc: location on labware
+                + int deck_pos: the location on deck
+                + float required_vol: the volume of water needed to create the solution
         postconditions:  
             protocol has been initialzied  
             containers and tip_racks have been created  
@@ -554,6 +561,7 @@ class OT2Robot():
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
         reagent_df = pd.DataFrame(reagent_df)
+        dry_containers_df = pd.DataFrame(dry_containers_df).set_index('index')
         self.containers = {}
         self.pipettes = {}
         self.my_ip = my_ip
@@ -578,6 +586,7 @@ class OT2Robot():
         self._init_params()
         self._init_directories()
         self._init_labware(labware_df, using_temp_ctrl, temp)
+        self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
         self._init_containers(reagent_df)
 
@@ -602,6 +611,25 @@ class OT2Robot():
         self.debug_p = os.path.join(self.root_p, 'Debug')
         self.logs_p = os.path.join(self.root_p, 'Logs')
 
+    def _init_dry_containers(self, dry_containers_df):
+        '''
+        initializes self._dry_containers. This method should only be run during init. It's 
+        a little odd because it initializes containers to locations on the lab deck without
+        any comunication to those labware objects. This gives a lot of power to the user.
+        Please don't double book or make up locations on the labware  
+        params:  
+            df dry_containers_df: as recieved by init  
+        Postconditions:  
+            dry_containers have been initialized internally.  
+        '''
+        #initialize containers in case of duplicates
+        self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
+        dry_containers_df['container_types'] = dry_containers_df[['deck_pos','loc']].apply(lambda row: 
+                self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
+        for name, conc, loc, deck_pos, req_vol, container_type in dry_containers_df.itertuples():
+            self.dry_containers[name].append((self._construct_container(container_type, name,
+                    deck_pos,loc, conc=conc), req_vol))
+
 
     def _init_containers(self, reagent_df):
         '''
@@ -611,12 +639,9 @@ class OT2Robot():
             the dictionary, self.containers, has been initialized to have name keys to container
               objects  
         '''
-        container_types = reagent_df['deck_pos'].apply(lambda d: self.lab_deck[d])
-        container_types = reagent_df[['deck_pos','loc']].apply(lambda row: 
+        reagent_df['container_types'] = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
-        container_types.name = 'container_type'
-
-        for name, conc, loc, deck_pos, mass, container_type in reagent_df.join(container_types).itertuples():
+        for name, conc, loc, deck_pos, mass, container_type in reagent_df.itertuples():
             self.containers[name] = self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
     
     def _construct_container(self, container_type, name, deck_pos, loc, **kwargs):
@@ -1215,11 +1240,11 @@ def launch_eve_server(**kwargs):
     eve = None
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
-        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip = args
+        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip, dry_containers_df = args
         #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
         #like to be run from a thread
         asyncio.set_event_loop(asyncio.new_event_loop())
-        eve = OT2Robot(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal)
+        eve = OT2Robot(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal, dry_containers_df)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:

@@ -31,6 +31,14 @@ x00: 'init'
 	  dataframe with.to_dict())
         dict reagents: reagents information see excel spec DataFrame.to_dict()
 	str controller_ip: the ip address of the controller
+        dict dry_containers: actually df with .to_dict()
+            note: cannot be sent over pickle as is because the index has duplicates.
+              solution is to reset the index for shipping
+            + str index: the chemical name
+            + float conc: the concentration once built
+            + str loc: the location on the labware
+            + int deck_pos: position on the deck
+            + float required_vol: the volume of water needed to turn this into a reagent
 
 x01: 'close'
     controller<->robot
