@@ -1,8 +1,12 @@
 CRITICAL
 
 PRIORITY
-platereader implementation
-stops
+Pipette Mixes
+dry reagent
+Test pr
+Get data loaded
+Look at data and do feature engineering. ignore the 400
+look at bares add
 
 FUTURE
 When we start pipetting from wells, we're gonna want a DEAD_VOL
@@ -13,9 +17,8 @@ Error Exits
     implement server side error handle
     implement client side error handle
 Update UML diagram and review protected vars/funcs
-Block_On_Ready should probably be part of Armchair
-OT2Controller should be renamed to OT2
-Git needs to be cleaned up. Random files are lying around
+ploting the metadata
+drop metadata on reaction on exit
 
 NOTES
 We've mostly fixed the tube problem, but for ML, where you really just want a container 

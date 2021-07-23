@@ -1,0 +1,3 @@
+pdoc3 --html -f -o ./docs  ./ot2_robot.py
+pdoc3 --html -f -o ./docs  ./controller.py
+pdoc3 --html -f -o ./docs  ./Armchair/armchair.py
