@@ -11,3 +11,5 @@ a recieving code to take commands from the executor and run them on the robot.
 4. df\_utils: assorted helper functions  
 5. LabwareDefs/: Opentrons Definitions for the platereader  
 6. excel\_spreadsheet\_preconditoins.txt: specs for google sheets  
+## Documentation
+Documentation for the code can be found here https://science356lab.github.io/OT2Control/
