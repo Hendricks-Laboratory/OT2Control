@@ -396,13 +396,11 @@ class Controller(ABC):
         '''
         #other rows will be empty str unless dry
         dry_containers = raw_reagent_df.loc[raw_reagent_df['molar_mass'].astype(bool)].astype(
-                {'conc':float,'deck_pos':int,'mass':float,'molar_mass':float})
-        def _get_necessary_vol(row):
-            milimols = 1000 * row['mass']/row['molar_mass']
-            vol = milimols/row['conc'] * 1e6 #microliter conversion
-            return vol
-        dry_containers['required_vol'] = dry_containers.apply(_get_necessary_vol, axis=1)
-        return dry_containers.drop(columns=['mass','molar_mass']).reset_index()
+                {'deck_pos':int,'mass':float,'molar_mass':float})
+        dry_containers.drop(columns='conc',inplace=True)
+        dry_containers.reset_index(inplace=True)
+        dry_containers['index'] = dry_containers['index'].apply(lambda x: x.replace(' ','_'))
+        return dry_containers
 
 
     
@@ -510,12 +508,9 @@ class Controller(ABC):
             chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
               has no concentration, or nan if no name  
         '''
-        if pd.isnull(row['reagent']):
+        if pd.isnull(row['reagent']) or pd.isnull(row['conc']):
             #this must not be a transfer. this operation has no chemical name
             return np.nan
-        elif pd.isnull(row['conc']):
-            #this uses a chemical, but the chemical doesn't have a concentration (probably a mix)
-            return row['reagent'].replace(' ', '_')
         else:
             #this uses a chemical with a conc. Probably a stock solution
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
@@ -737,7 +732,6 @@ class ProtocolExecutor(Controller):
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
-        print(self.robo_params['reagent_df'])
         self.run_all_checks()
 
     def run_simulation(self):
@@ -1013,9 +1007,18 @@ class ProtocolExecutor(Controller):
             elif row['op'] == 'mix':
                 self._mix(row, i)
             elif row['op'] == 'make':
-                pass
+                self._send_make(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
+    def _send_make(self, row, i):
+        '''
+        sends a make command to the robot  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        self.portal.send_pack('make', row['reagent'].replace(' ','_'), row['conc'])
 
     def _execute_scan(self,row,i):
         '''
@@ -1031,8 +1034,6 @@ class ProtocolExecutor(Controller):
         params:  
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         '''
         #1)
         self.portal.send_pack('home')
@@ -1377,7 +1378,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        sbs =self._get_vol_lab_cont_sbs()
+        sbs = self._get_vol_lab_cont_sbs()
         sbs['flag'] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
         filtered_sbs = sbs.loc[~sbs['flag']]
         if filtered_sbs.empty:
@@ -1441,7 +1442,7 @@ class ProtocolExecutor(Controller):
             print(row.to_frame().T)
             print()
             return False
-        if row['loc_t'] != 'any' and not row['loc'] == row['loc_t']:
+        if row['loc_t'] != 'any' and row['loc'] not in row['loc_t']:
             print('<<controller>> loc error:')
             print(row.to_frame().T)
             print()
@@ -1475,7 +1476,21 @@ class ProtocolExecutor(Controller):
         labware_df = self.robo_params['labware_df'].set_index('name').rename(index={'platereader7':'platereader','platereader4':'platereader'}) #converting to dict like
         product_df = self.robo_params['product_df'].copy()
         reagent_df = self.robo_params['reagent_df'].copy()
+        #create a df with sets of allowable locs and deck_poses
+        def get_dry_container_cols(df):
+            '''
+            apply helper func to combine the rows of the dry_containers_df
+            '''
+            d = {'loc':set(),'deck_pos':set()}
+            for i, r in df.iterrows():
+                d['loc'].add(r['loc'])
+                d['deck_pos'].add(r['deck_pos'])
+            return pd.Series(d)
+        dry_containers = self.robo_params['dry_containers'].groupby('index').apply(get_dry_container_cols)
         def get_deck_pos(labware):
+            '''
+            apply helper func to get the deck position for products
+            '''
             if labware:
                 deck_pos = labware_df.loc[labware,'deck_pos']
                 if isinstance(deck_pos,np.int64):
@@ -1489,9 +1504,30 @@ class ProtocolExecutor(Controller):
         product_df['vol'] = [self._vol_calc(name) for name in product_df.index]
         product_df['loc'] = 'any'
         product_df.replace('','any', inplace=True)
-        reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: [x])
+
+        #because reagents can be built, we now need to ensure that you end up with something 
+        #that could be on a new set of labware for reagents
+        reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: {x})
+        reagent_df['loc'] = reagent_df['loc'].apply(lambda x: {x})
         reagent_df['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
         reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
+        def merge_dry(row):
+            '''
+            apply helper to merge a reagent_df with a dry_container_df
+            '''
+            d = {'loc':{}, 'deck_pos':{}}
+            found_match = False
+            for name in dry_containers.index.unique():
+                if name in row.name:
+                    d['loc'] = dry_containers.loc[name,'loc'].union(row['loc'])
+                    d['deck_pos'] = dry_containers.loc[name,'deck_pos'].union(row['deck_pos'])
+                    found_match = True
+            if not found_match:
+                d['loc'] = row['loc']
+                d['deck_pos'] = row['deck_pos']
+            return pd.Series(d)
+        reagent_df[['loc', 'deck_pos']] = reagent_df.apply(merge_dry, axis=1)
+                    
         theoretical_df = pd.concat((reagent_df.loc[:,['loc', 'deck_pos',\
                 'vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
         result_df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t').set_index('chem_name')

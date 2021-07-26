@@ -132,3 +132,10 @@ x0D: 'home'
     robot->controller:
     Description: before scanning, the robot needs to get the pipette out of the way of the reader
       hence we tell it to home
+
+x0E: 'make'
+    controller->robot
+    Description: command the robot to make a new solution from powder
+    Args:
+    	str name: NOT THE CHEM_NAME. just the first part of the name without C<conc>
+	float conc: the concentration of the reagent desired

@@ -98,8 +98,10 @@ from df_utils import make_unique, df_popout
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    help_str = &#39;mode=auto runs in ml, mode=protocol or not supplied runs protocol&#39;
-    parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=help_str,default=&#39;protocol&#39;)
+    mode_help_str = &#39;mode=auto runs in ml, mode=protocol or not supplied runs protocol&#39;
+    parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=mode_help_str,default=&#39;protocol&#39;)
+    parser.add_argument(&#39;-n&#39;,&#39;--name&#39;,help=&#39;the name of the google sheet&#39;)
+    parser.add_argument(&#39;-c&#39;,&#39;--cache&#39;,help=&#39;flag. if supplied, uses cache&#39;,action=&#39;store_true&#39;)
     return parser
 
 def main(serveraddr):
@@ -110,25 +112,24 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == &#39;protocol&#39;:
         print(&#39;launching in protocol mode&#39;)
-        launch_protocol_exec(serveraddr)
+        launch_protocol_exec(serveraddr,args.name,args.cache)
     elif args.mode == &#39;auto&#39;:
         print(&#39;launching in auto mode&#39;)
-        launch_auto(serveraddr)
+        launch_auto(serveraddr,args.name,args.cache)
     else:
         print(&#34;invalid argument to mode, &#39;{}&#39;&#34;.format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr):
+def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
     &#39;&#39;&#39;
     main function to launch a controller and execute a protocol
     &#39;&#39;&#39;
     #instantiate a controller
-    rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
-    #using the cache bypasses google docs communication and uses the last rxn you loaded
-    use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use the spreadsheet cache? [yn] &#39;)
-#    #debugging lines for me
-#    use_cache = True
-#    rxn_sheet_name = &#39;test_dilutions_sane&#39;
+    if not rxn_sheet_name:
+        rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use spreadsheet cache? [yn] &#39;)
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
@@ -140,16 +141,15 @@ def launch_protocol_exec(serveraddr):
     else:
         print(&#39;Failed Some Tests. Please fix your errors and try again&#39;)
 
-def launch_auto(serveraddr):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache):
     &#39;&#39;&#39;
     main function to launch an auto scientist that designs it&#39;s own experiments
     &#39;&#39;&#39;
-   # rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
-   # #using the cache bypasses google docs communication and uses the last rxn you loaded
-   # use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use the spreadsheet cache? [yn] &#39;)
-    #debugging lines for me
-    use_cache = True
-    rxn_sheet_name = &#39;test_layout&#39;
+    if not rxn_sheet_name:
+        rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use spreadsheet cache? [yn] &#39;)
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     auto.run_simulation()
@@ -408,6 +408,7 @@ class Controller(ABC):
             #DEBUG
             with open(os.path.join(self.cache_path, &#39;reagent_info_sheet.pkl&#39;), &#39;wb&#39;) as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={&#39;molar_mass (for dry only)&#39;: &#39;molar_mass&#39;}, inplace=True)
         return reagent_info
 
     def _get_empty_containers(self, raw_reagent_df):
@@ -423,6 +424,30 @@ class Controller(ABC):
                 + str loc: location on the labware  
         &#39;&#39;&#39;
         return raw_reagent_df.loc[&#39;empty&#39; == raw_reagent_df.index].set_index(&#39;deck_pos&#39;).drop(columns=[&#39;conc&#39;, &#39;mass&#39;])
+
+    def _get_dry_containers(self, raw_reagent_df):
+        &#39;&#39;&#39;
+        params:  
+            df raw_reagent_df: the reagent dataframe as recieved from excel  
+        returns:  
+            df dry_containers:  
+                note: cannot be sent over pickle as is because the index has duplicates.
+                  solution is to reset the index for shipping
+                + str index: the chemical name
+                + float conc: the concentration once built
+                + str loc: the location on the labware
+                + int deck_pos: position on the deck
+                + float required_vol: the volume of water needed to turn this into a reagent
+        &#39;&#39;&#39;
+        #other rows will be empty str unless dry
+        dry_containers = raw_reagent_df.loc[raw_reagent_df[&#39;molar_mass&#39;].astype(bool)].astype(
+                {&#39;deck_pos&#39;:int,&#39;mass&#39;:float,&#39;molar_mass&#39;:float})
+        dry_containers.drop(columns=&#39;conc&#39;,inplace=True)
+        dry_containers.reset_index(inplace=True)
+        dry_containers[&#39;index&#39;] = dry_containers[&#39;index&#39;].apply(lambda x: x.replace(&#39; &#39;,&#39;_&#39;))
+        return dry_containers
+
+
     
     def _parse_raw_reagent_df(self, raw_reagent_df):
         &#39;&#39;&#39;
@@ -432,7 +457,10 @@ class Controller(ABC):
         returns:  
             df reagent_df: empties ignored, columns with correct types  
         &#39;&#39;&#39;
-        reagent_df = raw_reagent_df.drop([&#39;empty&#39;], errors=&#39;ignore&#39;) # incase not on axis
+        # incase not on axis
+        reagent_df = raw_reagent_df.drop([&#39;empty&#39;], errors=&#39;ignore&#39;)
+        reagent_df = reagent_df.loc[~reagent_df[&#39;molar_mass&#39;].astype(bool)] #drop dry
+        reagent_df.drop(columns=&#39;molar_mass&#39;,inplace=True)
         try:
             reagent_df = reagent_df.astype({&#39;conc&#39;:float,&#39;deck_pos&#39;:int,&#39;mass&#39;:float})
         except ValueError as e:
@@ -525,12 +553,9 @@ class Controller(ABC):
             chemical_name: the name for the chemical &#34;{}C{}&#34;.format(name, conc) or name if
               has no concentration, or nan if no name  
         &#39;&#39;&#39;
-        if pd.isnull(row[&#39;reagent&#39;]):
+        if pd.isnull(row[&#39;reagent&#39;]) or pd.isnull(row[&#39;conc&#39;]):
             #this must not be a transfer. this operation has no chemical name
             return np.nan
-        elif pd.isnull(row[&#39;conc&#39;]):
-            #this uses a chemical, but the chemical doesn&#39;t have a concentration (probably a mix)
-            return row[&#39;reagent&#39;].replace(&#39; &#39;, &#39;_&#39;)
         else:
             #this uses a chemical with a conc. Probably a stock solution
             return &#34;{}C{}&#34;.format(row[&#39;reagent&#39;], row[&#39;conc&#39;]).replace(&#39; &#39;, &#39;_&#39;)
@@ -594,7 +619,8 @@ class Controller(ABC):
         cid = self.portal.send_pack(&#39;init&#39;, simulate, 
                 self.robo_params[&#39;using_temp_ctrl&#39;], self.robo_params[&#39;temp&#39;],
                 self.robo_params[&#39;labware_df&#39;].to_dict(), self.robo_params[&#39;instruments&#39;],
-                self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip)
+                self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip,
+                self.robo_params[&#39;dry_containers&#39;].to_dict())
 
     @abstractmethod
     def run_simulation():
@@ -745,6 +771,7 @@ class ProtocolExecutor(Controller):
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
         #with a parsed reagent_df. This is exactly as is pulled from gsheets
         empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params[&#39;dry_containers&#39;] = self._get_dry_containers(raw_reagent_df)
         products_to_labware = self._get_products_to_labware(input_data)
         self.robo_params[&#39;reagent_df&#39;] = self._parse_raw_reagent_df(raw_reagent_df)
         self.robo_params[&#39;instruments&#39;] = self._get_instrument_dict(deck_data)
@@ -850,6 +877,7 @@ class ProtocolExecutor(Controller):
             #DEBUG
             with open(os.path.join(self.cache_path, &#39;reagent_info_sheet.pkl&#39;), &#39;wb&#39;) as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={&#39;molar_mass (for dry only)&#39;: &#39;molar_mass&#39;}, inplace=True)
         return reagent_info
 
     def _load_rxn_df(self, input_data):
@@ -946,7 +974,7 @@ class ProtocolExecutor(Controller):
         rxn_names = self.rxn_df.loc[:, &#39;reagent&#39;:&#39;chemical_name&#39;].drop(columns=[&#39;reagent&#39;,&#39;chemical_name&#39;]).columns
         reagent_df = self.rxn_df[[&#39;chemical_name&#39;, &#39;conc&#39;]].groupby(&#39;chemical_name&#39;).first()
         reagent_df.drop(rxn_names, errors=&#39;ignore&#39;, inplace=True) #not all rxns are reagents
-        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;, &#39;mass&#39;, &#39;comments&#39;]] = &#39;&#39;
+        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;, &#39;mass&#39;, &#39;molar_mass (for dry only)&#39;, &#39;comments&#39;]] = &#39;&#39;
         if not self.use_cache:
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = &#39;reagent_info&#39;, row_names=False , credentials = credentials)
 
@@ -1023,8 +1051,19 @@ class ProtocolExecutor(Controller):
                 self._send_dilution_commands(row, i)
             elif row[&#39;op&#39;] == &#39;mix&#39;:
                 self._mix(row, i)
+            elif row[&#39;op&#39;] == &#39;make&#39;:
+                self._send_make(row, i)
             else:
                 raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))
+
+    def _send_make(self, row, i):
+        &#39;&#39;&#39;
+        sends a make command to the robot  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        &#39;&#39;&#39;
+        self.portal.send_pack(&#39;make&#39;, row[&#39;reagent&#39;].replace(&#39; &#39;,&#39;_&#39;), row[&#39;conc&#39;])
 
     def _execute_scan(self,row,i):
         &#39;&#39;&#39;
@@ -1040,8 +1079,6 @@ class ProtocolExecutor(Controller):
         params:  
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         &#39;&#39;&#39;
         #1)
         self.portal.send_pack(&#39;home&#39;)
@@ -1386,7 +1423,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        sbs =self._get_vol_lab_cont_sbs()
+        sbs = self._get_vol_lab_cont_sbs()
         sbs[&#39;flag&#39;] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
         filtered_sbs = sbs.loc[~sbs[&#39;flag&#39;]]
         if filtered_sbs.empty:
@@ -1450,7 +1487,7 @@ class ProtocolExecutor(Controller):
             print(row.to_frame().T)
             print()
             return False
-        if row[&#39;loc_t&#39;] != &#39;any&#39; and not row[&#39;loc&#39;] == row[&#39;loc_t&#39;]:
+        if row[&#39;loc_t&#39;] != &#39;any&#39; and row[&#39;loc&#39;] not in row[&#39;loc_t&#39;]:
             print(&#39;&lt;&lt;controller&gt;&gt; loc error:&#39;)
             print(row.to_frame().T)
             print()
@@ -1484,7 +1521,21 @@ class ProtocolExecutor(Controller):
         labware_df = self.robo_params[&#39;labware_df&#39;].set_index(&#39;name&#39;).rename(index={&#39;platereader7&#39;:&#39;platereader&#39;,&#39;platereader4&#39;:&#39;platereader&#39;}) #converting to dict like
         product_df = self.robo_params[&#39;product_df&#39;].copy()
         reagent_df = self.robo_params[&#39;reagent_df&#39;].copy()
+        #create a df with sets of allowable locs and deck_poses
+        def get_dry_container_cols(df):
+            &#39;&#39;&#39;
+            apply helper func to combine the rows of the dry_containers_df
+            &#39;&#39;&#39;
+            d = {&#39;loc&#39;:set(),&#39;deck_pos&#39;:set()}
+            for i, r in df.iterrows():
+                d[&#39;loc&#39;].add(r[&#39;loc&#39;])
+                d[&#39;deck_pos&#39;].add(r[&#39;deck_pos&#39;])
+            return pd.Series(d)
+        dry_containers = self.robo_params[&#39;dry_containers&#39;].groupby(&#39;index&#39;).apply(get_dry_container_cols)
         def get_deck_pos(labware):
+            &#39;&#39;&#39;
+            apply helper func to get the deck position for products
+            &#39;&#39;&#39;
             if labware:
                 deck_pos = labware_df.loc[labware,&#39;deck_pos&#39;]
                 if isinstance(deck_pos,np.int64):
@@ -1498,9 +1549,30 @@ class ProtocolExecutor(Controller):
         product_df[&#39;vol&#39;] = [self._vol_calc(name) for name in product_df.index]
         product_df[&#39;loc&#39;] = &#39;any&#39;
         product_df.replace(&#39;&#39;,&#39;any&#39;, inplace=True)
-        reagent_df[&#39;deck_pos&#39;] = reagent_df[&#39;deck_pos&#39;].apply(lambda x: [x])
+
+        #because reagents can be built, we now need to ensure that you end up with something 
+        #that could be on a new set of labware for reagents
+        reagent_df[&#39;deck_pos&#39;] = reagent_df[&#39;deck_pos&#39;].apply(lambda x: {x})
+        reagent_df[&#39;loc&#39;] = reagent_df[&#39;loc&#39;].apply(lambda x: {x})
         reagent_df[&#39;vol&#39;] = &#39;any&#39; #I&#39;m not checking this because it&#39;s harder to check, and works fine
         reagent_df[&#39;container&#39;] = &#39;any&#39; #actually fixed, but checked by combo deck_pos and loc
+        def merge_dry(row):
+            &#39;&#39;&#39;
+            apply helper to merge a reagent_df with a dry_container_df
+            &#39;&#39;&#39;
+            d = {&#39;loc&#39;:{}, &#39;deck_pos&#39;:{}}
+            found_match = False
+            for name in dry_containers.index.unique():
+                if name in row.name:
+                    d[&#39;loc&#39;] = dry_containers.loc[name,&#39;loc&#39;].union(row[&#39;loc&#39;])
+                    d[&#39;deck_pos&#39;] = dry_containers.loc[name,&#39;deck_pos&#39;].union(row[&#39;deck_pos&#39;])
+                    found_match = True
+            if not found_match:
+                d[&#39;loc&#39;] = row[&#39;loc&#39;]
+                d[&#39;deck_pos&#39;] = row[&#39;deck_pos&#39;]
+            return pd.Series(d)
+        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;]] = reagent_df.apply(merge_dry, axis=1)
+                    
         theoretical_df = pd.concat((reagent_df.loc[:,[&#39;loc&#39;, &#39;deck_pos&#39;,\
                 &#39;vol&#39;,&#39;container&#39;]], product_df.loc[:,[&#39;loc&#39;, &#39;deck_pos&#39;,&#39;vol&#39;,&#39;container&#39;]]))
         result_df = pd.read_csv(os.path.join(self.eve_files_path,&#39;wellmap.tsv&#39;), sep=&#39;\t&#39;).set_index(&#39;chem_name&#39;)
@@ -1844,13 +1916,15 @@ if __name__ == &#39;__main__&#39;:
 </summary>
 <pre><code class="python">def init_parser():
     parser = argparse.ArgumentParser()
-    help_str = &#39;mode=auto runs in ml, mode=protocol or not supplied runs protocol&#39;
-    parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=help_str,default=&#39;protocol&#39;)
+    mode_help_str = &#39;mode=auto runs in ml, mode=protocol or not supplied runs protocol&#39;
+    parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=mode_help_str,default=&#39;protocol&#39;)
+    parser.add_argument(&#39;-n&#39;,&#39;--name&#39;,help=&#39;the name of the google sheet&#39;)
+    parser.add_argument(&#39;-c&#39;,&#39;--cache&#39;,help=&#39;flag. if supplied, uses cache&#39;,action=&#39;store_true&#39;)
     return parser</code></pre>
 </details>
 </dd>
 <dt id="controller.launch_auto"><code class="name flex">
-<span>def <span class="ident">launch_auto</span></span>(<span>serveraddr)</span>
+<span>def <span class="ident">launch_auto</span></span>(<span>serveraddr, rxn_sheet_name, use_cache)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>main function to launch an auto scientist that designs it's own experiments</p></div>
@@ -1858,23 +1932,22 @@ if __name__ == &#39;__main__&#39;:
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def launch_auto(serveraddr):
+<pre><code class="python">def launch_auto(serveraddr, rxn_sheet_name, use_cache):
     &#39;&#39;&#39;
     main function to launch an auto scientist that designs it&#39;s own experiments
     &#39;&#39;&#39;
-   # rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
-   # #using the cache bypasses google docs communication and uses the last rxn you loaded
-   # use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use the spreadsheet cache? [yn] &#39;)
-    #debugging lines for me
-    use_cache = True
-    rxn_sheet_name = &#39;test_layout&#39;
+    if not rxn_sheet_name:
+        rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use spreadsheet cache? [yn] &#39;)
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     auto.run_simulation()</code></pre>
 </details>
 </dd>
 <dt id="controller.launch_protocol_exec"><code class="name flex">
-<span>def <span class="ident">launch_protocol_exec</span></span>(<span>serveraddr)</span>
+<span>def <span class="ident">launch_protocol_exec</span></span>(<span>serveraddr, rxn_sheet_name=None, use_cache=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>main function to launch a controller and execute a protocol</p></div>
@@ -1882,17 +1955,16 @@ if __name__ == &#39;__main__&#39;:
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def launch_protocol_exec(serveraddr):
+<pre><code class="python">def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
     &#39;&#39;&#39;
     main function to launch a controller and execute a protocol
     &#39;&#39;&#39;
     #instantiate a controller
-    rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
-    #using the cache bypasses google docs communication and uses the last rxn you loaded
-    use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use the spreadsheet cache? [yn] &#39;)
-#    #debugging lines for me
-#    use_cache = True
-#    rxn_sheet_name = &#39;test_dilutions_sane&#39;
+    if not rxn_sheet_name:
+        rxn_sheet_name = input(&#39;&lt;&lt;controller&gt;&gt; please input the sheet name &#39;)
+    if not use_cache:
+        #using the cache bypasses google docs communication and uses the last rxn you loaded
+        use_cache = &#39;y&#39; == input(&#39;&lt;&lt;controller&gt;&gt; would you like to use spreadsheet cache? [yn] &#39;)
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
@@ -1922,10 +1994,10 @@ if __name__ == &#39;__main__&#39;:
     args = parser.parse_args()
     if args.mode == &#39;protocol&#39;:
         print(&#39;launching in protocol mode&#39;)
-        launch_protocol_exec(serveraddr)
+        launch_protocol_exec(serveraddr,args.name,args.cache)
     elif args.mode == &#39;auto&#39;:
         print(&#39;launching in auto mode&#39;)
-        launch_auto(serveraddr)
+        launch_auto(serveraddr,args.name,args.cache)
     else:
         print(&#34;invalid argument to mode, &#39;{}&#39;&#34;.format(args.mode))
         parser.print_help()</code></pre>
@@ -2672,6 +2744,7 @@ is instantiated in run</p></div>
             #DEBUG
             with open(os.path.join(self.cache_path, &#39;reagent_info_sheet.pkl&#39;), &#39;wb&#39;) as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={&#39;molar_mass (for dry only)&#39;: &#39;molar_mass&#39;}, inplace=True)
         return reagent_info
 
     def _get_empty_containers(self, raw_reagent_df):
@@ -2687,6 +2760,30 @@ is instantiated in run</p></div>
                 + str loc: location on the labware  
         &#39;&#39;&#39;
         return raw_reagent_df.loc[&#39;empty&#39; == raw_reagent_df.index].set_index(&#39;deck_pos&#39;).drop(columns=[&#39;conc&#39;, &#39;mass&#39;])
+
+    def _get_dry_containers(self, raw_reagent_df):
+        &#39;&#39;&#39;
+        params:  
+            df raw_reagent_df: the reagent dataframe as recieved from excel  
+        returns:  
+            df dry_containers:  
+                note: cannot be sent over pickle as is because the index has duplicates.
+                  solution is to reset the index for shipping
+                + str index: the chemical name
+                + float conc: the concentration once built
+                + str loc: the location on the labware
+                + int deck_pos: position on the deck
+                + float required_vol: the volume of water needed to turn this into a reagent
+        &#39;&#39;&#39;
+        #other rows will be empty str unless dry
+        dry_containers = raw_reagent_df.loc[raw_reagent_df[&#39;molar_mass&#39;].astype(bool)].astype(
+                {&#39;deck_pos&#39;:int,&#39;mass&#39;:float,&#39;molar_mass&#39;:float})
+        dry_containers.drop(columns=&#39;conc&#39;,inplace=True)
+        dry_containers.reset_index(inplace=True)
+        dry_containers[&#39;index&#39;] = dry_containers[&#39;index&#39;].apply(lambda x: x.replace(&#39; &#39;,&#39;_&#39;))
+        return dry_containers
+
+
     
     def _parse_raw_reagent_df(self, raw_reagent_df):
         &#39;&#39;&#39;
@@ -2696,7 +2793,10 @@ is instantiated in run</p></div>
         returns:  
             df reagent_df: empties ignored, columns with correct types  
         &#39;&#39;&#39;
-        reagent_df = raw_reagent_df.drop([&#39;empty&#39;], errors=&#39;ignore&#39;) # incase not on axis
+        # incase not on axis
+        reagent_df = raw_reagent_df.drop([&#39;empty&#39;], errors=&#39;ignore&#39;)
+        reagent_df = reagent_df.loc[~reagent_df[&#39;molar_mass&#39;].astype(bool)] #drop dry
+        reagent_df.drop(columns=&#39;molar_mass&#39;,inplace=True)
         try:
             reagent_df = reagent_df.astype({&#39;conc&#39;:float,&#39;deck_pos&#39;:int,&#39;mass&#39;:float})
         except ValueError as e:
@@ -2789,12 +2889,9 @@ is instantiated in run</p></div>
             chemical_name: the name for the chemical &#34;{}C{}&#34;.format(name, conc) or name if
               has no concentration, or nan if no name  
         &#39;&#39;&#39;
-        if pd.isnull(row[&#39;reagent&#39;]):
+        if pd.isnull(row[&#39;reagent&#39;]) or pd.isnull(row[&#39;conc&#39;]):
             #this must not be a transfer. this operation has no chemical name
             return np.nan
-        elif pd.isnull(row[&#39;conc&#39;]):
-            #this uses a chemical, but the chemical doesn&#39;t have a concentration (probably a mix)
-            return row[&#39;reagent&#39;].replace(&#39; &#39;, &#39;_&#39;)
         else:
             #this uses a chemical with a conc. Probably a stock solution
             return &#34;{}C{}&#34;.format(row[&#39;reagent&#39;], row[&#39;conc&#39;]).replace(&#39; &#39;, &#39;_&#39;)
@@ -2858,7 +2955,8 @@ is instantiated in run</p></div>
         cid = self.portal.send_pack(&#39;init&#39;, simulate, 
                 self.robo_params[&#39;using_temp_ctrl&#39;], self.robo_params[&#39;temp&#39;],
                 self.robo_params[&#39;labware_df&#39;].to_dict(), self.robo_params[&#39;instruments&#39;],
-                self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip)
+                self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip,
+                self.robo_params[&#39;dry_containers&#39;].to_dict())
 
     @abstractmethod
     def run_simulation():
@@ -2958,7 +3056,8 @@ robot has been initialized with necessary params</p></div>
     cid = self.portal.send_pack(&#39;init&#39;, simulate, 
             self.robo_params[&#39;using_temp_ctrl&#39;], self.robo_params[&#39;temp&#39;],
             self.robo_params[&#39;labware_df&#39;].to_dict(), self.robo_params[&#39;instruments&#39;],
-            self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip)</code></pre>
+            self.robo_params[&#39;reagent_df&#39;].to_dict(), self.my_ip,
+            self.robo_params[&#39;dry_containers&#39;].to_dict())</code></pre>
 </details>
 </dd>
 <dt id="controller.Controller.run_protocol"><code class="name flex">
@@ -3447,6 +3546,7 @@ is instantiated in run</p></div>
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
         #with a parsed reagent_df. This is exactly as is pulled from gsheets
         empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params[&#39;dry_containers&#39;] = self._get_dry_containers(raw_reagent_df)
         products_to_labware = self._get_products_to_labware(input_data)
         self.robo_params[&#39;reagent_df&#39;] = self._parse_raw_reagent_df(raw_reagent_df)
         self.robo_params[&#39;instruments&#39;] = self._get_instrument_dict(deck_data)
@@ -3552,6 +3652,7 @@ is instantiated in run</p></div>
             #DEBUG
             with open(os.path.join(self.cache_path, &#39;reagent_info_sheet.pkl&#39;), &#39;wb&#39;) as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={&#39;molar_mass (for dry only)&#39;: &#39;molar_mass&#39;}, inplace=True)
         return reagent_info
 
     def _load_rxn_df(self, input_data):
@@ -3648,7 +3749,7 @@ is instantiated in run</p></div>
         rxn_names = self.rxn_df.loc[:, &#39;reagent&#39;:&#39;chemical_name&#39;].drop(columns=[&#39;reagent&#39;,&#39;chemical_name&#39;]).columns
         reagent_df = self.rxn_df[[&#39;chemical_name&#39;, &#39;conc&#39;]].groupby(&#39;chemical_name&#39;).first()
         reagent_df.drop(rxn_names, errors=&#39;ignore&#39;, inplace=True) #not all rxns are reagents
-        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;, &#39;mass&#39;, &#39;comments&#39;]] = &#39;&#39;
+        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;, &#39;mass&#39;, &#39;molar_mass (for dry only)&#39;, &#39;comments&#39;]] = &#39;&#39;
         if not self.use_cache:
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = &#39;reagent_info&#39;, row_names=False , credentials = credentials)
 
@@ -3725,8 +3826,19 @@ is instantiated in run</p></div>
                 self._send_dilution_commands(row, i)
             elif row[&#39;op&#39;] == &#39;mix&#39;:
                 self._mix(row, i)
+            elif row[&#39;op&#39;] == &#39;make&#39;:
+                self._send_make(row, i)
             else:
                 raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))
+
+    def _send_make(self, row, i):
+        &#39;&#39;&#39;
+        sends a make command to the robot  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        &#39;&#39;&#39;
+        self.portal.send_pack(&#39;make&#39;, row[&#39;reagent&#39;].replace(&#39; &#39;,&#39;_&#39;), row[&#39;conc&#39;])
 
     def _execute_scan(self,row,i):
         &#39;&#39;&#39;
@@ -3742,8 +3854,6 @@ is instantiated in run</p></div>
         params:  
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         &#39;&#39;&#39;
         #1)
         self.portal.send_pack(&#39;home&#39;)
@@ -4088,7 +4198,7 @@ is instantiated in run</p></div>
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        sbs =self._get_vol_lab_cont_sbs()
+        sbs = self._get_vol_lab_cont_sbs()
         sbs[&#39;flag&#39;] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
         filtered_sbs = sbs.loc[~sbs[&#39;flag&#39;]]
         if filtered_sbs.empty:
@@ -4152,7 +4262,7 @@ is instantiated in run</p></div>
             print(row.to_frame().T)
             print()
             return False
-        if row[&#39;loc_t&#39;] != &#39;any&#39; and not row[&#39;loc&#39;] == row[&#39;loc_t&#39;]:
+        if row[&#39;loc_t&#39;] != &#39;any&#39; and row[&#39;loc&#39;] not in row[&#39;loc_t&#39;]:
             print(&#39;&lt;&lt;controller&gt;&gt; loc error:&#39;)
             print(row.to_frame().T)
             print()
@@ -4186,7 +4296,21 @@ is instantiated in run</p></div>
         labware_df = self.robo_params[&#39;labware_df&#39;].set_index(&#39;name&#39;).rename(index={&#39;platereader7&#39;:&#39;platereader&#39;,&#39;platereader4&#39;:&#39;platereader&#39;}) #converting to dict like
         product_df = self.robo_params[&#39;product_df&#39;].copy()
         reagent_df = self.robo_params[&#39;reagent_df&#39;].copy()
+        #create a df with sets of allowable locs and deck_poses
+        def get_dry_container_cols(df):
+            &#39;&#39;&#39;
+            apply helper func to combine the rows of the dry_containers_df
+            &#39;&#39;&#39;
+            d = {&#39;loc&#39;:set(),&#39;deck_pos&#39;:set()}
+            for i, r in df.iterrows():
+                d[&#39;loc&#39;].add(r[&#39;loc&#39;])
+                d[&#39;deck_pos&#39;].add(r[&#39;deck_pos&#39;])
+            return pd.Series(d)
+        dry_containers = self.robo_params[&#39;dry_containers&#39;].groupby(&#39;index&#39;).apply(get_dry_container_cols)
         def get_deck_pos(labware):
+            &#39;&#39;&#39;
+            apply helper func to get the deck position for products
+            &#39;&#39;&#39;
             if labware:
                 deck_pos = labware_df.loc[labware,&#39;deck_pos&#39;]
                 if isinstance(deck_pos,np.int64):
@@ -4200,9 +4324,30 @@ is instantiated in run</p></div>
         product_df[&#39;vol&#39;] = [self._vol_calc(name) for name in product_df.index]
         product_df[&#39;loc&#39;] = &#39;any&#39;
         product_df.replace(&#39;&#39;,&#39;any&#39;, inplace=True)
-        reagent_df[&#39;deck_pos&#39;] = reagent_df[&#39;deck_pos&#39;].apply(lambda x: [x])
+
+        #because reagents can be built, we now need to ensure that you end up with something 
+        #that could be on a new set of labware for reagents
+        reagent_df[&#39;deck_pos&#39;] = reagent_df[&#39;deck_pos&#39;].apply(lambda x: {x})
+        reagent_df[&#39;loc&#39;] = reagent_df[&#39;loc&#39;].apply(lambda x: {x})
         reagent_df[&#39;vol&#39;] = &#39;any&#39; #I&#39;m not checking this because it&#39;s harder to check, and works fine
         reagent_df[&#39;container&#39;] = &#39;any&#39; #actually fixed, but checked by combo deck_pos and loc
+        def merge_dry(row):
+            &#39;&#39;&#39;
+            apply helper to merge a reagent_df with a dry_container_df
+            &#39;&#39;&#39;
+            d = {&#39;loc&#39;:{}, &#39;deck_pos&#39;:{}}
+            found_match = False
+            for name in dry_containers.index.unique():
+                if name in row.name:
+                    d[&#39;loc&#39;] = dry_containers.loc[name,&#39;loc&#39;].union(row[&#39;loc&#39;])
+                    d[&#39;deck_pos&#39;] = dry_containers.loc[name,&#39;deck_pos&#39;].union(row[&#39;deck_pos&#39;])
+                    found_match = True
+            if not found_match:
+                d[&#39;loc&#39;] = row[&#39;loc&#39;]
+                d[&#39;deck_pos&#39;] = row[&#39;deck_pos&#39;]
+            return pd.Series(d)
+        reagent_df[[&#39;loc&#39;, &#39;deck_pos&#39;]] = reagent_df.apply(merge_dry, axis=1)
+                    
         theoretical_df = pd.concat((reagent_df.loc[:,[&#39;loc&#39;, &#39;deck_pos&#39;,\
                 &#39;vol&#39;,&#39;container&#39;]], product_df.loc[:,[&#39;loc&#39;, &#39;deck_pos&#39;,&#39;vol&#39;,&#39;container&#39;]]))
         result_df = pd.read_csv(os.path.join(self.eve_files_path,&#39;wellmap.tsv&#39;), sep=&#39;\t&#39;).set_index(&#39;chem_name&#39;)
@@ -4506,6 +4651,8 @@ every step in the protocol has been sent to the robot</p></div>
             self._send_dilution_commands(row, i)
         elif row[&#39;op&#39;] == &#39;mix&#39;:
             self._mix(row, i)
+        elif row[&#39;op&#39;] == &#39;make&#39;:
+            self._send_make(row, i)
         else:
             raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))</code></pre>
 </details>
@@ -4758,7 +4905,7 @@ bool: True if all tests were passed</p></div>
     Returns:  
         bool: True if all tests were passed  
     &#39;&#39;&#39;
-    sbs =self._get_vol_lab_cont_sbs()
+    sbs = self._get_vol_lab_cont_sbs()
     sbs[&#39;flag&#39;] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
     filtered_sbs = sbs.loc[~sbs[&#39;flag&#39;]]
     if filtered_sbs.empty:

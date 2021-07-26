@@ -11,7 +11,6 @@ look at bares add
 FUTURE
 When we start pipetting from wells, we're gonna want a DEAD_VOL
 inputs should all be wrapped in while loops
-platereader should have 200 ul. Check at each scan]
 Use logger to log messages
 Error Exits
     implement server side error handle

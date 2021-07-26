@@ -41,7 +41,7 @@ class Armchair():
         close() void: terminate the connection  
     '''
 
-    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D'})
+    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E'})
     GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req'] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready's / are not added to inflight packs. Do not modify CID.

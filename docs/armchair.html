@@ -69,7 +69,7 @@ class Armchair():
         close() void: terminate the connection  
     &#39;&#39;&#39;
 
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;})
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;})
     GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
@@ -310,7 +310,7 @@ close() void: terminate the connection</p></div>
         close() void: terminate the connection  
     &#39;&#39;&#39;
 
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;})
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;})
     GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
