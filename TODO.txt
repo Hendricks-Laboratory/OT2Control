@@ -19,6 +19,7 @@ Error Exits
 Update UML diagram and review protected vars/funcs
 ploting the metadata
 drop metadata on reaction on exit
+Would be nice to implement some timing calculator that prints expected time at end of simulation
 
 NOTES
 We've mostly fixed the tube problem, but for ML, where you really just want a container 
@@ -27,6 +28,5 @@ We've mostly fixed the tube problem, but for ML, where you really just want a co
   a new class LabwareType that has a list of labware objects and finds the best one
 
 DISCUSSION POINTS
-We have the capacity to not pickup new tip on each transfer if same reagent if you wish. Sure Implement it
-Would love a picture of each labware type
-Would be nice to implement some timing calculator that prints expected time at end of simulation
+Is it always 48 rows to skip?
+What metadata do you want?

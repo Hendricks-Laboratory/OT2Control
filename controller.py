@@ -491,6 +491,29 @@ class Controller(ABC):
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
         return pd.Series(new_cols)
 
+    def _load_reader_data(filename):
+        '''
+        given a filename, returns the scan data  
+        params:  
+            str filename: the name of the file to read  
+        retunrs:  
+            df: columns are the wells, rows are absorbances.  
+        Preconditions:
+            the entrys for all of the wells in the scan must be in the cache. If you
+            scanned using the controller, this was already done.  
+        '''
+        # Read data ignoring first 50 lines
+        df = pd.read_csv(filename,skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = [x[:-1] for x in df.columns]
+        #Note no read to query the cache because these were all scanned
+        pr_dict = {entry[1]:entry[0] for entry in self._cached_reader_locs.values() if entry[2] in [4,7]}
+        #converting to chemical names instead of locs on wellplate
+        headers = [pr_dict[header] for header in headers]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df
+
     def close_connection(self):
         '''
         runs through closing procedure with robot    
@@ -502,9 +525,6 @@ class Controller(ABC):
         self.portal.send_pack('close')
         #server will initiate file transfer
         pack_type, cid, arguments = self.portal.recv_pack()
-        while pack_type == 'ready':
-            #spin through all the queued ready packets
-            pack_type, cid, arguments = self.portal.recv_pack()
         assert(pack_type == 'sending_files')
         port = arguments[0]
         filenames = arguments[1]
