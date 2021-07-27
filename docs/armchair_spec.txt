@@ -139,3 +139,11 @@ x0E: 'make'
     Args:
     	str name: NOT THE CHEM_NAME. just the first part of the name without C<conc>
 	float conc: the concentration of the reagent desired
+
+x0F: 'mix'
+    controller->robot
+    Description: command the robot to mix a set of wells
+    Args:
+        list<tuple<str,int>>:
+	    1st is the chem_name to be mixed
+	    2nd is the integer mix code. 1 is mix normal, 2 is mix a lot

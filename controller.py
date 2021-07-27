@@ -151,7 +151,8 @@ class Controller(ABC):
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers  
     PRIVATE ATTRS:  
-        dict<str:tuple<obj>> _cached_reader_locs: cache for chemical information from the robot  
+        dict<str:tuple<obj>> _cached_reader_locs: chemical information from the robot
+            chem_name is key, which is redundant  
             The tuple has following structure:  
             0 str chem_name: the name of the well  
             1 str well_loc: the loc of the well on it's labware (translated to human if on pr)  
@@ -1041,20 +1042,8 @@ class ProtocolExecutor(Controller):
         self.portal.burn_pipe()
         #3)
         wellnames = row[self._products][row[self._products].astype(bool)].index
+        self._query_wells(wellnames)
         #4)
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
-        if unknown_wellnames:
-            #4a
-            #couldn't find in the cache, so we got to make a query
-            self.portal.send_pack('loc_req', unknown_wellnames)
-            #4b
-            pack_type, _, payload = self.portal.recv_pack()
-            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
-            #4c
-            returned_well_locs = payload[0]
-            #update the cache
-            for well_entry in returned_well_locs:
-                self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:]
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
@@ -1066,6 +1055,32 @@ class ProtocolExecutor(Controller):
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
         self.pr.exec_macro('PlateOut')
 
+    def _query_wells(self, wellnames):
+        '''
+        checks the cache to see if wellnames are in the cache. If they aren't, a query will be
+        made to Eve for the wellnames, and data for those will be stored in the cache  
+        params:  
+            list<str> wellnames: the names of the wells you want to lookup  
+        Postconditions:  
+            The wellnames are in the cache  
+        '''
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
+        if unknown_wellnames:
+            #couldn't find in the cache, so we got to make a query
+            self.portal.send_pack('loc_req', unknown_wellnames)
+            pack_type, _, payload = self.portal.recv_pack()
+            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
+            returned_well_locs = payload[0]
+            #update the cache
+            for well_entry in returned_well_locs:
+                if well_entry[2] in [4,7]:
+                    #is on reader. Need to translate index
+                    self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:]
+                else:
+                    #not on reader, just use vanilla index
+                    self._cached_reader_locs[well_entry[0]] = well_entry
+
+
     def _mix(self,row,i):
         '''
         For now this function just shakes the whole plate.
@@ -1073,11 +1088,37 @@ class ProtocolExecutor(Controller):
         things that aren't on the platereader, in which case a new argument should be made in 
         excel for the wells to scan, and we should make a function to pipette mix.
         '''
-        self.portal.send_pack('home')
-        self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
-        self.pr.exec_macro('PlateIn')
-        self.pr.shake()
-        self.pr.exec_macro('PlateOut')
+        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
+        wells_to_mix.name = 'mix_code'
+        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
+        self._query_wells(wells_to_mix.index)
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname][2] for 
+                wellname in wells_to_mix.index}, name='deck_pos')
+        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
+        #get platereader rows. true if pr
+        wells_to_mix_df['platereader'] = wells_to_mix_df['deck_pos'].apply(lambda x: x in [4,7]) 
+        if wells_to_mix_df['platereader'].sum() > 0:
+            #TODO technically, you could be mixing the other stuff by hand while you're mixing
+            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
+            #platereader because of a bug, Mark will be mad, so apart for now. After testing
+            #you should burn pipe, then send the handmix command, then mix the platereader
+            #to multitask
+
+            #at least one well nees a shake
+            self.portal.send_pack('home')
+            self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
+            self.pr.exec_macro('PlateIn')
+            self.pr.shake()
+            self.pr.exec_macro('PlateOut')
+        if (~wells_to_mix_df['platereader']).sum() > 0:
+            #at least one needs to be mixed by hand
+            #still df
+            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df['platereader']].reset_index()
+            #convert to list of tuples
+            hand_mix_wells = [tuple(t) for t in hand_mix_wells[['index','mix_code']].itertuples(index=False)]
+            self.portal.send_pack('mix', hand_mix_wells)
+            
+
 
     def _send_dilution_commands(self,row,i):
         '''

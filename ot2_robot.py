@@ -1002,11 +1002,63 @@ class OT2Robot():
             self._exec_make(*arguments)
             self.portal.send_pack('ready',cid)
             return 1
+        elif command_type == 'mix':
+            self._exec_mix(arguments[0])
+            self.portal.send_pack('ready', cid)
+            return 1
         elif command_type == 'close':
             self._exec_close()
             return 0
         else:
             raise Exception("Unidenified command {}".format(pack_type))
+
+    def _exec_mix(self, mix_list):
+        '''
+        executes a mix command.  
+        params:  
+            list<tuple<str, int>> mix_list: list of chem_names to be mixed with a code for the 
+              type of mix to be performed.  
+        Postconditions:  
+            every well in the mix_list has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        '''
+        for chem_name, mix_code in mix_list:
+            self._mix(chem_name, mix_code)
+
+    def _mix(self, chem_name, mix_code):
+        '''
+        mix a well mix_code relates to how thorough  
+        params:  
+            str chem_name: the name of the chemical to mix  
+            int mix_code: 1 is normal 2 is 'for real'  
+        Postconditions:  
+            Well has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        '''
+
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', chem_name]:
+                self._get_clean_tips()
+                break; #cause now they're clean
+        for arm_to_check in self.pipettes.keys():
+            #this is really easy to fix, but it should not be fixed here, it should be fixed in a
+            #higher level function call. This is minimal step for maximum speed.
+            assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
+        self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
+        arm = self._get_preffered_pipette(0) #gets the smallest pipette 
+        pipette = self.pipettes[arm]['pipette']
+        cont = self.containers[chem_name]
+        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = cont.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = cont.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            for j in range(3):
+                pipette.touch_tip(radius=0.75,speed=40)
+            pipette.blow_out()
+            pipette.mix(1,300,well)
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         '''
