@@ -1035,7 +1035,6 @@ class OT2Robot():
             Well has been mixed.  
             pipette tips were replaced if they were dirty with something else before  
         '''
-
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', chem_name]:
                 self._get_clean_tips()
@@ -1043,7 +1042,7 @@ class OT2Robot():
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
             #higher level function call. This is minimal step for maximum speed.
-            assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
+            assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', chem_name]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
         arm = self._get_preffered_pipette(0) #gets the smallest pipette 
         pipette = self.pipettes[arm]['pipette']
@@ -1058,7 +1057,15 @@ class OT2Robot():
             for j in range(3):
                 pipette.touch_tip(radius=0.75,speed=40)
             pipette.blow_out()
-            pipette.mix(1,300,well)
+            pipette.mix(1,20,well)
+        #pull a little out of that well and shake off the drops
+        #TODO my assumption is that this will blow out above, but could be wrong
+        pipette.well_bottom_clearance.dispense = cont.disp_height
+        #blowout
+        for i in range(4):
+            pipette.blow_out()
+        #wiggle - touch tip (spin fast inside well)
+        pipette.touch_tip(radius=0.3,speed=40)
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         '''
@@ -1112,7 +1119,8 @@ class OT2Robot():
         self._exec_transfer('WaterC1.0',[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
         self.containers[chem_name].rewrite_history_first()
-        #TODO mix
+        #mix
+        self._mix(chem_name, 2)
 
     def _exec_loc_req(self, wellnames):
         '''
