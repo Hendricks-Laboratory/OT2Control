@@ -45,6 +45,9 @@ import numpy as np
 import opentrons.execute
 from opentrons import protocol_api, simulate, types
 from boltons.socketutils import BufferedSocket
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
@@ -365,6 +368,25 @@ class Controller(ABC):
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
+
+    def _plot_setup_overlay(name):
+        '''
+        Sets up a figure for an overlay plot
+        '''
+        #formats the figure nicely
+        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+        plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
+        plt.rc('axes', linewidth = 2)
+        plt.xlabel('Wavelength (nm)',fontsize = 16, fontfamily = 'Arial',fontname="Arial")
+        plt.ylabel('Absorbance (a.u.)', fontsize = 16,fontname="Arial")
+        plt.tick_params(axis = "both", width = 2)
+        plt.tick_params(axis = "both", width = 2)
+        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.yticks([i/10 for i in range(0,11,1)])
+        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.xticks(fontsize = 10)
+        plt.yticks(fontsize = 10)
+        plt.title(str(name), fontsize = 16, pad = 20,fontname="Arial")
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
