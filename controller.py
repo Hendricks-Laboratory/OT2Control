@@ -271,7 +271,6 @@ class Controller(ABC):
             They are not overwritten if they already exist. paths variables of this class
             have also been initialized
         '''
-
         out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
         if not os.path.exists(out_path):
             #not on the laptop
@@ -283,7 +282,8 @@ class Controller(ABC):
         #if the folder doesn't exist yet, make it
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
         self.debug_path = os.path.join(self.out_path, 'Debug')
-        paths = [self.out_path, self.eve_files_path, self.debug_path]
+        self.plot_path = os.path.join(self.out_path, 'Plots')
+        paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -369,9 +369,11 @@ class Controller(ABC):
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
 
-    def _plot_setup_overlay(name):
+    def _plot_setup_overlay(self,title):
         '''
-        Sets up a figure for an overlay plot
+        Sets up a figure for an overlay plot  
+        params:  
+            str title: the title of the reaction  
         '''
         #formats the figure nicely
         plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
@@ -386,8 +388,122 @@ class Controller(ABC):
         plt.axis([300, 1000, 0.0 , 1.0])
         plt.xticks(fontsize = 10)
         plt.yticks(fontsize = 10)
-        plt.title(str(name), fontsize = 16, pad = 20,fontname="Arial")
-
+        plt.title(str(title), fontsize = 16, pad = 20,fontname="Arial")
+        
+    def plot_LAM_overlay(self,df,title,wells):
+        '''
+        plots overlayed spectra of wells in the order that they are specified  
+        params:  
+            df df: dataframe with columns = chem_names, and values of each column is a series
+              of scans in 701 intervals.  
+            str title: the title of the plot.  
+            list<str> wells: an ordered list of all of the chem_names you want to plot.  
+        Postconditions:  
+            plot has been written with name "{title}_overlay.png" to the plotting dir.  
+        '''
+        x_vals = list(range(300,1001))
+        #overlays only things you specify
+        y = []
+        #df = df[df_reorder]
+        #headers = [well_key[k] for k in df.columns]
+        #legend_colors = []
+        for chem_name in wells:
+            y.append(df[chem_name].iloc[-701:].to_list())
+        self._plot_setup_overlay(title)
+        breakpoint()
+        colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
+        print(len(y[0]))
+        for i in range(len(y)):
+            if len(y[i]) != 701:
+                breakpoint()
+            plt.plot(x_vals,y[i],color = tuple(colors[i]))
+        patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
+        plt.legend(patches, wells, loc='upper right', frameon=False,prop={'size':3})
+        legend = pd.DataFrame({'Color':patches,'Labels': wells})
+        plt.savefig(os.path.join(self.out_path, 'Plots/{}.png'.format(title)))
+        plt.show()
+       
+    # below until ~end is all not used yet needs to be worked up
+    #TODO
+    def kinetics_subplots(df):
+        calc_cycles(df)
+        colors = list(cm.rainbow(np.linspace(0, 1, cycles)))
+        fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
+        for idx, (col, ax) in enumerate(zip(df.columns, axes.flatten())):
+            try:
+                ax.set_title(well_key[col])
+                kin = 0
+                temp = df[col].tolist()
+                while kin != cycles:
+                    ax.plot(x_vals, temp[:701], color = tuple(colors[kin]))
+                    del temp[:701]
+                    kin +=1
+            except:
+                ax.plot(x_vals,dummy,color = 'red')
+                ax.set_title('NOT DATA')
+            plt.subplots_adjust(wspace=0.3, hspace= -0.1)
+        
+            ax.tick_params(
+                which='both',
+                bottom='off',
+                left='off',
+                right='off',
+                top='off'
+            )
+            ax.set_xlim((300,1000))
+            ax.set_ylim((0,1.0))
+            ax.set_xlabel("Wavlength (nm)")
+            ax.set_ylabel("Absorbance (A.U.)")
+            ax.set_xticks(range(300, 1100, 100))
+            #ax.set_aspect(adjustable='box')
+            #ax.set_yticks(range(0,1))
+        else:
+            [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
+    
+    def ind_kinetics(df,idx):
+        calc_cycles(df)
+        colors = list(cm.rainbow(np.linspace(0, 1, cycles)))
+        kin = 0
+        temp = df.iloc[:,idx].tolist()
+        plot_setup_overlay('Overlay: ')
+        while kin != cycles:
+            plt.plot(x_vals, temp[:701], color = tuple(colors[kin]))
+            del temp[:701]
+            kin +=1
+            
+    def ind_subplots(df):
+        df = df.tail(701)
+        #in an ideal world this plots in shape of platereader
+        fig, axes = plt.subplots(8, 10, figsize=(50, 50),subplot_kw=dict(box_aspect=1))
+                                  #,sharex = True,sharey = True)
+        for idx, (col, ax) in enumerate(zip(df.columns, axes.flatten())):
+            try:
+                ax.set_title(col + ": " + well_key[col])
+                ax.set_title(col)
+                ax.plot(x_vals, df[col],color = 'red')
+            except:
+                ax.plot(x_vals,dummy,color = 'red')
+                ax.set_title('NOT DATA')
+            #plt.title(str(name) + well_key[name])
+            plt.subplots_adjust(wspace=0.3, hspace= -0.1)
+        
+            ax.tick_params(
+                which='both',
+                bottom='off',
+                left='off',
+                right='off',
+                top='off'
+            )
+            ax.set_xlim((300,1000))
+            ax.set_ylim((0,1.0))
+            ax.set_xlabel("Wavlength (nm)")
+            ax.set_ylabel("Absorbance (A.U.)")
+            ax.set_xticks(range(300, 1100, 100))
+            #ax.set_aspect(adjustable='box')
+            #ax.set_yticks(range(0,1))
+        else:
+            [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
+            
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
         params:  
@@ -562,7 +678,7 @@ class Controller(ABC):
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
         return pd.Series(new_cols)
 
-    def _load_reader_data(filename):
+    def _load_data(filename):
         '''
         #TODO this is outdated should mostly be burden shifted to platereader
         given a filename, returns the scan data  
@@ -1729,7 +1845,7 @@ class AbstractPlateReader(ABC):
         shake() void: shakes the platereader  
         exec_macro(macro, *args) void: low level method to send a command to platereader with
           arguments  
-        load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
+        load_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
           reads the platereader data into a df and returns a dictionary of interesting 
           metadata.  
     ATTRIBUTES:
@@ -1786,7 +1902,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def load_reader_data(filename,loc_to_name):
+    def load_data(filename,loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
@@ -1865,7 +1981,7 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
-    def load_reader_data(self,filename, loc_to_name):
+    def load_data(self,filename, loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
@@ -1879,7 +1995,7 @@ class PlateReader(AbstractPlateReader):
                 int n_cycles: the number of cycles  
         '''
         #parse the metadata
-        start_i, metadata = self._parse_metadata(filename, self.data_path)
+        start_i, metadata = self._parse_metadata(filename)
         # Read data ignoring first metadata lines
         df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
                 header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
