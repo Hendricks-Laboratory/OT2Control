@@ -390,17 +390,20 @@ class Controller(ABC):
         plt.yticks(fontsize = 10)
         plt.title(str(title), fontsize = 16, pad = 20,fontname="Arial")
         
-    def plot_LAM_overlay(self,df,title,wells):
+    def plot_LAM_overlay(self,df,wells,filename=None):
         '''
         plots overlayed spectra of wells in the order that they are specified  
         params:  
             df df: dataframe with columns = chem_names, and values of each column is a series
               of scans in 701 intervals.  
-            str title: the title of the plot.  
+            str filename: the title of the plot, and the file  
             list<str> wells: an ordered list of all of the chem_names you want to plot.  
         Postconditions:  
-            plot has been written with name "{title}_overlay.png" to the plotting dir.  
+            plot has been written with name "overlay.png" to the plotting dir. or 
+            {filename}.png if filename was supplied  
         '''
+        if not filename:
+            filename = "overlay"
         x_vals = list(range(300,1001))
         #overlays only things you specify
         y = []
@@ -409,8 +412,7 @@ class Controller(ABC):
         #legend_colors = []
         for chem_name in wells:
             y.append(df[chem_name].iloc[-701:].to_list())
-        self._plot_setup_overlay(title)
-        breakpoint()
+        self._plot_setup_overlay(filename)
         colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
         print(len(y[0]))
         for i in range(len(y)):
@@ -420,27 +422,28 @@ class Controller(ABC):
         patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
         plt.legend(patches, wells, loc='upper right', frameon=False,prop={'size':3})
         legend = pd.DataFrame({'Color':patches,'Labels': wells})
-        plt.savefig(os.path.join(self.out_path, 'Plots/{}.png'.format(title)))
-        plt.show()
+        plt.savefig(os.path.join(self.out_path, 'Plots/{}.png'.format(filename)))
        
     # below until ~end is all not used yet needs to be worked up
-    #TODO
-    def kinetics_subplots(df):
-        calc_cycles(df)
-        colors = list(cm.rainbow(np.linspace(0, 1, cycles)))
+    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
+        '''
+        plots kinetics for each well in the order given by wells.  
+        params:  
+            df df: the scan data  
+            int n_cycles: the number of cycles for the scan data  
+            list<str> wells: the wells you want to plot in order
+        Postconditions:  
+            plot has been written with name "{filename}_overlay.png" to the plotting dir.  
+            If filename is not supplied, name is kin_subplots
+        '''
+        if not filename:
+            filename=kin_subplots
+        x_vals = list(range(300,1001))
+        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
         fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
-        for idx, (col, ax) in enumerate(zip(df.columns, axes.flatten())):
-            try:
-                ax.set_title(well_key[col])
-                kin = 0
-                temp = df[col].tolist()
-                while kin != cycles:
-                    ax.plot(x_vals, temp[:701], color = tuple(colors[kin]))
-                    del temp[:701]
-                    kin +=1
-            except:
-                ax.plot(x_vals,dummy,color = 'red')
-                ax.set_title('NOT DATA')
+        for idx, (chem_name, ax) in enumerate(zip(wells, axes.flatten())):
+            ax.set_title(chem_name)
+            self._plot_kin(ax, df, n_cycles, chem_name)
             plt.subplots_adjust(wspace=0.3, hspace= -0.1)
         
             ax.tick_params(
@@ -459,18 +462,47 @@ class Controller(ABC):
             #ax.set_yticks(range(0,1))
         else:
             [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
-    
-    def ind_kinetics(df,idx):
-        calc_cycles(df)
-        colors = list(cm.rainbow(np.linspace(0, 1, cycles)))
+        plt.savefig(os.path.join(self.out_path, 'Plots/{}.png'.format(filename)))
+
+    def _plot_kin(self, ax, df, n_cycles, chem_name):
+        '''
+        helper method for kinetics plotting methods  
+        params:  
+            plt.axes ax: or anything with a plot func. the place you want ot plot  
+            df df: the scan data  
+            int n_cycles: the number of cycles in per well scanned  
+            str chem_name: the name of the chemical to be plotted  
+        Postconditions:  
+            a kinetics plot of the well has been plotted on ax  
+        '''
+        x_vals = list(range(300,1001))
+        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
         kin = 0
-        temp = df.iloc[:,idx].tolist()
-        plot_setup_overlay('Overlay: ')
-        while kin != cycles:
-            plt.plot(x_vals, temp[:701], color = tuple(colors[kin]))
-            del temp[:701]
-            kin +=1
-            
+        col = df[chem_name]
+        for kin in range(n_cycles):
+            ax.plot(x_vals, df[chem_name].iloc[kin*701:(kin+1)*701],color=tuple(colors[kin]))
+        
+    
+    def plot_single_kin(self, df, n_cycles, chem_name, filename=None):
+        '''
+        plots one kinetics trace. 
+        params:  
+            df df: the scan data  
+            int n_cycles: the number of cycles in per well scanned  
+            str chem_name: the name of the chemical to be plotted  
+            str filename: the name of the file to write  
+        Postconditions:  
+            A kinetics trace of the well has been written to the Plots directory.
+            under the name filename. If filename was None, the filename will be 
+            {chem_name}_kinetics.png
+        '''
+        if not filename:
+            filename = '{}_kinetics'.format(chem_name)
+        self._plot_setup_overlay('Kinetics {}: '.format(chem_name))
+        self._plot_kin(plt,df, n_cycles, chem_name)
+        plt.savefig(os.path.join(self.out_path, 'Plots/{}.png'.format(filename)))
+
+
     def ind_subplots(df):
         df = df.tail(701)
         #in an ideal world this plots in shape of platereader
@@ -503,6 +535,7 @@ class Controller(ABC):
             #ax.set_yticks(range(0,1))
         else:
             [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
+    #~end
             
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''

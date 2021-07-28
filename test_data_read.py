@@ -16,7 +16,9 @@ params = [
 try:
     for param in params:
         df, metadata = controller.pr.load_data(*param[0:2])
-        controller.plot_LAM_overlay(df,param[2],param[3])
+        controller.plot_LAM_overlay(df,param[3], param[2])
+        controller.plot_kin_subplots(df, metadata['n_cycles'], param[3],'subplot_kin')
+        controller.plot_single_kin(df,metadata['n_cycles'], 'W7', 'single_kin_W1')
 except Exception as e:
     controller.pr.shutdown()
     raise e
