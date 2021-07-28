@@ -6,8 +6,13 @@ params = [
 ('test_inLab02Results.csv',{'B05':'W1', 'C05':'W2', 'D05':'W3', 'E05':'W4'})
 ]
 
-pr = PlateReader(simulate=True)
+try:
+    pr = PlateReader(simulate=True)
 
-for param in params:
-    df = pr.load_reader_data(*param)
-    print(df)
+    for param in params:
+        df = pr.load_reader_data(*param)
+        print(df)
+except Exception as e:
+    pr.shutdown()
+    raise e
+pr.shutdown()

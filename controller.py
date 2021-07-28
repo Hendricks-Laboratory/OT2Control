@@ -33,6 +33,7 @@ import asyncio
 import threading
 import time
 import argparse
+import re
 
 from bidict import bidict
 import gspread
@@ -1576,8 +1577,11 @@ class AbstractPlateReader(ABC):
         run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
         shutdown() void: kills the platereader and restores default config  
         shake() void: shakes the platereader  
-        exec_macro(macro, *args) void: low level method to send a command to platereader with  
-        arguments  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with
+          arguments  
+        load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
+          reads the platereader data into a df and returns a dictionary of interesting 
+          metadata.  
     '''
     SPECTRO_ROOT_PATH = None
     SPECTRO_ROOT_PATH_WIN = None
@@ -1634,6 +1638,22 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
+    def load_reader_data(str filename, dict<str:str> loc_to_name, str path)
+        '''
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            str path: the path containing the file. defaults to datapath  
+            dict<str:str> loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        pass
+
 class DummyReader(AbstractPlateReader):
     '''
     Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
@@ -1648,7 +1668,8 @@ class PlateReader(AbstractPlateReader):
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     SPECTRO_ROOT_PATH_WIN = "C:\Program Files\SPECTROstar Nano V5.50"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    DATA_PATH = r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
+    DATA_PATH_WIN = r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
+    DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
 
     def __init__(self, simulate=False):
         input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
@@ -1697,27 +1718,8 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
-
-
-
-
-
-
-        # Read data ignoring first 50 lines
-        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [x[:-1] for x in df.columns]
-        #Note no read to query the cache because these were all scanned
-        pr_dict = {entry[1]:entry[0] for entry in self._cached_reader_locs.values() if entry[2] in [4,7]}
-        #converting to chemical names instead of locs on wellplate
-        headers = [pr_dict[header] for header in headers]
-        df.columns = headers
-        df.dropna(inplace=True)
-        df = df.astype(float)
-        return df
-
-    def load_reader_data(filename, loc_to_name, path=self.DATA_PATH):
+    def load_reader_data(self,filename, loc_to_name, path=DATA_PATH):
         '''
-        TODO update class doc. should I be abstract?
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
         params:  
@@ -1732,17 +1734,17 @@ class PlateReader(AbstractPlateReader):
         '''
         #parse the metadata
         start_i, metadata = self._parse_metadata(filename, path)
-        # Read data ignoring first 50 lines
-        df = pd.read_csv(filename,skiprows=start_i,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [x[:-1] for x in df.columns]
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = [loc_to_name[x[:-1]] for x in df.columns]
         df.columns = headers
         df.dropna(inplace=True)
         df = df.astype(float)
         return df, metadata
 
-    def _parse_metadata(filename, path=self.DATA_PATH):
+    def _parse_metadata(self, filename, path=DATA_PATH):
         '''
-        TODO update class doc. should I be abstract?
         parses the meta data of a platereader output, and returns a dataframe of the scans
         and a dictionary of parameters  
         params:  
@@ -1758,7 +1760,7 @@ class PlateReader(AbstractPlateReader):
         i = 0
         n_cycles = None
         line = 'dowhile'
-        with open(filename, 'r',encoding='latin1') as file:
+        with open(os.path.join(path,filename), 'r',encoding='latin1') as file:
             while not found_start and line != '':
                 line = file.readline()
                 if bool(re.match(r'No\. of Cycles:',line)):
@@ -1805,7 +1807,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, data_path=self.DATA_PATH, layout=None):
+    def run_protocol(self, protocol_name, filename, data_path=DATA_PATH_WIN, layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
