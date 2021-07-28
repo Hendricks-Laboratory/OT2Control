@@ -33,6 +33,7 @@ import asyncio
 import threading
 import time
 import argparse
+import re
 
 from bidict import bidict
 import gspread
@@ -517,6 +518,30 @@ class Controller(ABC):
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
         return pd.Series(new_cols)
 
+    def _load_reader_data(filename):
+        '''
+        #TODO this is outdated should mostly be burden shifted to platereader
+        given a filename, returns the scan data  
+        params:  
+            str filename: the name of the file to read  
+        retunrs:  
+            df: columns are the wells, rows are absorbances.  
+        Preconditions:
+            the entrys for all of the wells in the scan must be in the cache. If you
+            scanned using the controller, this was already done.  
+        '''
+        # Read data ignoring first 50 lines
+        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = [x[:-1] for x in df.columns]
+        #Note no read to query the cache because these were all scanned
+        pr_dict = {entry[1]:entry[0] for entry in self._cached_reader_locs.values() if entry[2] in [4,7]}
+        #converting to chemical names instead of locs on wellplate
+        headers = [pr_dict[header] for header in headers]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df
+
     def close_connection(self):
         '''
         runs through closing procedure with robot    
@@ -528,9 +553,6 @@ class Controller(ABC):
         self.portal.send_pack('close')
         #server will initiate file transfer
         pack_type, cid, arguments = self.portal.recv_pack()
-        while pack_type == 'ready':
-            #spin through all the queued ready packets
-            pack_type, cid, arguments = self.portal.recv_pack()
         assert(pack_type == 'sending_files')
         port = arguments[0]
         filenames = arguments[1]
@@ -1668,11 +1690,16 @@ class AbstractPlateReader(ABC):
         run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
         shutdown() void: kills the platereader and restores default config  
         shake() void: shakes the platereader  
-        exec_macro(macro, *args) void: low level method to send a command to platereader with  
-        arguments  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with
+          arguments  
+        load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
+          reads the platereader data into a df and returns a dictionary of interesting 
+          metadata.  
     '''
     SPECTRO_ROOT_PATH = None
+    SPECTRO_ROOT_PATH_WIN = None
     PROTOCOL_PATH = None
+    DATA_PATH = None
 
     def __init__(self):
         pass
@@ -1724,6 +1751,22 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
+    def load_reader_data(str filename, dict<str:str> loc_to_name, str path)
+        '''
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            str path: the path containing the file. defaults to datapath  
+            dict<str:str> loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        pass
+
 class DummyReader(AbstractPlateReader):
     '''
     Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
@@ -1738,6 +1781,8 @@ class PlateReader(AbstractPlateReader):
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     SPECTRO_ROOT_PATH_WIN = "C:\Program Files\SPECTROstar Nano V5.50"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
+    DATA_PATH_WIN = r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
+    DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
 
     def __init__(self, simulate=False):
         input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
@@ -1786,6 +1831,66 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
+    def load_reader_data(self,filename, loc_to_name, path=DATA_PATH):
+        '''
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            str path: the path containing the file. defaults to datapath  
+            dict<str:str> loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        #parse the metadata
+        start_i, metadata = self._parse_metadata(filename, path)
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = [loc_to_name[x[:-1]] for x in df.columns]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df, metadata
+
+    def _parse_metadata(self, filename, path=DATA_PATH):
+        '''
+        parses the meta data of a platereader output, and returns a dataframe of the scans
+        and a dictionary of parameters  
+        params:  
+            str filename: the name of the file to be read  
+            str path: the path containing the file. defaults to datapath  
+        returns:  
+            int: the index to start reading the dataframe at  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        found_start = False
+        i = 0
+        n_cycles = None
+        line = 'dowhile'
+        with open(os.path.join(path,filename), 'r',encoding='latin1') as file:
+            while not found_start and line != '':
+                line = file.readline()
+                if bool(re.match(r'No\. of Cycles:',line)):
+                    #is number of cycles
+                    n_cycles = int((re.search(r'\d+', line)).group(0))
+                if line[:6] == 'T[°C]:':
+                    while not bool(re.match('\D\d',line)) and line != '':
+                        #is not of form A1/B03 etc
+                        line = file.readline()
+                        i += 1
+                    i -= 1 #cause you will increment once more 
+                    found_start = True
+                i+=1
+        assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
+        assert (n_cycles != None), "corrupt reader file. num cycles not found."
+        return i, {'n_cycles':n_cycles,'filename':filename}
+
     def edit_layout(self, protocol_name, layout):
         '''
         This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
@@ -1815,7 +1920,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
+    def run_protocol(self, protocol_name, filename, data_path=DATA_PATH_WIN, layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
