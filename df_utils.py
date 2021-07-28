@@ -18,6 +18,7 @@ import logging
 import asyncio
 import threading
 import time
+import subprocess
 
 from bidict import bidict
 import gspread
@@ -46,6 +47,14 @@ def df_popout(df):
         f.write(str.encode(html_str,'ascii'))
     webbrowser.open(f.name)
 
+def wslpath(path, flag):
+    '''
+    makes a wslpath call to system. path and flag are the same as for wslpath
+    system call courtesy of stack overflow @author illkachu
+    '''
+    exec_str = "wslpath -{} '{}'".format(flag, path)
+    x = subprocess.check_output(exec_str,shell=True).decode('utf8')[:-1]#drop newline
+    return x
 
 def make_unique(s):
     '''

@@ -8,6 +8,10 @@ The only hard constraints are:
     in the B column. (yes if you want to use module)
     one row must have the string "temp" in the A column, and a float, 
     the temperature in celcius, if you are using temp mod, else anything (recommend blank)
+    one row must have the string "data_dir" with a string value, the name of the folder to
+    put everything (platereader data, dump files at end, error messages, etc.). This folder 
+    will be automatically constructed in the 'Plate Reader Data' directory in the google drive
+    if possible, but if not it will just dump to the current directory
 It is recommended that you only use these two rows, but I do not guarentee that the code 
 will crash if you do other strange things 
 

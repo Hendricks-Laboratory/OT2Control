@@ -49,7 +49,7 @@ from boltons.socketutils import BufferedSocket
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
-from df_utils import make_unique, df_popout
+from df_utils import make_unique, df_popout, wslpath
 
 
 def init_parser():
@@ -58,6 +58,7 @@ def init_parser():
     parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
     parser.add_argument('-n','--name',help='the name of the google sheet')
     parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
+    parser.add_argument('-s','--simulate',help='runs robot and pr in simulation mode',action='store_true')
     return parser
 
 def main(serveraddr):
@@ -68,15 +69,15 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == 'protocol':
         print('launching in protocol mode')
-        launch_protocol_exec(serveraddr,args.name,args.cache)
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        launch_auto(serveraddr,args.name,args.cache)
+        launch_auto(serveraddr,args.name,args.cache,args.simulate)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
+def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False):
     '''
     main function to launch a controller and execute a protocol
     '''
@@ -93,7 +94,7 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
 
     if tests_passed:
         if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol()
+            controller.run_protocol(simulate)
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
@@ -181,7 +182,7 @@ class Controller(ABC):
     #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -191,9 +192,9 @@ class Controller(ABC):
         is instantiated in run
         '''
         #set according to input
-        self.cache_path = cache_path
+        self.cache_path=cache_path
+        self._make_cache()
         self.use_cache = use_cache
-        self._make_out_dirs(out_path)
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size=4
@@ -231,6 +232,12 @@ class Controller(ABC):
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
+    def _init_pr(self,simulate):
+        try:
+            self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+        except:
+            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
@@ -252,20 +259,35 @@ class Controller(ABC):
         return data
 
 
-    def _make_out_dirs(self, out_path):
+    def _make_out_dirs(self, header_data):
         '''
         params:  
-            str out_path: the path for all files output by controller  
+            list<list<str>> header_data: data from the header  
         Postconditions:  
             All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist  
+            They are not overwritten if they already exist. paths variables of this class
+            have also been initialized
         '''
-        self.eve_files_path = os.path.join(out_path, 'Eve_Files')
-        self.debug_path = os.path.join(out_path, 'Debug')
-        paths = [out_path, self.eve_files_path, self.debug_path]
+
+        out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
+        if not os.path.exists(out_path):
+            #not on the laptop
+            out_path = './Controller_Out'
+        #get the root folder
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        data_dir = header_dict['data_dir']
+        self.out_path = os.path.join(out_path, data_dir)
+        #if the folder doesn't exist yet, make it
+        self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
+        self.debug_path = os.path.join(self.out_path, 'Debug')
+        paths = [self.out_path, self.eve_files_path, self.debug_path]
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+
+    def _make_cache(self):
+        if not os.path.exists(self.cache_path):
+            os.path.makedirs(self.cache_path)
 
     def _init_credentials(self, rxn_sheet_name):
         '''
@@ -678,11 +700,7 @@ class AutoContr(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print('<<controller>> failed to initialize platereader, initializing dummy reader')
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -726,7 +744,7 @@ class ProtocolExecutor(Controller):
         translate_wellmap() void, run_simulation() bool  
     '''
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -735,7 +753,7 @@ class ProtocolExecutor(Controller):
         NOte that pr cannot be initialized until you know if you're simulating or not, so it
         is instantiated in run
         '''
-        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
         #necessary helper params
         credentials = self._init_credentials(rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -744,6 +762,7 @@ class ProtocolExecutor(Controller):
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
+        self._make_out_dirs(header_data)
         self.rxn_df = self._load_rxn_df(input_data)
         self._query_reagents(wks_key, credentials)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
@@ -813,11 +832,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print('<<controller>> failed to initialize platereader, initializing dummy reader')
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -1329,7 +1344,7 @@ class ProtocolExecutor(Controller):
                 print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you're transfering
-            if r['op'] == 'transfer' and not r['reagent']:
+            if r['op'] == 'transfer' and pd.isna(r['reagent']):
                 print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
         return found_errors
@@ -1399,7 +1414,7 @@ class ProtocolExecutor(Controller):
         for i, row in labware_w_empties.iterrows():
             for loc in row['empty_list'].replace(' ','').split(','):
                 loc_pos_empty_pairs.append((loc, row['deck_pos']))
-        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype='float64')
         loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
@@ -1695,13 +1710,13 @@ class AbstractPlateReader(ABC):
         load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
           reads the platereader data into a df and returns a dictionary of interesting 
           metadata.  
+    ATTRIBUTES:
+        str data_path: a linux path to where all the data is 
     '''
     SPECTRO_ROOT_PATH = None
-    SPECTRO_ROOT_PATH_WIN = None
     PROTOCOL_PATH = None
-    DATA_PATH = None
 
-    def __init__(self):
+    def __init__(self, data_path):
         pass
         
     def exec_macro(self, macro, *args):
@@ -1734,12 +1749,10 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def run_protocol(self, protocol_name, filename, data_path=r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data", layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
@@ -1751,13 +1764,12 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def load_reader_data(str filename, dict<str:str> loc_to_name, str path)
+    def load_reader_data(filename,loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
         params:  
             str filename: the name of the file to read  
-            str path: the path containing the file. defaults to datapath  
             dict<str:str> loc_to_name: maps location to name of reaction  
         returns:  
             df: the scan data for that file  
@@ -1779,12 +1791,12 @@ class PlateReader(AbstractPlateReader):
     This class handles all platereader interactions. Inherits from the interface
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
-    SPECTRO_ROOT_PATH_WIN = "C:\Program Files\SPECTROstar Nano V5.50"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    DATA_PATH_WIN = r"G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data"
-    DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
 
-    def __init__(self, simulate=False):
+    def __init__(self, data_path, simulate=False):
+        self.data_path = data_path
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
         input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
@@ -1831,13 +1843,12 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
-    def load_reader_data(self,filename, loc_to_name, path=DATA_PATH):
+    def load_reader_data(self,filename, loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
         params:  
             str filename: the name of the file to read  
-            str path: the path containing the file. defaults to datapath  
             dict<str:str> loc_to_name: maps location to name of reaction  
         returns:  
             df: the scan data for that file  
@@ -1846,9 +1857,9 @@ class PlateReader(AbstractPlateReader):
                 int n_cycles: the number of cycles  
         '''
         #parse the metadata
-        start_i, metadata = self._parse_metadata(filename, path)
+        start_i, metadata = self._parse_metadata(filename, self.data_path)
         # Read data ignoring first metadata lines
-        df = pd.read_csv(os.path.join(path,filename), skiprows=start_i,
+        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
                 header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
         headers = [loc_to_name[x[:-1]] for x in df.columns]
         df.columns = headers
@@ -1856,13 +1867,12 @@ class PlateReader(AbstractPlateReader):
         df = df.astype(float)
         return df, metadata
 
-    def _parse_metadata(self, filename, path=DATA_PATH):
+    def _parse_metadata(self, filename):
         '''
         parses the meta data of a platereader output, and returns a dataframe of the scans
         and a dictionary of parameters  
         params:  
             str filename: the name of the file to be read  
-            str path: the path containing the file. defaults to datapath  
         returns:  
             int: the index to start reading the dataframe at  
             dict<str:obj>: holds the metadata  
@@ -1873,7 +1883,7 @@ class PlateReader(AbstractPlateReader):
         i = 0
         n_cycles = None
         line = 'dowhile'
-        with open(os.path.join(path,filename), 'r',encoding='latin1') as file:
+        with open(os.path.join(self.data_path,filename), 'r',encoding='latin1') as file:
             while not found_start and line != '':
                 line = file.readline()
                 if bool(re.match(r'No\. of Cycles:',line)):
@@ -1912,7 +1922,8 @@ class PlateReader(AbstractPlateReader):
         for i, well in enumerate(layout):
             well_entries.append("{}=X{}".format(well, i+1))
         filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,'.temp_ot2_bmg_layout.lb')
-        filepath_win = os.path.join(self.SPECTRO_ROOT_PATH_WIN,'.temp_ot2_bmg_layout.lb')
+        filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,'w'),'.temp_ot2_bmg_layout.lb')
+        print(filepath_win)
         with open(filepath_lin, 'w+') as layout:
             layout.write('EmptyLayout')
             for entry in well_entries:
@@ -1920,21 +1931,18 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, data_path=DATA_PATH_WIN, layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
         if layout:
             self.edit_layout(protocol_name, layout)
         macro = 'run'
-        data_path = data_path
         #three '' are plate ids to pad. data_path specified once for ascii and once for other
-        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path, '', '', '', '', filename)
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.data_path,'w'), '', '', '', '', filename)
 
     def _set_config_attr(self, header, attr, val):
         '''
