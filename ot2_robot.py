@@ -1040,6 +1040,8 @@ class OT2Robot():
             Well has been mixed.  
             pipette tips were replaced if they were dirty with something else before  
         '''
+        '''
+        #TODO bring this back!
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', chem_name]:
                 self._get_clean_tips()
@@ -1071,6 +1073,8 @@ class OT2Robot():
             pipette.blow_out()
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
+        '''
+        pass
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         '''

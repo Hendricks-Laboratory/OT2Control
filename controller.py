@@ -1796,6 +1796,7 @@ class PlateReader(AbstractPlateReader):
 
     def __init__(self, data_path, simulate=False):
         self.data_path = data_path
+        self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
@@ -1945,7 +1946,8 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,'w'), '', '', '', '', filename)
         #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
         #that, so we move it from the default landing zone to where I actually want it
-        shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), os.path.join(self.data_path, "{}.csv".format(filename)))
+        if not self.simulate:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), os.path.join(self.data_path, "{}.csv".format(filename)))
 
 
     def _set_config_attr(self, header, attr, val):
