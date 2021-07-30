@@ -1040,6 +1040,7 @@ class OT2Robot():
             Well has been mixed.  
             pipette tips were replaced if they were dirty with something else before  
         '''
+
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', chem_name]:
                 self._get_clean_tips()
@@ -1059,10 +1060,12 @@ class OT2Robot():
         pipette.well_bottom_clearance.dispense = cont.asp_height
         #do the actual mix
         for i in range(2**mix_code):
+            pipette.mix(1,20,well)
             for j in range(3):
                 pipette.touch_tip(radius=0.75,speed=40)
+                pass
             pipette.blow_out()
-            pipette.mix(1,20,well)
+        
         #pull a little out of that well and shake off the drops
         #TODO my assumption is that this will blow out above, but could be wrong
         pipette.well_bottom_clearance.dispense = cont.disp_height
