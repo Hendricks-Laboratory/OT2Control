@@ -1,15 +1,6 @@
 Armchair is a protocol for sending datagrams between and ot2 robot (eve) and a driver code (laptop).
 The default port for Armchair protocol is 50000.
 
-SECONDARY TCP CONNECTIONS
-sometimes Armchair commands will cause the robot and controller to engage in a second conversation
-the rules of these conversations are detailed here
-    FTP:
-    	Description: used to transfer debug files from server to controller at the end of the 
-	      session
-        Invoked by: 'close'
-	    Port: 50001
-
 PACKET FIELDS
 Header
     8B body_len: the length of the packet minus the header
@@ -77,12 +68,12 @@ x05: 'init_containers'
 
 x06: 'sending_files'
     robot->controller
-    Description: Used to alert client to create a new socket over which to transfer files
+    Description: Used to initiate an ftp. Files are huge, and so they're not being sent as
+      a payload (this may be possible, but I suspect it would be inefficient for large files)
+      instead, after a sending_files is sent, files will be sent as a continous stream deliminated
+      by file delimiters, (FTP_EOF in Armchair).
     Args:
-        int port: the port number of the robot server (the convention here is 50001)
-	list<str> filenames: the list of ordered filenames
-        NOTE ip not needed because you connected to the robot already
-	NOTE a file transfer will be initiated. the eof file delimiter in scoket is 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
+	list<str> filenames: the list of ordered filenames that are going to be sent
 
 x07: 'pause'
     controller-> robot:
@@ -129,7 +120,7 @@ x0C: 'loc_resp'
 	    5th element is the aspirable volumeFalse
 
 x0D: 'home'
-    robot->controller:
+    controller->robot:
     Description: before scanning, the robot needs to get the pipette out of the way of the reader
       hence we tell it to home
 

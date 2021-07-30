@@ -1405,38 +1405,12 @@ class OT2Robot():
         self.dump_well_map()
         #ship logs
         filenames = list(os.listdir(self.logs_p))
-        port = 50001 #default port for ftp 
-        self._send_files(port, filenames)
+        filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
+        self.portal.send_ftp(filepaths)
         #kill link
         print('<<eve>> shutting down')
         self.portal.send_pack('close')
         self.portal.close()
-
-    def _send_files(self,port,filenames):
-        '''
-        used to ship files back to server  
-        params:  
-            int port: the port number to ship the files out of  
-            list<str> filepaths: the filepaths to ship  
-        '''
-        #setting up a socket for FTP
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, port))
-        sock.listen(5)
-        #send ok to server that you are ready to accept
-        print('<<eve>> initializing filetransfer')
-        filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_pack('sending_files', port, filenames)
-        client_sock, client_addr = sock.accept()
-        for filepath in filepaths:
-            with open(filepath,'rb') as local_file:
-                client_sock.sendfile(local_file)
-                client_sock.send(armchair.FTP_EOF)
-            #wait until client has sent that they're ready to recieve again
-        client_sock.close()
-        sock.close()
-
 
 def launch_eve_server(**kwargs):
     '''

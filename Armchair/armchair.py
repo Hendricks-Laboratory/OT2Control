@@ -4,7 +4,6 @@ import os
 import dill
 
 #used for armchair file transfer initialized from armchair instructions
-FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
 
 class Armchair():
     '''
@@ -41,6 +40,7 @@ class Armchair():
         close() void: terminate the connection  
     '''
 
+    FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
     PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F'})
     GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req'] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
@@ -176,6 +176,38 @@ class Armchair():
         '''
         while self._inflight_packs:
             self._block_on_ready()
+
+            
+    def recv_ftp(self):
+        '''
+        violates the armchair protocol a little bit because rather than sending an entire  
+        file as a payload, ftp is sent in a raw stream with delimiters after a sending_files   
+        is sent  
+        returns:  
+            list<tuple<str:bytes>>: linked filenames and files as bytestreams  
+        '''
+        pack_type, cid, arguments = self.recv_pack()
+        assert(pack_type == 'sending_files')
+        filenames = arguments[0]
+        files = []
+        for filename in filenames:
+            file_bytes = self.sock.recv_until(self.FTP_EOF)
+            files.append((filename, file_bytes))
+        #ack the send files
+        self.send_pack('ready')
+        return files
+
+    def send_ftp(self, filepaths):
+        '''
+        params:  
+            list<str> filenames: the names of the files to send  
+            str filepath: the path where all the files live  
+        '''
+        self.send_pack('sending_files', [os.path.basename(filepath) for filepath in filepaths])
+        for filepath in filepaths:
+            with open(filepath,'rb') as local_file:
+                self.sock.sock.sendfile(local_file)
+                self.sock.send(self.FTP_EOF)
 
     def _block_on_ready(self):
         '''

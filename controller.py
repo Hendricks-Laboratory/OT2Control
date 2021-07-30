@@ -613,20 +613,11 @@ class Controller(ABC):
         print('<<controller>> initializing breakdown')
         self.portal.send_pack('close')
         #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'sending_files')
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
             with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
+                write_file.write(file_bytes)
         self.translate_wellmap()
-        print('<<controller>> files recieved')
-        sock.close()
         #server should now send a close command
         pack_type, cid, arguments = self.portal.recv_pack()
         assert(pack_type == 'close')
