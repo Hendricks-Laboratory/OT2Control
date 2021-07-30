@@ -703,14 +703,19 @@ class OT2Robot():
             + vals are lists of tuples<Container, float, float> correspoding to the container
               it's in, the mass of the powder W/O CONTAINER, and the molar mass  
         '''
-        #initialize containers in case of duplicates
-        self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
-        dry_containers_df['container_types'] = dry_containers_df[['deck_pos','loc']].apply(
-                lambda row: self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
-        for name, loc, deck_pos, mass, molar_mass, container_type in dry_containers_df.itertuples():
-            self.dry_containers[name].append((self._construct_container(container_type, name,
-                    deck_pos,loc), mass, molar_mass))
-
+        #indices don't align for apply if empty so must check
+        if not dry_containers_df.empty:
+            #initialize containers in case of duplicates
+            self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
+            dry_containers_df['container_types'] = dry_containers_df[['deck_pos','loc']\
+                    ].apply(lambda row: self.lab_deck[row['deck_pos']].get_container_type(\
+                    row['loc']),axis=1)
+            for name, loc, deck_pos, mass, molar_mass, container_type in \
+                    dry_containers_df.itertuples():
+                self.dry_containers[name].append((self._construct_container(container_type, \
+                        name, deck_pos,loc), mass, molar_mass))
+        else:
+            self.dry_containers = {}
 
     def _init_containers(self, reagent_df):
         '''
@@ -1035,6 +1040,8 @@ class OT2Robot():
             Well has been mixed.  
             pipette tips were replaced if they were dirty with something else before  
         '''
+        '''
+        #TODO bring this back!
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', chem_name]:
                 self._get_clean_tips()
@@ -1066,6 +1073,8 @@ class OT2Robot():
             pipette.blow_out()
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
+        '''
+        pass
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         '''
