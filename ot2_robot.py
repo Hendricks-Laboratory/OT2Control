@@ -43,7 +43,7 @@ from boltons.socketutils import BufferedSocket
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
-import df_utils
+from df_utils import *
 
 #CONTAINERS
 class Container(ABC):
@@ -967,6 +967,7 @@ class OT2Robot():
     _exec_init_containers.priority['platereader4'] = 1
     _exec_init_containers.priority['platereader7'] = 2
 
+    @error_exit
     def execute(self, command_type, cid, arguments):
         '''
         takes the packet type and payload of an Armchair packet, and executes the command  
@@ -992,6 +993,7 @@ class OT2Robot():
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'stop':
+            self._error_handler(Exception())
             self._exec_stop()
             self.portal.send_pack('ready', cid)
             return 1
@@ -1420,6 +1422,22 @@ class OT2Robot():
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
         self.portal.send_ftp(filepaths)
         
+    def _error_handler(self, e):
+        try:
+            print('''<<eve>> ----------------Eve Errror--------------
+            Sending Error packet''')
+            self.portal.send_pack('error', e)
+            print('<<eve>> Waiting on close')
+            #do
+            pack_type, cid, payload = self.portal.recv_pack()
+            while pack_type != 'save': #Executor will request save. Burn other prexisting packs
+                pack_type, cid, payload = self.portal.recv_pack()
+            self._exec_save()
+            pack_type, cid, payload = self.portal.recv_pack()
+            assert (pack_type == 'close'), "expected 'close', but recieved '{}'".format(pack_type)
+            self._exec_close(cid)
+        finally:
+            raise e
 
 def launch_eve_server(**kwargs):
     '''

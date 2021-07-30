@@ -36,6 +36,14 @@ x01: 'close'
     Description: This command is used to tell the robot to terminate. It should be acknowledged
       with a ready indicating that the robot is exiting
 
+x02: 'error'
+    robot->controller
+    Description: This command signifies an error that occured on the robot's side of things.
+      Upon receipt, the Armchair will store accompanying information, update it's error state,
+      and then raise a ConnectionError
+    Args:
+	Exception e: the exception raised by the robot
+
 x03: 'ready'
     robot->controller
     Description: These are effectively Acks. They're used for flow control. They are sent after

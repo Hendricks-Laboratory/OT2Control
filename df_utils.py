@@ -19,6 +19,7 @@ import asyncio
 import threading
 import time
 import subprocess
+import functools
 
 from bidict import bidict
 import gspread
@@ -78,3 +79,19 @@ def make_unique(s):
             return name
     return s.apply(_get_new_name)
     webbrowser.open(f.name)
+
+
+def error_exit(func):
+    '''
+    This is a decorator to wrap functions in error catching code. Methods with this
+    decorator call error_handler upon failure. It is used for class methods
+    Preconditions:  
+        To use this wrapper, the client class must implement a function, _error_handler,
+    '''
+    @functools.wraps(func)
+    def decorated(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            args[0]._error_handler(e)
+    return decorated

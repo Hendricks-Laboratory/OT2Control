@@ -54,7 +54,7 @@ import matplotlib.cm as cm
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
-from df_utils import make_unique, df_popout, wslpath
+from df_utils import make_unique, df_popout, wslpath, error_exit
 
 
 def init_parser():
@@ -208,19 +208,6 @@ class Controller(ABC):
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
-
-    def _error_exit(func):
-        '''
-        This is a decorator to wrap functions in error catching code. Methods with this
-        decorator call error_handler upon failure
-        '''
-        @functools.wraps(func)
-        def decorated(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                args[0]._error_handler(e)
-        return decorated
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
@@ -624,8 +611,6 @@ class Controller(ABC):
         self.save()
         #server should now send a close command
         self.portal.send_pack('close')
-        #pack_type, cid, arguments = self.portal.recv_pack()
-        #assert(pack_type == 'close')
         print('<<controller>> shutting down')
         self.portal.close()
     
@@ -670,15 +655,28 @@ class Controller(ABC):
         '''
         When an error is thrown from a public method, it will be sent here and handled
         '''
-        try:
-            #handle the error
-            print('uh oh. I got an error!')
-        except Exception as handle_e:
-            #failed to handle error
-            print("<<controller>> Experienced {} error while trying to handle error. Aborting \
-                    graceful exit.")
-        finally:
-            raise e
+        #handle the error
+        if self.portal.state == 1:
+            #Armchair recieved an error packet, so eve had a problem
+            try:
+                eve_error = self.portal.error_payload[0]
+                print('''<<controller>>----------------Eve Error----------------
+                Eve threw error '{}'
+                Attempting to save state on exit
+                '''.format(eve_error))
+                self.portal.reset_error()
+                breakpoint()
+                self.close_connection()
+            finally:
+                breakpoint()
+                raise eve_error
+        else:
+            try:
+                print('''<<controller>> ----------------Controller Error----------------
+                <<controller>> Attempting to save state on exit''')
+                self.close_connection()
+            finally:
+                raise e
 
 class AutoContr(Controller):
     '''
@@ -746,7 +744,7 @@ class AutoContr(Controller):
     def run_protocol(simulate):
         pass
 
-    @Controller._error_exit
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -879,7 +877,7 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
-    @Controller._error_exit
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
