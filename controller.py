@@ -1972,7 +1972,8 @@ class PlateReader(AbstractPlateReader):
         #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
         #that, so we move it from the default landing zone to where I actually want it
         if not self.simulate:
-            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), os.path.join(self.data_path, "{}.csv".format(filename)))
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
+                    os.path.join(self.data_path, "{}.csv".format(filename)))
 
 
     def _set_config_attr(self, header, attr, val):
