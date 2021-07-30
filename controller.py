@@ -35,6 +35,7 @@ import threading
 import time
 import argparse
 import re
+import functools
 
 from bidict import bidict
 import gspread
@@ -207,6 +208,19 @@ class Controller(ABC):
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
+
+    def _error_exit(func):
+        '''
+        This is a decorator to wrap functions in error catching code. Methods with this
+        decorator call error_handler upon failure
+        '''
+        @functools.wraps(func)
+        def decorated(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                args[0]._error_handler(e)
+        return decorated
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
@@ -648,11 +662,27 @@ class Controller(ABC):
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
-    def run_simulation():
+    def run_simulation(self):
         pass
+
     @abstractmethod
-    def run_protocol(simulate):
+    def run_protocol(self,simulate):
         pass
+
+
+    def _error_handler(self, e):
+        '''
+        When an error is thrown from a public method, it will be sent here and handled
+        '''
+        try:
+            #handle the error
+            print('uh oh. I got an error!')
+        except Exception as handle_e:
+            #failed to handle error
+            print("<<controller>> Experienced {} error while trying to handle error. Aborting \
+                    graceful exit.")
+        finally:
+            raise e
 
 class AutoContr(Controller):
     '''
@@ -720,6 +750,7 @@ class AutoContr(Controller):
     def run_protocol(simulate):
         pass
 
+    @Controller._error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -852,6 +883,7 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
+    @Controller._error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
