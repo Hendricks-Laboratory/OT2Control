@@ -31,9 +31,11 @@ class Armchair():
           not go to the buffer, are sent immediately without waiting for a ready. The responses to
           these packets are controlled outside of the Armchair class by the user  
     METHODS:  
-        recv_pack() tuple<str,int,Obj>: this is a wrapped version of recv for user. It will make
+        recv_pack() tuple<str,int,Obj>: recieve a packet. This method will make
           sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
-          payload  
+          payload  tuple<str,int,Obj>: like recv, but 
+        recv_first(str pack_type) tuple<str,int,Obj>: recieves the first packet that has the 
+          given type. Discards any other packets read in the process.  
         send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
           of pack_type with args.  
         burn_pipe() void: This command waits until the pipe is clear  
@@ -177,7 +179,7 @@ class Armchair():
         while header_type == 'ready':
             header_type, header_cid, payload = self._recv()
             if header_type == 'ready':
-                self._inflight_packs.remove(header_cid)
+                self._inflight_packs.remove(payload[0])
         return header_type, header_cid, payload
         
     @state_dependent
@@ -222,7 +224,23 @@ class Armchair():
         while self._inflight_packs:
             self._block_on_ready()
 
-            
+    def recv_first(self,pack_type):
+        '''
+        This method should be used sparingly, but is applicable in error handling.  
+        It reads through packets until it finds one with the given pack_type.  
+        Packets of other types that were read in the process are ignored  
+        params:  
+            str pack_type: the type of packet to wait for  
+        returns:  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
+        '''
+        pack_type, cid, payload = self._recv()
+        while pack_type != pack_type: #Executor will request save. Burn other prexisting packs
+            pack_type, cid, payload = self._recv()
+        return pack_type, cid, payload
+
     def recv_ftp(self):
         '''
         violates the armchair protocol a little bit because rather than sending an entire  
@@ -239,7 +257,7 @@ class Armchair():
             file_bytes = self.sock.recv_until(self.FTP_EOF)
             files.append((filename, file_bytes))
         #ack the send files
-        self.send_pack('ready')
+        self.send_pack('ready',cid)
         return files
 
     def send_ftp(self, filepaths):

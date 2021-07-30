@@ -981,6 +981,7 @@ class OT2Robot():
             the command has been executed  
         '''
         if command_type == 'transfer':
+            raise Exception('Baddness 1')
             self._exec_transfer(*arguments)
             self.portal.send_pack('ready', cid)
             return 1
@@ -993,7 +994,6 @@ class OT2Robot():
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'stop':
-            self._error_handler(Exception())
             self._exec_stop()
             self.portal.send_pack('ready', cid)
             return 1
@@ -1428,15 +1428,13 @@ class OT2Robot():
             Sending Error packet''')
             self.portal.send_pack('error', e)
             print('<<eve>> Waiting on close')
-            #do
-            pack_type, cid, payload = self.portal.recv_pack()
-            while pack_type != 'save': #Executor will request save. Burn other prexisting packs
-                pack_type, cid, payload = self.portal.recv_pack()
+            self.portal.recv_first('save')
             self._exec_save()
-            pack_type, cid, payload = self.portal.recv_pack()
-            assert (pack_type == 'close'), "expected 'close', but recieved '{}'".format(pack_type)
+            pack_type, cid, payload = self.portal.recv_first('close')
             self._exec_close(cid)
+            raise Exception("e2")
         finally:
+            time.sleep(2) #this is just for printing format. Not critical
             raise e
 
 def launch_eve_server(**kwargs):

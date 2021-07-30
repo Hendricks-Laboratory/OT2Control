@@ -665,10 +665,8 @@ class Controller(ABC):
                 Attempting to save state on exit
                 '''.format(eve_error))
                 self.portal.reset_error()
-                breakpoint()
                 self.close_connection()
             finally:
-                breakpoint()
                 raise eve_error
         else:
             try:
@@ -676,6 +674,7 @@ class Controller(ABC):
                 <<controller>> Attempting to save state on exit''')
                 self.close_connection()
             finally:
+                time.sleep(.5) #this is just for printing format. Not critical
                 raise e
 
 class AutoContr(Controller):
@@ -725,7 +724,7 @@ class AutoContr(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
@@ -844,7 +843,7 @@ class ProtocolExecutor(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
