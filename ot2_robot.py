@@ -981,7 +981,6 @@ class OT2Robot():
             the command has been executed  
         '''
         if command_type == 'transfer':
-            raise Exception('Baddness 1')
             self._exec_transfer(*arguments)
             self.portal.send_pack('ready', cid)
             return 1
@@ -1432,7 +1431,6 @@ class OT2Robot():
             self._exec_save()
             pack_type, cid, payload = self.portal.recv_first('close')
             self._exec_close(cid)
-            raise Exception("e2")
         finally:
             time.sleep(2) #this is just for printing format. Not critical
             raise e
