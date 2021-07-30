@@ -19,6 +19,7 @@ based on command line ars. (run this script with -h)
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
+from collections import namedtuple
 from datetime import datetime
 import socket
 import json
@@ -45,6 +46,9 @@ import numpy as np
 import opentrons.execute
 from opentrons import protocol_api, simulate, types
 from boltons.socketutils import BufferedSocket
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
@@ -153,14 +157,13 @@ class Controller(ABC):
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers  
     PRIVATE ATTRS:  
-        dict<str:tuple<obj>> _cached_reader_locs: chemical information from the robot
-            chem_name is key, which is redundant  
+        dict<str:ChemCacheEntry> _cached_reader_locs: chemical information from the robot
+            ChemCacheEntry is a named tuple with below attributes
             The tuple has following structure:  
-            0 str chem_name: the name of the well  
-            1 str well_loc: the loc of the well on it's labware (translated to human if on pr)  
-            2 int deck_pos: the position of the labware it's on  
-            3 float vol: the volume in the container  
-            4 float aspiratible_vol: the volume minus dead vol  
+            str loc: the loc of the well on it's labware (translated to human if on pr)  
+            int deck_pos: the position of the labware it's on  
+            float vol: the volume in the container  
+            float aspiratible_vol: the volume minus dead vol  
     CONSTANTS:  
         bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info  
@@ -181,6 +184,8 @@ class Controller(ABC):
     #reader given a regular loc for a 96well plate.
     #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
+
+    ChemCacheEntry = namedtuple('ChemCacheEntry',['loc','deck_pos','vol','aspirable_vol'])
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         '''
@@ -365,6 +370,25 @@ class Controller(ABC):
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
+
+    def _plot_setup_overlay(name):
+        '''
+        Sets up a figure for an overlay plot
+        '''
+        #formats the figure nicely
+        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+        plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
+        plt.rc('axes', linewidth = 2)
+        plt.xlabel('Wavelength (nm)',fontsize = 16, fontfamily = 'Arial',fontname="Arial")
+        plt.ylabel('Absorbance (a.u.)', fontsize = 16,fontname="Arial")
+        plt.tick_params(axis = "both", width = 2)
+        plt.tick_params(axis = "both", width = 2)
+        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.yticks([i/10 for i in range(0,11,1)])
+        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.xticks(fontsize = 10)
+        plt.yticks(fontsize = 10)
+        plt.title(str(name), fontsize = 16, pad = 20,fontname="Arial")
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
@@ -556,7 +580,8 @@ class Controller(ABC):
         df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
         headers = [x[:-1] for x in df.columns]
         #Note no read to query the cache because these were all scanned
-        pr_dict = {entry[1]:entry[0] for entry in self._cached_reader_locs.values() if entry[2] in [4,7]}
+        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
+                if entry.deck_pos in [4,7]}
         #converting to chemical names instead of locs on wellplate
         headers = [pr_dict[header] for header in headers]
         df.columns = headers
@@ -1084,9 +1109,9 @@ class ProtocolExecutor(Controller):
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
-            assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
-            assert (math.isclose(entry[2], 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry[2])
-            well_locs.append(entry[0])
+            assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
+            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
@@ -1112,10 +1137,10 @@ class ProtocolExecutor(Controller):
             for well_entry in returned_well_locs:
                 if well_entry[2] in [4,7]:
                     #is on reader. Need to translate index
-                    self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:]
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
                 else:
                     #not on reader, just use vanilla index
-                    self._cached_reader_locs[well_entry[0]] = well_entry
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
 
 
     def _mix(self,row,i):
@@ -1129,7 +1154,7 @@ class ProtocolExecutor(Controller):
         wells_to_mix.name = 'mix_code'
         #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
         self._query_wells(wells_to_mix.index)
-        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname][2] for 
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
                 wellname in wells_to_mix.index}, name='deck_pos')
         wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
         #get platereader rows. true if pr
@@ -1414,7 +1439,7 @@ class ProtocolExecutor(Controller):
         for i, row in labware_w_empties.iterrows():
             for loc in row['empty_list'].replace(' ','').split(','):
                 loc_pos_empty_pairs.append((loc, row['deck_pos']))
-        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype='float64')
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
         loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
