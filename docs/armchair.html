@@ -32,7 +32,6 @@ import os
 import dill
 
 #used for armchair file transfer initialized from armchair instructions
-FTP_EOF = &#39;AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile&#39;.encode(&#39;ascii&#39;)
 
 class Armchair():
     &#39;&#39;&#39;
@@ -69,8 +68,9 @@ class Armchair():
         close() void: terminate the connection  
     &#39;&#39;&#39;
 
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;})
-    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;] #These are necessary because we never want to wait on a
+    FTP_EOF = &#39;AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile&#39;.encode(&#39;ascii&#39;)
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
+    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
 
@@ -205,6 +205,38 @@ class Armchair():
         while self._inflight_packs:
             self._block_on_ready()
 
+            
+    def recv_ftp(self):
+        &#39;&#39;&#39;
+        violates the armchair protocol a little bit because rather than sending an entire  
+        file as a payload, ftp is sent in a raw stream with delimiters after a sending_files   
+        is sent  
+        returns:  
+            list&lt;tuple&lt;str:bytes&gt;&gt;: linked filenames and files as bytestreams  
+        &#39;&#39;&#39;
+        pack_type, cid, arguments = self.recv_pack()
+        assert(pack_type == &#39;sending_files&#39;)
+        filenames = arguments[0]
+        files = []
+        for filename in filenames:
+            file_bytes = self.sock.recv_until(self.FTP_EOF)
+            files.append((filename, file_bytes))
+        #ack the send files
+        self.send_pack(&#39;ready&#39;)
+        return files
+
+    def send_ftp(self, filepaths):
+        &#39;&#39;&#39;
+        params:  
+            list&lt;str&gt; filenames: the names of the files to send  
+            str filepath: the path where all the files live  
+        &#39;&#39;&#39;
+        self.send_pack(&#39;sending_files&#39;, [os.path.basename(filepath) for filepath in filepaths])
+        for filepath in filepaths:
+            with open(filepath,&#39;rb&#39;) as local_file:
+                self.sock.sock.sendfile(local_file)
+                self.sock.send(self.FTP_EOF)
+
     def _block_on_ready(self):
         &#39;&#39;&#39;
         used to block until the other side responds with a &#39;ready&#39; packet  
@@ -221,8 +253,9 @@ class Armchair():
 
     def close(self):
         &#39;&#39;&#39;
-        shutsdown this Armchair
+        shutsdown this Armchair. Will burn through all readys before closing connection
         &#39;&#39;&#39;
+        self.burn_pipe()
         self.sock.close()</code></pre>
 </details>
 </section>
@@ -310,8 +343,9 @@ close() void: terminate the connection</p></div>
         close() void: terminate the connection  
     &#39;&#39;&#39;
 
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;})
-    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;] #These are necessary because we never want to wait on a
+    FTP_EOF = &#39;AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile&#39;.encode(&#39;ascii&#39;)
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
+    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
 
@@ -446,6 +480,38 @@ close() void: terminate the connection</p></div>
         while self._inflight_packs:
             self._block_on_ready()
 
+            
+    def recv_ftp(self):
+        &#39;&#39;&#39;
+        violates the armchair protocol a little bit because rather than sending an entire  
+        file as a payload, ftp is sent in a raw stream with delimiters after a sending_files   
+        is sent  
+        returns:  
+            list&lt;tuple&lt;str:bytes&gt;&gt;: linked filenames and files as bytestreams  
+        &#39;&#39;&#39;
+        pack_type, cid, arguments = self.recv_pack()
+        assert(pack_type == &#39;sending_files&#39;)
+        filenames = arguments[0]
+        files = []
+        for filename in filenames:
+            file_bytes = self.sock.recv_until(self.FTP_EOF)
+            files.append((filename, file_bytes))
+        #ack the send files
+        self.send_pack(&#39;ready&#39;)
+        return files
+
+    def send_ftp(self, filepaths):
+        &#39;&#39;&#39;
+        params:  
+            list&lt;str&gt; filenames: the names of the files to send  
+            str filepath: the path where all the files live  
+        &#39;&#39;&#39;
+        self.send_pack(&#39;sending_files&#39;, [os.path.basename(filepath) for filepath in filepaths])
+        for filepath in filepaths:
+            with open(filepath,&#39;rb&#39;) as local_file:
+                self.sock.sock.sendfile(local_file)
+                self.sock.send(self.FTP_EOF)
+
     def _block_on_ready(self):
         &#39;&#39;&#39;
         used to block until the other side responds with a &#39;ready&#39; packet  
@@ -462,12 +528,17 @@ close() void: terminate the connection</p></div>
 
     def close(self):
         &#39;&#39;&#39;
-        shutsdown this Armchair
+        shutsdown this Armchair. Will burn through all readys before closing connection
         &#39;&#39;&#39;
+        self.burn_pipe()
         self.sock.close()</code></pre>
 </details>
 <h3>Class variables</h3>
 <dl>
+<dt id="armchair.Armchair.FTP_EOF"><code class="name">var <span class="ident">FTP_EOF</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
 <dt id="armchair.Armchair.GHOST_TYPES"><code class="name">var <span class="ident">GHOST_TYPES</span></code></dt>
 <dd>
 <div class="desc"></div>
@@ -504,15 +575,16 @@ Nothing left in the inflight packets buffer</p></div>
 <span>def <span class="ident">close</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>shutsdown this Armchair</p></div>
+<div class="desc"><p>shutsdown this Armchair. Will burn through all readys before closing connection</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def close(self):
     &#39;&#39;&#39;
-    shutsdown this Armchair
+    shutsdown this Armchair. Will burn through all readys before closing connection
     &#39;&#39;&#39;
+    self.burn_pipe()
     self.sock.close()</code></pre>
 </details>
 </dd>
@@ -643,6 +715,39 @@ Obj: the argmuents/payload</p></div>
     return header_type, header_cid, payload</code></pre>
 </details>
 </dd>
+<dt id="armchair.Armchair.recv_ftp"><code class="name flex">
+<span>def <span class="ident">recv_ftp</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>violates the armchair protocol a little bit because rather than sending an entire<br>
+file as a payload, ftp is sent in a raw stream with delimiters after a sending_files <br>
+is sent<br>
+returns:<br>
+list<tuple\<str:bytes>>: linked filenames and files as bytestreams</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def recv_ftp(self):
+    &#39;&#39;&#39;
+    violates the armchair protocol a little bit because rather than sending an entire  
+    file as a payload, ftp is sent in a raw stream with delimiters after a sending_files   
+    is sent  
+    returns:  
+        list&lt;tuple&lt;str:bytes&gt;&gt;: linked filenames and files as bytestreams  
+    &#39;&#39;&#39;
+    pack_type, cid, arguments = self.recv_pack()
+    assert(pack_type == &#39;sending_files&#39;)
+    filenames = arguments[0]
+    files = []
+    for filename in filenames:
+        file_bytes = self.sock.recv_until(self.FTP_EOF)
+        files.append((filename, file_bytes))
+    #ack the send files
+    self.send_pack(&#39;ready&#39;)
+    return files</code></pre>
+</details>
+</dd>
 <dt id="armchair.Armchair.recv_pack"><code class="name flex">
 <span>def <span class="ident">recv_pack</span></span>(<span>self)</span>
 </code></dt>
@@ -674,6 +779,30 @@ Obj: the argmuents/payload</p></div>
         if header_type == &#39;ready&#39;:
             self._inflight_packs.remove(header_cid)
     return header_type, header_cid, payload</code></pre>
+</details>
+</dd>
+<dt id="armchair.Armchair.send_ftp"><code class="name flex">
+<span>def <span class="ident">send_ftp</span></span>(<span>self, filepaths)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>params:<br>
+list<str> filenames: the names of the files to send<br>
+str filepath: the path where all the files live</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def send_ftp(self, filepaths):
+    &#39;&#39;&#39;
+    params:  
+        list&lt;str&gt; filenames: the names of the files to send  
+        str filepath: the path where all the files live  
+    &#39;&#39;&#39;
+    self.send_pack(&#39;sending_files&#39;, [os.path.basename(filepath) for filepath in filepaths])
+    for filepath in filepaths:
+        with open(filepath,&#39;rb&#39;) as local_file:
+            self.sock.sock.sendfile(local_file)
+            self.sock.send(self.FTP_EOF)</code></pre>
 </details>
 </dd>
 <dt id="armchair.Armchair.send_pack"><code class="name flex">
@@ -743,6 +872,7 @@ cid has been appended to self._inflight_packs</p></div>
 <li>
 <h4><code><a title="armchair.Armchair" href="#armchair.Armchair">Armchair</a></code></h4>
 <ul class="two-column">
+<li><code><a title="armchair.Armchair.FTP_EOF" href="#armchair.Armchair.FTP_EOF">FTP_EOF</a></code></li>
 <li><code><a title="armchair.Armchair.GHOST_TYPES" href="#armchair.Armchair.GHOST_TYPES">GHOST_TYPES</a></code></li>
 <li><code><a title="armchair.Armchair.PACK_TYPES" href="#armchair.Armchair.PACK_TYPES">PACK_TYPES</a></code></li>
 <li><code><a title="armchair.Armchair.burn_pipe" href="#armchair.Armchair.burn_pipe">burn_pipe</a></code></li>
@@ -752,7 +882,9 @@ cid has been appended to self._inflight_packs</p></div>
 <li><code><a title="armchair.Armchair.get_len" href="#armchair.Armchair.get_len">get_len</a></code></li>
 <li><code><a title="armchair.Armchair.get_type" href="#armchair.Armchair.get_type">get_type</a></code></li>
 <li><code><a title="armchair.Armchair.recv" href="#armchair.Armchair.recv">recv</a></code></li>
+<li><code><a title="armchair.Armchair.recv_ftp" href="#armchair.Armchair.recv_ftp">recv_ftp</a></code></li>
 <li><code><a title="armchair.Armchair.recv_pack" href="#armchair.Armchair.recv_pack">recv_pack</a></code></li>
+<li><code><a title="armchair.Armchair.send_ftp" href="#armchair.Armchair.send_ftp">send_ftp</a></code></li>
 <li><code><a title="armchair.Armchair.send_pack" href="#armchair.Armchair.send_pack">send_pack</a></code></li>
 </ul>
 </li>

@@ -41,8 +41,8 @@ class Armchair():
     '''
 
     FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
-    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F'})
-    GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req'] #These are necessary because we never want to wait on a
+    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F','save':b'\x10'})
+    GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req', 'save'] #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready's / are not added to inflight packs. Do not modify CID.
 
@@ -225,6 +225,7 @@ class Armchair():
 
     def close(self):
         '''
-        shutsdown this Armchair
+        shutsdown this Armchair. Will burn through all readys before closing connection
         '''
+        self.burn_pipe()
         self.sock.close()

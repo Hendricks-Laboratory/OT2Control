@@ -603,6 +603,16 @@ class Controller(ABC):
         df = df.astype(float)
         return df
 
+    def save(self):
+        self.portal.send_pack('save')
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
+
     def close_connection(self):
         '''
         runs through closing procedure with robot    
@@ -611,16 +621,11 @@ class Controller(ABC):
             Connection has been closed  
         '''
         print('<<controller>> initializing breakdown')
-        self.portal.send_pack('close')
-        #server will initiate file transfer
-        files = self.portal.recv_ftp()
-        for filename, file_bytes in files:
-            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
-                write_file.write(file_bytes)
-        self.translate_wellmap()
+        self.save()
         #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'close')
+        self.portal.send_pack('close')
+        #pack_type, cid, arguments = self.portal.recv_pack()
+        #assert(pack_type == 'close')
         print('<<controller>> shutting down')
         self.portal.close()
     
@@ -1094,6 +1099,8 @@ class ProtocolExecutor(Controller):
                 self._mix(row, i)
             elif row['op'] == 'make':
                 self._send_make(row, i)
+            elif row['op'] == 'save':
+                self.save()
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 

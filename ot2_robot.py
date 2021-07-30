@@ -1011,8 +1011,11 @@ class OT2Robot():
             self._exec_mix(arguments[0])
             self.portal.send_pack('ready', cid)
             return 1
+        elif command_type == 'save':
+            self._exec_save()
+            return 1
         elif command_type == 'close':
-            self._exec_close()
+            self._exec_close(cid) #will be acked in func
             return 0
         else:
             raise Exception("Unidenified command {}".format(pack_type))
@@ -1390,7 +1393,7 @@ class OT2Robot():
         '''
         pass
 
-    def _exec_close(self):
+    def _exec_close(self, cid):
         '''
         close the connection in a nice way
         '''
@@ -1399,6 +1402,15 @@ class OT2Robot():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
         self.protocol.home()
+        self.portal.send_pack('ready', cid)
+        #kill link
+        print('<<eve>> shutting down')
+        self.portal.close()
+
+    def _exec_save(self):
+        '''
+        saves state, and then ships files back to controller over FTP  
+        '''
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
@@ -1407,10 +1419,7 @@ class OT2Robot():
         filenames = list(os.listdir(self.logs_p))
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
         self.portal.send_ftp(filepaths)
-        #kill link
-        print('<<eve>> shutting down')
-        self.portal.send_pack('close')
-        self.portal.close()
+        
 
 def launch_eve_server(**kwargs):
     '''

@@ -32,9 +32,9 @@ x00: 'init'
             + float required_vol: the volume of water needed to turn this into a reagent
 
 x01: 'close'
-    controller<->robot
-    Description: This command is used to tell the robot to terminate. Or to tell the client it is
-        safe to terminate. It is not an interrupt.
+    controller->robot
+    Description: This command is used to tell the robot to terminate. It should be acknowledged
+      with a ready indicating that the robot is exiting
 
 x03: 'ready'
     robot->controller
@@ -138,3 +138,8 @@ x0F: 'mix'
         list<tuple<str,int>>:
 	    1st is the chem_name to be mixed
 	    2nd is the integer mix code. 1 is mix normal, 2 is mix a lot
+
+x10: 'save'
+    controller->robot
+    GHOST_TYPE: part of a call response. It is expected the next pack will be a sending_files
+    Description: commands robot to save it's data and ship it back over ftp
