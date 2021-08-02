@@ -35,6 +35,7 @@ import threading
 import time
 import argparse
 import re
+import functools
 
 from bidict import bidict
 import gspread
@@ -53,7 +54,7 @@ import matplotlib.cm as cm
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
-from df_utils import make_unique, df_popout, wslpath
+from df_utils import make_unique, df_popout, wslpath, error_exit
 
 
 def init_parser():
@@ -589,6 +590,16 @@ class Controller(ABC):
         df = df.astype(float)
         return df
 
+    def save(self):
+        self.portal.send_pack('save')
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
+
     def close_connection(self):
         '''
         runs through closing procedure with robot    
@@ -597,25 +608,9 @@ class Controller(ABC):
             Connection has been closed  
         '''
         print('<<controller>> initializing breakdown')
-        self.portal.send_pack('close')
-        #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'sending_files')
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
-            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
-        self.translate_wellmap()
-        print('<<controller>> files recieved')
-        sock.close()
+        self.save()
         #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'close')
+        self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
     
@@ -648,11 +643,39 @@ class Controller(ABC):
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
-    def run_simulation():
+    def run_simulation(self):
         pass
+
     @abstractmethod
-    def run_protocol(simulate):
+    def run_protocol(self,simulate):
         pass
+
+
+    def _error_handler(self, e):
+        '''
+        When an error is thrown from a public method, it will be sent here and handled
+        '''
+        #handle the error
+        if self.portal.state == 1:
+            #Armchair recieved an error packet, so eve had a problem
+            try:
+                eve_error = self.portal.error_payload[0]
+                print('''<<controller>>----------------Eve Error----------------
+                Eve threw error '{}'
+                Attempting to save state on exit
+                '''.format(eve_error))
+                self.portal.reset_error()
+                self.close_connection()
+            finally:
+                raise eve_error
+        else:
+            try:
+                print('''<<controller>> ----------------Controller Error----------------
+                <<controller>> Attempting to save state on exit''')
+                self.close_connection()
+            finally:
+                time.sleep(.5) #this is just for printing format. Not critical
+                raise e
 
 class AutoContr(Controller):
     '''
@@ -701,7 +724,7 @@ class AutoContr(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
@@ -720,6 +743,7 @@ class AutoContr(Controller):
     def run_protocol(simulate):
         pass
 
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -819,7 +843,7 @@ class ProtocolExecutor(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
@@ -852,6 +876,7 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -1071,6 +1096,8 @@ class ProtocolExecutor(Controller):
                 self._mix(row, i)
             elif row['op'] == 'make':
                 self._send_make(row, i)
+            elif row['op'] == 'save':
+                self.save()
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
