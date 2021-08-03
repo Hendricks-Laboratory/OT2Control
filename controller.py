@@ -666,6 +666,7 @@ class Controller(ABC):
                 '''.format(eve_error))
                 self.portal.reset_error()
                 self.close_connection()
+                self.pr.shutdown()
             finally:
                 raise eve_error
         else:
@@ -673,6 +674,7 @@ class Controller(ABC):
                 print('''<<controller>> ----------------Controller Error----------------
                 <<controller>> Attempting to save state on exit''')
                 self.close_connection()
+                self.pr.shutdown()
             finally:
                 time.sleep(.5) #this is just for printing format. Not critical
                 raise e
