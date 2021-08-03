@@ -51,9 +51,12 @@ stop:
 pause:
     must add pause time in seconds. Will pause that long before continuing
 scan:
-    must specify the protocol on scanner you wish to run, and the filename without exetension that
+    must specify the protocol on scanner you wish to run, and the filename without 
+    exetension that
     you want to save the data as. Mark the wells you wish to scan with a 1. mark 0 or blank in
     others
+    IF YOU HAVE ALREADY RUN THIS PROTOCOL AND HAVE A SCAN OF THE SAME NOW IN THE SCAN DIR
+    IT WILL BE OVERWRITTEN. YOU'VE BEEN WARNED
 mix:
     specify wells to mix with a 1. This is redundant for now because only platereader wells can be
     mixed, but for anything that's not on the plate reader future features would pipette mix it

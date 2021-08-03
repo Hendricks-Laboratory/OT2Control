@@ -19,6 +19,7 @@ based on command line ars. (run this script with -h)
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
+from collections import namedtuple
 from datetime import datetime
 import socket
 import json
@@ -34,6 +35,7 @@ import threading
 import time
 import argparse
 import re
+import functools
 
 from bidict import bidict
 import gspread
@@ -52,7 +54,7 @@ import matplotlib.cm as cm
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
-from df_utils import make_unique, df_popout, wslpath
+from df_utils import make_unique, df_popout, wslpath, error_exit
 
 
 def init_parser():
@@ -156,14 +158,13 @@ class Controller(ABC):
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers  
     PRIVATE ATTRS:  
-        dict<str:tuple<obj>> _cached_reader_locs: chemical information from the robot
-            chem_name is key, which is redundant  
+        dict<str:ChemCacheEntry> _cached_reader_locs: chemical information from the robot
+            ChemCacheEntry is a named tuple with below attributes
             The tuple has following structure:  
-            0 str chem_name: the name of the well  
-            1 str well_loc: the loc of the well on it's labware (translated to human if on pr)  
-            2 int deck_pos: the position of the labware it's on  
-            3 float vol: the volume in the container  
-            4 float aspiratible_vol: the volume minus dead vol  
+            str loc: the loc of the well on it's labware (translated to human if on pr)  
+            int deck_pos: the position of the labware it's on  
+            float vol: the volume in the container  
+            float aspiratible_vol: the volume minus dead vol  
     CONSTANTS:  
         bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info  
@@ -184,6 +185,8 @@ class Controller(ABC):
     #reader given a regular loc for a 96well plate.
     #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
+
+    ChemCacheEntry = namedtuple('ChemCacheEntry',['loc','deck_pos','vol','aspirable_vol'])
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         '''
@@ -271,7 +274,7 @@ class Controller(ABC):
             They are not overwritten if they already exist. paths variables of this class
             have also been initialized
         '''
-        out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
+        out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Protocol_Outputs"
         if not os.path.exists(out_path):
             #not on the laptop
             out_path = './Controller_Out'
@@ -727,13 +730,24 @@ class Controller(ABC):
         df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
         headers = [x[:-1] for x in df.columns]
         #Note no read to query the cache because these were all scanned
-        pr_dict = {entry[1]:entry[0] for entry in self._cached_reader_locs.values() if entry[2] in [4,7]}
+        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
+                if entry.deck_pos in [4,7]}
         #converting to chemical names instead of locs on wellplate
         headers = [pr_dict[header] for header in headers]
         df.columns = headers
         df.dropna(inplace=True)
         df = df.astype(float)
         return df
+
+    def save(self):
+        self.portal.send_pack('save')
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
 
     def close_connection(self):
         '''
@@ -743,25 +757,9 @@ class Controller(ABC):
             Connection has been closed  
         '''
         print('<<controller>> initializing breakdown')
-        self.portal.send_pack('close')
-        #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'sending_files')
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
-            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
-        self.translate_wellmap()
-        print('<<controller>> files recieved')
-        sock.close()
+        self.save()
         #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == 'close')
+        self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
     
@@ -794,11 +792,41 @@ class Controller(ABC):
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
-    def run_simulation():
+    def run_simulation(self):
         pass
+
     @abstractmethod
-    def run_protocol(simulate):
+    def run_protocol(self,simulate):
         pass
+
+
+    def _error_handler(self, e):
+        '''
+        When an error is thrown from a public method, it will be sent here and handled
+        '''
+        #handle the error
+        if self.portal.state == 1:
+            #Armchair recieved an error packet, so eve had a problem
+            try:
+                eve_error = self.portal.error_payload[0]
+                print('''<<controller>>----------------Eve Error----------------
+                Eve threw error '{}'
+                Attempting to save state on exit
+                '''.format(eve_error))
+                self.portal.reset_error()
+                self.close_connection()
+                self.pr.shutdown()
+            finally:
+                raise eve_error
+        else:
+            try:
+                print('''<<controller>> ----------------Controller Error----------------
+                <<controller>> Attempting to save state on exit''')
+                self.close_connection()
+                self.pr.shutdown()
+            finally:
+                time.sleep(.5) #this is just for printing format. Not critical
+                raise e
 
 class AutoContr(Controller):
     '''
@@ -847,7 +875,7 @@ class AutoContr(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
@@ -866,6 +894,7 @@ class AutoContr(Controller):
     def run_protocol(simulate):
         pass
 
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -965,7 +994,7 @@ class ProtocolExecutor(Controller):
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
-        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b})
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
 
         #do create a connection
@@ -998,6 +1027,7 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=simulate)
         print('<<controller>> EXITING PROTOCOL')
         
+    @error_exit
     def _run(self, port, simulate):
         '''
         Returns:  
@@ -1217,6 +1247,8 @@ class ProtocolExecutor(Controller):
                 self._mix(row, i)
             elif row['op'] == 'make':
                 self._send_make(row, i)
+            elif row['op'] == 'save':
+                self.save()
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
@@ -1255,9 +1287,9 @@ class ProtocolExecutor(Controller):
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
-            assert (entry[1] == 4 or entry[1] == 7), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry[0], entry[1])
-            assert (math.isclose(entry[2], 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry[2])
-            well_locs.append(entry[0])
+            assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
+            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
@@ -1283,10 +1315,10 @@ class ProtocolExecutor(Controller):
             for well_entry in returned_well_locs:
                 if well_entry[2] in [4,7]:
                     #is on reader. Need to translate index
-                    self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:]
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
                 else:
                     #not on reader, just use vanilla index
-                    self._cached_reader_locs[well_entry[0]] = well_entry
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
 
 
     def _mix(self,row,i):
@@ -1300,7 +1332,7 @@ class ProtocolExecutor(Controller):
         wells_to_mix.name = 'mix_code'
         #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
         self._query_wells(wells_to_mix.index)
-        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname][2] for 
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
                 wellname in wells_to_mix.index}, name='deck_pos')
         wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
         #get platereader rows. true if pr
@@ -1585,7 +1617,7 @@ class ProtocolExecutor(Controller):
         for i, row in labware_w_empties.iterrows():
             for loc in row['empty_list'].replace(' ','').split(','):
                 loc_pos_empty_pairs.append((loc, row['deck_pos']))
-        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype='float64')
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
         loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
@@ -1963,9 +1995,11 @@ class PlateReader(AbstractPlateReader):
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
+    SPECTRO_DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
 
     def __init__(self, data_path, simulate=False):
         self.data_path = data_path
+        self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
@@ -2094,7 +2128,6 @@ class PlateReader(AbstractPlateReader):
             well_entries.append("{}=X{}".format(well, i+1))
         filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,'.temp_ot2_bmg_layout.lb')
         filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,'w'),'.temp_ot2_bmg_layout.lb')
-        print(filepath_win)
         with open(filepath_lin, 'w+') as layout:
             layout.write('EmptyLayout')
             for entry in well_entries:
@@ -2113,7 +2146,13 @@ class PlateReader(AbstractPlateReader):
             self.edit_layout(protocol_name, layout)
         macro = 'run'
         #three '' are plate ids to pad. data_path specified once for ascii and once for other
-        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.data_path,'w'), '', '', '', '', filename)
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,'w'), '', '', '', '', filename)
+        #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+        #that, so we move it from the default landing zone to where I actually want it
+        if not self.simulate:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
+                    os.path.join(self.data_path, "{}.csv".format(filename)))
+
 
     def _set_config_attr(self, header, attr, val):
         '''

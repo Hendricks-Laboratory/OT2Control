@@ -64,6 +64,7 @@ based on command line ars. (run this script with -h)
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
+from collections import namedtuple
 from datetime import datetime
 import socket
 import json
@@ -78,6 +79,8 @@ import asyncio
 import threading
 import time
 import argparse
+import re
+import functools
 
 from bidict import bidict
 import gspread
@@ -89,11 +92,14 @@ import numpy as np
 import opentrons.execute
 from opentrons import protocol_api, simulate, types
 from boltons.socketutils import BufferedSocket
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
-from df_utils import make_unique, df_popout
+from df_utils import make_unique, df_popout, wslpath
 
 
 def init_parser():
@@ -102,6 +108,7 @@ def init_parser():
     parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=mode_help_str,default=&#39;protocol&#39;)
     parser.add_argument(&#39;-n&#39;,&#39;--name&#39;,help=&#39;the name of the google sheet&#39;)
     parser.add_argument(&#39;-c&#39;,&#39;--cache&#39;,help=&#39;flag. if supplied, uses cache&#39;,action=&#39;store_true&#39;)
+    parser.add_argument(&#39;-s&#39;,&#39;--simulate&#39;,help=&#39;runs robot and pr in simulation mode&#39;,action=&#39;store_true&#39;)
     return parser
 
 def main(serveraddr):
@@ -112,15 +119,15 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == &#39;protocol&#39;:
         print(&#39;launching in protocol mode&#39;)
-        launch_protocol_exec(serveraddr,args.name,args.cache)
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate)
     elif args.mode == &#39;auto&#39;:
         print(&#39;launching in auto mode&#39;)
-        launch_auto(serveraddr,args.name,args.cache)
+        launch_auto(serveraddr,args.name,args.cache,args.simulate)
     else:
         print(&#34;invalid argument to mode, &#39;{}&#39;&#34;.format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
+def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False):
     &#39;&#39;&#39;
     main function to launch a controller and execute a protocol
     &#39;&#39;&#39;
@@ -137,7 +144,7 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
 
     if tests_passed:
         if input(&#39;would you like to run the protocol? [yn] &#39;).lower() == &#39;y&#39;:
-            controller.run_protocol()
+            controller.run_protocol(simulate)
     else:
         print(&#39;Failed Some Tests. Please fix your errors and try again&#39;)
 
@@ -196,13 +203,13 @@ class Controller(ABC):
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers  
     PRIVATE ATTRS:  
-        dict&lt;str:tuple&lt;obj&gt;&gt; _cached_reader_locs: cache for chemical information from the robot  
+        dict&lt;str:ChemCacheEntry&gt; _cached_reader_locs: chemical information from the robot
+            ChemCacheEntry is a named tuple with below attributes
             The tuple has following structure:  
-            0 str chem_name: the name of the well  
-            1 str well_loc: the loc of the well on it&#39;s labware (translated to human if on pr)  
-            2 int deck_pos: the position of the labware it&#39;s on  
-            3 float vol: the volume in the container  
-            4 float aspiratible_vol: the volume minus dead vol  
+            str loc: the loc of the well on it&#39;s labware (translated to human if on pr)  
+            int deck_pos: the position of the labware it&#39;s on  
+            float vol: the volume in the container  
+            float aspiratible_vol: the volume minus dead vol  
     CONSTANTS:  
         bidict&lt;str:tuple&lt;str,str&gt;&gt; PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info  
@@ -224,7 +231,9 @@ class Controller(ABC):
     #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({&#39;A1&#39;: (&#39;E1&#39;, &#39;platereader4&#39;), &#39;A2&#39;: (&#39;D1&#39;, &#39;platereader4&#39;), &#39;A3&#39;: (&#39;C1&#39;, &#39;platereader4&#39;), &#39;A4&#39;: (&#39;B1&#39;, &#39;platereader4&#39;), &#39;A5&#39;: (&#39;A1&#39;, &#39;platereader4&#39;), &#39;A12&#39;: (&#39;A1&#39;, &#39;platereader7&#39;), &#39;A11&#39;: (&#39;B1&#39;, &#39;platereader7&#39;), &#39;A10&#39;: (&#39;C1&#39;, &#39;platereader7&#39;), &#39;A9&#39;: (&#39;D1&#39;, &#39;platereader7&#39;), &#39;A8&#39;: (&#39;E1&#39;, &#39;platereader7&#39;), &#39;A7&#39;: (&#39;F1&#39;, &#39;platereader7&#39;), &#39;A6&#39;: (&#39;G1&#39;, &#39;platereader7&#39;), &#39;B1&#39;: (&#39;E2&#39;, &#39;platereader4&#39;), &#39;B2&#39;: (&#39;D2&#39;, &#39;platereader4&#39;), &#39;B3&#39;: (&#39;C2&#39;, &#39;platereader4&#39;), &#39;B4&#39;: (&#39;B2&#39;, &#39;platereader4&#39;), &#39;B5&#39;: (&#39;A2&#39;, &#39;platereader4&#39;), &#39;B6&#39;: (&#39;G2&#39;, &#39;platereader7&#39;), &#39;B7&#39;: (&#39;F2&#39;, &#39;platereader7&#39;), &#39;B8&#39;: (&#39;E2&#39;, &#39;platereader7&#39;), &#39;B9&#39;: (&#39;D2&#39;, &#39;platereader7&#39;), &#39;B10&#39;: (&#39;C2&#39;, &#39;platereader7&#39;), &#39;B11&#39;: (&#39;B2&#39;, &#39;platereader7&#39;), &#39;B12&#39;: (&#39;A2&#39;, &#39;platereader7&#39;), &#39;C1&#39;: (&#39;E3&#39;, &#39;platereader4&#39;), &#39;C2&#39;: (&#39;D3&#39;, &#39;platereader4&#39;), &#39;C3&#39;: (&#39;C3&#39;, &#39;platereader4&#39;), &#39;C4&#39;: (&#39;B3&#39;, &#39;platereader4&#39;), &#39;C5&#39;: (&#39;A3&#39;, &#39;platereader4&#39;), &#39;C6&#39;: (&#39;G3&#39;, &#39;platereader7&#39;), &#39;C7&#39;: (&#39;F3&#39;, &#39;platereader7&#39;), &#39;C8&#39;: (&#39;E3&#39;, &#39;platereader7&#39;), &#39;C9&#39;: (&#39;D3&#39;, &#39;platereader7&#39;), &#39;C10&#39;: (&#39;C3&#39;, &#39;platereader7&#39;), &#39;C11&#39;: (&#39;B3&#39;, &#39;platereader7&#39;), &#39;C12&#39;: (&#39;A3&#39;, &#39;platereader7&#39;), &#39;D1&#39;: (&#39;E4&#39;, &#39;platereader4&#39;), &#39;D2&#39;: (&#39;D4&#39;, &#39;platereader4&#39;), &#39;D3&#39;: (&#39;C4&#39;, &#39;platereader4&#39;), &#39;D4&#39;: (&#39;B4&#39;, &#39;platereader4&#39;), &#39;D5&#39;: (&#39;A4&#39;, &#39;platereader4&#39;), &#39;D6&#39;: (&#39;G4&#39;, &#39;platereader7&#39;), &#39;D7&#39;: (&#39;F4&#39;, &#39;platereader7&#39;), &#39;D8&#39;: (&#39;E4&#39;, &#39;platereader7&#39;), &#39;D9&#39;: (&#39;D4&#39;, &#39;platereader7&#39;), &#39;D10&#39;: (&#39;C4&#39;, &#39;platereader7&#39;), &#39;D11&#39;: (&#39;B4&#39;, &#39;platereader7&#39;), &#39;D12&#39;: (&#39;A4&#39;, &#39;platereader7&#39;), &#39;E1&#39;: (&#39;E5&#39;, &#39;platereader4&#39;), &#39;E2&#39;: (&#39;D5&#39;, &#39;platereader4&#39;), &#39;E3&#39;: (&#39;C5&#39;, &#39;platereader4&#39;), &#39;E4&#39;: (&#39;B5&#39;, &#39;platereader4&#39;), &#39;E5&#39;: (&#39;A5&#39;, &#39;platereader4&#39;), &#39;E6&#39;: (&#39;G5&#39;, &#39;platereader7&#39;), &#39;E7&#39;: (&#39;F5&#39;, &#39;platereader7&#39;), &#39;E8&#39;: (&#39;E5&#39;, &#39;platereader7&#39;), &#39;E9&#39;: (&#39;D5&#39;, &#39;platereader7&#39;), &#39;E10&#39;: (&#39;C5&#39;, &#39;platereader7&#39;), &#39;E11&#39;: (&#39;B5&#39;, &#39;platereader7&#39;), &#39;E12&#39;: (&#39;A5&#39;, &#39;platereader7&#39;), &#39;F1&#39;: (&#39;E6&#39;, &#39;platereader4&#39;), &#39;F2&#39;: (&#39;D6&#39;, &#39;platereader4&#39;), &#39;F3&#39;: (&#39;C6&#39;, &#39;platereader4&#39;), &#39;F4&#39;: (&#39;B6&#39;, &#39;platereader4&#39;), &#39;F5&#39;: (&#39;A6&#39;, &#39;platereader4&#39;), &#39;F6&#39;: (&#39;G6&#39;, &#39;platereader7&#39;), &#39;F7&#39;: (&#39;F6&#39;, &#39;platereader7&#39;), &#39;F8&#39;: (&#39;E6&#39;, &#39;platereader7&#39;), &#39;F9&#39;: (&#39;D6&#39;, &#39;platereader7&#39;), &#39;F10&#39;: (&#39;C6&#39;, &#39;platereader7&#39;), &#39;F11&#39;: (&#39;B6&#39;, &#39;platereader7&#39;), &#39;F12&#39;: (&#39;A6&#39;, &#39;platereader7&#39;), &#39;G1&#39;: (&#39;E7&#39;, &#39;platereader4&#39;), &#39;G2&#39;: (&#39;D7&#39;, &#39;platereader4&#39;), &#39;G3&#39;: (&#39;C7&#39;, &#39;platereader4&#39;), &#39;G4&#39;: (&#39;B7&#39;, &#39;platereader4&#39;), &#39;G5&#39;: (&#39;A7&#39;, &#39;platereader4&#39;), &#39;G6&#39;: (&#39;G7&#39;, &#39;platereader7&#39;), &#39;G7&#39;: (&#39;F7&#39;, &#39;platereader7&#39;), &#39;G8&#39;: (&#39;E7&#39;, &#39;platereader7&#39;), &#39;G9&#39;: (&#39;D7&#39;, &#39;platereader7&#39;), &#39;G10&#39;: (&#39;C7&#39;, &#39;platereader7&#39;), &#39;G11&#39;: (&#39;B7&#39;, &#39;platereader7&#39;), &#39;G12&#39;: (&#39;A7&#39;, &#39;platereader7&#39;), &#39;H1&#39;: (&#39;E8&#39;, &#39;platereader4&#39;), &#39;H2&#39;: (&#39;D8&#39;, &#39;platereader4&#39;), &#39;H3&#39;: (&#39;C8&#39;, &#39;platereader4&#39;), &#39;H4&#39;: (&#39;B8&#39;, &#39;platereader4&#39;), &#39;H5&#39;: (&#39;A8&#39;, &#39;platereader4&#39;), &#39;H6&#39;: (&#39;G8&#39;, &#39;platereader7&#39;), &#39;H7&#39;: (&#39;F8&#39;, &#39;platereader7&#39;), &#39;H8&#39;: (&#39;E8&#39;, &#39;platereader7&#39;), &#39;H9&#39;: (&#39;D8&#39;, &#39;platereader7&#39;), &#39;H10&#39;: (&#39;C8&#39;, &#39;platereader7&#39;), &#39;H11&#39;: (&#39;B8&#39;, &#39;platereader7&#39;), &#39;H12&#39;: (&#39;A8&#39;, &#39;platereader7&#39;)})
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path=&#39;Eve_Files&#39;, cache_path=&#39;Cache&#39;):
+    ChemCacheEntry = namedtuple(&#39;ChemCacheEntry&#39;,[&#39;loc&#39;,&#39;deck_pos&#39;,&#39;vol&#39;,&#39;aspirable_vol&#39;])
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path=&#39;Cache&#39;):
         &#39;&#39;&#39;
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -234,9 +243,9 @@ class Controller(ABC):
         is instantiated in run
         &#39;&#39;&#39;
         #set according to input
-        self.cache_path = cache_path
+        self.cache_path=cache_path
+        self._make_cache()
         self.use_cache = use_cache
-        self._make_out_dirs(out_path)
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size=4
@@ -244,6 +253,19 @@ class Controller(ABC):
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
+
+    def _error_exit(func):
+        &#39;&#39;&#39;
+        This is a decorator to wrap functions in error catching code. Methods with this
+        decorator call error_handler upon failure
+        &#39;&#39;&#39;
+        @functools.wraps(func)
+        def decorated(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                args[0]._error_handler(e)
+        return decorated
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         &#39;&#39;&#39;
@@ -274,6 +296,12 @@ class Controller(ABC):
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
+    def _init_pr(self,simulate):
+        try:
+            self.pr = PlateReader(os.path.join(self.out_path, &#39;pr_data&#39;),simulate)
+        except:
+            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
+            self.pr = DummyReader(os.path.join(self.out_path, &#39;pr_data&#39;))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         &#39;&#39;&#39;
@@ -295,20 +323,35 @@ class Controller(ABC):
         return data
 
 
-    def _make_out_dirs(self, out_path):
+    def _make_out_dirs(self, header_data):
         &#39;&#39;&#39;
         params:  
-            str out_path: the path for all files output by controller  
+            list&lt;list&lt;str&gt;&gt; header_data: data from the header  
         Postconditions:  
             All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist  
+            They are not overwritten if they already exist. paths variables of this class
+            have also been initialized
         &#39;&#39;&#39;
-        self.eve_files_path = os.path.join(out_path, &#39;Eve_Files&#39;)
-        self.debug_path = os.path.join(out_path, &#39;Debug&#39;)
-        paths = [out_path, self.eve_files_path, self.debug_path]
+
+        out_path = &#34;/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Protocol_Outputs&#34;
+        if not os.path.exists(out_path):
+            #not on the laptop
+            out_path = &#39;./Controller_Out&#39;
+        #get the root folder
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        data_dir = header_dict[&#39;data_dir&#39;]
+        self.out_path = os.path.join(out_path, data_dir)
+        #if the folder doesn&#39;t exist yet, make it
+        self.eve_files_path = os.path.join(self.out_path, &#39;Eve_Files&#39;)
+        self.debug_path = os.path.join(self.out_path, &#39;Debug&#39;)
+        paths = [self.out_path, self.eve_files_path, self.debug_path]
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+
+    def _make_cache(self):
+        if not os.path.exists(self.cache_path):
+            os.path.makedirs(self.cache_path)
 
     def _init_credentials(self, rxn_sheet_name):
         &#39;&#39;&#39;
@@ -386,6 +429,25 @@ class Controller(ABC):
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params[&#39;using_temp_ctrl&#39;] = header_dict[&#39;using_temp_ctrl&#39;] == &#39;yes&#39;
         self.robo_params[&#39;temp&#39;] = float(header_dict[&#39;temp&#39;]) if self.robo_params[&#39;using_temp_ctrl&#39;] else None
+
+    def _plot_setup_overlay(name):
+        &#39;&#39;&#39;
+        Sets up a figure for an overlay plot
+        &#39;&#39;&#39;
+        #formats the figure nicely
+        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor=&#39;w&#39;, edgecolor=&#39;k&#39;)
+        plt.legend(loc=&#34;upper right&#34;,frameon = False, prop={&#34;size&#34;:7},labelspacing = 0.5)
+        plt.rc(&#39;axes&#39;, linewidth = 2)
+        plt.xlabel(&#39;Wavelength (nm)&#39;,fontsize = 16, fontfamily = &#39;Arial&#39;,fontname=&#34;Arial&#34;)
+        plt.ylabel(&#39;Absorbance (a.u.)&#39;, fontsize = 16,fontname=&#34;Arial&#34;)
+        plt.tick_params(axis = &#34;both&#34;, width = 2)
+        plt.tick_params(axis = &#34;both&#34;, width = 2)
+        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.yticks([i/10 for i in range(0,11,1)])
+        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.xticks(fontsize = 10)
+        plt.yticks(fontsize = 10)
+        plt.title(str(name), fontsize = 16, pad = 20,fontname=&#34;Arial&#34;)
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         &#39;&#39;&#39;
@@ -561,6 +623,41 @@ class Controller(ABC):
             return &#34;{}C{}&#34;.format(row[&#39;reagent&#39;], row[&#39;conc&#39;]).replace(&#39; &#39;, &#39;_&#39;)
         return pd.Series(new_cols)
 
+    def _load_reader_data(filename):
+        &#39;&#39;&#39;
+        #TODO this is outdated should mostly be burden shifted to platereader
+        given a filename, returns the scan data  
+        params:  
+            str filename: the name of the file to read  
+        retunrs:  
+            df: columns are the wells, rows are absorbances.  
+        Preconditions:
+            the entrys for all of the wells in the scan must be in the cache. If you
+            scanned using the controller, this was already done.  
+        &#39;&#39;&#39;
+        # Read data ignoring first 50 lines
+        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=[&#34;       -&#34;],encoding = &#39;latin1&#39;).T
+        headers = [x[:-1] for x in df.columns]
+        #Note no read to query the cache because these were all scanned
+        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
+                if entry.deck_pos in [4,7]}
+        #converting to chemical names instead of locs on wellplate
+        headers = [pr_dict[header] for header in headers]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df
+
+    def save(self):
+        self.portal.send_pack(&#39;save&#39;)
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
+
     def close_connection(self):
         &#39;&#39;&#39;
         runs through closing procedure with robot    
@@ -569,28 +666,11 @@ class Controller(ABC):
             Connection has been closed  
         &#39;&#39;&#39;
         print(&#39;&lt;&lt;controller&gt;&gt; initializing breakdown&#39;)
-        self.portal.send_pack(&#39;close&#39;)
-        #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        while pack_type == &#39;ready&#39;:
-            #spin through all the queued ready packets
-            pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == &#39;sending_files&#39;)
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
-            with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
-        self.translate_wellmap()
-        print(&#39;&lt;&lt;controller&gt;&gt; files recieved&#39;)
-        sock.close()
+        self.save()
         #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == &#39;close&#39;)
+        self.portal.send_pack(&#39;close&#39;)
+        #pack_type, cid, arguments = self.portal.recv_pack()
+        #assert(pack_type == &#39;close&#39;)
         print(&#39;&lt;&lt;controller&gt;&gt; shutting down&#39;)
         self.portal.close()
     
@@ -623,11 +703,27 @@ class Controller(ABC):
                 self.robo_params[&#39;dry_containers&#39;].to_dict())
 
     @abstractmethod
-    def run_simulation():
+    def run_simulation(self):
         pass
+
     @abstractmethod
-    def run_protocol(simulate):
+    def run_protocol(self,simulate):
         pass
+
+
+    def _error_handler(self, e):
+        &#39;&#39;&#39;
+        When an error is thrown from a public method, it will be sent here and handled
+        &#39;&#39;&#39;
+        try:
+            #handle the error
+            print(&#39;uh oh. I got an error!&#39;)
+        except Exception as handle_e:
+            #failed to handle error
+            print(&#34;&lt;&lt;controller&gt;&gt; Experienced {} error while trying to handle error. Aborting \
+                    graceful exit.&#34;)
+        finally:
+            raise e
 
 class AutoContr(Controller):
     &#39;&#39;&#39;
@@ -695,16 +791,13 @@ class AutoContr(Controller):
     def run_protocol(simulate):
         pass
 
+    @Controller._error_exit
     def _run(self, port, simulate):
         &#39;&#39;&#39;
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -748,7 +841,7 @@ class ProtocolExecutor(Controller):
         translate_wellmap() void, run_simulation() bool  
     &#39;&#39;&#39;
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path=&#39;Eve_Files&#39;, cache_path=&#39;Cache&#39;):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False):
         &#39;&#39;&#39;
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -757,7 +850,7 @@ class ProtocolExecutor(Controller):
         NOte that pr cannot be initialized until you know if you&#39;re simulating or not, so it
         is instantiated in run
         &#39;&#39;&#39;
-        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
         #necessary helper params
         credentials = self._init_credentials(rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -766,6 +859,7 @@ class ProtocolExecutor(Controller):
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
+        self._make_out_dirs(header_data)
         self.rxn_df = self._load_rxn_df(input_data)
         self._query_reagents(wks_key, credentials)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
@@ -830,16 +924,13 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=simulate)
         print(&#39;&lt;&lt;controller&gt;&gt; EXITING PROTOCOL&#39;)
         
+    @Controller._error_exit
     def _run(self, port, simulate):
         &#39;&#39;&#39;
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -1053,6 +1144,8 @@ class ProtocolExecutor(Controller):
                 self._mix(row, i)
             elif row[&#39;op&#39;] == &#39;make&#39;:
                 self._send_make(row, i)
+            elif row[&#39;op&#39;] == &#39;save&#39;:
+                self.save()
             else:
                 raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))
 
@@ -1086,30 +1179,44 @@ class ProtocolExecutor(Controller):
         self.portal.burn_pipe()
         #3)
         wellnames = row[self._products][row[self._products].astype(bool)].index
+        self._query_wells(wellnames)
         #4)
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
-        if unknown_wellnames:
-            #4a
-            #couldn&#39;t find in the cache, so we got to make a query
-            self.portal.send_pack(&#39;loc_req&#39;, unknown_wellnames)
-            #4b
-            pack_type, _, payload = self.portal.recv_pack()
-            assert (pack_type == &#39;loc_resp&#39;), &#39;was expecting loc_resp but recieved {}&#39;.format(pack_type)
-            #4c
-            returned_well_locs = payload[0]
-            #update the cache
-            for well_entry in returned_well_locs:
-                self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],&#39;platereader{}&#39;.format(well_entry[2]))],)+well_entry[2:]
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
-            assert (entry[1] == 4 or entry[1] == 7), &#34;tried to scan {}, but {} is on {} in deck pos {}&#34;.format(well, well, entry[0], entry[1])
-            assert (math.isclose(entry[2], 200)), &#34;tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan&#34;.format(well, well, entry[2])
-            well_locs.append(entry[0])
+            assert (entry.deck_pos in [4,7]), &#34;tried to scan {}, but {} is on {} in deck pos {}&#34;.format(well, well, entry.deck_pos, entry.loc)
+            assert (math.isclose(entry.vol, 200)), &#34;tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan&#34;.format(well, well, entry.vol)
+            well_locs.append(entry.loc)
         #5
         self.pr.exec_macro(&#39;PlateIn&#39;)
         self.pr.run_protocol(row[&#39;scan_protocol&#39;], row[&#39;scan_filename&#39;], layout=well_locs)
         self.pr.exec_macro(&#39;PlateOut&#39;)
+
+    def _query_wells(self, wellnames):
+        &#39;&#39;&#39;
+        checks the cache to see if wellnames are in the cache. If they aren&#39;t, a query will be
+        made to Eve for the wellnames, and data for those will be stored in the cache  
+        params:  
+            list&lt;str&gt; wellnames: the names of the wells you want to lookup  
+        Postconditions:  
+            The wellnames are in the cache  
+        &#39;&#39;&#39;
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
+        if unknown_wellnames:
+            #couldn&#39;t find in the cache, so we got to make a query
+            self.portal.send_pack(&#39;loc_req&#39;, unknown_wellnames)
+            pack_type, _, payload = self.portal.recv_pack()
+            assert (pack_type == &#39;loc_resp&#39;), &#39;was expecting loc_resp but recieved {}&#39;.format(pack_type)
+            returned_well_locs = payload[0]
+            #update the cache
+            for well_entry in returned_well_locs:
+                if well_entry[2] in [4,7]:
+                    #is on reader. Need to translate index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],&#39;platereader{}&#39;.format(well_entry[2]))],)+well_entry[2:])
+                else:
+                    #not on reader, just use vanilla index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
+
 
     def _mix(self,row,i):
         &#39;&#39;&#39;
@@ -1118,11 +1225,37 @@ class ProtocolExecutor(Controller):
         things that aren&#39;t on the platereader, in which case a new argument should be made in 
         excel for the wells to scan, and we should make a function to pipette mix.
         &#39;&#39;&#39;
-        self.portal.send_pack(&#39;home&#39;)
-        self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
-        self.pr.exec_macro(&#39;PlateIn&#39;)
-        self.pr.shake()
-        self.pr.exec_macro(&#39;PlateOut&#39;)
+        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
+        wells_to_mix.name = &#39;mix_code&#39;
+        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
+        self._query_wells(wells_to_mix.index)
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
+                wellname in wells_to_mix.index}, name=&#39;deck_pos&#39;)
+        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
+        #get platereader rows. true if pr
+        wells_to_mix_df[&#39;platereader&#39;] = wells_to_mix_df[&#39;deck_pos&#39;].apply(lambda x: x in [4,7]) 
+        if wells_to_mix_df[&#39;platereader&#39;].sum() &gt; 0:
+            #TODO technically, you could be mixing the other stuff by hand while you&#39;re mixing
+            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
+            #platereader because of a bug, Mark will be mad, so apart for now. After testing
+            #you should burn pipe, then send the handmix command, then mix the platereader
+            #to multitask
+
+            #at least one well nees a shake
+            self.portal.send_pack(&#39;home&#39;)
+            self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
+            self.pr.exec_macro(&#39;PlateIn&#39;)
+            self.pr.shake()
+            self.pr.exec_macro(&#39;PlateOut&#39;)
+        if (~wells_to_mix_df[&#39;platereader&#39;]).sum() &gt; 0:
+            #at least one needs to be mixed by hand
+            #still df
+            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df[&#39;platereader&#39;]].reset_index()
+            #convert to list of tuples
+            hand_mix_wells = [tuple(t) for t in hand_mix_wells[[&#39;index&#39;,&#39;mix_code&#39;]].itertuples(index=False)]
+            self.portal.send_pack(&#39;mix&#39;, hand_mix_wells)
+            
+
 
     def _send_dilution_commands(self,row,i):
         &#39;&#39;&#39;
@@ -1311,7 +1444,7 @@ class ProtocolExecutor(Controller):
                 print(&#34;&lt;&lt;controller&gt;&gt; You executed a transfer step in row {}, but you did not transfer any volume.&#34;.format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you&#39;re transfering
-            if r[&#39;op&#39;] == &#39;transfer&#39; and not r[&#39;reagent&#39;]:
+            if r[&#39;op&#39;] == &#39;transfer&#39; and pd.isna(r[&#39;reagent&#39;]):
                 print(&#39;&lt;&lt;controller&gt;&gt; transfer specified without reagent in row {}&#39;.format(r_num))
                 found_errors = max(found_errors,2)
         return found_errors
@@ -1381,7 +1514,7 @@ class ProtocolExecutor(Controller):
         for i, row in labware_w_empties.iterrows():
             for loc in row[&#39;empty_list&#39;].replace(&#39; &#39;,&#39;&#39;).split(&#39;,&#39;):
                 loc_pos_empty_pairs.append((loc, row[&#39;deck_pos&#39;]))
-        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
         loc_deck_pos_pairs = self.robo_params[&#39;reagent_df&#39;].apply(lambda r: (r[&#39;loc&#39;], r[&#39;deck_pos&#39;]),axis=1)
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
@@ -1672,13 +1805,18 @@ class AbstractPlateReader(ABC):
         run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
         shutdown() void: kills the platereader and restores default config  
         shake() void: shakes the platereader  
-        exec_macro(macro, *args) void: low level method to send a command to platereader with  
-        arguments  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with
+          arguments  
+        load_reader_data(str filename, dict&lt;str:str&gt; loc_to_name, str path) tuple&lt;df, dict&gt;:
+          reads the platereader data into a df and returns a dictionary of interesting 
+          metadata.  
+    ATTRIBUTES:
+        str data_path: a linux path to where all the data is 
     &#39;&#39;&#39;
     SPECTRO_ROOT_PATH = None
     PROTOCOL_PATH = None
 
-    def __init__(self):
+    def __init__(self, data_path):
         pass
         
     def exec_macro(self, macro, *args):
@@ -1711,12 +1849,10 @@ class AbstractPlateReader(ABC):
         &#39;&#39;&#39;
         pass
 
-    def run_protocol(self, protocol_name, filename, data_path=r&#34;G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data&#34;, layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r&#39;&#39;&#39;
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         &#39;&#39;&#39;
@@ -1725,6 +1861,21 @@ class AbstractPlateReader(ABC):
     def shutdown(self):
         &#39;&#39;&#39;
         closes connection. Use this if you&#39;re done with this object at cleanup stage
+        &#39;&#39;&#39;
+        pass
+
+    def load_reader_data(filename,loc_to_name):
+        &#39;&#39;&#39;
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            dict&lt;str:str&gt; loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
         &#39;&#39;&#39;
         pass
 
@@ -1740,10 +1891,14 @@ class PlateReader(AbstractPlateReader):
     This class handles all platereader interactions. Inherits from the interface
     &#39;&#39;&#39;
     SPECTRO_ROOT_PATH = &#34;/mnt/c/Program Files/SPECTROstar Nano V5.50/&#34;
-    SPECTRO_ROOT_PATH_WIN = &#34;C:\Program Files\SPECTROstar Nano V5.50&#34;
     PROTOCOL_PATH = r&#34;C:\Program Files\SPECTROstar Nano V5.50\User\Definit&#34;
+    SPECTRO_DATA_PATH = &#34;/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data&#34;
 
-    def __init__(self, simulate=False):
+    def __init__(self, data_path, simulate=False):
+        self.data_path = data_path
+        self.simulate = simulate
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
         input(&#39;&lt;&lt;Reader&gt;&gt; initializing. Please ensure that the software is closed. Press enter to continue&#39;)
         self._set_config_attr(&#39;Configuration&#39;,&#39;SimulationMode&#39;, str(int(simulate)))
         self._set_config_attr(&#39;ControlApp&#39;,&#39;AsDDEserver&#39;, &#39;True&#39;)
@@ -1790,6 +1945,64 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
+    def load_reader_data(self,filename, loc_to_name):
+        &#39;&#39;&#39;
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            dict&lt;str:str&gt; loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        &#39;&#39;&#39;
+        #parse the metadata
+        start_i, metadata = self._parse_metadata(filename, self.data_path)
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=[&#34;       -&#34;],encoding = &#39;latin1&#39;).T
+        headers = [loc_to_name[x[:-1]] for x in df.columns]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df, metadata
+
+    def _parse_metadata(self, filename):
+        &#39;&#39;&#39;
+        parses the meta data of a platereader output, and returns a dataframe of the scans
+        and a dictionary of parameters  
+        params:  
+            str filename: the name of the file to be read  
+        returns:  
+            int: the index to start reading the dataframe at  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        &#39;&#39;&#39;
+        found_start = False
+        i = 0
+        n_cycles = None
+        line = &#39;dowhile&#39;
+        with open(os.path.join(self.data_path,filename), &#39;r&#39;,encoding=&#39;latin1&#39;) as file:
+            while not found_start and line != &#39;&#39;:
+                line = file.readline()
+                if bool(re.match(r&#39;No\. of Cycles:&#39;,line)):
+                    #is number of cycles
+                    n_cycles = int((re.search(r&#39;\d+&#39;, line)).group(0))
+                if line[:6] == &#39;T[°C]:&#39;:
+                    while not bool(re.match(&#39;\D\d&#39;,line)) and line != &#39;&#39;:
+                        #is not of form A1/B03 etc
+                        line = file.readline()
+                        i += 1
+                    i -= 1 #cause you will increment once more 
+                    found_start = True
+                i+=1
+        assert (line != &#39;&#39;), &#34;corrupt reader file. ran out of file to read before finding a scanned well&#34;
+        assert (n_cycles != None), &#34;corrupt reader file. num cycles not found.&#34;
+        return i, {&#39;n_cycles&#39;:n_cycles,&#39;filename&#39;:filename}
+
     def edit_layout(self, protocol_name, layout):
         &#39;&#39;&#39;
         This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
@@ -1811,7 +2024,7 @@ class PlateReader(AbstractPlateReader):
         for i, well in enumerate(layout):
             well_entries.append(&#34;{}=X{}&#34;.format(well, i+1))
         filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,&#39;.temp_ot2_bmg_layout.lb&#39;)
-        filepath_win = os.path.join(self.SPECTRO_ROOT_PATH_WIN,&#39;.temp_ot2_bmg_layout.lb&#39;)
+        filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,&#39;w&#39;),&#39;.temp_ot2_bmg_layout.lb&#39;)
         with open(filepath_lin, &#39;w+&#39;) as layout:
             layout.write(&#39;EmptyLayout&#39;)
             for entry in well_entries:
@@ -1819,21 +2032,24 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro(&#39;ImportLayout&#39;, protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, data_path=r&#34;G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data&#34;, layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r&#39;&#39;&#39;
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         &#39;&#39;&#39;
         if layout:
             self.edit_layout(protocol_name, layout)
         macro = &#39;run&#39;
-        data_path = data_path
         #three &#39;&#39; are plate ids to pad. data_path specified once for ascii and once for other
-        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path, &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,&#39;w&#39;), &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+        #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+        #that, so we move it from the default landing zone to where I actually want it
+        if not self.simulate:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, &#34;{}.csv&#34;.format(filename)), 
+                    os.path.join(self.data_path, &#34;{}.csv&#34;.format(filename)))
+
 
     def _set_config_attr(self, header, attr, val):
         &#39;&#39;&#39;
@@ -1920,6 +2136,7 @@ if __name__ == &#39;__main__&#39;:
     parser.add_argument(&#39;-m&#39;,&#39;--mode&#39;,help=mode_help_str,default=&#39;protocol&#39;)
     parser.add_argument(&#39;-n&#39;,&#39;--name&#39;,help=&#39;the name of the google sheet&#39;)
     parser.add_argument(&#39;-c&#39;,&#39;--cache&#39;,help=&#39;flag. if supplied, uses cache&#39;,action=&#39;store_true&#39;)
+    parser.add_argument(&#39;-s&#39;,&#39;--simulate&#39;,help=&#39;runs robot and pr in simulation mode&#39;,action=&#39;store_true&#39;)
     return parser</code></pre>
 </details>
 </dd>
@@ -1947,7 +2164,7 @@ if __name__ == &#39;__main__&#39;:
 </details>
 </dd>
 <dt id="controller.launch_protocol_exec"><code class="name flex">
-<span>def <span class="ident">launch_protocol_exec</span></span>(<span>serveraddr, rxn_sheet_name=None, use_cache=False)</span>
+<span>def <span class="ident">launch_protocol_exec</span></span>(<span>serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>main function to launch a controller and execute a protocol</p></div>
@@ -1955,7 +2172,7 @@ if __name__ == &#39;__main__&#39;:
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False):
+<pre><code class="python">def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False):
     &#39;&#39;&#39;
     main function to launch a controller and execute a protocol
     &#39;&#39;&#39;
@@ -1972,7 +2189,7 @@ if __name__ == &#39;__main__&#39;:
 
     if tests_passed:
         if input(&#39;would you like to run the protocol? [yn] &#39;).lower() == &#39;y&#39;:
-            controller.run_protocol()
+            controller.run_protocol(simulate)
     else:
         print(&#39;Failed Some Tests. Please fix your errors and try again&#39;)</code></pre>
 </details>
@@ -1994,10 +2211,10 @@ if __name__ == &#39;__main__&#39;:
     args = parser.parse_args()
     if args.mode == &#39;protocol&#39;:
         print(&#39;launching in protocol mode&#39;)
-        launch_protocol_exec(serveraddr,args.name,args.cache)
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate)
     elif args.mode == &#39;auto&#39;:
         print(&#39;launching in auto mode&#39;)
-        launch_auto(serveraddr,args.name,args.cache)
+        launch_auto(serveraddr,args.name,args.cache,args.simulate)
     else:
         print(&#34;invalid argument to mode, &#39;{}&#39;&#34;.format(args.mode))
         parser.print_help()</code></pre>
@@ -2010,6 +2227,7 @@ if __name__ == &#39;__main__&#39;:
 <dl>
 <dt id="controller.AbstractPlateReader"><code class="flex name class">
 <span>class <span class="ident">AbstractPlateReader</span></span>
+<span>(</span><span>data_path)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>This class is responsible for executing platereader commands. When instantiated, this
@@ -2019,8 +2237,14 @@ edit_layout(protocol_name, layout) void: changes the layout for a protocol<br>
 run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol<br>
 shutdown() void: kills the platereader and restores default config<br>
 shake() void: shakes the platereader<br>
-exec_macro(macro, *args) void: low level method to send a command to platereader with<br>
-arguments</p></div>
+exec_macro(macro, *args) void: low level method to send a command to platereader with
+arguments<br>
+load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
+reads the platereader data into a df and returns a dictionary of interesting
+metadata.
+</p>
+<h2 id="attributes">Attributes</h2>
+<p>str data_path: a linux path to where all the data is</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2034,13 +2258,18 @@ arguments</p></div>
         run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
         shutdown() void: kills the platereader and restores default config  
         shake() void: shakes the platereader  
-        exec_macro(macro, *args) void: low level method to send a command to platereader with  
-        arguments  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with
+          arguments  
+        load_reader_data(str filename, dict&lt;str:str&gt; loc_to_name, str path) tuple&lt;df, dict&gt;:
+          reads the platereader data into a df and returns a dictionary of interesting 
+          metadata.  
+    ATTRIBUTES:
+        str data_path: a linux path to where all the data is 
     &#39;&#39;&#39;
     SPECTRO_ROOT_PATH = None
     PROTOCOL_PATH = None
 
-    def __init__(self):
+    def __init__(self, data_path):
         pass
         
     def exec_macro(self, macro, *args):
@@ -2073,12 +2302,10 @@ arguments</p></div>
         &#39;&#39;&#39;
         pass
 
-    def run_protocol(self, protocol_name, filename, data_path=r&#34;G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data&#34;, layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r&#39;&#39;&#39;
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         &#39;&#39;&#39;
@@ -2087,6 +2314,21 @@ arguments</p></div>
     def shutdown(self):
         &#39;&#39;&#39;
         closes connection. Use this if you&#39;re done with this object at cleanup stage
+        &#39;&#39;&#39;
+        pass
+
+    def load_reader_data(filename,loc_to_name):
+        &#39;&#39;&#39;
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            dict&lt;str:str&gt; loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
         &#39;&#39;&#39;
         pass</code></pre>
 </details>
@@ -2168,26 +2410,56 @@ an error will be thrown</p></div>
     pass</code></pre>
 </details>
 </dd>
+<dt id="controller.AbstractPlateReader.load_reader_data"><code class="name flex">
+<span>def <span class="ident">load_reader_data</span></span>(<span>filename, loc_to_name)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>takes in the filename of a reader output and returns a dataframe with the scan data
+loaded, and a dictionary with relevant metadata.<br>
+params:<br>
+str filename: the name of the file to read<br>
+dict<str:str> loc_to_name: maps location to name of reaction<br>
+returns:<br>
+df: the scan data for that file<br>
+dict<str:obj>: holds the metadata<br>
+str filename: the filename as you passed in<br>
+int n_cycles: the number of cycles</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def load_reader_data(filename,loc_to_name):
+    &#39;&#39;&#39;
+    takes in the filename of a reader output and returns a dataframe with the scan data
+    loaded, and a dictionary with relevant metadata.  
+    params:  
+        str filename: the name of the file to read  
+        dict&lt;str:str&gt; loc_to_name: maps location to name of reaction  
+    returns:  
+        df: the scan data for that file  
+        dict&lt;str:obj&gt;: holds the metadata  
+            str filename: the filename as you passed in  
+            int n_cycles: the number of cycles  
+    &#39;&#39;&#39;
+    pass</code></pre>
+</details>
+</dd>
 <dt id="controller.AbstractPlateReader.run_protocol"><code class="name flex">
-<span>def <span class="ident">run_protocol</span></span>(<span>self, protocol_name, filename, data_path='G:\\Shared drives\\Hendricks Lab Drive\\Opentrons_Reactions\\Plate Reader Data', layout=None)</span>
+<span>def <span class="ident">run_protocol</span></span>(<span>self, protocol_name, filename, layout=None)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>params:<br>
 str protocol_name: the name of the protocol that will be edited<br>
-str data_path: windows path raw string. no quotes on outside. e.g.
-C:\Program Files\SPECTROstar Nano V5.50\User<br>
 list<str> layout: the wells that you want to be used for the protocol ordered.
 (first will be X1, second X2 etc. If not specified will not alter layout)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def run_protocol(self, protocol_name, filename, data_path=r&#34;G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data&#34;, layout=None):
+<pre><code class="python">def run_protocol(self, protocol_name, filename, layout=None):
     r&#39;&#39;&#39;
     params:  
         str protocol_name: the name of the protocol that will be edited  
-        str data_path: windows path raw string. no quotes on outside. e.g.
-          C:\Program Files\SPECTROstar Nano V5.50\User  
         list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
           (first will be X1, second X2 etc. If not specified will not alter layout)  
     &#39;&#39;&#39;
@@ -2312,16 +2584,13 @@ is instantiated in run</p></div>
     def run_protocol(simulate):
         pass
 
+    @Controller._error_exit
     def _run(self, port, simulate):
         &#39;&#39;&#39;
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -2407,6 +2676,7 @@ bool: True if all tests were passed</p></div>
 <ul class="hlist">
 <li><code><b><a title="controller.Controller" href="#controller.Controller">Controller</a></b></code>:
 <ul class="hlist">
+<li><code><a title="controller.Controller.ChemCacheEntry" href="#controller.Controller.ChemCacheEntry">ChemCacheEntry</a></code></li>
 <li><code><a title="controller.Controller.close_connection" href="#controller.Controller.close_connection">close_connection</a></code></li>
 <li><code><a title="controller.Controller.init_robot" href="#controller.Controller.init_robot">init_robot</a></code></li>
 <li><code><a title="controller.Controller.translate_wellmap" href="#controller.Controller.translate_wellmap">translate_wellmap</a></code></li>
@@ -2416,7 +2686,7 @@ bool: True if all tests were passed</p></div>
 </dd>
 <dt id="controller.Controller"><code class="flex name class">
 <span>class <span class="ident">Controller</span></span>
-<span>(</span><span>rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache')</span>
+<span>(</span><span>rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache')</span>
 </code></dt>
 <dd>
 <div class="desc"><p>This class is a shared interface for the ProtocolExecutor and the <strong><em>_</em>_AI</strong>Executor___
@@ -2458,13 +2728,13 @@ int buff_size: this is the size of the buffer between Armchair commands. It's si
 corresponds to the number of commands you want to pile up in the socket buffer.
 Really more for developers<br>
 PRIVATE ATTRS:<br>
-dict<str:tuple\<obj>> _cached_reader_locs: cache for chemical information from the robot<br>
+dict<str:ChemCacheEntry> _cached_reader_locs: chemical information from the robot
+ChemCacheEntry is a named tuple with below attributes
 The tuple has following structure:<br>
-0 str chem_name: the name of the well<br>
-1 str well_loc: the loc of the well on it's labware (translated to human if on pr)<br>
-2 int deck_pos: the position of the labware it's on<br>
-3 float vol: the volume in the container<br>
-4 float aspiratible_vol: the volume minus dead vol<br>
+str loc: the loc of the well on it's labware (translated to human if on pr)<br>
+int deck_pos: the position of the labware it's on<br>
+float vol: the volume in the container<br>
+float aspiratible_vol: the volume minus dead vol<br>
 CONSTANTS:<br>
 bidict<str:tuple\<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
 wellplate to locs on the opentrons object. Use a json viewer for more structural info<br>
@@ -2532,13 +2802,13 @@ is instantiated in run</p></div>
           corresponds to the number of commands you want to pile up in the socket buffer.
           Really more for developers  
     PRIVATE ATTRS:  
-        dict&lt;str:tuple&lt;obj&gt;&gt; _cached_reader_locs: cache for chemical information from the robot  
+        dict&lt;str:ChemCacheEntry&gt; _cached_reader_locs: chemical information from the robot
+            ChemCacheEntry is a named tuple with below attributes
             The tuple has following structure:  
-            0 str chem_name: the name of the well  
-            1 str well_loc: the loc of the well on it&#39;s labware (translated to human if on pr)  
-            2 int deck_pos: the position of the labware it&#39;s on  
-            3 float vol: the volume in the container  
-            4 float aspiratible_vol: the volume minus dead vol  
+            str loc: the loc of the well on it&#39;s labware (translated to human if on pr)  
+            int deck_pos: the position of the labware it&#39;s on  
+            float vol: the volume in the container  
+            float aspiratible_vol: the volume minus dead vol  
     CONSTANTS:  
         bidict&lt;str:tuple&lt;str,str&gt;&gt; PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info  
@@ -2560,7 +2830,9 @@ is instantiated in run</p></div>
     #Please do not read this. paste it into a nice json viewer.
     PLATEREADER_INDEX_TRANSLATOR = bidict({&#39;A1&#39;: (&#39;E1&#39;, &#39;platereader4&#39;), &#39;A2&#39;: (&#39;D1&#39;, &#39;platereader4&#39;), &#39;A3&#39;: (&#39;C1&#39;, &#39;platereader4&#39;), &#39;A4&#39;: (&#39;B1&#39;, &#39;platereader4&#39;), &#39;A5&#39;: (&#39;A1&#39;, &#39;platereader4&#39;), &#39;A12&#39;: (&#39;A1&#39;, &#39;platereader7&#39;), &#39;A11&#39;: (&#39;B1&#39;, &#39;platereader7&#39;), &#39;A10&#39;: (&#39;C1&#39;, &#39;platereader7&#39;), &#39;A9&#39;: (&#39;D1&#39;, &#39;platereader7&#39;), &#39;A8&#39;: (&#39;E1&#39;, &#39;platereader7&#39;), &#39;A7&#39;: (&#39;F1&#39;, &#39;platereader7&#39;), &#39;A6&#39;: (&#39;G1&#39;, &#39;platereader7&#39;), &#39;B1&#39;: (&#39;E2&#39;, &#39;platereader4&#39;), &#39;B2&#39;: (&#39;D2&#39;, &#39;platereader4&#39;), &#39;B3&#39;: (&#39;C2&#39;, &#39;platereader4&#39;), &#39;B4&#39;: (&#39;B2&#39;, &#39;platereader4&#39;), &#39;B5&#39;: (&#39;A2&#39;, &#39;platereader4&#39;), &#39;B6&#39;: (&#39;G2&#39;, &#39;platereader7&#39;), &#39;B7&#39;: (&#39;F2&#39;, &#39;platereader7&#39;), &#39;B8&#39;: (&#39;E2&#39;, &#39;platereader7&#39;), &#39;B9&#39;: (&#39;D2&#39;, &#39;platereader7&#39;), &#39;B10&#39;: (&#39;C2&#39;, &#39;platereader7&#39;), &#39;B11&#39;: (&#39;B2&#39;, &#39;platereader7&#39;), &#39;B12&#39;: (&#39;A2&#39;, &#39;platereader7&#39;), &#39;C1&#39;: (&#39;E3&#39;, &#39;platereader4&#39;), &#39;C2&#39;: (&#39;D3&#39;, &#39;platereader4&#39;), &#39;C3&#39;: (&#39;C3&#39;, &#39;platereader4&#39;), &#39;C4&#39;: (&#39;B3&#39;, &#39;platereader4&#39;), &#39;C5&#39;: (&#39;A3&#39;, &#39;platereader4&#39;), &#39;C6&#39;: (&#39;G3&#39;, &#39;platereader7&#39;), &#39;C7&#39;: (&#39;F3&#39;, &#39;platereader7&#39;), &#39;C8&#39;: (&#39;E3&#39;, &#39;platereader7&#39;), &#39;C9&#39;: (&#39;D3&#39;, &#39;platereader7&#39;), &#39;C10&#39;: (&#39;C3&#39;, &#39;platereader7&#39;), &#39;C11&#39;: (&#39;B3&#39;, &#39;platereader7&#39;), &#39;C12&#39;: (&#39;A3&#39;, &#39;platereader7&#39;), &#39;D1&#39;: (&#39;E4&#39;, &#39;platereader4&#39;), &#39;D2&#39;: (&#39;D4&#39;, &#39;platereader4&#39;), &#39;D3&#39;: (&#39;C4&#39;, &#39;platereader4&#39;), &#39;D4&#39;: (&#39;B4&#39;, &#39;platereader4&#39;), &#39;D5&#39;: (&#39;A4&#39;, &#39;platereader4&#39;), &#39;D6&#39;: (&#39;G4&#39;, &#39;platereader7&#39;), &#39;D7&#39;: (&#39;F4&#39;, &#39;platereader7&#39;), &#39;D8&#39;: (&#39;E4&#39;, &#39;platereader7&#39;), &#39;D9&#39;: (&#39;D4&#39;, &#39;platereader7&#39;), &#39;D10&#39;: (&#39;C4&#39;, &#39;platereader7&#39;), &#39;D11&#39;: (&#39;B4&#39;, &#39;platereader7&#39;), &#39;D12&#39;: (&#39;A4&#39;, &#39;platereader7&#39;), &#39;E1&#39;: (&#39;E5&#39;, &#39;platereader4&#39;), &#39;E2&#39;: (&#39;D5&#39;, &#39;platereader4&#39;), &#39;E3&#39;: (&#39;C5&#39;, &#39;platereader4&#39;), &#39;E4&#39;: (&#39;B5&#39;, &#39;platereader4&#39;), &#39;E5&#39;: (&#39;A5&#39;, &#39;platereader4&#39;), &#39;E6&#39;: (&#39;G5&#39;, &#39;platereader7&#39;), &#39;E7&#39;: (&#39;F5&#39;, &#39;platereader7&#39;), &#39;E8&#39;: (&#39;E5&#39;, &#39;platereader7&#39;), &#39;E9&#39;: (&#39;D5&#39;, &#39;platereader7&#39;), &#39;E10&#39;: (&#39;C5&#39;, &#39;platereader7&#39;), &#39;E11&#39;: (&#39;B5&#39;, &#39;platereader7&#39;), &#39;E12&#39;: (&#39;A5&#39;, &#39;platereader7&#39;), &#39;F1&#39;: (&#39;E6&#39;, &#39;platereader4&#39;), &#39;F2&#39;: (&#39;D6&#39;, &#39;platereader4&#39;), &#39;F3&#39;: (&#39;C6&#39;, &#39;platereader4&#39;), &#39;F4&#39;: (&#39;B6&#39;, &#39;platereader4&#39;), &#39;F5&#39;: (&#39;A6&#39;, &#39;platereader4&#39;), &#39;F6&#39;: (&#39;G6&#39;, &#39;platereader7&#39;), &#39;F7&#39;: (&#39;F6&#39;, &#39;platereader7&#39;), &#39;F8&#39;: (&#39;E6&#39;, &#39;platereader7&#39;), &#39;F9&#39;: (&#39;D6&#39;, &#39;platereader7&#39;), &#39;F10&#39;: (&#39;C6&#39;, &#39;platereader7&#39;), &#39;F11&#39;: (&#39;B6&#39;, &#39;platereader7&#39;), &#39;F12&#39;: (&#39;A6&#39;, &#39;platereader7&#39;), &#39;G1&#39;: (&#39;E7&#39;, &#39;platereader4&#39;), &#39;G2&#39;: (&#39;D7&#39;, &#39;platereader4&#39;), &#39;G3&#39;: (&#39;C7&#39;, &#39;platereader4&#39;), &#39;G4&#39;: (&#39;B7&#39;, &#39;platereader4&#39;), &#39;G5&#39;: (&#39;A7&#39;, &#39;platereader4&#39;), &#39;G6&#39;: (&#39;G7&#39;, &#39;platereader7&#39;), &#39;G7&#39;: (&#39;F7&#39;, &#39;platereader7&#39;), &#39;G8&#39;: (&#39;E7&#39;, &#39;platereader7&#39;), &#39;G9&#39;: (&#39;D7&#39;, &#39;platereader7&#39;), &#39;G10&#39;: (&#39;C7&#39;, &#39;platereader7&#39;), &#39;G11&#39;: (&#39;B7&#39;, &#39;platereader7&#39;), &#39;G12&#39;: (&#39;A7&#39;, &#39;platereader7&#39;), &#39;H1&#39;: (&#39;E8&#39;, &#39;platereader4&#39;), &#39;H2&#39;: (&#39;D8&#39;, &#39;platereader4&#39;), &#39;H3&#39;: (&#39;C8&#39;, &#39;platereader4&#39;), &#39;H4&#39;: (&#39;B8&#39;, &#39;platereader4&#39;), &#39;H5&#39;: (&#39;A8&#39;, &#39;platereader4&#39;), &#39;H6&#39;: (&#39;G8&#39;, &#39;platereader7&#39;), &#39;H7&#39;: (&#39;F8&#39;, &#39;platereader7&#39;), &#39;H8&#39;: (&#39;E8&#39;, &#39;platereader7&#39;), &#39;H9&#39;: (&#39;D8&#39;, &#39;platereader7&#39;), &#39;H10&#39;: (&#39;C8&#39;, &#39;platereader7&#39;), &#39;H11&#39;: (&#39;B8&#39;, &#39;platereader7&#39;), &#39;H12&#39;: (&#39;A8&#39;, &#39;platereader7&#39;)})
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path=&#39;Eve_Files&#39;, cache_path=&#39;Cache&#39;):
+    ChemCacheEntry = namedtuple(&#39;ChemCacheEntry&#39;,[&#39;loc&#39;,&#39;deck_pos&#39;,&#39;vol&#39;,&#39;aspirable_vol&#39;])
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path=&#39;Cache&#39;):
         &#39;&#39;&#39;
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -2570,9 +2842,9 @@ is instantiated in run</p></div>
         is instantiated in run
         &#39;&#39;&#39;
         #set according to input
-        self.cache_path = cache_path
+        self.cache_path=cache_path
+        self._make_cache()
         self.use_cache = use_cache
-        self._make_out_dirs(out_path)
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size=4
@@ -2580,6 +2852,19 @@ is instantiated in run</p></div>
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
+
+    def _error_exit(func):
+        &#39;&#39;&#39;
+        This is a decorator to wrap functions in error catching code. Methods with this
+        decorator call error_handler upon failure
+        &#39;&#39;&#39;
+        @functools.wraps(func)
+        def decorated(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                args[0]._error_handler(e)
+        return decorated
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         &#39;&#39;&#39;
@@ -2610,6 +2895,12 @@ is instantiated in run</p></div>
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
+    def _init_pr(self,simulate):
+        try:
+            self.pr = PlateReader(os.path.join(self.out_path, &#39;pr_data&#39;),simulate)
+        except:
+            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
+            self.pr = DummyReader(os.path.join(self.out_path, &#39;pr_data&#39;))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         &#39;&#39;&#39;
@@ -2631,20 +2922,35 @@ is instantiated in run</p></div>
         return data
 
 
-    def _make_out_dirs(self, out_path):
+    def _make_out_dirs(self, header_data):
         &#39;&#39;&#39;
         params:  
-            str out_path: the path for all files output by controller  
+            list&lt;list&lt;str&gt;&gt; header_data: data from the header  
         Postconditions:  
             All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist  
+            They are not overwritten if they already exist. paths variables of this class
+            have also been initialized
         &#39;&#39;&#39;
-        self.eve_files_path = os.path.join(out_path, &#39;Eve_Files&#39;)
-        self.debug_path = os.path.join(out_path, &#39;Debug&#39;)
-        paths = [out_path, self.eve_files_path, self.debug_path]
+
+        out_path = &#34;/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Protocol_Outputs&#34;
+        if not os.path.exists(out_path):
+            #not on the laptop
+            out_path = &#39;./Controller_Out&#39;
+        #get the root folder
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        data_dir = header_dict[&#39;data_dir&#39;]
+        self.out_path = os.path.join(out_path, data_dir)
+        #if the folder doesn&#39;t exist yet, make it
+        self.eve_files_path = os.path.join(self.out_path, &#39;Eve_Files&#39;)
+        self.debug_path = os.path.join(self.out_path, &#39;Debug&#39;)
+        paths = [self.out_path, self.eve_files_path, self.debug_path]
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+
+    def _make_cache(self):
+        if not os.path.exists(self.cache_path):
+            os.path.makedirs(self.cache_path)
 
     def _init_credentials(self, rxn_sheet_name):
         &#39;&#39;&#39;
@@ -2722,6 +3028,25 @@ is instantiated in run</p></div>
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params[&#39;using_temp_ctrl&#39;] = header_dict[&#39;using_temp_ctrl&#39;] == &#39;yes&#39;
         self.robo_params[&#39;temp&#39;] = float(header_dict[&#39;temp&#39;]) if self.robo_params[&#39;using_temp_ctrl&#39;] else None
+
+    def _plot_setup_overlay(name):
+        &#39;&#39;&#39;
+        Sets up a figure for an overlay plot
+        &#39;&#39;&#39;
+        #formats the figure nicely
+        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor=&#39;w&#39;, edgecolor=&#39;k&#39;)
+        plt.legend(loc=&#34;upper right&#34;,frameon = False, prop={&#34;size&#34;:7},labelspacing = 0.5)
+        plt.rc(&#39;axes&#39;, linewidth = 2)
+        plt.xlabel(&#39;Wavelength (nm)&#39;,fontsize = 16, fontfamily = &#39;Arial&#39;,fontname=&#34;Arial&#34;)
+        plt.ylabel(&#39;Absorbance (a.u.)&#39;, fontsize = 16,fontname=&#34;Arial&#34;)
+        plt.tick_params(axis = &#34;both&#34;, width = 2)
+        plt.tick_params(axis = &#34;both&#34;, width = 2)
+        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.yticks([i/10 for i in range(0,11,1)])
+        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.xticks(fontsize = 10)
+        plt.yticks(fontsize = 10)
+        plt.title(str(name), fontsize = 16, pad = 20,fontname=&#34;Arial&#34;)
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         &#39;&#39;&#39;
@@ -2897,6 +3222,41 @@ is instantiated in run</p></div>
             return &#34;{}C{}&#34;.format(row[&#39;reagent&#39;], row[&#39;conc&#39;]).replace(&#39; &#39;, &#39;_&#39;)
         return pd.Series(new_cols)
 
+    def _load_reader_data(filename):
+        &#39;&#39;&#39;
+        #TODO this is outdated should mostly be burden shifted to platereader
+        given a filename, returns the scan data  
+        params:  
+            str filename: the name of the file to read  
+        retunrs:  
+            df: columns are the wells, rows are absorbances.  
+        Preconditions:
+            the entrys for all of the wells in the scan must be in the cache. If you
+            scanned using the controller, this was already done.  
+        &#39;&#39;&#39;
+        # Read data ignoring first 50 lines
+        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=[&#34;       -&#34;],encoding = &#39;latin1&#39;).T
+        headers = [x[:-1] for x in df.columns]
+        #Note no read to query the cache because these were all scanned
+        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
+                if entry.deck_pos in [4,7]}
+        #converting to chemical names instead of locs on wellplate
+        headers = [pr_dict[header] for header in headers]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df
+
+    def save(self):
+        self.portal.send_pack(&#39;save&#39;)
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
+
     def close_connection(self):
         &#39;&#39;&#39;
         runs through closing procedure with robot    
@@ -2905,28 +3265,11 @@ is instantiated in run</p></div>
             Connection has been closed  
         &#39;&#39;&#39;
         print(&#39;&lt;&lt;controller&gt;&gt; initializing breakdown&#39;)
-        self.portal.send_pack(&#39;close&#39;)
-        #server will initiate file transfer
-        pack_type, cid, arguments = self.portal.recv_pack()
-        while pack_type == &#39;ready&#39;:
-            #spin through all the queued ready packets
-            pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == &#39;sending_files&#39;)
-        port = arguments[0]
-        filenames = arguments[1]
-        sock = socket.socket(socket.AF_INET)
-        sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-        for filename in filenames:
-            with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
-                data = buffered_sock.recv_until(armchair.FTP_EOF)
-                write_file.write(data)
-        self.translate_wellmap()
-        print(&#39;&lt;&lt;controller&gt;&gt; files recieved&#39;)
-        sock.close()
+        self.save()
         #server should now send a close command
-        pack_type, cid, arguments = self.portal.recv_pack()
-        assert(pack_type == &#39;close&#39;)
+        self.portal.send_pack(&#39;close&#39;)
+        #pack_type, cid, arguments = self.portal.recv_pack()
+        #assert(pack_type == &#39;close&#39;)
         print(&#39;&lt;&lt;controller&gt;&gt; shutting down&#39;)
         self.portal.close()
     
@@ -2959,11 +3302,27 @@ is instantiated in run</p></div>
                 self.robo_params[&#39;dry_containers&#39;].to_dict())
 
     @abstractmethod
-    def run_simulation():
+    def run_simulation(self):
         pass
+
     @abstractmethod
-    def run_protocol(simulate):
-        pass</code></pre>
+    def run_protocol(self,simulate):
+        pass
+
+
+    def _error_handler(self, e):
+        &#39;&#39;&#39;
+        When an error is thrown from a public method, it will be sent here and handled
+        &#39;&#39;&#39;
+        try:
+            #handle the error
+            print(&#39;uh oh. I got an error!&#39;)
+        except Exception as handle_e:
+            #failed to handle error
+            print(&#34;&lt;&lt;controller&gt;&gt; Experienced {} error while trying to handle error. Aborting \
+                    graceful exit.&#34;)
+        finally:
+            raise e</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
@@ -2976,6 +3335,10 @@ is instantiated in run</p></div>
 </ul>
 <h3>Class variables</h3>
 <dl>
+<dt id="controller.Controller.ChemCacheEntry"><code class="name">var <span class="ident">ChemCacheEntry</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
 <dt id="controller.Controller.PLATEREADER_INDEX_TRANSLATOR"><code class="name">var <span class="ident">PLATEREADER_INDEX_TRANSLATOR</span></code></dt>
 <dd>
 <div class="desc"></div>
@@ -3005,28 +3368,11 @@ Connection has been closed</p></div>
         Connection has been closed  
     &#39;&#39;&#39;
     print(&#39;&lt;&lt;controller&gt;&gt; initializing breakdown&#39;)
-    self.portal.send_pack(&#39;close&#39;)
-    #server will initiate file transfer
-    pack_type, cid, arguments = self.portal.recv_pack()
-    while pack_type == &#39;ready&#39;:
-        #spin through all the queued ready packets
-        pack_type, cid, arguments = self.portal.recv_pack()
-    assert(pack_type == &#39;sending_files&#39;)
-    port = arguments[0]
-    filenames = arguments[1]
-    sock = socket.socket(socket.AF_INET)
-    sock.connect((self.server_ip, port))
-    buffered_sock = BufferedSocket(sock,maxsize=4e9) #file better not be bigger than 4GB
-    for filename in filenames:
-        with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
-            data = buffered_sock.recv_until(armchair.FTP_EOF)
-            write_file.write(data)
-    self.translate_wellmap()
-    print(&#39;&lt;&lt;controller&gt;&gt; files recieved&#39;)
-    sock.close()
+    self.save()
     #server should now send a close command
-    pack_type, cid, arguments = self.portal.recv_pack()
-    assert(pack_type == &#39;close&#39;)
+    self.portal.send_pack(&#39;close&#39;)
+    #pack_type, cid, arguments = self.portal.recv_pack()
+    #assert(pack_type == &#39;close&#39;)
     print(&#39;&lt;&lt;controller&gt;&gt; shutting down&#39;)
     self.portal.close()</code></pre>
 </details>
@@ -3061,7 +3407,7 @@ robot has been initialized with necessary params</p></div>
 </details>
 </dd>
 <dt id="controller.Controller.run_protocol"><code class="name flex">
-<span>def <span class="ident">run_protocol</span></span>(<span>simulate)</span>
+<span>def <span class="ident">run_protocol</span></span>(<span>self, simulate)</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -3070,12 +3416,12 @@ robot has been initialized with necessary params</p></div>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@abstractmethod
-def run_protocol(simulate):
+def run_protocol(self,simulate):
     pass</code></pre>
 </details>
 </dd>
 <dt id="controller.Controller.run_simulation"><code class="name flex">
-<span>def <span class="ident">run_simulation</span></span>(<span>)</span>
+<span>def <span class="ident">run_simulation</span></span>(<span>self)</span>
 </code></dt>
 <dd>
 <div class="desc"></div>
@@ -3084,8 +3430,27 @@ def run_protocol(simulate):
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">@abstractmethod
-def run_simulation():
+def run_simulation(self):
     pass</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.save"><code class="name flex">
+<span>def <span class="ident">save</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def save(self):
+    self.portal.send_pack(&#39;save&#39;)
+    #server will initiate file transfer
+    files = self.portal.recv_ftp()
+    for filename, file_bytes in files:
+        with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
+            write_file.write(file_bytes)
+    self.translate_wellmap()</code></pre>
 </details>
 </dd>
 <dt id="controller.Controller.translate_wellmap"><code class="name flex">
@@ -3120,6 +3485,7 @@ it's locations translated to human locs, but the labware pos remains the same</p
 </dd>
 <dt id="controller.DummyReader"><code class="flex name class">
 <span>class <span class="ident">DummyReader</span></span>
+<span>(</span><span>data_path)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
@@ -3146,6 +3512,7 @@ anything. useful for some simulations</p></div>
 <ul class="hlist">
 <li><code><a title="controller.AbstractPlateReader.edit_layout" href="#controller.AbstractPlateReader.edit_layout">edit_layout</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.exec_macro" href="#controller.AbstractPlateReader.exec_macro">exec_macro</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.run_protocol" href="#controller.AbstractPlateReader.run_protocol">run_protocol</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
@@ -3155,7 +3522,7 @@ anything. useful for some simulations</p></div>
 </dd>
 <dt id="controller.PlateReader"><code class="flex name class">
 <span>class <span class="ident">PlateReader</span></span>
-<span>(</span><span>simulate=False)</span>
+<span>(</span><span>data_path, simulate=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>This class handles all platereader interactions. Inherits from the interface</p></div>
@@ -3168,10 +3535,14 @@ anything. useful for some simulations</p></div>
     This class handles all platereader interactions. Inherits from the interface
     &#39;&#39;&#39;
     SPECTRO_ROOT_PATH = &#34;/mnt/c/Program Files/SPECTROstar Nano V5.50/&#34;
-    SPECTRO_ROOT_PATH_WIN = &#34;C:\Program Files\SPECTROstar Nano V5.50&#34;
     PROTOCOL_PATH = r&#34;C:\Program Files\SPECTROstar Nano V5.50\User\Definit&#34;
+    SPECTRO_DATA_PATH = &#34;/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data&#34;
 
-    def __init__(self, simulate=False):
+    def __init__(self, data_path, simulate=False):
+        self.data_path = data_path
+        self.simulate = simulate
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
         input(&#39;&lt;&lt;Reader&gt;&gt; initializing. Please ensure that the software is closed. Press enter to continue&#39;)
         self._set_config_attr(&#39;Configuration&#39;,&#39;SimulationMode&#39;, str(int(simulate)))
         self._set_config_attr(&#39;ControlApp&#39;,&#39;AsDDEserver&#39;, &#39;True&#39;)
@@ -3218,6 +3589,64 @@ anything. useful for some simulations</p></div>
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
+    def load_reader_data(self,filename, loc_to_name):
+        &#39;&#39;&#39;
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        params:  
+            str filename: the name of the file to read  
+            dict&lt;str:str&gt; loc_to_name: maps location to name of reaction  
+        returns:  
+            df: the scan data for that file  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        &#39;&#39;&#39;
+        #parse the metadata
+        start_i, metadata = self._parse_metadata(filename, self.data_path)
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=[&#34;       -&#34;],encoding = &#39;latin1&#39;).T
+        headers = [loc_to_name[x[:-1]] for x in df.columns]
+        df.columns = headers
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df, metadata
+
+    def _parse_metadata(self, filename):
+        &#39;&#39;&#39;
+        parses the meta data of a platereader output, and returns a dataframe of the scans
+        and a dictionary of parameters  
+        params:  
+            str filename: the name of the file to be read  
+        returns:  
+            int: the index to start reading the dataframe at  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        &#39;&#39;&#39;
+        found_start = False
+        i = 0
+        n_cycles = None
+        line = &#39;dowhile&#39;
+        with open(os.path.join(self.data_path,filename), &#39;r&#39;,encoding=&#39;latin1&#39;) as file:
+            while not found_start and line != &#39;&#39;:
+                line = file.readline()
+                if bool(re.match(r&#39;No\. of Cycles:&#39;,line)):
+                    #is number of cycles
+                    n_cycles = int((re.search(r&#39;\d+&#39;, line)).group(0))
+                if line[:6] == &#39;T[°C]:&#39;:
+                    while not bool(re.match(&#39;\D\d&#39;,line)) and line != &#39;&#39;:
+                        #is not of form A1/B03 etc
+                        line = file.readline()
+                        i += 1
+                    i -= 1 #cause you will increment once more 
+                    found_start = True
+                i+=1
+        assert (line != &#39;&#39;), &#34;corrupt reader file. ran out of file to read before finding a scanned well&#34;
+        assert (n_cycles != None), &#34;corrupt reader file. num cycles not found.&#34;
+        return i, {&#39;n_cycles&#39;:n_cycles,&#39;filename&#39;:filename}
+
     def edit_layout(self, protocol_name, layout):
         &#39;&#39;&#39;
         This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
@@ -3239,7 +3668,7 @@ anything. useful for some simulations</p></div>
         for i, well in enumerate(layout):
             well_entries.append(&#34;{}=X{}&#34;.format(well, i+1))
         filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,&#39;.temp_ot2_bmg_layout.lb&#39;)
-        filepath_win = os.path.join(self.SPECTRO_ROOT_PATH_WIN,&#39;.temp_ot2_bmg_layout.lb&#39;)
+        filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,&#39;w&#39;),&#39;.temp_ot2_bmg_layout.lb&#39;)
         with open(filepath_lin, &#39;w+&#39;) as layout:
             layout.write(&#39;EmptyLayout&#39;)
             for entry in well_entries:
@@ -3247,21 +3676,24 @@ anything. useful for some simulations</p></div>
         self.exec_macro(&#39;ImportLayout&#39;, protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, data_path=r&#34;G:\Shared drives\Hendricks Lab Drive\Opentrons_Reactions\Plate Reader Data&#34;, layout=None):
+    def run_protocol(self, protocol_name, filename, layout=None):
         r&#39;&#39;&#39;
         params:  
             str protocol_name: the name of the protocol that will be edited  
-            str data_path: windows path raw string. no quotes on outside. e.g.
-              C:\Program Files\SPECTROstar Nano V5.50\User  
             list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         &#39;&#39;&#39;
         if layout:
             self.edit_layout(protocol_name, layout)
         macro = &#39;run&#39;
-        data_path = data_path
         #three &#39;&#39; are plate ids to pad. data_path specified once for ascii and once for other
-        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, data_path, &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,&#39;w&#39;), &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+        #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+        #that, so we move it from the default landing zone to where I actually want it
+        if not self.simulate:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, &#34;{}.csv&#34;.format(filename)), 
+                    os.path.join(self.data_path, &#34;{}.csv&#34;.format(filename)))
+
 
     def _set_config_attr(self, header, attr, val):
         &#39;&#39;&#39;
@@ -3331,11 +3763,11 @@ anything. useful for some simulations</p></div>
 <dd>
 <div class="desc"></div>
 </dd>
-<dt id="controller.PlateReader.SPECTRO_ROOT_PATH"><code class="name">var <span class="ident">SPECTRO_ROOT_PATH</span></code></dt>
+<dt id="controller.PlateReader.SPECTRO_DATA_PATH"><code class="name">var <span class="ident">SPECTRO_DATA_PATH</span></code></dt>
 <dd>
 <div class="desc"></div>
 </dd>
-<dt id="controller.PlateReader.SPECTRO_ROOT_PATH_WIN"><code class="name">var <span class="ident">SPECTRO_ROOT_PATH_WIN</span></code></dt>
+<dt id="controller.PlateReader.SPECTRO_ROOT_PATH"><code class="name">var <span class="ident">SPECTRO_ROOT_PATH</span></code></dt>
 <dd>
 <div class="desc"></div>
 </dd>
@@ -3382,7 +3814,7 @@ The protocol has had it's layout updated to include only the wells specified</p>
     for i, well in enumerate(layout):
         well_entries.append(&#34;{}=X{}&#34;.format(well, i+1))
     filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,&#39;.temp_ot2_bmg_layout.lb&#39;)
-    filepath_win = os.path.join(self.SPECTRO_ROOT_PATH_WIN,&#39;.temp_ot2_bmg_layout.lb&#39;)
+    filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,&#39;w&#39;),&#39;.temp_ot2_bmg_layout.lb&#39;)
     with open(filepath_lin, &#39;w+&#39;) as layout:
         layout.write(&#39;EmptyLayout&#39;)
         for entry in well_entries:
@@ -3442,6 +3874,7 @@ an error will be thrown</p></div>
 <ul class="hlist">
 <li><code><b><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></b></code>:
 <ul class="hlist">
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.run_protocol" href="#controller.AbstractPlateReader.run_protocol">run_protocol</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
@@ -3451,7 +3884,7 @@ an error will be thrown</p></div>
 </dd>
 <dt id="controller.ProtocolExecutor"><code class="flex name class">
 <span>class <span class="ident">ProtocolExecutor</span></span>
-<span>(</span><span>rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache')</span>
+<span>(</span><span>rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>class to execute a protocol from the docs<br>
@@ -3523,7 +3956,7 @@ is instantiated in run</p></div>
         translate_wellmap() void, run_simulation() bool  
     &#39;&#39;&#39;
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path=&#39;Eve_Files&#39;, cache_path=&#39;Cache&#39;):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False):
         &#39;&#39;&#39;
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -3532,7 +3965,7 @@ is instantiated in run</p></div>
         NOte that pr cannot be initialized until you know if you&#39;re simulating or not, so it
         is instantiated in run
         &#39;&#39;&#39;
-        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
         #necessary helper params
         credentials = self._init_credentials(rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -3541,6 +3974,7 @@ is instantiated in run</p></div>
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
+        self._make_out_dirs(header_data)
         self.rxn_df = self._load_rxn_df(input_data)
         self._query_reagents(wks_key, credentials)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
@@ -3605,16 +4039,13 @@ is instantiated in run</p></div>
         self._run(port, simulate=simulate)
         print(&#39;&lt;&lt;controller&gt;&gt; EXITING PROTOCOL&#39;)
         
+    @Controller._error_exit
     def _run(self, port, simulate):
         &#39;&#39;&#39;
         Returns:  
             bool: True if all tests were passed  
         &#39;&#39;&#39;
-        try:
-            self.pr = PlateReader(simulate)
-        except:
-            print(&#39;&lt;&lt;controller&gt;&gt; failed to initialize platereader, initializing dummy reader&#39;)
-            self.pr = DummyReader()
+        self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -3828,6 +4259,8 @@ is instantiated in run</p></div>
                 self._mix(row, i)
             elif row[&#39;op&#39;] == &#39;make&#39;:
                 self._send_make(row, i)
+            elif row[&#39;op&#39;] == &#39;save&#39;:
+                self.save()
             else:
                 raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))
 
@@ -3861,30 +4294,44 @@ is instantiated in run</p></div>
         self.portal.burn_pipe()
         #3)
         wellnames = row[self._products][row[self._products].astype(bool)].index
+        self._query_wells(wellnames)
         #4)
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
-        if unknown_wellnames:
-            #4a
-            #couldn&#39;t find in the cache, so we got to make a query
-            self.portal.send_pack(&#39;loc_req&#39;, unknown_wellnames)
-            #4b
-            pack_type, _, payload = self.portal.recv_pack()
-            assert (pack_type == &#39;loc_resp&#39;), &#39;was expecting loc_resp but recieved {}&#39;.format(pack_type)
-            #4c
-            returned_well_locs = payload[0]
-            #update the cache
-            for well_entry in returned_well_locs:
-                self._cached_reader_locs[well_entry[0]] = (self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],&#39;platereader{}&#39;.format(well_entry[2]))],)+well_entry[2:]
         #update the locs on the well
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
-            assert (entry[1] == 4 or entry[1] == 7), &#34;tried to scan {}, but {} is on {} in deck pos {}&#34;.format(well, well, entry[0], entry[1])
-            assert (math.isclose(entry[2], 200)), &#34;tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan&#34;.format(well, well, entry[2])
-            well_locs.append(entry[0])
+            assert (entry.deck_pos in [4,7]), &#34;tried to scan {}, but {} is on {} in deck pos {}&#34;.format(well, well, entry.deck_pos, entry.loc)
+            assert (math.isclose(entry.vol, 200)), &#34;tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan&#34;.format(well, well, entry.vol)
+            well_locs.append(entry.loc)
         #5
         self.pr.exec_macro(&#39;PlateIn&#39;)
         self.pr.run_protocol(row[&#39;scan_protocol&#39;], row[&#39;scan_filename&#39;], layout=well_locs)
         self.pr.exec_macro(&#39;PlateOut&#39;)
+
+    def _query_wells(self, wellnames):
+        &#39;&#39;&#39;
+        checks the cache to see if wellnames are in the cache. If they aren&#39;t, a query will be
+        made to Eve for the wellnames, and data for those will be stored in the cache  
+        params:  
+            list&lt;str&gt; wellnames: the names of the wells you want to lookup  
+        Postconditions:  
+            The wellnames are in the cache  
+        &#39;&#39;&#39;
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
+        if unknown_wellnames:
+            #couldn&#39;t find in the cache, so we got to make a query
+            self.portal.send_pack(&#39;loc_req&#39;, unknown_wellnames)
+            pack_type, _, payload = self.portal.recv_pack()
+            assert (pack_type == &#39;loc_resp&#39;), &#39;was expecting loc_resp but recieved {}&#39;.format(pack_type)
+            returned_well_locs = payload[0]
+            #update the cache
+            for well_entry in returned_well_locs:
+                if well_entry[2] in [4,7]:
+                    #is on reader. Need to translate index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],&#39;platereader{}&#39;.format(well_entry[2]))],)+well_entry[2:])
+                else:
+                    #not on reader, just use vanilla index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
+
 
     def _mix(self,row,i):
         &#39;&#39;&#39;
@@ -3893,11 +4340,37 @@ is instantiated in run</p></div>
         things that aren&#39;t on the platereader, in which case a new argument should be made in 
         excel for the wells to scan, and we should make a function to pipette mix.
         &#39;&#39;&#39;
-        self.portal.send_pack(&#39;home&#39;)
-        self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
-        self.pr.exec_macro(&#39;PlateIn&#39;)
-        self.pr.shake()
-        self.pr.exec_macro(&#39;PlateOut&#39;)
+        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
+        wells_to_mix.name = &#39;mix_code&#39;
+        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
+        self._query_wells(wells_to_mix.index)
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
+                wellname in wells_to_mix.index}, name=&#39;deck_pos&#39;)
+        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
+        #get platereader rows. true if pr
+        wells_to_mix_df[&#39;platereader&#39;] = wells_to_mix_df[&#39;deck_pos&#39;].apply(lambda x: x in [4,7]) 
+        if wells_to_mix_df[&#39;platereader&#39;].sum() &gt; 0:
+            #TODO technically, you could be mixing the other stuff by hand while you&#39;re mixing
+            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
+            #platereader because of a bug, Mark will be mad, so apart for now. After testing
+            #you should burn pipe, then send the handmix command, then mix the platereader
+            #to multitask
+
+            #at least one well nees a shake
+            self.portal.send_pack(&#39;home&#39;)
+            self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
+            self.pr.exec_macro(&#39;PlateIn&#39;)
+            self.pr.shake()
+            self.pr.exec_macro(&#39;PlateOut&#39;)
+        if (~wells_to_mix_df[&#39;platereader&#39;]).sum() &gt; 0:
+            #at least one needs to be mixed by hand
+            #still df
+            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df[&#39;platereader&#39;]].reset_index()
+            #convert to list of tuples
+            hand_mix_wells = [tuple(t) for t in hand_mix_wells[[&#39;index&#39;,&#39;mix_code&#39;]].itertuples(index=False)]
+            self.portal.send_pack(&#39;mix&#39;, hand_mix_wells)
+            
+
 
     def _send_dilution_commands(self,row,i):
         &#39;&#39;&#39;
@@ -4086,7 +4559,7 @@ is instantiated in run</p></div>
                 print(&#34;&lt;&lt;controller&gt;&gt; You executed a transfer step in row {}, but you did not transfer any volume.&#34;.format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you&#39;re transfering
-            if r[&#39;op&#39;] == &#39;transfer&#39; and not r[&#39;reagent&#39;]:
+            if r[&#39;op&#39;] == &#39;transfer&#39; and pd.isna(r[&#39;reagent&#39;]):
                 print(&#39;&lt;&lt;controller&gt;&gt; transfer specified without reagent in row {}&#39;.format(r_num))
                 found_errors = max(found_errors,2)
         return found_errors
@@ -4156,7 +4629,7 @@ is instantiated in run</p></div>
         for i, row in labware_w_empties.iterrows():
             for loc in row[&#39;empty_list&#39;].replace(&#39; &#39;,&#39;&#39;).split(&#39;,&#39;):
                 loc_pos_empty_pairs.append((loc, row[&#39;deck_pos&#39;]))
-        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
         loc_deck_pos_pairs = self.robo_params[&#39;reagent_df&#39;].apply(lambda r: (r[&#39;loc&#39;], r[&#39;deck_pos&#39;]),axis=1)
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
@@ -4558,7 +5031,7 @@ code:<br>
     for i, row in labware_w_empties.iterrows():
         for loc in row[&#39;empty_list&#39;].replace(&#39; &#39;,&#39;&#39;).split(&#39;,&#39;):
             loc_pos_empty_pairs.append((loc, row[&#39;deck_pos&#39;]))
-    loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs)
+    loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
     loc_deck_pos_pairs = self.robo_params[&#39;reagent_df&#39;].apply(lambda r: (r[&#39;loc&#39;], r[&#39;deck_pos&#39;]),axis=1)
     loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
     val_counts = loc_deck_pos_pairs.value_counts()
@@ -4609,7 +5082,7 @@ code:<br>
             print(&#34;&lt;&lt;controller&gt;&gt; You executed a transfer step in row {}, but you did not transfer any volume.&#34;.format(r_num))
             found_errors = max(found_errors, 1)
         #check that you have a reagent if you&#39;re transfering
-        if r[&#39;op&#39;] == &#39;transfer&#39; and not r[&#39;reagent&#39;]:
+        if r[&#39;op&#39;] == &#39;transfer&#39; and pd.isna(r[&#39;reagent&#39;]):
             print(&#39;&lt;&lt;controller&gt;&gt; transfer specified without reagent in row {}&#39;.format(r_num))
             found_errors = max(found_errors,2)
     return found_errors</code></pre>
@@ -4653,6 +5126,8 @@ every step in the protocol has been sent to the robot</p></div>
             self._mix(row, i)
         elif row[&#39;op&#39;] == &#39;make&#39;:
             self._send_make(row, i)
+        elif row[&#39;op&#39;] == &#39;save&#39;:
+            self.save()
         else:
             raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))</code></pre>
 </details>
@@ -4925,6 +5400,7 @@ bool: True if all tests were passed</p></div>
 <ul class="hlist">
 <li><code><b><a title="controller.Controller" href="#controller.Controller">Controller</a></b></code>:
 <ul class="hlist">
+<li><code><a title="controller.Controller.ChemCacheEntry" href="#controller.Controller.ChemCacheEntry">ChemCacheEntry</a></code></li>
 <li><code><a title="controller.Controller.close_connection" href="#controller.Controller.close_connection">close_connection</a></code></li>
 <li><code><a title="controller.Controller.translate_wellmap" href="#controller.Controller.translate_wellmap">translate_wellmap</a></code></li>
 </ul>
@@ -4957,6 +5433,7 @@ bool: True if all tests were passed</p></div>
 <li><code><a title="controller.AbstractPlateReader.SPECTRO_ROOT_PATH" href="#controller.AbstractPlateReader.SPECTRO_ROOT_PATH">SPECTRO_ROOT_PATH</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.edit_layout" href="#controller.AbstractPlateReader.edit_layout">edit_layout</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.exec_macro" href="#controller.AbstractPlateReader.exec_macro">exec_macro</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.run_protocol" href="#controller.AbstractPlateReader.run_protocol">run_protocol</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
 <li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
@@ -4972,11 +5449,13 @@ bool: True if all tests were passed</p></div>
 <li>
 <h4><code><a title="controller.Controller" href="#controller.Controller">Controller</a></code></h4>
 <ul class="">
+<li><code><a title="controller.Controller.ChemCacheEntry" href="#controller.Controller.ChemCacheEntry">ChemCacheEntry</a></code></li>
 <li><code><a title="controller.Controller.PLATEREADER_INDEX_TRANSLATOR" href="#controller.Controller.PLATEREADER_INDEX_TRANSLATOR">PLATEREADER_INDEX_TRANSLATOR</a></code></li>
 <li><code><a title="controller.Controller.close_connection" href="#controller.Controller.close_connection">close_connection</a></code></li>
 <li><code><a title="controller.Controller.init_robot" href="#controller.Controller.init_robot">init_robot</a></code></li>
 <li><code><a title="controller.Controller.run_protocol" href="#controller.Controller.run_protocol">run_protocol</a></code></li>
 <li><code><a title="controller.Controller.run_simulation" href="#controller.Controller.run_simulation">run_simulation</a></code></li>
+<li><code><a title="controller.Controller.save" href="#controller.Controller.save">save</a></code></li>
 <li><code><a title="controller.Controller.translate_wellmap" href="#controller.Controller.translate_wellmap">translate_wellmap</a></code></li>
 </ul>
 </li>
@@ -4987,8 +5466,8 @@ bool: True if all tests were passed</p></div>
 <h4><code><a title="controller.PlateReader" href="#controller.PlateReader">PlateReader</a></code></h4>
 <ul class="">
 <li><code><a title="controller.PlateReader.PROTOCOL_PATH" href="#controller.PlateReader.PROTOCOL_PATH">PROTOCOL_PATH</a></code></li>
+<li><code><a title="controller.PlateReader.SPECTRO_DATA_PATH" href="#controller.PlateReader.SPECTRO_DATA_PATH">SPECTRO_DATA_PATH</a></code></li>
 <li><code><a title="controller.PlateReader.SPECTRO_ROOT_PATH" href="#controller.PlateReader.SPECTRO_ROOT_PATH">SPECTRO_ROOT_PATH</a></code></li>
-<li><code><a title="controller.PlateReader.SPECTRO_ROOT_PATH_WIN" href="#controller.PlateReader.SPECTRO_ROOT_PATH_WIN">SPECTRO_ROOT_PATH_WIN</a></code></li>
 <li><code><a title="controller.PlateReader.edit_layout" href="#controller.PlateReader.edit_layout">edit_layout</a></code></li>
 <li><code><a title="controller.PlateReader.exec_macro" href="#controller.PlateReader.exec_macro">exec_macro</a></code></li>
 </ul>

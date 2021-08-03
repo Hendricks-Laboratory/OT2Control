@@ -43,7 +43,7 @@ from boltons.socketutils import BufferedSocket
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
-import df_utils
+from df_utils import *
 
 #CONTAINERS
 class Container(ABC):
@@ -155,12 +155,12 @@ class Tube20000uL(Container):
     DEAD_VOL = 2000
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, labware, mass=6.6699, conc=1):
+    def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
         '''
         mass is defaulted to the avg_mass so that there is nothing in the container
         '''
         density_water_25C = 0.9970479 # g/mL
-        avg_tube_mass15 = 6.6699 # grams
+        avg_tube_mass15 = 6.9731 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
         assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
@@ -967,6 +967,7 @@ class OT2Robot():
     _exec_init_containers.priority['platereader4'] = 1
     _exec_init_containers.priority['platereader7'] = 2
 
+    @error_exit
     def execute(self, command_type, cid, arguments):
         '''
         takes the packet type and payload of an Armchair packet, and executes the command  
@@ -1011,8 +1012,11 @@ class OT2Robot():
             self._exec_mix(arguments[0])
             self.portal.send_pack('ready', cid)
             return 1
+        elif command_type == 'save':
+            self._exec_save()
+            return 1
         elif command_type == 'close':
-            self._exec_close()
+            self._exec_close(cid) #will be acked in func
             return 0
         else:
             raise Exception("Unidenified command {}".format(pack_type))
@@ -1059,10 +1063,12 @@ class OT2Robot():
         pipette.well_bottom_clearance.dispense = cont.asp_height
         #do the actual mix
         for i in range(2**mix_code):
+            pipette.mix(1,20,well)
             for j in range(3):
                 pipette.touch_tip(radius=0.75,speed=40)
+                pass
             pipette.blow_out()
-            pipette.mix(1,20,well)
+        
         #pull a little out of that well and shake off the drops
         #TODO my assumption is that this will blow out above, but could be wrong
         pipette.well_bottom_clearance.dispense = cont.disp_height
@@ -1388,7 +1394,7 @@ class OT2Robot():
         '''
         pass
 
-    def _exec_close(self):
+    def _exec_close(self, cid):
         '''
         close the connection in a nice way
         '''
@@ -1397,44 +1403,37 @@ class OT2Robot():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
         self.protocol.home()
+        self.portal.send_pack('ready', cid)
+        #kill link
+        print('<<eve>> shutting down')
+        self.portal.close()
+
+    def _exec_save(self):
+        '''
+        saves state, and then ships files back to controller over FTP  
+        '''
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
         self.dump_well_map()
         #ship logs
         filenames = list(os.listdir(self.logs_p))
-        port = 50001 #default port for ftp 
-        self._send_files(port, filenames)
-        #kill link
-        print('<<eve>> shutting down')
-        self.portal.send_pack('close')
-        self.portal.close()
-
-    def _send_files(self,port,filenames):
-        '''
-        used to ship files back to server  
-        params:  
-            int port: the port number to ship the files out of  
-            list<str> filepaths: the filepaths to ship  
-        '''
-        #setting up a socket for FTP
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, port))
-        sock.listen(5)
-        #send ok to server that you are ready to accept
-        print('<<eve>> initializing filetransfer')
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_pack('sending_files', port, filenames)
-        client_sock, client_addr = sock.accept()
-        for filepath in filepaths:
-            with open(filepath,'rb') as local_file:
-                client_sock.sendfile(local_file)
-                client_sock.send(armchair.FTP_EOF)
-            #wait until client has sent that they're ready to recieve again
-        client_sock.close()
-        sock.close()
-
+        self.portal.send_ftp(filepaths)
+        
+    def _error_handler(self, e):
+        try:
+            print('''<<eve>> ----------------Eve Errror--------------
+            Sending Error packet''')
+            self.portal.send_pack('error', e)
+            print('<<eve>> Waiting on close')
+            self.portal.recv_first('save')
+            self._exec_save()
+            pack_type, cid, payload = self.portal.recv_first('close')
+            self._exec_close(cid)
+        finally:
+            time.sleep(2) #this is just for printing format. Not critical
+            raise e
 
 def launch_eve_server(**kwargs):
     '''

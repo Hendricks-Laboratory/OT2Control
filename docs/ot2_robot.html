@@ -744,14 +744,19 @@ class OT2Robot():
             + vals are lists of tuples&lt;Container, float, float&gt; correspoding to the container
               it&#39;s in, the mass of the powder W/O CONTAINER, and the molar mass  
         &#39;&#39;&#39;
-        #initialize containers in case of duplicates
-        self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
-        dry_containers_df[&#39;container_types&#39;] = dry_containers_df[[&#39;deck_pos&#39;,&#39;loc&#39;]].apply(
-                lambda row: self.lab_deck[row[&#39;deck_pos&#39;]].get_container_type(row[&#39;loc&#39;]),axis=1)
-        for name, loc, deck_pos, mass, molar_mass, container_type in dry_containers_df.itertuples():
-            self.dry_containers[name].append((self._construct_container(container_type, name,
-                    deck_pos,loc), mass, molar_mass))
-
+        #indices don&#39;t align for apply if empty so must check
+        if not dry_containers_df.empty:
+            #initialize containers in case of duplicates
+            self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
+            dry_containers_df[&#39;container_types&#39;] = dry_containers_df[[&#39;deck_pos&#39;,&#39;loc&#39;]\
+                    ].apply(lambda row: self.lab_deck[row[&#39;deck_pos&#39;]].get_container_type(\
+                    row[&#39;loc&#39;]),axis=1)
+            for name, loc, deck_pos, mass, molar_mass, container_type in \
+                    dry_containers_df.itertuples():
+                self.dry_containers[name].append((self._construct_container(container_type, \
+                        name, deck_pos,loc), mass, molar_mass))
+        else:
+            self.dry_containers = {}
 
     def _init_containers(self, reagent_df):
         &#39;&#39;&#39;
@@ -1043,11 +1048,75 @@ class OT2Robot():
             self._exec_make(*arguments)
             self.portal.send_pack(&#39;ready&#39;,cid)
             return 1
+        elif command_type == &#39;mix&#39;:
+            self._exec_mix(arguments[0])
+            self.portal.send_pack(&#39;ready&#39;, cid)
+            return 1
+        elif command_type == &#39;save&#39;:
+            self._exec_save()
+            return 1
         elif command_type == &#39;close&#39;:
-            self._exec_close()
+            self._exec_close(cid) #will be acked in func
             return 0
         else:
             raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))
+
+    def _exec_mix(self, mix_list):
+        &#39;&#39;&#39;
+        executes a mix command.  
+        params:  
+            list&lt;tuple&lt;str, int&gt;&gt; mix_list: list of chem_names to be mixed with a code for the 
+              type of mix to be performed.  
+        Postconditions:  
+            every well in the mix_list has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        &#39;&#39;&#39;
+        for chem_name, mix_code in mix_list:
+            self._mix(chem_name, mix_code)
+
+    def _mix(self, chem_name, mix_code):
+        &#39;&#39;&#39;
+        mix a well mix_code relates to how thorough  
+        params:  
+            str chem_name: the name of the chemical to mix  
+            int mix_code: 1 is normal 2 is &#39;for real&#39;  
+        Postconditions:  
+            Well has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        &#39;&#39;&#39;
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm][&#39;last_used&#39;] not in [&#39;WaterC1.0&#39;, &#39;clean&#39;, chem_name]:
+                self._get_clean_tips()
+                break; #cause now they&#39;re clean
+        for arm_to_check in self.pipettes.keys():
+            #this is really easy to fix, but it should not be fixed here, it should be fixed in a
+            #higher level function call. This is minimal step for maximum speed.
+            assert (self.pipettes[arm_to_check][&#39;last_used&#39;] in [&#39;clean&#39;, &#39;WaterC1.0&#39;, chem_name]), &#34;trying to transfer {}-&gt;{}, with {} arm, but {} arm was dirty with {}&#34;.format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check][&#39;last_used&#39;])
+        self.protocol._commands.append(&#39;HEAD: {} : mixing {} &#39;.format(datetime.now().strftime(&#39;%d-%b-%Y %H:%M:%S:%f&#39;), chem_name))
+        arm = self._get_preffered_pipette(0) #gets the smallest pipette 
+        pipette = self.pipettes[arm][&#39;pipette&#39;]
+        cont = self.containers[chem_name]
+        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = cont.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = cont.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1,20,well)
+            for j in range(3):
+                pipette.touch_tip(radius=0.75,speed=40)
+                pass
+            pipette.blow_out()
+        
+        #pull a little out of that well and shake off the drops
+        #TODO my assumption is that this will blow out above, but could be wrong
+        pipette.well_bottom_clearance.dispense = cont.disp_height
+        #blowout
+        for i in range(4):
+            pipette.blow_out()
+        #wiggle - touch tip (spin fast inside well)
+        pipette.touch_tip(radius=0.3,speed=40)
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         &#39;&#39;&#39;
@@ -1101,7 +1170,8 @@ class OT2Robot():
         self._exec_transfer(&#39;WaterC1.0&#39;,[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
         self.containers[chem_name].rewrite_history_first()
-        #TODO mix
+        #mix
+        self._mix(chem_name, 2)
 
     def _exec_loc_req(self, wellnames):
         &#39;&#39;&#39;
@@ -1364,7 +1434,7 @@ class OT2Robot():
         &#39;&#39;&#39;
         pass
 
-    def _exec_close(self):
+    def _exec_close(self, cid):
         &#39;&#39;&#39;
         close the connection in a nice way
         &#39;&#39;&#39;
@@ -1373,44 +1443,24 @@ class OT2Robot():
             pipette = arm_dict[&#39;pipette&#39;]
             pipette.drop_tip()
         self.protocol.home()
+        self.portal.send_pack(&#39;ready&#39;, cid)
+        #kill link
+        print(&#39;&lt;&lt;eve&gt;&gt; shutting down&#39;)
+        self.portal.close()
+
+    def _exec_save(self):
+        &#39;&#39;&#39;
+        saves state, and then ships files back to controller over FTP  
+        &#39;&#39;&#39;
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
         self.dump_well_map()
         #ship logs
         filenames = list(os.listdir(self.logs_p))
-        port = 50001 #default port for ftp 
-        self._send_files(port, filenames)
-        #kill link
-        print(&#39;&lt;&lt;eve&gt;&gt; shutting down&#39;)
-        self.portal.send_pack(&#39;close&#39;)
-        self.portal.close()
-
-    def _send_files(self,port,filenames):
-        &#39;&#39;&#39;
-        used to ship files back to server  
-        params:  
-            int port: the port number to ship the files out of  
-            list&lt;str&gt; filepaths: the filepaths to ship  
-        &#39;&#39;&#39;
-        #setting up a socket for FTP
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, port))
-        sock.listen(5)
-        #send ok to server that you are ready to accept
-        print(&#39;&lt;&lt;eve&gt;&gt; initializing filetransfer&#39;)
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_pack(&#39;sending_files&#39;, port, filenames)
-        client_sock, client_addr = sock.accept()
-        for filepath in filepaths:
-            with open(filepath,&#39;rb&#39;) as local_file:
-                client_sock.sendfile(local_file)
-                client_sock.send(armchair.FTP_EOF)
-            #wait until client has sent that they&#39;re ready to recieve again
-        client_sock.close()
-        sock.close()
-
+        self.portal.send_ftp(filepaths)
+        
 
 def launch_eve_server(**kwargs):
     &#39;&#39;&#39;
@@ -2202,14 +2252,19 @@ to operating with them</p></div>
             + vals are lists of tuples&lt;Container, float, float&gt; correspoding to the container
               it&#39;s in, the mass of the powder W/O CONTAINER, and the molar mass  
         &#39;&#39;&#39;
-        #initialize containers in case of duplicates
-        self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
-        dry_containers_df[&#39;container_types&#39;] = dry_containers_df[[&#39;deck_pos&#39;,&#39;loc&#39;]].apply(
-                lambda row: self.lab_deck[row[&#39;deck_pos&#39;]].get_container_type(row[&#39;loc&#39;]),axis=1)
-        for name, loc, deck_pos, mass, molar_mass, container_type in dry_containers_df.itertuples():
-            self.dry_containers[name].append((self._construct_container(container_type, name,
-                    deck_pos,loc), mass, molar_mass))
-
+        #indices don&#39;t align for apply if empty so must check
+        if not dry_containers_df.empty:
+            #initialize containers in case of duplicates
+            self.dry_containers = {name:[] for name in dry_containers_df.index.unique()}
+            dry_containers_df[&#39;container_types&#39;] = dry_containers_df[[&#39;deck_pos&#39;,&#39;loc&#39;]\
+                    ].apply(lambda row: self.lab_deck[row[&#39;deck_pos&#39;]].get_container_type(\
+                    row[&#39;loc&#39;]),axis=1)
+            for name, loc, deck_pos, mass, molar_mass, container_type in \
+                    dry_containers_df.itertuples():
+                self.dry_containers[name].append((self._construct_container(container_type, \
+                        name, deck_pos,loc), mass, molar_mass))
+        else:
+            self.dry_containers = {}
 
     def _init_containers(self, reagent_df):
         &#39;&#39;&#39;
@@ -2501,11 +2556,75 @@ to operating with them</p></div>
             self._exec_make(*arguments)
             self.portal.send_pack(&#39;ready&#39;,cid)
             return 1
+        elif command_type == &#39;mix&#39;:
+            self._exec_mix(arguments[0])
+            self.portal.send_pack(&#39;ready&#39;, cid)
+            return 1
+        elif command_type == &#39;save&#39;:
+            self._exec_save()
+            return 1
         elif command_type == &#39;close&#39;:
-            self._exec_close()
+            self._exec_close(cid) #will be acked in func
             return 0
         else:
             raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))
+
+    def _exec_mix(self, mix_list):
+        &#39;&#39;&#39;
+        executes a mix command.  
+        params:  
+            list&lt;tuple&lt;str, int&gt;&gt; mix_list: list of chem_names to be mixed with a code for the 
+              type of mix to be performed.  
+        Postconditions:  
+            every well in the mix_list has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        &#39;&#39;&#39;
+        for chem_name, mix_code in mix_list:
+            self._mix(chem_name, mix_code)
+
+    def _mix(self, chem_name, mix_code):
+        &#39;&#39;&#39;
+        mix a well mix_code relates to how thorough  
+        params:  
+            str chem_name: the name of the chemical to mix  
+            int mix_code: 1 is normal 2 is &#39;for real&#39;  
+        Postconditions:  
+            Well has been mixed.  
+            pipette tips were replaced if they were dirty with something else before  
+        &#39;&#39;&#39;
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm][&#39;last_used&#39;] not in [&#39;WaterC1.0&#39;, &#39;clean&#39;, chem_name]:
+                self._get_clean_tips()
+                break; #cause now they&#39;re clean
+        for arm_to_check in self.pipettes.keys():
+            #this is really easy to fix, but it should not be fixed here, it should be fixed in a
+            #higher level function call. This is minimal step for maximum speed.
+            assert (self.pipettes[arm_to_check][&#39;last_used&#39;] in [&#39;clean&#39;, &#39;WaterC1.0&#39;, chem_name]), &#34;trying to transfer {}-&gt;{}, with {} arm, but {} arm was dirty with {}&#34;.format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check][&#39;last_used&#39;])
+        self.protocol._commands.append(&#39;HEAD: {} : mixing {} &#39;.format(datetime.now().strftime(&#39;%d-%b-%Y %H:%M:%S:%f&#39;), chem_name))
+        arm = self._get_preffered_pipette(0) #gets the smallest pipette 
+        pipette = self.pipettes[arm][&#39;pipette&#39;]
+        cont = self.containers[chem_name]
+        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = cont.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = cont.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1,20,well)
+            for j in range(3):
+                pipette.touch_tip(radius=0.75,speed=40)
+                pass
+            pipette.blow_out()
+        
+        #pull a little out of that well and shake off the drops
+        #TODO my assumption is that this will blow out above, but could be wrong
+        pipette.well_bottom_clearance.dispense = cont.disp_height
+        #blowout
+        for i in range(4):
+            pipette.blow_out()
+        #wiggle - touch tip (spin fast inside well)
+        pipette.touch_tip(radius=0.3,speed=40)
 
     def _get_necessary_vol(self, mass, molar_mass, conc):
         &#39;&#39;&#39;
@@ -2559,7 +2678,8 @@ to operating with them</p></div>
         self._exec_transfer(&#39;WaterC1.0&#39;,[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
         self.containers[chem_name].rewrite_history_first()
-        #TODO mix
+        #mix
+        self._mix(chem_name, 2)
 
     def _exec_loc_req(self, wellnames):
         &#39;&#39;&#39;
@@ -2822,7 +2942,7 @@ to operating with them</p></div>
         &#39;&#39;&#39;
         pass
 
-    def _exec_close(self):
+    def _exec_close(self, cid):
         &#39;&#39;&#39;
         close the connection in a nice way
         &#39;&#39;&#39;
@@ -2831,43 +2951,23 @@ to operating with them</p></div>
             pipette = arm_dict[&#39;pipette&#39;]
             pipette.drop_tip()
         self.protocol.home()
+        self.portal.send_pack(&#39;ready&#39;, cid)
+        #kill link
+        print(&#39;&lt;&lt;eve&gt;&gt; shutting down&#39;)
+        self.portal.close()
+
+    def _exec_save(self):
+        &#39;&#39;&#39;
+        saves state, and then ships files back to controller over FTP  
+        &#39;&#39;&#39;
         #write logs
         self.dump_protocol_record()
         self.dump_well_histories()
         self.dump_well_map()
         #ship logs
         filenames = list(os.listdir(self.logs_p))
-        port = 50001 #default port for ftp 
-        self._send_files(port, filenames)
-        #kill link
-        print(&#39;&lt;&lt;eve&gt;&gt; shutting down&#39;)
-        self.portal.send_pack(&#39;close&#39;)
-        self.portal.close()
-
-    def _send_files(self,port,filenames):
-        &#39;&#39;&#39;
-        used to ship files back to server  
-        params:  
-            int port: the port number to ship the files out of  
-            list&lt;str&gt; filepaths: the filepaths to ship  
-        &#39;&#39;&#39;
-        #setting up a socket for FTP
-        sock = socket.socket(socket.AF_INET)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.my_ip, port))
-        sock.listen(5)
-        #send ok to server that you are ready to accept
-        print(&#39;&lt;&lt;eve&gt;&gt; initializing filetransfer&#39;)
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_pack(&#39;sending_files&#39;, port, filenames)
-        client_sock, client_addr = sock.accept()
-        for filepath in filepaths:
-            with open(filepath,&#39;rb&#39;) as local_file:
-                client_sock.sendfile(local_file)
-                client_sock.send(armchair.FTP_EOF)
-            #wait until client has sent that they&#39;re ready to recieve again
-        client_sock.close()
-        sock.close()</code></pre>
+        self.portal.send_ftp(filepaths)</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
@@ -3024,8 +3124,15 @@ int: 1=ready to recieve. 0=terminated
         self._exec_make(*arguments)
         self.portal.send_pack(&#39;ready&#39;,cid)
         return 1
+    elif command_type == &#39;mix&#39;:
+        self._exec_mix(arguments[0])
+        self.portal.send_pack(&#39;ready&#39;, cid)
+        return 1
+    elif command_type == &#39;save&#39;:
+        self._exec_save()
+        return 1
     elif command_type == &#39;close&#39;:
-        self._exec_close()
+        self._exec_close(cid) #will be acked in func
         return 0
     else:
         raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))</code></pre>
