@@ -1089,7 +1089,7 @@ class ProtocolExecutor(Controller):
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[3:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'plot protocol':'plot_protocol','scan filename (no extension)':'scan_filename','plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
         rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
@@ -1249,8 +1249,38 @@ class ProtocolExecutor(Controller):
                 self._send_make(row, i)
             elif row['op'] == 'save':
                 self.save()
+            elif row['op'] == 'plot':
+                self._create_plot(row, i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
+    def _create_plot(row, i):
+        '''
+        exectues a plot command  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        plot_type = row['plot_protocol']
+        filename = row['plot_filename']
+        #make sure you have mapping for all files
+        self._query_reagents(wellnames)
+        pr_dict = {entry.loc:chem_name 
+                    for chem_name, entry 
+                    in self._cached_reader_locs.items() 
+                    if entry.deck_pos in [4,7]}
+        #it's not safe to plot in simulation because the scan file may not exist yet
+        if not self.simulate:
+            df, metadata = self.pr.load_data('{}.csv'.format(row['scan_filename']), pr_dict)
+            #execute the plot depending on what was specified
+            if plot_type == 'single_kin':
+                for wellname in wellnames:
+                    self.plot_single_kin(df, metadata['n_cyles'], wellname, "{}_{}".format(wellname, filename))
+            elif plot_type == 'overlay':
+                self.plot_LAM_overlay(df, wellnames, pr_dict)
+            elif plot_type == 'multi_kin':
+                self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
 
     def _send_make(self, row, i):
         '''
@@ -2048,12 +2078,12 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
-    def load_data(self,filename, loc_to_name):
+    def load_data(self, filename, loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
         params:  
-            str filename: the name of the file to read  
+            str filename: the name of the file to read with extension  
             dict<str:str> loc_to_name: maps location to name of reaction  
         returns:  
             df: the scan data for that file  
