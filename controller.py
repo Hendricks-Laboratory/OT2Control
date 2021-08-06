@@ -52,9 +52,9 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 from Armchair.armchair import Armchair
-import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
+from ml_models import DummyMLModel
 
 
 def init_parser():
@@ -103,7 +103,7 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simul
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-def launch_auto(serveraddr, rxn_sheet_name, use_cache):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
@@ -114,7 +114,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache):
         use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    auto.run_simulation()
+    model = DummyMLModel(3)
+    auto.run_simulation(model)
 
 
 class Controller(ABC):
@@ -684,7 +685,7 @@ class AutoContr(Controller):
     This is a completely automated controller. It takes as input a layout sheet, and then does
     it's own experiments, pulling data etc  
     '''
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         '''
         Note that init does not initialize the portal. This must be done explicitly or by calling
         a run function that creates a portal. The portal is not passed to init because although
@@ -693,12 +694,13 @@ class AutoContr(Controller):
         NOte that pr cannot be initialized until you know if you're simulating or not, so it
         is instantiated in run
         '''
-        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         #necessary helper params
         credentials = self._init_credentials(rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
+        self._make_out_dirs(header_data)
         deck_data = self._download_sheet(rxn_spreadsheet, 1)
         self._init_robo_header_params(header_data)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
@@ -707,12 +709,15 @@ class AutoContr(Controller):
         self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
 
-    def run_simulation(self):
+    def run_simulation(self, model):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
         end of function  
+        params:
+            MLModel model: the model to use when training and predicting  
         Returns:  
             bool: True if all tests were passed  
         '''
@@ -731,7 +736,7 @@ class AutoContr(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, simulate=True)
+        self._run(port, True, model)
 
         #collect the eve thread
         eve_thread.join()
@@ -742,11 +747,12 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
+        
     def run_protocol(simulate):
         pass
 
     @error_exit
-    def _run(self, port, simulate):
+    def _run(self, port, simulate, model):
         '''
         Returns:  
             bool: True if all tests were passed  
@@ -758,11 +764,54 @@ class AutoContr(Controller):
         buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
-
+        
         self.init_robot(simulate)
+        while not model.quit:
+            recipes = model.predict(5)
+            wellnames = self._create_samples(recipes)
+            scan_data = self._get_sample_data(wellnames)
+            model.train(scan_data.T.to_numpy(),recipes)
+            print('made it through the rough part')
+        breakpoint()
         self.close_connection()
         self.pr.shutdown()
         return
+
+
+    def _get_sample_data(self,wellnames):
+        '''
+        SKELETON
+        scans a sample of wells specified by wellnames, and returns their spectra  
+        params:  
+            list<str> wellnames: the names of the wells to be scanned  
+        returns:
+            df: n_wells, by size of spectra, the scan data.  
+        ''' 
+        return pd.DataFrame(np.zeros((701,len(wellnames))), columns=wellnames)
+
+    def _create_samples(self, recipes):
+        '''
+        SKELETON
+        creates the desired reactions on the platereader  
+        params:  
+            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+              you can use for each reaction you want to perform  
+        returns:  
+            list<str> wellnames: the names of the wells produced   
+        '''
+        wellnames = []
+        for i in range(recipes.shape[0]):
+            #do something
+            #get a new wellname
+            wellname = "autowell{}".format(self._create_samples.count)
+            wellnames.append(wellname)
+            #this is an indirect way at getting at the count, but I don't know why the straight
+            #forward way doesn't work
+            self._create_samples.__dict__['count'] += 1
+            print(wellname)
+        return wellnames
+
+    _create_samples.count = 0
 
 class ProtocolExecutor(Controller): 
     '''
@@ -1838,7 +1887,17 @@ class DummyReader(AbstractPlateReader):
     Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
     anything. useful for some simulations
     '''
-    pass
+
+    def load_reader_data(filename, loc_to_name):
+        '''
+        doesn't actually read data, generates some dummy data for you to use  
+        returns:  
+            df: a bunch of -1s in a nice dataframe with size 701 per well  
+        '''
+        wellnames = loc_to_name.values()
+        return pd.DataFrame(np.ones(701,len(wellnames)), columns=wellnames)
+
+
 
 class PlateReader(AbstractPlateReader):
     '''

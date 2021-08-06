@@ -1019,7 +1019,7 @@ class OT2Robot():
             self._exec_close(cid) #will be acked in func
             return 0
         else:
-            raise Exception("Unidenified command {}".format(pack_type))
+            raise Exception("Unidenified command '{}'".format(command_type))
 
     def _exec_mix(self, mix_list):
         '''
