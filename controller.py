@@ -776,8 +776,7 @@ class AutoContr(Controller):
         self.close_connection()
         self.pr.shutdown()
         return
-
-
+    
     def _get_sample_data(self,wellnames):
         '''
         SKELETON
@@ -788,8 +787,18 @@ class AutoContr(Controller):
             df: n_wells, by size of spectra, the scan data.  
         ''' 
         return pd.DataFrame(np.zeros((701,len(wellnames))), columns=wellnames)
+        self._query_wells(wellnames)
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        self.pr.load_reader_data(filename, pr_dict)
 
     def _create_samples(self, recipes):
+        #TODO this class should have a psuedo reaction df, but the reaction df should 
+        #describe only how to make a single reagent
+        #in fact, the exact same format for parsing and sending should be used, but 
+        #instead of volumes in transfer steps use decimals for the percentage of a reagent
+        #execute the exact same way, but create new columns for each sample
+        #make sure that the order in which you read is the same as the order of the 
+        #dataframe and of the ml expects
         '''
         SKELETON
         creates the desired reactions on the platereader  
@@ -799,15 +808,22 @@ class AutoContr(Controller):
         returns:  
             list<str> wellnames: the names of the wells produced   
         '''
+        recipes *= 200 #convert the ratios into volumes
         wellnames = []
         for i in range(recipes.shape[0]):
-            #do something
             #get a new wellname
             wellname = "autowell{}".format(self._create_samples.count)
             wellnames.append(wellname)
             #this is an indirect way at getting at the count, but I don't know why the straight
             #forward way doesn't work
             self._create_samples.__dict__['count'] += 1
+        for j in range(recipes.shape[1]):
+            #j is the src
+            transfer_steps = []
+            for i in range recipes.shape[0])
+                #i is the dst
+                
+
             print(wellname)
         return wellnames
 
