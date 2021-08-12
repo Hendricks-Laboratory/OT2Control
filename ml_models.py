@@ -48,10 +48,11 @@ class DummyMLModel():
         int curr_iter: formally, this is the number of times the train method has been called
         int max_iters: the number of iters to execute before quiting
     '''
-    def __init__(self, max_iters):
+    def __init__(self, max_iters, y_shape):
         self.max_iters = max_iters
         self.curr_iter = 0
         self.quit = self.update_quit()
+        self.y_shape = y_shape
 
     def train(self, X, y):
         '''
@@ -73,7 +74,7 @@ class DummyMLModel():
         yet.
         '''
         print('generating preditions')
-        return np.zeros((n_predictions, 2))
+        return np.zeros((n_predictions, self.y_shape))
 
     def update_quit(self):
         '''

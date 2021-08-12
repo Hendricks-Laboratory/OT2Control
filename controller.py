@@ -114,7 +114,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    model = DummyMLModel(3)
+    model = DummyMLModel(3, 3)
     auto.run_simulation(model)
 
 
@@ -1086,9 +1086,16 @@ class AutoContr(Controller):
     '''
     This is a completely automated controller. It takes as input a layout sheet, and then does
     it's own experiments, pulling data etc  
+    We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
+    but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
+        self.rxn_df_template = self.rxn_df
+        self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
+        assert ('product' in self.rxn_df.columns), "Noah, you need to remove this line now that you have replaced template with product"
+        self.rxn_df_template.rename(columns={'product':'template'},inplace=True)
+        self.batch_num = 0
 
     def run_simulation(self, model):
         '''
@@ -1154,18 +1161,18 @@ class AutoContr(Controller):
         while not model.quit:
             recipes = model.predict(5)
             wellnames = self._create_samples(recipes) #wellnames ordered like recipes
-            scan_data = self._get_sample_data(wellnames) #also ordered like recipes
+            #also ordered like recipes
+            scan_data = self._get_sample_data(wellnames, self.rxn_df['scan_filename']) 
             #DEBUG
             to_pass = scan_data.T.to_numpy()
-            breakpoint()
             model.train(scan_data.T.to_numpy(),recipes)
             print('made it through the rough part')
-        breakpoint()
+            self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
         return
     
-    def _get_sample_data(self,wellnames):
+    def _get_sample_data(self,wellnames, filename):
         '''
         TODO
         SKELETON
@@ -1189,6 +1196,7 @@ class AutoContr(Controller):
         #execute the exact same way, but create new columns for each sample
         #make sure that the order in which you read is the same as the order of the 
         #dataframe and of the ml expects
+        #TODO you probably want to move the majority of this code to build rxn_dfj:1095
         '''
         SKELETON
         creates the desired reactions on the platereader  
@@ -1206,19 +1214,48 @@ class AutoContr(Controller):
             wellnames.append(wellname)
             self._create_samples.__dict__['count'] += 1
         #TODO implement stuff to get a product df, and then use 
-        self.portal.send_pack('init_containers')
+        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
+                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        self.rxn_df = self._build_rxn_df(wellnames, recipes)
         return wellnames
-        #recipes *= 200 #convert the ratios into volumes
-        #for j in range(recipes.shape[1]):
-        #    #j is the src
-        #    transfer_steps = []
-        #    for i in range(recipes.shape[0]):
-        #        #i is the dst
-        #    print(wellname)
-        #return wellnames
 
     _create_samples.count = 0
-    
+
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        This is used right now because it's best I've got. Ideally, you could drop the part 
+        of init that constructs product_df
+        '''
+        return 200.0
+
+    def _build_rxn_df(self,wellnames,recipes):
+        '''
+        used to construct a rxn_df for this batch of reactions
+        TODO test bejesus out of this method
+        TODO need some sort of key to map from name of reagent to index of the 
+        recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
+        '''
+        rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        def build_product_rows(row):
+            '''
+            params:  
+                pd.Series row: a row of the template df  
+            returns:  
+                pd.Series: a row for the new df
+            '''
+            d = {}
+            if row['op'] == 'transfer':
+                #is a transfer, so we want to lookup the volume of that reagent in recipe_df
+                return recipe_df.loc[:, row['chemical_name']] * row['template'] * 200.0
+            else:
+                #if not a tranfer, we want to keep whatever value was there
+                return pd.Series(row['template'], index=recipe_df.index)
+        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1)).drop(
+                columns='template')
+        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
+                x, self.batch_num))
+        return rxn_df
 
 class ProtocolExecutor(Controller): 
     '''
@@ -1868,7 +1905,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def load_reader_data(filename,loc_to_name):
+    def load_reader_data(self, filename,loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
@@ -1889,14 +1926,14 @@ class DummyReader(AbstractPlateReader):
     anything. useful for some simulations
     '''
 
-    def load_reader_data(filename, loc_to_name):
+    def load_reader_data(self, filename, loc_to_name):
         '''
         doesn't actually read data, generates some dummy data for you to use  
         returns:  
             df: a bunch of -1s in a nice dataframe with size 701 per well  
         '''
         wellnames = loc_to_name.values()
-        return pd.DataFrame(np.ones(701,len(wellnames)), columns=wellnames)
+        return pd.DataFrame(np.ones((701,len(wellnames))), columns=wellnames)
 
 
 

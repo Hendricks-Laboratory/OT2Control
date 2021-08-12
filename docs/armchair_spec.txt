@@ -71,6 +71,7 @@ x05: 'init_containers'
             COLS:
             str labware: the type of labware this reaction must go in. If None, platereader will
               be used unless no space or too small in which case something else will be used.
+	    str container: the container this reaction must go in
             float max_vol: the maximum volume that will every ocupy this container. If not
               specified, some container will be found
 
