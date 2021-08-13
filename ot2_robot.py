@@ -29,6 +29,7 @@ import logging
 import asyncio
 import threading
 import time
+import traceback
 
 from bidict import bidict
 import gspread
@@ -1489,4 +1490,12 @@ def hack_to_get_ip():
 if __name__ == '__main__':
     my_ip = hack_to_get_ip()
     while True:
-        launch_eve_server(my_ip=my_ip, barrier=None)
+        try:
+            launch_eve_server(my_ip=my_ip, barrier=None)
+        except Exception as e:
+            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.")
+            #credit Horacio of stack overflow
+            with open('ot2_error_output.txt', 'a+') as file:
+                file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
+                file.write(str(e))
+                file.write(traceback.format_exc())
