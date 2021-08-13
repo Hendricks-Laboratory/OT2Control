@@ -74,7 +74,7 @@ class DummyMLModel():
         yet.
         '''
         print('generating preditions')
-        return np.zeros((n_predictions, self.y_shape))
+        return np.ones((n_predictions, self.y_shape)) / self.y_shape
 
     def update_quit(self):
         '''

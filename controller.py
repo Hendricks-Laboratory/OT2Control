@@ -858,7 +858,7 @@ class Controller(ABC):
         self.portal.burn_pipe()
         #3)
         wellnames = row[self._products][row[self._products].astype(bool)].index
-        self._query_wells(wellnames)
+        self._update_cached_locs(wellnames)
         #4)
         #update the locs on the well
         well_locs = []
@@ -871,7 +871,7 @@ class Controller(ABC):
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
         self.pr.exec_macro('PlateOut')
 
-    def _query_wells(self, wellnames):
+    def _update_cached_locs(self, wellnames):
         '''
         checks the cache to see if wellnames are in the cache. If they aren't, a query will be
         made to Eve for the wellnames, and data for those will be stored in the cache  
@@ -906,7 +906,7 @@ class Controller(ABC):
         wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
         wells_to_mix.name = 'mix_code'
         #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
-        self._query_wells(wells_to_mix.index)
+        self._update_cached_locs(wells_to_mix.index)
         deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
                 wellname in wells_to_mix.index}, name='deck_pos')
         wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
@@ -1095,7 +1095,10 @@ class AutoContr(Controller):
         self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
         assert ('product' in self.rxn_df.columns), "Noah, you need to remove this line now that you have replaced template with product"
         self.rxn_df_template.rename(columns={'product':'template'},inplace=True)
-        self.batch_num = 0
+        self._products = ['template']
+
+        self.well_count = 0 #used internally for unique wellnames
+        self.batch_num = 0 #used internally for unique filenames
 
     def run_simulation(self, model):
         '''
@@ -1142,6 +1145,13 @@ class AutoContr(Controller):
         '''
         pass
 
+    def _get_product_df(self, products_to_labware):
+        '''
+        required for class compatibility, but not used by Auto
+        TODO would be nice to return something that would blow up if accessed
+        '''
+        return np.nan
+
     @error_exit
     def _run(self, port, simulate, model):
         '''
@@ -1160,13 +1170,14 @@ class AutoContr(Controller):
         self.init_robot(simulate)
         while not model.quit:
             recipes = model.predict(5)
-            wellnames = self._create_samples(recipes) #wellnames ordered like recipes
-            #also ordered like recipes
+            wellnames = [self.generate_wellname() for i in range(recipes.shape[0])]
+            self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
+                    'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+            self.rxn_df = self._build_rxn_df(wellnames, recipes)
+            self._products = wellnames
+            self.execute_protocol_df()
             scan_data = self._get_sample_data(wellnames, self.rxn_df['scan_filename']) 
-            #DEBUG
-            to_pass = scan_data.T.to_numpy()
             model.train(scan_data.T.to_numpy(),recipes)
-            print('made it through the rough part')
             self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
@@ -1179,47 +1190,37 @@ class AutoContr(Controller):
         scans a sample of wells specified by wellnames, and returns their spectra  
         params:  
             list<str> wellnames: the names of the wells to be scanned  
-        returns:
+            str filename: the name of the file that holds the scans  
+        returns:  
             df: n_wells, by size of spectra, the scan data.  
         ''' 
-        self._query_wells(wellnames)
+        self._update_cached_locs(wellnames)
         pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
         unordered_data = self.pr.load_reader_data(filename, pr_dict)
-        #need to reorder according to order of wellnames
+        #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-    def _create_samples(self, recipes):
-        #TODO this class should have a psuedo reaction df, but the reaction df should 
-        #describe only how to make a single reagent
-        #in fact, the exact same format for parsing and sending should be used, but 
-        #instead of volumes in transfer steps use decimals for the percentage of a reagent
-        #execute the exact same way, but create new columns for each sample
-        #make sure that the order in which you read is the same as the order of the 
-        #dataframe and of the ml expects
-        #TODO you probably want to move the majority of this code to build rxn_dfj:1095
-        '''
-        SKELETON
-        creates the desired reactions on the platereader  
-        params:  
-            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
-              you can use for each reaction you want to perform  
-        returns:  
-            list<str> wellnames: the names of the wells produced ordered in accordance to the
-              order of recipes
-        '''
-        wellnames = []
-        for i in range(recipes.shape[0]):
-            #get a new wellname
-            wellname = "autowell{}".format(self._create_samples.count)
-            wellnames.append(wellname)
-            self._create_samples.__dict__['count'] += 1
-        #TODO implement stuff to get a product df, and then use 
-        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
-                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
-        self.rxn_df = self._build_rxn_df(wellnames, recipes)
-        return wellnames
+#This may be worth bringing back later. Now everything is in the main
+#    def _create_samples(self, wellnames, recipes):
+#        '''
+#        creates the desired reactions on the platereader  
+#        params:  
+#            str wellnames: the ordered names of the wells you want to produce  
+#            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+#              you can use for each reaction you want to perform  
+#        returns:  
+#            list<str> wellnames: the names of the wells produced ordered in accordance to the
+#              order of recipes
+#        '''
 
-    _create_samples.count = 0
+    def generate_wellname(self):
+        '''
+        returns:  
+            str: a unique name for a new well
+        '''
+        wellname = "autowell{}".format(self.well_count)
+        self.well_count += 1
+        return wellname
 
     def _get_rxn_max_vol(self, name, products):
         '''
