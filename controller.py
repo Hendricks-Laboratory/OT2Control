@@ -116,6 +116,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     model = DummyMLModel(3, 3)
     auto.run_simulation(model)
+    if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+        auto.run_protocol(model)
 
 
 class Controller(ABC):
@@ -1068,10 +1070,6 @@ class AutoContr(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
-        assert ('product' in self.rxn_df.columns), "Noah, you need to remove this line now that you have replaced template with product"
-        self.rxn_df_template.rename(columns={'product':'template'},inplace=True)
-        self._products = ['template']
-
         self.well_count = 0 #used internally for unique wellnames
         self.batch_num = 0 #used internally for unique filenames
 
@@ -1111,8 +1109,20 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(simulate):
-        pass
+    def run_protocol(self, model, simulate=False):
+        '''
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
+            str simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            MLModel model: the model to use when training and predicting  
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
+        '''
+        print('<<controller>> RUNNING')
+        self._run(port, model, simulate=simulate)
+        print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
         '''
@@ -1900,12 +1910,6 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-class DummyReader(AbstractPlateReader):
-    '''
-    Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
-    anything. useful for some simulations
-    '''
-
     def load_reader_data(self, filename, loc_to_name):
         '''
         doesn't actually read data, generates some dummy data for you to use  
@@ -1915,6 +1919,12 @@ class DummyReader(AbstractPlateReader):
         wellnames = loc_to_name.values()
         return pd.DataFrame(np.ones((701,len(wellnames))), columns=wellnames)
 
+class DummyReader(AbstractPlateReader):
+    '''
+    Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
+    anything. useful for some simulations
+    '''
+    pass
 
 
 class PlateReader(AbstractPlateReader):
@@ -1989,16 +1999,19 @@ class PlateReader(AbstractPlateReader):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
-        #parse the metadata
-        start_i, metadata = self._parse_metadata(filename, self.data_path)
-        # Read data ignoring first metadata lines
-        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
-                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [loc_to_name[x[:-1]] for x in df.columns]
-        df.columns = headers
-        df.dropna(inplace=True)
-        df = df.astype(float)
-        return df, metadata
+        if self.simulate:
+            super().load_reader_data(filename, loc_to_name) #return dummy data
+        else:
+            #parse the metadata
+            start_i, metadata = self._parse_metadata(filename, self.data_path)
+            # Read data ignoring first metadata lines
+            df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                    header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+            headers = [loc_to_name[x[:-1]] for x in df.columns]
+            df.columns = headers
+            df.dropna(inplace=True)
+            df = df.astype(float)
+            return df, metadata
 
     def _parse_metadata(self, filename):
         '''
