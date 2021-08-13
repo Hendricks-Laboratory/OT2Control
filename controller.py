@@ -545,31 +545,6 @@ class Controller(ABC):
         labware_df['deck_pos'] = pd.to_numeric(labware_df['deck_pos'])
         return labware_df
 
-    def _load_reader_data(filename):
-        '''
-        #TODO this is outdated should mostly be burden shifted to platereader
-        given a filename, returns the scan data  
-        params:  
-            str filename: the name of the file to read  
-        retunrs:  
-            df: columns are the wells, rows are absorbances.  
-        Preconditions:
-            the entrys for all of the wells in the scan must be in the cache. If you
-            scanned using the controller, this was already done.  
-        '''
-        # Read data ignoring first 50 lines
-        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [x[:-1] for x in df.columns]
-        #Note no read to query the cache because these were all scanned
-        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
-                if entry.deck_pos in [4,7]}
-        #converting to chemical names instead of locs on wellplate
-        headers = [pr_dict[header] for header in headers]
-        df.columns = headers
-        df.dropna(inplace=True)
-        df = df.astype(float)
-        return df
-
     def save(self):
         self.portal.send_pack('save')
         #server will initiate file transfer
@@ -1170,13 +1145,13 @@ class AutoContr(Controller):
         self.init_robot(simulate)
         while not model.quit:
             recipes = model.predict(5)
+            #generate new wellnames for next batch
             wellnames = [self.generate_wellname() for i in range(recipes.shape[0])]
-            self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
-                    'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
-            self.rxn_df = self._build_rxn_df(wellnames, recipes)
-            self._products = wellnames
-            self.execute_protocol_df()
+            #plan and execute a reaction
+            self._create_samples(wellnames, recipes)
+            #pull in the scan data
             scan_data = self._get_sample_data(wellnames, self.rxn_df['scan_filename']) 
+            #train on scans
             model.train(scan_data.T.to_numpy(),recipes)
             self.batch_num += 1
         self.close_connection()
@@ -1200,18 +1175,22 @@ class AutoContr(Controller):
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-#This may be worth bringing back later. Now everything is in the main
-#    def _create_samples(self, wellnames, recipes):
-#        '''
-#        creates the desired reactions on the platereader  
-#        params:  
-#            str wellnames: the ordered names of the wells you want to produce  
-#            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
-#              you can use for each reaction you want to perform  
-#        returns:  
-#            list<str> wellnames: the names of the wells produced ordered in accordance to the
-#              order of recipes
-#        '''
+    def _create_samples(self, wellnames, recipes):
+        '''
+        creates the desired reactions on the platereader  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+              you can use for each reaction you want to perform  
+        returns:  
+            list<str> wellnames: the names of the wells produced ordered in accordance to the
+              order of recipes
+        '''
+        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
+                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        self.rxn_df = self._build_rxn_df(wellnames, recipes)
+        self._products = wellnames
+        self.execute_protocol_df()
 
     def generate_wellname(self):
         '''
