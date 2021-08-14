@@ -114,10 +114,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    model = DummyMLModel(3, 3)
+    model = DummyMLModel(2, 3)
     auto.run_simulation(model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        auto.run_protocol(model)
+        #need a new model because last is fit to sim
+        model = DummyMLModel(2, 3)
+        auto.run_protocol(model, simulate)
 
 
 class Controller(ABC):
@@ -298,7 +300,7 @@ class Controller(ABC):
             have also been initialized
         '''
 
-        out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Protocol_Outputs"
+        out_path = 'Ideally this would be a gdrive path, but for now everything is local'
         if not os.path.exists(out_path):
             #not on the laptop
             out_path = './Controller_Out'
@@ -1109,7 +1111,7 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(self, model, simulate=False):
+    def run_protocol(self, model, simulate=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
@@ -1121,7 +1123,7 @@ class AutoContr(Controller):
           simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING')
-        self._run(port, model, simulate=simulate)
+        self._run(port, simulate, model)
         print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
@@ -1933,14 +1935,13 @@ class PlateReader(AbstractPlateReader):
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    SPECTRO_DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
+    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
 
     def __init__(self, data_path, simulate=False):
         self.data_path = data_path
         self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
-        input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
@@ -2000,7 +2001,7 @@ class PlateReader(AbstractPlateReader):
                 int n_cycles: the number of cycles  
         '''
         if self.simulate:
-            super().load_reader_data(filename, loc_to_name) #return dummy data
+            return super().load_reader_data(filename, loc_to_name) #return dummy data
         else:
             #parse the metadata
             start_i, metadata = self._parse_metadata(filename, self.data_path)

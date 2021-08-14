@@ -1307,7 +1307,7 @@ class OT2Robot():
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
         try:
-            assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,src_cont.aspiratible_vol)
+            assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))
         except AssertionError as e:
             #ran out of reagent. Try to make more
             src_raw_name = src[:src.find('C')]
