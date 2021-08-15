@@ -29,6 +29,7 @@ import logging
 import asyncio
 import threading
 import time
+import traceback
 
 from bidict import bidict
 import gspread
@@ -1019,7 +1020,7 @@ class OT2Robot():
             self._exec_close(cid) #will be acked in func
             return 0
         else:
-            raise Exception("Unidenified command {}".format(pack_type))
+            raise Exception("Unidenified command '{}'".format(command_type))
 
     def _exec_mix(self, mix_list):
         '''
@@ -1307,7 +1308,7 @@ class OT2Robot():
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
         try:
-            assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,src_cont.aspiratible_vol)
+            assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))
         except AssertionError as e:
             #ran out of reagent. Try to make more
             src_raw_name = src[:src.find('C')]
@@ -1489,4 +1490,12 @@ def hack_to_get_ip():
 if __name__ == '__main__':
     my_ip = hack_to_get_ip()
     while True:
-        launch_eve_server(my_ip=my_ip, barrier=None)
+        try:
+            launch_eve_server(my_ip=my_ip, barrier=None)
+        except Exception as e:
+            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.")
+            #credit Horacio of stack overflow
+            with open('ot2_error_output.txt', 'a+') as file:
+                file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
+                file.write(str(e))
+                file.write(traceback.format_exc())

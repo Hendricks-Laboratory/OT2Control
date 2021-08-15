@@ -14,7 +14,7 @@ This module also contains two launchers.
 launch_protocol_exec runs a protocol from the sheets using a protocol executor
 launch_auto runs in automatic machine learning mode
 A main method is supplied that will run if you run this script. It will call one of the launchers
-based on command line ars. (run this script with -h)
+based on command line args. (run this script with -h)
 '''
 from abc import ABC
 from abc import abstractmethod
@@ -52,9 +52,9 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 from Armchair.armchair import Armchair
-import Armchair.armchair as armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
+from ml_models import DummyMLModel
 
 
 def init_parser():
@@ -103,7 +103,7 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simul
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-def launch_auto(serveraddr, rxn_sheet_name, use_cache):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
@@ -114,7 +114,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache):
         use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    auto.run_simulation()
+    model = DummyMLModel(2, 3)
+    auto.run_simulation(model)
+    if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+        #need a new model because last is fit to sim
+        model = DummyMLModel(2, 3)
+        auto.run_protocol(model, simulate)
 
 
 class Controller(ABC):
@@ -208,6 +213,26 @@ class Controller(ABC):
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
         self.robo_params = {}
+        #necessary helper params
+        credentials = self._init_credentials(rxn_sheet_name)
+        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
+        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
+        header_data = self._download_sheet(rxn_spreadsheet,0)
+        input_data = self._download_sheet(rxn_spreadsheet,1)
+        deck_data = self._download_sheet(rxn_spreadsheet, 2)
+        self._init_robo_header_params(header_data)
+        self._make_out_dirs(header_data)
+        self.rxn_df = self._load_rxn_df(input_data)
+        self._query_reagents(wks_key, credentials)
+        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
+        #with a parsed reagent_df. This is exactly as is pulled from gsheets
+        empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
+        products_to_labware = self._get_products_to_labware(input_data)
+        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
+        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
+        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+        self.robo_params['product_df'] = self._get_product_df(products_to_labware)
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
@@ -275,7 +300,7 @@ class Controller(ABC):
             have also been initialized
         '''
 
-        out_path = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Protocol_Outputs"
+        out_path = 'Ideally this would be a gdrive path, but for now everything is local'
         if not os.path.exists(out_path):
             #not on the laptop
             out_path = './Controller_Out'
@@ -391,29 +416,6 @@ class Controller(ABC):
         plt.yticks(fontsize = 10)
         plt.title(str(name), fontsize = 16, pad = 20,fontname="Arial")
 
-    def _download_reagent_data(self, spreadsheet_key, credentials):
-        '''
-        params:  
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
-            ServiceAccount Credentials credentials: to access sheets  
-        returns:  
-            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
-        '''
-        
-        if self.use_cache:
-            #if you've already seen this don't pull it
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
-                reagent_info = dill.load(reagent_info_cache)
-        else:
-            #pull down from the cloud
-            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
-                row_names = True, credentials=credentials).drop(columns=['comments'])
-            #cache the data
-            #DEBUG
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
-                dill.dump(reagent_info, reagent_info_cache)
-        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
-        return reagent_info
 
     def _get_empty_containers(self, raw_reagent_df):
         '''
@@ -547,49 +549,6 @@ class Controller(ABC):
         labware_df['deck_pos'] = pd.to_numeric(labware_df['deck_pos'])
         return labware_df
 
-    def _get_chemical_name(self,row):
-        '''
-        create a chemical name
-        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])  
-        params:  
-            pd.Series row: a row in the rxn_df  
-        returns:  
-            chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
-              has no concentration, or nan if no name  
-        '''
-        if pd.isnull(row['reagent']) or pd.isnull(row['conc']):
-            #this must not be a transfer. this operation has no chemical name
-            return np.nan
-        else:
-            #this uses a chemical with a conc. Probably a stock solution
-            return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
-        return pd.Series(new_cols)
-
-    def _load_reader_data(filename):
-        '''
-        #TODO this is outdated should mostly be burden shifted to platereader
-        given a filename, returns the scan data  
-        params:  
-            str filename: the name of the file to read  
-        retunrs:  
-            df: columns are the wells, rows are absorbances.  
-        Preconditions:
-            the entrys for all of the wells in the scan must be in the cache. If you
-            scanned using the controller, this was already done.  
-        '''
-        # Read data ignoring first 50 lines
-        df = pd.read_csv(os.path.join(path,filename),skiprows=50,header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [x[:-1] for x in df.columns]
-        #Note no read to query the cache because these were all scanned
-        pr_dict = {entry.loc:chem_name for chem_name, entry in self._cached_reader_locs.items() 
-                if entry.deck_pos in [4,7]}
-        #converting to chemical names instead of locs on wellplate
-        headers = [pr_dict[header] for header in headers]
-        df.columns = headers
-        df.dropna(inplace=True)
-        df = df.astype(float)
-        return df
-
     def save(self):
         self.portal.send_pack('save')
         #server will initiate file transfer
@@ -679,40 +638,450 @@ class Controller(ABC):
                 time.sleep(.5) #this is just for printing format. Not critical
                 raise e
 
+    def _load_rxn_df(self, input_data):
+        '''
+        reaches out to google sheets and loads the reaction protocol into a df and formats the df
+        adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
+        renames some columns to code friendly as opposed to human friendly names  
+        params:  
+            list<list<str>> input_data: as recieved in excel  
+        returns:  
+            pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols  
+        Postconditions:  
+            self._products has been initialized to hold the names of all the products  
+        '''
+        cols = make_unique(pd.Series(input_data[0])) 
+        rxn_df = pd.DataFrame(input_data[3:], columns=cols)
+        #rename some of the clunkier columns 
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename'}, axis=1, inplace=True)
+        rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
+        rxn_df.replace('', np.nan,inplace=True)
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
+        #rename chemical names
+        rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
+        self._rename_products(rxn_df)
+        #go back for some non numeric columns
+        rxn_df['callbacks'].fillna('',inplace=True)
+        self._products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
+        #make the reagent columns floats
+        rxn_df.loc[:,self._products] =  rxn_df[self._products].astype(float)
+        rxn_df.loc[:,self._products] = rxn_df[self._products].fillna(0)
+        return rxn_df
+
+    @abstractmethod
+    def _rename_products(self, rxn_df):
+        '''
+        Different for Protocol Executor vs auto
+        renames dilutions acording to the reagent that created them
+        and renames rxns to have a concentration  
+        Preconditions:  
+            dilution cols are named dilution_1/2 etc  
+            callback is the last column in the dataframe  
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization  
+        params:  
+            df rxn_df: the dataframe with all the reactions  
+        Postconditions:  
+            the df has had it's dilution columns renamed to a chemical name
+        '''
+        pass
+
+    def _get_products_to_labware(self, input_data):
+        '''
+        create a dictionary mapping products to their requested labware/containers  
+        Preconditions:  
+            self.rxn_df must have been initialized already  
+        params:  
+            list<list<str>> input data: the data from the excel sheet  
+        returns:  
+            Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
+                    labware and container preferences for products  
+        '''
+        cols = self.rxn_df.columns.to_list()
+        product_start_i = cols.index('reagent')+1
+        requested_containers = input_data[2][product_start_i+1:]
+        requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
+        #in df this is an index, so size cols is one less
+        products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
+        return products_to_labware
+
+    def _query_reagents(self, spreadsheet_key, credentials):
+        '''
+        query the user with a reagent sheet asking for more details on locations of reagents, mass
+        etc  
+        Preconditions:  
+            self.rxn_df should be initialized  
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
+            ServiceAccount Credentials credentials: to access sheets  
+        PostConditions:  
+            reagent_sheet has been constructed  
+        '''
+        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
+        reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
+        reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
+        if not self.use_cache:
+            d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
+
+    def _get_product_df(self, products_to_labware):
+        '''
+        Creates a df to be used by robot to initialize containers for the products it will make  
+        params:  
+            df products_to_labware: as passed to init_robot  
+        returns:  
+            df products:  
+                + INDEX:  
+                + str chemical_name: the name of this rxn  
+                + COLS:  
+                + str labware: the labware to put this rxn in or None if no preference  
+                + float max_vol: the maximum volume that will ever ocupy this container  
+        '''
+        products = products_to_labware.keys()
+        max_vols = [self._get_rxn_max_vol(product, products) for product in products]
+        product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
+        product_df['max_vol'] = max_vols
+        return product_df
+
+    @abstractmethod
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        This needs to be implemented to as a helper for _get_product_df.
+        It calculates the maximum volume that a container will hold at a time
+        '''
+        pass
+
+    def execute_protocol_df(self):
+        '''
+        takes a protocol df and sends every step to robot to execute  
+        params:  
+            int buff: the number of commands allowed in flight at a time  
+        Postconditions:  
+            every step in the protocol has been sent to the robot  
+        '''
+        for i, row in self.rxn_df.iterrows():
+            if row['op'] == 'transfer':
+                self._send_transfer_command(row,i)
+            elif row['op'] == 'pause':
+                cid = self.portal.send_pack('pause',row['pause_time'])
+            elif row['op'] == 'stop':
+                #read through the inflight packets
+                self.portal.send_pack('stop')
+                self._stop(i)
+            elif row['op'] == 'scan':
+                self._execute_scan(row, i)
+            elif row['op'] == 'dilution':
+                self._send_dilution_commands(row, i)
+            elif row['op'] == 'mix':
+                self._mix(row, i)
+            elif row['op'] == 'make':
+                self._send_make(row, i)
+            elif row['op'] == 'save':
+                self.save()
+            else:
+                raise Exception('invalid operation {}'.format(row['op']))
+
+    def _download_reagent_data(self, spreadsheet_key, credentials):
+        '''
+        This is almost line for line inherited, but we need to input in the middle. 
+        What can you do?  
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
+            ServiceAccount Credentials credentials: to access sheets  
+        returns:  
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
+        '''
+        
+        if self.use_cache:
+            #if you've already seen this don't pull it
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
+                reagent_info = dill.load(reagent_info_cache)
+        else:
+            input("<<controller>> please press enter when you've completed the reagent sheet")
+            #pull down from the cloud
+            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
+                row_names = True, credentials=credentials).drop(columns=['comments'])
+            #cache the data
+            #DEBUG
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
+                dill.dump(reagent_info, reagent_info_cache)
+        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
+        return reagent_info
+
+    def _send_make(self, row, i):
+        '''
+        sends a make command to the robot  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        self.portal.send_pack('make', row['reagent'].replace(' ','_'), row['conc'])
+
+    def _execute_scan(self,row,i):
+        '''
+        There are a few things entailed in a scan command  
+        1) send home to robot  
+        2) block until you run out of waits  
+        3) figure out what wells you want to scan  
+        4) query the robot for those wells, or use cache if you have it  
+            a) if you had to query robot, send request of reagents  
+            b) wait on robot response  
+            c) translate robot response to human readable  
+        5) update layout to scanner and scan  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        #1)
+        self.portal.send_pack('home')
+        #2)
+        self.portal.burn_pipe()
+        #3)
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        self._update_cached_locs(wellnames)
+        #4)
+        #update the locs on the well
+        well_locs = []
+        for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
+            assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
+            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            well_locs.append(entry.loc)
+        #5
+        self.pr.exec_macro('PlateIn')
+        self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
+        self.pr.exec_macro('PlateOut')
+
+    def _update_cached_locs(self, wellnames):
+        '''
+        checks the cache to see if wellnames are in the cache. If they aren't, a query will be
+        made to Eve for the wellnames, and data for those will be stored in the cache  
+        params:  
+            list<str> wellnames: the names of the wells you want to lookup  
+        Postconditions:  
+            The wellnames are in the cache  
+        '''
+        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
+        if unknown_wellnames:
+            #couldn't find in the cache, so we got to make a query
+            self.portal.send_pack('loc_req', unknown_wellnames)
+            pack_type, _, payload = self.portal.recv_pack()
+            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
+            returned_well_locs = payload[0]
+            #update the cache
+            for well_entry in returned_well_locs:
+                if well_entry[2] in [4,7]:
+                    #is on reader. Need to translate index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
+                else:
+                    #not on reader, just use vanilla index
+                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
+
+    def _mix(self,row,i):
+        '''
+        For now this function just shakes the whole plate.
+        In the future, we may want to mix
+        things that aren't on the platereader, in which case a new argument should be made in 
+        excel for the wells to scan, and we should make a function to pipette mix.
+        '''
+        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
+        wells_to_mix.name = 'mix_code'
+        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
+        self._update_cached_locs(wells_to_mix.index)
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
+                wellname in wells_to_mix.index}, name='deck_pos')
+        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
+        #get platereader rows. true if pr
+        wells_to_mix_df['platereader'] = wells_to_mix_df['deck_pos'].apply(lambda x: x in [4,7]) 
+        if wells_to_mix_df['platereader'].sum() > 0:
+            #TODO technically, you could be mixing the other stuff by hand while you're mixing
+            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
+            #platereader because of a bug, Mark will be mad, so apart for now. After testing
+            #you should burn pipe, then send the handmix command, then mix the platereader
+            #to multitask
+
+            #at least one well nees a shake
+            self.portal.send_pack('home')
+            self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
+            self.pr.exec_macro('PlateIn')
+            self.pr.shake()
+            self.pr.exec_macro('PlateOut')
+        if (~wells_to_mix_df['platereader']).sum() > 0:
+            #at least one needs to be mixed by hand
+            #still df
+            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df['platereader']].reset_index()
+            #convert to list of tuples
+            hand_mix_wells = [tuple(t) for t in hand_mix_wells[['index','mix_code']].itertuples(index=False)]
+            self.portal.send_pack('mix', hand_mix_wells)
+
+    def _send_dilution_commands(self,row,i):
+        '''
+        used to execute a dilution. This is analogous to microcode. This function will send two
+          commands. Water is always added first.
+            transfer: transfer water into the container
+            transfer: transfer reagent into the container  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        Preconditions:  
+            The buffer has room for at least one command  
+        Postconditions:  
+            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.  
+            Will block on ready if the buffer is filled  
+        '''
+        water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        self._send_transfer_command(water_transfer_row, i)
+        self._send_transfer_command(reagent_transfer_row, i)
+
+    def _get_dilution_transfer_rows(self, row):
+        '''
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+        returns:  
+            tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
+              reagent
+              see self._construct_dilution_transfer_row for details  
+        '''
+        reagent = row['chemical_name']
+        reagent_conc = row['conc']
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
+        total_vol = dilution_name_vol.iloc[0]
+        target_name = dilution_name_vol.index[0]
+        target_conc = row['dilution_conc']
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
+        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
+        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        return water_transfer_row, reagent_transfer_row
+
+    def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
+        '''
+        The transfer command expects a nicely formated row of the rxn_df, so here we create a row
+        with everything in it to ship to the transfer command.  
+        params:  
+            str reagent_name: used as the chemical_name field  
+            str target_name: used as the product_name field  
+            str vol: the volume to transfer  
+        returns:  
+            pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
+              op] have been initialized. The other fields are empty/NaN  
+        '''
+        template = self.rxn_df.iloc[0].copy()
+        template[:] = np.nan
+        template[self._products] = 0.0
+        template['op'] = 'transfer'
+        template['chemical_name'] = reagent_name
+        template[target_name] = vol
+        template['callbacks'] = ''
+        return template
+
+    def _stop(self, i):
+        '''
+        used to execute a stop operation. reads through buffer and then waits on user input  
+        params:  
+            int i: the index of the row in the protocol you're stopped on  
+        Postconditions:  
+            self._inflight_packs has been cleaned  
+        '''
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
+        if not self.simulate:
+            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+        self.portal.send_pack('continue')
+
+    def _send_transfer_command(self, row, i):
+        '''
+        params:  
+            pd.Series row: a row of self.rxn_df
+              uses the chemical_name, callbacks (and associated args), product_columns  
+            int i: index of this row  
+        returns:  
+            int: the cid of this command  
+        Postconditions:  
+            a transfer command has been sent to the robot  
+        '''
+        src = row['chemical_name']
+        containers = row[self._products].loc[row[self._products] != 0]
+        transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
+        #temporarilly just the raw callbacks
+        callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
+        has_stop = 'stop' in callbacks
+        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
+        cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
+        if has_stop:
+            n_stops = containers.shape[0]
+            for _ in range(n_stops):
+                self._stop(i)
+
+    
+    def _get_callback_args(self, row, callback):
+        '''
+        params:  
+            pd.Series row: a row of self.rxn_df  
+        returns:  
+            list<object>: the arguments associated with the callback or None if no arguments  
+        '''
+        if callback == 'pause':
+            return [row['pause_time']]
+        return None
+    
+
+    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
+        '''
+        calculates the amount of reagent volume needed for a dilution  
+        params:  
+            float target_conc: the concentration desired at the end  
+            float reagent_conc: the concentration of the reagent  
+            float total_vol: the total volume requested  
+        returns:  
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer  
+        '''
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
+
+    def _get_chemical_name(self,row):
+        '''
+        create a chemical name
+        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])  
+        params:  
+            pd.Series row: a row in the rxn_df  
+        returns:  
+            chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
+              has no concentration, or nan if no name  
+        '''
+        if pd.isnull(row['reagent']) or pd.isnull(row['conc']):
+            #this must not be a transfer. this operation has no chemical name
+            return np.nan
+        else:
+            #this uses a chemical with a conc. Probably a stock solution
+            return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
+        return pd.Series(new_cols)
+
 class AutoContr(Controller):
     '''
     This is a completely automated controller. It takes as input a layout sheet, and then does
     it's own experiments, pulling data etc  
+    We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
+    but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, out_path='Eve_Files', cache_path='Cache'):
-        '''
-        Note that init does not initialize the portal. This must be done explicitly or by calling
-        a run function that creates a portal. The portal is not passed to init because although
-        the code must not use more than one portal at a time, the portal may change over the 
-        lifetime of the class
-        NOte that pr cannot be initialized until you know if you're simulating or not, so it
-        is instantiated in run
-        '''
-        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, out_path, cache_path)
-        #necessary helper params
-        credentials = self._init_credentials(rxn_sheet_name)
-        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
-        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
-        header_data = self._download_sheet(rxn_spreadsheet,0)
-        deck_data = self._download_sheet(rxn_spreadsheet, 1)
-        self._init_robo_header_params(header_data)
-        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
-        #with a parsed reagent_df. This is exactly as is pulled from gsheets
-        empty_containers = self._get_empty_containers(raw_reagent_df)
-        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
-        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
-        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
+        self.rxn_df_template = self.rxn_df
+        self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
+        self.well_count = 0 #used internally for unique wellnames
+        self.batch_num = 0 #used internally for unique filenames
 
-    def run_simulation(self):
+    def run_simulation(self, model):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
         end of function  
+        params:
+            MLModel model: the model to use when training and predicting  
         Returns:  
             bool: True if all tests were passed  
         '''
@@ -731,7 +1100,7 @@ class AutoContr(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, simulate=True)
+        self._run(port, True, model)
 
         #collect the eve thread
         eve_thread.join()
@@ -742,12 +1111,38 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(simulate):
+    def run_protocol(self, model, simulate=False, port=50000):
+        '''
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
+            str simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            MLModel model: the model to use when training and predicting  
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
+        '''
+        print('<<controller>> RUNNING')
+        self._run(port, simulate, model)
+        print('<<controller>> EXITING')
+
+    def _rename_products(self, rxn_df):
+        '''
+        required for class compatibility, but not used by the Auto
+        '''
         pass
 
-    @error_exit
-    def _run(self, port, simulate):
+    def _get_product_df(self, products_to_labware):
         '''
+        required for class compatibility, but not used by Auto
+        TODO would be nice to return something that would blow up if accessed
+        '''
+        return np.nan
+
+    @error_exit
+    def _run(self, port, simulate, model):
+        '''
+        private function to run
         Returns:  
             bool: True if all tests were passed  
         '''
@@ -758,11 +1153,101 @@ class AutoContr(Controller):
         buffered_sock = BufferedSocket(sock, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
-
+        
         self.init_robot(simulate)
+        while not model.quit:
+            recipes = model.predict(5)
+            #generate new wellnames for next batch
+            wellnames = [self.generate_wellname() for i in range(recipes.shape[0])]
+            #plan and execute a reaction
+            self._create_samples(wellnames, recipes)
+            #pull in the scan data
+            scan_data = self._get_sample_data(wellnames, self.rxn_df['scan_filename']) 
+            #train on scans
+            model.train(scan_data.T.to_numpy(),recipes)
+            self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
         return
+    
+    def _get_sample_data(self,wellnames, filename):
+        '''
+        TODO
+        SKELETON
+        scans a sample of wells specified by wellnames, and returns their spectra  
+        params:  
+            list<str> wellnames: the names of the wells to be scanned  
+            str filename: the name of the file that holds the scans  
+        returns:  
+            df: n_wells, by size of spectra, the scan data.  
+        ''' 
+        self._update_cached_locs(wellnames)
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        unordered_data = self.pr.load_reader_data(filename, pr_dict)
+        #reorder according to order of wellnames
+        return unordered_data[wellnames]
+
+    def _create_samples(self, wellnames, recipes):
+        '''
+        creates the desired reactions on the platereader  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+              you can use for each reaction you want to perform  
+        returns:  
+            list<str> wellnames: the names of the wells produced ordered in accordance to the
+              order of recipes
+        '''
+        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
+                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        self.rxn_df = self._build_rxn_df(wellnames, recipes)
+        self._products = wellnames
+        self.execute_protocol_df()
+
+    def generate_wellname(self):
+        '''
+        returns:  
+            str: a unique name for a new well
+        '''
+        wellname = "autowell{}".format(self.well_count)
+        self.well_count += 1
+        return wellname
+
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        This is used right now because it's best I've got. Ideally, you could drop the part 
+        of init that constructs product_df
+        '''
+        return 200.0
+
+    def _build_rxn_df(self,wellnames,recipes):
+        '''
+        used to construct a rxn_df for this batch of reactions
+        TODO test bejesus out of this method
+        TODO need some sort of key to map from name of reagent to index of the 
+        recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
+        '''
+        rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        def build_product_rows(row):
+            '''
+            params:  
+                pd.Series row: a row of the template df  
+            returns:  
+                pd.Series: a row for the new df
+            '''
+            d = {}
+            if row['op'] == 'transfer':
+                #is a transfer, so we want to lookup the volume of that reagent in recipe_df
+                return recipe_df.loc[:, row['chemical_name']] * row['template'] * 200.0
+            else:
+                #if not a tranfer, we want to keep whatever value was there
+                return pd.Series(row['template'], index=recipe_df.index)
+        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1)).drop(
+                columns='template')
+        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
+                x, self.batch_num))
+        return rxn_df
 
 class ProtocolExecutor(Controller): 
     '''
@@ -805,26 +1290,6 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-        #necessary helper params
-        credentials = self._init_credentials(rxn_sheet_name)
-        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
-        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
-        header_data = self._download_sheet(rxn_spreadsheet,0)
-        input_data = self._download_sheet(rxn_spreadsheet,1)
-        deck_data = self._download_sheet(rxn_spreadsheet, 2)
-        self._init_robo_header_params(header_data)
-        self._make_out_dirs(header_data)
-        self.rxn_df = self._load_rxn_df(input_data)
-        self._query_reagents(wks_key, credentials)
-        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
-        #with a parsed reagent_df. This is exactly as is pulled from gsheets
-        empty_containers = self._get_empty_containers(raw_reagent_df)
-        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
-        products_to_labware = self._get_products_to_labware(input_data)
-        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
-        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
-        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
-        self.robo_params['product_df'] = self._get_product_df(products_to_labware)
         self.run_all_checks()
 
     def run_simulation(self):
@@ -896,65 +1361,18 @@ class ProtocolExecutor(Controller):
         self.execute_protocol_df()
         self.close_connection()
         self.pr.shutdown()
-        return
 
-    def _download_reagent_data(self, spreadsheet_key, credentials):
+    def init_robot(self,simulate):
         '''
-        This is almost line for line inherited, but we need to input in the middle. 
-        What can you do?  
+        calls super init robot, and then sends an init_containers command to initialize all the
+        prodcuts  
         params:  
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
-            ServiceAccount Credentials credentials: to access sheets  
-        returns:  
-            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
+            bool simulate: whether the robot should run a simulation  
         '''
-        
-        if self.use_cache:
-            #if you've already seen this don't pull it
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
-                reagent_info = dill.load(reagent_info_cache)
-        else:
-            input("<<controller>> please press enter when you've completed the reagent sheet")
-            #pull down from the cloud
-            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
-                row_names = True, credentials=credentials).drop(columns=['comments'])
-            #cache the data
-            #DEBUG
-            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
-                dill.dump(reagent_info, reagent_info_cache)
-        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
-        return reagent_info
-
-    def _load_rxn_df(self, input_data):
-        '''
-        reaches out to google sheets and loads the reaction protocol into a df and formats the df
-        adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
-        renames some columns to code friendly as opposed to human friendly names  
-        params:  
-            list<list<str>> input_data: as recieved in excel  
-        returns:  
-            pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols  
-        Postconditions:  
-            self._products has been initialized to hold the names of all the products  
-        '''
-        cols = make_unique(pd.Series(input_data[0])) 
-        rxn_df = pd.DataFrame(input_data[3:], columns=cols)
-        #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename'}, axis=1, inplace=True)
-        rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
-        rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
-        #rename chemical names
-        rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
-        self._rename_products(rxn_df)
-        #go back for some non numeric columns
-        rxn_df['callbacks'].fillna('',inplace=True)
-        self._products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
-        #make the reagent columns floats
-        rxn_df.loc[:,self._products] =  rxn_df[self._products].astype(float)
-        rxn_df.loc[:,self._products] = rxn_df[self._products].fillna(0)
-
-        return rxn_df
+        super().init_robot(simulate)
+        #send robot data to initialize empty product containers. Because we know things like total
+        #vol and desired labware, this makes sense for a planned experiment
+        self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
     
     def _rename_products(self, rxn_df):
         '''
@@ -982,65 +1400,7 @@ class ProtocolExecutor(Controller):
                 rename_key[col] = name
             else:
                 rename_key[col] = "{}C1.0".format(col).replace(' ','_')
-    
         rxn_df.rename(rename_key, axis=1, inplace=True)
-
-    def _get_products_to_labware(self, input_data):
-        '''
-        create a dictionary mapping products to their requested labware/containers  
-        Preconditions:  
-            self.rxn_df must have been initialized already  
-        params:  
-            list<list<str>> input data: the data from the excel sheet  
-        returns:  
-            Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
-                    labware and container preferences for products  
-        '''
-        cols = self.rxn_df.columns.to_list()
-        product_start_i = cols.index('reagent')+1
-        requested_containers = input_data[2][product_start_i+1:]
-        requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
-        #in df this is an index, so size cols is one less
-        products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
-        return products_to_labware
-
-    def _query_reagents(self, spreadsheet_key, credentials):
-        '''
-        query the user with a reagent sheet asking for more details on locations of reagents, mass
-        etc  
-        Preconditions:  
-            self.rxn_df should be initialized  
-        params:  
-            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
-            ServiceAccount Credentials credentials: to access sheets  
-        PostConditions:  
-            reagent_sheet has been constructed  
-        '''
-        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
-        reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
-        reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
-        reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
-        if not self.use_cache:
-            d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
-
-    def _get_product_df(self, products_to_labware):
-        '''
-        Creates a df to be used by robot to initialize containers for the products it will make  
-        params:  
-            df products_to_labware: as passed to init_robot  
-        returns:  
-            df products:  
-                + INDEX:  
-                + str chemical_name: the name of this rxn  
-                + COLS:  
-                + str labware: the labware to put this rxn in or None if no preference  
-                + float max_vol: the maximum volume that will ever ocupy this container  
-        '''
-        products = products_to_labware.keys()
-        max_vols = [self._get_rxn_max_vol(product, products) for product in products]
-        product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
-        product_df['max_vol'] = max_vols
-        return product_df
 
     def _get_rxn_max_vol(self, name, products):
         '''
@@ -1072,287 +1432,6 @@ class ProtocolExecutor(Controller):
                 current_vol += self.rxn_df.loc[i,name]
                 max_vol = max(max_vol, current_vol)
         return max_vol
-
-    def execute_protocol_df(self):
-        '''
-        takes a protocol df and sends every step to robot to execute  
-        params:  
-            int buff: the number of commands allowed in flight at a time  
-        Postconditions:  
-            every step in the protocol has been sent to the robot  
-        '''
-        for i, row in self.rxn_df.iterrows():
-            if row['op'] == 'transfer':
-                self._send_transfer_command(row,i)
-            elif row['op'] == 'pause':
-                cid = self.portal.send_pack('pause',row['pause_time'])
-            elif row['op'] == 'stop':
-                #read through the inflight packets
-                self.portal.send_pack('stop')
-                self._stop(i)
-            elif row['op'] == 'scan':
-                self._execute_scan(row, i)
-            elif row['op'] == 'dilution':
-                self._send_dilution_commands(row, i)
-            elif row['op'] == 'mix':
-                self._mix(row, i)
-            elif row['op'] == 'make':
-                self._send_make(row, i)
-            elif row['op'] == 'save':
-                self.save()
-            else:
-                raise Exception('invalid operation {}'.format(row['op']))
-
-    def _send_make(self, row, i):
-        '''
-        sends a make command to the robot  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-            int i: index of this row  
-        '''
-        self.portal.send_pack('make', row['reagent'].replace(' ','_'), row['conc'])
-
-    def _execute_scan(self,row,i):
-        '''
-        There are a few things entailed in a scan command  
-        1) send home to robot  
-        2) block until you run out of waits  
-        3) figure out what wells you want to scan  
-        4) query the robot for those wells, or use cache if you have it  
-            a) if you had to query robot, send request of reagents  
-            b) wait on robot response  
-            c) translate robot response to human readable  
-        5) update layout to scanner and scan  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-            int i: index of this row  
-        '''
-        #1)
-        self.portal.send_pack('home')
-        #2)
-        self.portal.burn_pipe()
-        #3)
-        wellnames = row[self._products][row[self._products].astype(bool)].index
-        self._query_wells(wellnames)
-        #4)
-        #update the locs on the well
-        well_locs = []
-        for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
-            assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
-            well_locs.append(entry.loc)
-        #5
-        self.pr.exec_macro('PlateIn')
-        self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
-        self.pr.exec_macro('PlateOut')
-
-    def _query_wells(self, wellnames):
-        '''
-        checks the cache to see if wellnames are in the cache. If they aren't, a query will be
-        made to Eve for the wellnames, and data for those will be stored in the cache  
-        params:  
-            list<str> wellnames: the names of the wells you want to lookup  
-        Postconditions:  
-            The wellnames are in the cache  
-        '''
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
-        if unknown_wellnames:
-            #couldn't find in the cache, so we got to make a query
-            self.portal.send_pack('loc_req', unknown_wellnames)
-            pack_type, _, payload = self.portal.recv_pack()
-            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
-            returned_well_locs = payload[0]
-            #update the cache
-            for well_entry in returned_well_locs:
-                if well_entry[2] in [4,7]:
-                    #is on reader. Need to translate index
-                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
-                else:
-                    #not on reader, just use vanilla index
-                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
-
-
-    def _mix(self,row,i):
-        '''
-        For now this function just shakes the whole plate.
-        In the future, we may want to mix
-        things that aren't on the platereader, in which case a new argument should be made in 
-        excel for the wells to scan, and we should make a function to pipette mix.
-        '''
-        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
-        wells_to_mix.name = 'mix_code'
-        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
-        self._query_wells(wells_to_mix.index)
-        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
-                wellname in wells_to_mix.index}, name='deck_pos')
-        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
-        #get platereader rows. true if pr
-        wells_to_mix_df['platereader'] = wells_to_mix_df['deck_pos'].apply(lambda x: x in [4,7]) 
-        if wells_to_mix_df['platereader'].sum() > 0:
-            #TODO technically, you could be mixing the other stuff by hand while you're mixing
-            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
-            #platereader because of a bug, Mark will be mad, so apart for now. After testing
-            #you should burn pipe, then send the handmix command, then mix the platereader
-            #to multitask
-
-            #at least one well nees a shake
-            self.portal.send_pack('home')
-            self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
-            self.pr.exec_macro('PlateIn')
-            self.pr.shake()
-            self.pr.exec_macro('PlateOut')
-        if (~wells_to_mix_df['platereader']).sum() > 0:
-            #at least one needs to be mixed by hand
-            #still df
-            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df['platereader']].reset_index()
-            #convert to list of tuples
-            hand_mix_wells = [tuple(t) for t in hand_mix_wells[['index','mix_code']].itertuples(index=False)]
-            self.portal.send_pack('mix', hand_mix_wells)
-            
-
-
-    def _send_dilution_commands(self,row,i):
-        '''
-        used to execute a dilution. This is analogous to microcode. This function will send two
-          commands. Water is always added first.
-            transfer: transfer water into the container
-            transfer: transfer reagent into the container  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-            int i: index of this row  
-        Preconditions:  
-            The buffer has room for at least one command  
-        Postconditions:  
-            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.  
-            Will block on ready if the buffer is filled  
-        '''
-        water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
-        self._send_transfer_command(water_transfer_row, i)
-        self._send_transfer_command(reagent_transfer_row, i)
-
-    def _get_dilution_transfer_rows(self, row):
-        '''
-        Takes in a dilution row and builds two transfer rows to be used by the transfer command  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-        returns:  
-            tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
-              reagent
-              see self._construct_dilution_transfer_row for details  
-        '''
-        reagent = row['chemical_name']
-        reagent_conc = row['conc']
-        product_cols = row.loc[self._products]
-        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
-        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
-        total_vol = dilution_name_vol.iloc[0]
-        target_name = dilution_name_vol.index[0]
-        target_conc = row['dilution_conc']
-        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
-        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
-        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
-        return water_transfer_row, reagent_transfer_row
-
-    def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
-        '''
-        The transfer command expects a nicely formated row of the rxn_df, so here we create a row
-        with everything in it to ship to the transfer command.  
-        params:  
-            str reagent_name: used as the chemical_name field  
-            str target_name: used as the product_name field  
-            str vol: the volume to transfer  
-        returns:  
-            pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
-              op] have been initialized. The other fields are empty/NaN  
-        '''
-        template = self.rxn_df.iloc[0].copy()
-        template[:] = np.nan
-        template[self._products] = 0.0
-        template['op'] = 'transfer'
-        template['chemical_name'] = reagent_name
-        template[target_name] = vol
-        template['callbacks'] = ''
-        return template
-
-
-    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
-        '''
-        calculates the amount of reagent volume needed for a dilution  
-        params:  
-            float target_conc: the concentration desired at the end  
-            float reagent_conc: the concentration of the reagent  
-            float total_vol: the total volume requested  
-        returns:  
-            tuple<float>: size 2
-                volume of water to transfer
-                volume of reagent to transfer  
-        '''
-        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
-        vol_reagent = mols_reagent/reagent_conc
-        vol_water = total_vol - vol_reagent
-        return vol_water, vol_reagent
-
-    def _stop(self, i):
-        '''
-        used to execute a stop operation. reads through buffer and then waits on user input  
-        params:  
-            int i: the index of the row in the protocol you're stopped on  
-        Postconditions:  
-            self._inflight_packs has been cleaned  
-        '''
-        pack_type, _, _ = self.portal.recv_pack()
-        assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
-        if not self.simulate:
-            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
-        self.portal.send_pack('continue')
-
-    def _send_transfer_command(self, row, i):
-        '''
-        params:  
-            pd.Series row: a row of self.rxn_df
-              uses the chemical_name, callbacks (and associated args), product_columns  
-            int i: index of this row  
-        returns:  
-            int: the cid of this command  
-        Postconditions:  
-            a transfer command has been sent to the robot  
-        '''
-        src = row['chemical_name']
-        containers = row[self._products].loc[row[self._products] != 0]
-        transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
-        #temporarilly just the raw callbacks
-        callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
-        has_stop = 'stop' in callbacks
-        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
-        cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
-        if has_stop:
-            n_stops = containers.shape[0]
-            for _ in range(n_stops):
-                self._stop(i)
-
-    
-    def _get_callback_args(self, row, callback):
-        '''
-        params:  
-            pd.Series row: a row of self.rxn_df  
-        returns:  
-            list<object>: the arguments associated with the callback or None if no arguments  
-        '''
-        if callback == 'pause':
-            return [row['pause_time']]
-        return None
-    
-    def init_robot(self,simulate):
-        '''
-        calls super init robot, and then sends an init_containers command to initialize all the
-        prodcuts  
-        params:  
-            bool simulate: whether the robot should run a simulation  
-        '''
-        super().init_robot(simulate)
-        #send robot data to initialize empty product containers. Because we know things like total
-        #vol and desired labware, this makes sense for a planned experiment
-        self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
 
     
     #TESTING
@@ -1818,7 +1897,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def load_reader_data(filename,loc_to_name):
+    def load_reader_data(self, filename,loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
@@ -1833,6 +1912,15 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
+    def load_reader_data(self, filename, loc_to_name):
+        '''
+        doesn't actually read data, generates some dummy data for you to use  
+        returns:  
+            df: a bunch of -1s in a nice dataframe with size 701 per well  
+        '''
+        wellnames = loc_to_name.values()
+        return pd.DataFrame(np.ones((701,len(wellnames))), columns=wellnames)
+
 class DummyReader(AbstractPlateReader):
     '''
     Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
@@ -1840,20 +1928,20 @@ class DummyReader(AbstractPlateReader):
     '''
     pass
 
+
 class PlateReader(AbstractPlateReader):
     '''
     This class handles all platereader interactions. Inherits from the interface
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    SPECTRO_DATA_PATH = "/mnt/g/Shared drives/Hendricks Lab Drive/Opentrons_Reactions/Plate Reader Data"
+    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
 
     def __init__(self, data_path, simulate=False):
         self.data_path = data_path
         self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
-        input('<<Reader>> initializing. Please ensure that the software is closed. Press enter to continue')
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
@@ -1912,16 +2000,19 @@ class PlateReader(AbstractPlateReader):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
-        #parse the metadata
-        start_i, metadata = self._parse_metadata(filename, self.data_path)
-        # Read data ignoring first metadata lines
-        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
-                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-        headers = [loc_to_name[x[:-1]] for x in df.columns]
-        df.columns = headers
-        df.dropna(inplace=True)
-        df = df.astype(float)
-        return df, metadata
+        if self.simulate:
+            return super().load_reader_data(filename, loc_to_name) #return dummy data
+        else:
+            #parse the metadata
+            start_i, metadata = self._parse_metadata(filename, self.data_path)
+            # Read data ignoring first metadata lines
+            df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                    header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+            headers = [loc_to_name[x[:-1]] for x in df.columns]
+            df.columns = headers
+            df.dropna(inplace=True)
+            df = df.astype(float)
+            return df, metadata
 
     def _parse_metadata(self, filename):
         '''
