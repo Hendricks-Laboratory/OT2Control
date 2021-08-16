@@ -444,8 +444,6 @@ class Controller(ABC):
         self._plot_setup_overlay(filename)
         colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
         for i in range(len(y)):
-            if len(y[i]) != 701:
-                breakpoint()
             plt.plot(x_vals,y[i],color = tuple(colors[i]))
         patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
         plt.legend(patches, wells, loc='upper right', frameon=False,prop={'size':3})
@@ -999,28 +997,26 @@ class Controller(ABC):
 
     def _update_cached_locs(self, wellnames):
         '''
-        checks the cache to see if wellnames are in the cache. If they aren't, a query will be
+        A query will be
         made to Eve for the wellnames, and data for those will be stored in the cache  
         params:  
             list<str> wellnames: the names of the wells you want to lookup  
         Postconditions:  
             The wellnames are in the cache  
         '''
-        unknown_wellnames = [wellname for wellname in wellnames if wellname not in self._cached_reader_locs]
-        if unknown_wellnames:
-            #couldn't find in the cache, so we got to make a query
-            self.portal.send_pack('loc_req', unknown_wellnames)
-            pack_type, _, payload = self.portal.recv_pack()
-            assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
-            returned_well_locs = payload[0]
-            #update the cache
-            for well_entry in returned_well_locs:
-                if well_entry[2] in [4,7]:
-                    #is on reader. Need to translate index
-                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
-                else:
-                    #not on reader, just use vanilla index
-                    self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
+        #couldn't find in the cache, so we got to make a query
+        self.portal.send_pack('loc_req', wellnames)
+        pack_type, _, payload = self.portal.recv_pack()
+        assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
+        returned_well_locs = payload[0]
+        #update the cache
+        for well_entry in returned_well_locs:
+            if well_entry[2] in [4,7]:
+                #is on reader. Need to translate index
+                self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
+            else:
+                #not on reader, just use vanilla index
+                self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
 
     def _mix(self,row,i):
         '''
@@ -2060,6 +2056,7 @@ class AbstractPlateReader(ABC):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
+        print('<<Reader>> generating dummy data')
         wellnames = loc_to_name.values()
         metadata = {'filename':filename, 'n_cycles':1}
         #.42 is a nice number to show up on plots. Also, 42 ...

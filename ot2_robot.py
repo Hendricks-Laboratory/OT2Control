@@ -1223,7 +1223,8 @@ class OT2Robot():
         '''
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
-        n_substeps = int(vol // self.pipettes[arm]['size']) + 1
+        #the fudge factor makes sure that if exactly 300 300//300 + 1 = 1 not 2
+        n_substeps = int((vol-1e-9) // self.pipettes[arm]['size']) + 1
         substep_vol = vol / n_substeps
         
         #transfer the liquid in as many steps are necessary
