@@ -319,7 +319,7 @@ class Controller(ABC):
 
     def _make_cache(self):
         if not os.path.exists(self.cache_path):
-            os.path.makedirs(self.cache_path)
+            os.makedirs(self.cache_path)
 
     def _init_credentials(self, rxn_sheet_name):
         '''
@@ -1389,12 +1389,12 @@ class AutoContr(Controller):
             d = {}
             if row['op'] == 'transfer':
                 #is a transfer, so we want to lookup the volume of that reagent in recipe_df
-                return recipe_df.loc[:, row['chemical_name']] * row['template'] * 200.0
+                return recipe_df.loc[:, row['chemical_name']] * row['Template'] * 200.0
             else:
                 #if not a tranfer, we want to keep whatever value was there
-                return pd.Series(row['template'], index=recipe_df.index)
+                return pd.Series(row['Template'], index=recipe_df.index)
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1)).drop(
-                columns='template')
+                columns='Template')
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
         return rxn_df
