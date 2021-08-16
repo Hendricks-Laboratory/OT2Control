@@ -832,10 +832,17 @@ class Controller(ABC):
             reagent_sheet has been constructed  
         '''
         rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
-        reagent_df = self.rxn_df[['chemical_name', 'conc']].groupby('chemical_name').first()
+        #you might make a reaction you don't want to specify at the start
+        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['chemical_name', 'conc']\
+                ].groupby('chemical_name').first()
         reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
         reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
         if not self.use_cache:
+            if reagent_df.empty:
+                #d2g has weird upload behavior so must add a blank row
+                blanks = ['' for i in range(reagent_df.shape[1])]
+                reagent_df = reagent_df.append(pd.DataFrame([blanks],
+                        columns=reagent_df.columns,index=pd.Index([''],name='chemical_name')))
             d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
     def _get_product_df(self, products_to_labware):

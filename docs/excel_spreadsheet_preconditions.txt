@@ -29,7 +29,8 @@ Please do not write concentrations in different ways. It's not nice. e.g. .050 s
 and 0.05 sodium hydroxide are distinct names to the robot. It will treat them as 
 different chemicals
 It's really not expected that you 'transfer' liquid into yourself. 
-I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do.
+I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do
+If you have no reagents, weird stuff happens
 The Labware row is used to specify labware for a chemical. 
 Choose from the dropdown menu if you have a preffered type of labware (e.g. temp controller) 
 for that reaction. This can be left blank if you don't care the labware you want to use
