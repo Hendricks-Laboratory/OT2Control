@@ -1564,6 +1564,8 @@ class AutoContr(Controller):
         has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
                 abs_tol=1e-9)).any()
         if has_invalid_ratio:
+            print('<<controller>> precheck error: invalid ratio of reagents (doesn\'t add to 1)')
+            print('  ratios were {}'.format(reagent_ratios))
             found_errors = max(found_errors, 2)
         return found_errors
 
@@ -1608,13 +1610,6 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-
-        #############DELETE THIS DEBUG VERY BAD. DOCTORING DATA BECAUSE NO WIFI
-        print('PLEASE REMOVE THIS: Doctoring data cause no wifi')
-        self.rxn_df.loc[8,'R3C0.5'] = 4800.0
-        self.rxn_df.loc[0,'P2C1.0'] = 1000.0 *2
-
-        self.run_all_checks()
 
     def run_simulation(self):
         '''
@@ -1963,7 +1958,9 @@ class ProtocolExecutor(Controller):
         reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
         def merge_dry(row):
             '''
-            apply helper to merge a reagent_df with a dry_container_df
+            apply helper to merge a reagent_df with a dry_container_df  
+            Note, this is meant to be applied to the reagent_df, so it doesn't generate
+            new rows if necessary. That must be done seperately.  
             '''
             d = {'loc':{}, 'deck_pos':{}}
             found_match = False
@@ -1982,6 +1979,15 @@ class ProtocolExecutor(Controller):
                 'vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
         result_df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t').set_index('chem_name')
         sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
+        #could still have NaNs if a dry reagent was made, but not specified at start
+        sbs_rows_w_nan = sbs.loc[sbs.isna().any(axis=1)].index
+        for chem_name in sbs_rows_w_nan:
+            for dry_name in dry_containers.index:
+                if dry_name in chem_name:
+                    sbs.at[chem_name,'loc_t'] = dry_containers.at[dry_name,'loc']
+                    sbs.at[chem_name,'deck_pos_t'] = dry_containers.at[dry_name,'deck_pos']
+                    sbs.at[chem_name,'vol_t'] = 'any'
+                    sbs.at[chem_name,'container_t'] = 'any'
         return sbs
 
     def _vol_calc(self, name):
