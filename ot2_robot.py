@@ -1014,6 +1014,7 @@ class OT2Robot():
             self.portal.send_pack('ready', cid)
             return 1
         elif command_type == 'save':
+            #ghost
             self._exec_save()
             return 1
         elif command_type == 'close':
@@ -1299,6 +1300,7 @@ class OT2Robot():
             volumes of src and dst have been updated  
         Preconditions:
             Both pipettes are clean or of same type  
+            src has enough volume to transfer
         '''
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
@@ -1309,7 +1311,7 @@ class OT2Robot():
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
         try:
-            assert (src_cont.vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))
+            assert (src_cont.aspiratible_vol >= vol),'{} cannot transfer {} to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))
         except AssertionError as e:
             #ran out of reagent. Try to make more
             src_raw_name = src[:src.find('C')]

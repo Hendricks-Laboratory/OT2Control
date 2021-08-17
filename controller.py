@@ -1300,7 +1300,7 @@ class AutoContr(Controller):
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock, timeout=None)
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
         
@@ -1333,7 +1333,7 @@ class AutoContr(Controller):
         ''' 
         self._update_cached_locs(wellnames)
         pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
-        unordered_data = self.pr.load_reader_data(filename, pr_dict)
+        unordered_data, metadata = self.pr.load_reader_data(filename, pr_dict)
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
@@ -1440,6 +1440,12 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
+
+        #############DELETE THIS DEBUG VERY BAD. DOCTORING DATA BECAUSE NO WIFI
+        print('PLEASE REMOVE THIS: Doctoring data cause no wifi')
+        self.rxn_df.loc[8,'R3C0.5'] = 4800.0
+        self.rxn_df.loc[0,'P2C1.0'] = 1000.0 *2
+
         self.run_all_checks()
 
     def run_simulation(self):
@@ -1503,7 +1509,7 @@ class ProtocolExecutor(Controller):
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
-        buffered_sock = BufferedSocket(sock, timeout=None)
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
 
