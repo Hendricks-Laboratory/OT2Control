@@ -1033,12 +1033,12 @@ class Controller(ABC):
         A query will be
         made to Eve for the wellnames, and data for those will be stored in the cache  
         params:  
-            list<str> wellnames: the names of the wells you want to lookup  
+            listlike<str> wellnames: the names of the wells you want to lookup  
         Postconditions:  
             The wellnames are in the cache  
         '''
         #couldn't find in the cache, so we got to make a query
-        self.portal.send_pack('loc_req', wellnames)
+        self.portal.send_pack('loc_req', [wellname for wellname in wellnames])
         pack_type, _, payload = self.portal.recv_pack()
         assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
         returned_well_locs = payload[0]
