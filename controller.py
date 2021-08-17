@@ -1428,7 +1428,7 @@ class AutoContr(Controller):
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         
         self.init_robot(simulate)
         while not model.quit:
@@ -1674,7 +1674,7 @@ class ProtocolExecutor(Controller):
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
-        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=1)
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
 
         self.init_robot(simulate)
         self.execute_protocol_df()
