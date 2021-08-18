@@ -30,6 +30,7 @@
 from datetime import datetime
 import os
 import dill
+import functools
 
 #used for armchair file transfer initialized from armchair instructions
 
@@ -50,6 +51,7 @@ class Armchair():
           packages.  
         str name: the name of this armchair object. Used for loging purposes  
         str log_path: the path to the log file for this Armchair  
+        int state: the state of the robot. 0 is good. 1 is bad
     CONSTANTS:  
         bidict PACK_TYPES: this is a key for translating between byte codes and string labels
           for different packet types  
@@ -57,11 +59,11 @@ class Armchair():
           not go to the buffer, are sent immediately without waiting for a ready. The responses to
           these packets are controlled outside of the Armchair class by the user  
     METHODS:  
-        recv() tuple&lt;str,int,Obj&gt;: this should almost never be used by a user. It recieves a
-          packet, but without any checking for buffer requirements  
-        recv_pack() tuple&lt;str,int,Obj&gt;: this is a wrapped version of recv for user. It will make
+        recv_pack() tuple&lt;str,int,Obj&gt;: recieve a packet. This method will make
           sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
-          payload  
+          payload  tuple&lt;str,int,Obj&gt;: like recv, but 
+        recv_first(str pack_type) tuple&lt;str,int,Obj&gt;: recieves the first packet that has the 
+          given type. Discards any other packets read in the process.  
         send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
           of pack_type with args.  
         burn_pipe() void: This command waits until the pipe is clear  
@@ -69,12 +71,16 @@ class Armchair():
     &#39;&#39;&#39;
 
     FTP_EOF = &#39;AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile&#39;.encode(&#39;ascii&#39;)
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
-    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;] #These are necessary because we never want to wait on a
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;error&#39;:b&#39;\x02&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
+    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;,&#39;error&#39;] 
+    #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
 
+
     def __init__(self, socket, name, log_path=&#39;&#39;, buffsize=4):
+        self.state = 0
+        self.error_payload = None
         self.sock = socket
         self.cid = 0
         self.buffsize = buffsize
@@ -86,9 +92,18 @@ class Armchair():
             os.makedirs(self.log_path)
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;w&#39;) as armchair_log:
             armchair_log.write(&#39;Armchair Log: {}, {}\n&#39;.format(self.name, datetime.now().strftime(&#39;%H:%M:%S:%f&#39;)))
+
+    def state_dependent(func):
+        def decorated(*args, **kwargs):
+            self = args[0]
+            if self.state == 0:
+                return func(*args, **kwargs)
+            else:
+                raise ConnectionError(&#39;Armchair Error: cannot send or recieve with error state {}, please call reset_error first&#39;.format(self.state))
+        return decorated
             
 
-    def get_len(self,header):
+    def _get_len(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -97,7 +112,7 @@ class Armchair():
         &#39;&#39;&#39;
         return int.from_bytes(header[:8], &#39;big&#39;)
     
-    def get_type(self,header):
+    def _get_type(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -106,7 +121,7 @@ class Armchair():
         &#39;&#39;&#39;
         return self.PACK_TYPES.inv[header[8:9]]
 
-    def get_cid(self,header):
+    def _get_cid(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -115,7 +130,7 @@ class Armchair():
         &#39;&#39;&#39;
         return int.from_bytes(header[9:17], &#39;big&#39;)
     
-    def construct_head(self,n_bytes, pack_type):
+    def _construct_head(self,n_bytes, pack_type):
         &#39;&#39;&#39;
         params:  
             int n_bytes: the number of bytes in the payload  
@@ -125,7 +140,8 @@ class Armchair():
             self.cid+=1
         return n_bytes.to_bytes(8,&#39;big&#39;) + self.PACK_TYPES[pack_type] + self.cid.to_bytes(8,&#39;big&#39;)
 
-    def recv(self):
+    @state_dependent
+    def _recv(self):
         &#39;&#39;&#39;
         If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
         will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
@@ -134,11 +150,13 @@ class Armchair():
             str: type of packet  
             int: the cid of the recived packet  
             Obj: the argmuents/payload  
+        raises:  
+            ConnectionError: if an error packet is recieved
         &#39;&#39;&#39;
         header = self.sock.recv_size(17)
-        header_len = self.get_len(header)
-        header_type = self.get_type(header)
-        header_cid = self.get_cid(header)
+        header_len = self._get_len(header)
+        header_type = self._get_type(header)
+        header_cid = self._get_cid(header)
         if header_len &gt; 0: #if there were arguments
             payload = self.sock.recv_size(header_len)
             payload = dill.loads(payload)
@@ -146,13 +164,40 @@ class Armchair():
             payload = None
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
                 armchair_log.write(&#34;{}\trecieved {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;),header_type,self.cid))
+        if header_type == &#39;error&#39;:
+            self._handle_error_pack(payload)
         return header_type, header_cid, payload
+
+    def _handle_error_pack(self, payload):
+        &#39;&#39;&#39;
+        handles the recipt of an error packet by setting error attributes, and then raising
+        an error  
+        params:  
+            list&lt;Obj&gt; payload: the arguments of the error packet (see specs)  
+        &#39;&#39;&#39;
+        self.error_payload = payload
+        self.state = 1
+        raise ConnectionError(&#39;Armchair Error: error pack recieved&#39;)
+
+    def reset_error(self):
+        &#39;&#39;&#39;
+        This makes a lot of sense to do if, e.g. you want to continue to use the Armchair
+        connection for ftp before you shutdown
+        Postconditions:  
+            state is reset  
+            error_payload is wiped  
+            inflight_packs are cleared without waiting for ready
+        &#39;&#39;&#39;
+        self.state = 0
+        self.error_payload = None
+        self._inflight_packs = []
 
     def recv_pack(self):
         &#39;&#39;&#39;
         processes the next packet and returns None if nothing to read
         If the next packet was a ready packet it will be ignored and corresponding send will be
         removed  
+        Not state dependent because recv is state dependent
         returns:  
             str: type of packet  
             int: the cid of the recived packet  
@@ -160,11 +205,12 @@ class Armchair():
         &#39;&#39;&#39;
         header_type = &#39;ready&#39; #do while
         while header_type == &#39;ready&#39;:
-            header_type, header_cid, payload = self.recv()
+            header_type, header_cid, payload = self._recv()
             if header_type == &#39;ready&#39;:
-                self._inflight_packs.remove(header_cid)
+                self._inflight_packs.remove(payload[0])
         return header_type, header_cid, payload
         
+    @state_dependent
     def send_pack(self, pack_type, *args):
         &#39;&#39;&#39;
         will first check the buffer. If buffer size is exceded will wait on a ready
@@ -184,11 +230,11 @@ class Armchair():
         if args:
             payload = dill.dumps(args)
             n_bytes = len(payload)
-            header = self.construct_head(n_bytes, pack_type)
+            header = self._construct_head(n_bytes, pack_type)
             self.sock.send(header+payload)
         else:
             n_bytes = 0
-            header = self.construct_head(n_bytes, pack_type)
+            header = self._construct_head(n_bytes, pack_type)
             self.sock.send(header)
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
             armchair_log.write(&#34;{}\tsending {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;), pack_type,self.cid))
@@ -199,13 +245,30 @@ class Armchair():
     def burn_pipe(self):
         &#39;&#39;&#39;
         burns through the pipe by reading all of the ready commands  
+        This is not state dependent because _block_on_ready calls recv_pack which is state dep
         Postconditions:  
             Nothing left in the inflight packets buffer  
         &#39;&#39;&#39;
         while self._inflight_packs:
             self._block_on_ready()
 
-            
+    def recv_first(self,pack_type):
+        &#39;&#39;&#39;
+        This method should be used sparingly, but is applicable in error handling.  
+        It reads through packets until it finds one with the given pack_type.  
+        Packets of other types that were read in the process are ignored  
+        params:  
+            str pack_type: the type of packet to wait for  
+        returns:  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
+        &#39;&#39;&#39;
+        pack_type, cid, payload = self._recv()
+        while pack_type != pack_type: #Executor will request save. Burn other prexisting packs
+            pack_type, cid, payload = self._recv()
+        return pack_type, cid, payload
+
     def recv_ftp(self):
         &#39;&#39;&#39;
         violates the armchair protocol a little bit because rather than sending an entire  
@@ -222,7 +285,7 @@ class Armchair():
             file_bytes = self.sock.recv_until(self.FTP_EOF)
             files.append((filename, file_bytes))
         #ack the send files
-        self.send_pack(&#39;ready&#39;)
+        self.send_pack(&#39;ready&#39;,cid)
         return files
 
     def send_ftp(self, filepaths):
@@ -246,7 +309,7 @@ class Armchair():
             has stalled until a ready command was recieved.  
             The cid in the ready command has been removed from self.inflight_packs  
         &#39;&#39;&#39;
-        pack_type, _, arguments = self.recv()
+        pack_type, _, arguments = self._recv()
         assert (pack_type == &#39;ready&#39;), &#34;was expecting a ready packet, but instead recieved a {}&#34;.format(pack_type)
         cid = arguments[0]
         self._inflight_packs.remove(cid)
@@ -288,6 +351,7 @@ communicate between Armchair objects about where the other end is in terms of pr
 packages.<br>
 str name: the name of this armchair object. Used for loging purposes<br>
 str log_path: the path to the log file for this Armchair<br>
+int state: the state of the robot. 0 is good. 1 is bad
 CONSTANTS:<br>
 bidict PACK_TYPES: this is a key for translating between byte codes and string labels
 for different packet types<br>
@@ -295,11 +359,12 @@ GHOST_TYPES: this is a list of all str types that classify as GHOST packets. i.e
 not go to the buffer, are sent immediately without waiting for a ready. The responses to
 these packets are controlled outside of the Armchair class by the user<br>
 METHODS:<br>
-recv() tuple<str,int,Obj>: this should almost never be used by a user. It recieves a
-packet, but without any checking for buffer requirements<br>
-recv_pack() tuple<str,int,Obj>: this is a wrapped version of recv for user. It will make
+recv_pack() tuple<str,int,Obj>: recieve a packet. This method will make
 sure that the buffer is managed appropriately if necessary. Returns type, cid, and
-payload<br>
+payload
+tuple<str,int,Obj>: like recv, but
+recv_first(str pack_type) tuple<str,int,Obj>: recieves the first packet that has the
+given type. Discards any other packets read in the process.<br>
 send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet
 of pack_type with args.<br>
 burn_pipe() void: This command waits until the pipe is clear<br>
@@ -325,6 +390,7 @@ close() void: terminate the connection</p></div>
           packages.  
         str name: the name of this armchair object. Used for loging purposes  
         str log_path: the path to the log file for this Armchair  
+        int state: the state of the robot. 0 is good. 1 is bad
     CONSTANTS:  
         bidict PACK_TYPES: this is a key for translating between byte codes and string labels
           for different packet types  
@@ -332,11 +398,11 @@ close() void: terminate the connection</p></div>
           not go to the buffer, are sent immediately without waiting for a ready. The responses to
           these packets are controlled outside of the Armchair class by the user  
     METHODS:  
-        recv() tuple&lt;str,int,Obj&gt;: this should almost never be used by a user. It recieves a
-          packet, but without any checking for buffer requirements  
-        recv_pack() tuple&lt;str,int,Obj&gt;: this is a wrapped version of recv for user. It will make
+        recv_pack() tuple&lt;str,int,Obj&gt;: recieve a packet. This method will make
           sure that the buffer is managed appropriately if necessary. Returns type, cid, and 
-          payload  
+          payload  tuple&lt;str,int,Obj&gt;: like recv, but 
+        recv_first(str pack_type) tuple&lt;str,int,Obj&gt;: recieves the first packet that has the 
+          given type. Discards any other packets read in the process.  
         send_pack(pack_type, *args) int: returns the cid it sent. This is used to send a packet 
           of pack_type with args.  
         burn_pipe() void: This command waits until the pipe is clear  
@@ -344,12 +410,16 @@ close() void: terminate the connection</p></div>
     &#39;&#39;&#39;
 
     FTP_EOF = &#39;AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile&#39;.encode(&#39;ascii&#39;)
-    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
-    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;] #These are necessary because we never want to wait on a
+    PACK_TYPES = bidict({&#39;init&#39;:b&#39;\x00&#39;,&#39;close&#39;:b&#39;\x01&#39;,&#39;error&#39;:b&#39;\x02&#39;,&#39;ready&#39;:b&#39;\x03&#39;,&#39;transfer&#39;:b&#39;\x04&#39;,&#39;init_containers&#39;:b&#39;\x05&#39;,&#39;sending_files&#39;:b&#39;\x06&#39;,&#39;pause&#39;:b&#39;\x07&#39;,&#39;stop&#39;:b&#39;\x08&#39;,&#39;continue&#39;:b&#39;\x09&#39;,&#39;stopped&#39;:b&#39;\x0A&#39;,&#39;loc_req&#39;:b&#39;\x0B&#39;,&#39;loc_resp&#39;:b&#39;\x0C&#39;,&#39;home&#39;:b&#39;\x0D&#39;,&#39;make&#39;:b&#39;\x0E&#39;,&#39;mix&#39;:b&#39;\x0F&#39;,&#39;save&#39;:b&#39;\x10&#39;})
+    GHOST_TYPES = [&#39;continue&#39;, &#39;stopped&#39;, &#39;loc_resp&#39;,&#39;loc_req&#39;, &#39;save&#39;,&#39;error&#39;] 
+    #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
     #They also do not require ready&#39;s / are not added to inflight packs. Do not modify CID.
 
+
     def __init__(self, socket, name, log_path=&#39;&#39;, buffsize=4):
+        self.state = 0
+        self.error_payload = None
         self.sock = socket
         self.cid = 0
         self.buffsize = buffsize
@@ -361,9 +431,18 @@ close() void: terminate the connection</p></div>
             os.makedirs(self.log_path)
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;w&#39;) as armchair_log:
             armchair_log.write(&#39;Armchair Log: {}, {}\n&#39;.format(self.name, datetime.now().strftime(&#39;%H:%M:%S:%f&#39;)))
+
+    def state_dependent(func):
+        def decorated(*args, **kwargs):
+            self = args[0]
+            if self.state == 0:
+                return func(*args, **kwargs)
+            else:
+                raise ConnectionError(&#39;Armchair Error: cannot send or recieve with error state {}, please call reset_error first&#39;.format(self.state))
+        return decorated
             
 
-    def get_len(self,header):
+    def _get_len(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -372,7 +451,7 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         return int.from_bytes(header[:8], &#39;big&#39;)
     
-    def get_type(self,header):
+    def _get_type(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -381,7 +460,7 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         return self.PACK_TYPES.inv[header[8:9]]
 
-    def get_cid(self,header):
+    def _get_cid(self,header):
         &#39;&#39;&#39;
         params:  
             bytes header: the header of the packet  
@@ -390,7 +469,7 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         return int.from_bytes(header[9:17], &#39;big&#39;)
     
-    def construct_head(self,n_bytes, pack_type):
+    def _construct_head(self,n_bytes, pack_type):
         &#39;&#39;&#39;
         params:  
             int n_bytes: the number of bytes in the payload  
@@ -400,7 +479,8 @@ close() void: terminate the connection</p></div>
             self.cid+=1
         return n_bytes.to_bytes(8,&#39;big&#39;) + self.PACK_TYPES[pack_type] + self.cid.to_bytes(8,&#39;big&#39;)
 
-    def recv(self):
+    @state_dependent
+    def _recv(self):
         &#39;&#39;&#39;
         If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
         will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
@@ -409,11 +489,13 @@ close() void: terminate the connection</p></div>
             str: type of packet  
             int: the cid of the recived packet  
             Obj: the argmuents/payload  
+        raises:  
+            ConnectionError: if an error packet is recieved
         &#39;&#39;&#39;
         header = self.sock.recv_size(17)
-        header_len = self.get_len(header)
-        header_type = self.get_type(header)
-        header_cid = self.get_cid(header)
+        header_len = self._get_len(header)
+        header_type = self._get_type(header)
+        header_cid = self._get_cid(header)
         if header_len &gt; 0: #if there were arguments
             payload = self.sock.recv_size(header_len)
             payload = dill.loads(payload)
@@ -421,13 +503,40 @@ close() void: terminate the connection</p></div>
             payload = None
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
                 armchair_log.write(&#34;{}\trecieved {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;),header_type,self.cid))
+        if header_type == &#39;error&#39;:
+            self._handle_error_pack(payload)
         return header_type, header_cid, payload
+
+    def _handle_error_pack(self, payload):
+        &#39;&#39;&#39;
+        handles the recipt of an error packet by setting error attributes, and then raising
+        an error  
+        params:  
+            list&lt;Obj&gt; payload: the arguments of the error packet (see specs)  
+        &#39;&#39;&#39;
+        self.error_payload = payload
+        self.state = 1
+        raise ConnectionError(&#39;Armchair Error: error pack recieved&#39;)
+
+    def reset_error(self):
+        &#39;&#39;&#39;
+        This makes a lot of sense to do if, e.g. you want to continue to use the Armchair
+        connection for ftp before you shutdown
+        Postconditions:  
+            state is reset  
+            error_payload is wiped  
+            inflight_packs are cleared without waiting for ready
+        &#39;&#39;&#39;
+        self.state = 0
+        self.error_payload = None
+        self._inflight_packs = []
 
     def recv_pack(self):
         &#39;&#39;&#39;
         processes the next packet and returns None if nothing to read
         If the next packet was a ready packet it will be ignored and corresponding send will be
         removed  
+        Not state dependent because recv is state dependent
         returns:  
             str: type of packet  
             int: the cid of the recived packet  
@@ -435,11 +544,12 @@ close() void: terminate the connection</p></div>
         &#39;&#39;&#39;
         header_type = &#39;ready&#39; #do while
         while header_type == &#39;ready&#39;:
-            header_type, header_cid, payload = self.recv()
+            header_type, header_cid, payload = self._recv()
             if header_type == &#39;ready&#39;:
-                self._inflight_packs.remove(header_cid)
+                self._inflight_packs.remove(payload[0])
         return header_type, header_cid, payload
         
+    @state_dependent
     def send_pack(self, pack_type, *args):
         &#39;&#39;&#39;
         will first check the buffer. If buffer size is exceded will wait on a ready
@@ -459,11 +569,11 @@ close() void: terminate the connection</p></div>
         if args:
             payload = dill.dumps(args)
             n_bytes = len(payload)
-            header = self.construct_head(n_bytes, pack_type)
+            header = self._construct_head(n_bytes, pack_type)
             self.sock.send(header+payload)
         else:
             n_bytes = 0
-            header = self.construct_head(n_bytes, pack_type)
+            header = self._construct_head(n_bytes, pack_type)
             self.sock.send(header)
         with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
             armchair_log.write(&#34;{}\tsending {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;), pack_type,self.cid))
@@ -474,13 +584,30 @@ close() void: terminate the connection</p></div>
     def burn_pipe(self):
         &#39;&#39;&#39;
         burns through the pipe by reading all of the ready commands  
+        This is not state dependent because _block_on_ready calls recv_pack which is state dep
         Postconditions:  
             Nothing left in the inflight packets buffer  
         &#39;&#39;&#39;
         while self._inflight_packs:
             self._block_on_ready()
 
-            
+    def recv_first(self,pack_type):
+        &#39;&#39;&#39;
+        This method should be used sparingly, but is applicable in error handling.  
+        It reads through packets until it finds one with the given pack_type.  
+        Packets of other types that were read in the process are ignored  
+        params:  
+            str pack_type: the type of packet to wait for  
+        returns:  
+            str: type of packet  
+            int: the cid of the recived packet  
+            Obj: the argmuents/payload  
+        &#39;&#39;&#39;
+        pack_type, cid, payload = self._recv()
+        while pack_type != pack_type: #Executor will request save. Burn other prexisting packs
+            pack_type, cid, payload = self._recv()
+        return pack_type, cid, payload
+
     def recv_ftp(self):
         &#39;&#39;&#39;
         violates the armchair protocol a little bit because rather than sending an entire  
@@ -497,7 +624,7 @@ close() void: terminate the connection</p></div>
             file_bytes = self.sock.recv_until(self.FTP_EOF)
             files.append((filename, file_bytes))
         #ack the send files
-        self.send_pack(&#39;ready&#39;)
+        self.send_pack(&#39;ready&#39;,cid)
         return files
 
     def send_ftp(self, filepaths):
@@ -521,7 +648,7 @@ close() void: terminate the connection</p></div>
             has stalled until a ready command was recieved.  
             The cid in the ready command has been removed from self.inflight_packs  
         &#39;&#39;&#39;
-        pack_type, _, arguments = self.recv()
+        pack_type, _, arguments = self._recv()
         assert (pack_type == &#39;ready&#39;), &#34;was expecting a ready packet, but instead recieved a {}&#34;.format(pack_type)
         cid = arguments[0]
         self._inflight_packs.remove(cid)
@@ -555,6 +682,7 @@ close() void: terminate the connection</p></div>
 </code></dt>
 <dd>
 <div class="desc"><p>burns through the pipe by reading all of the ready commands<br>
+This is not state dependent because _block_on_ready calls recv_pack which is state dep
 Postconditions:<br>
 Nothing left in the inflight packets buffer</p></div>
 <details class="source">
@@ -564,6 +692,7 @@ Nothing left in the inflight packets buffer</p></div>
 <pre><code class="python">def burn_pipe(self):
     &#39;&#39;&#39;
     burns through the pipe by reading all of the ready commands  
+    This is not state dependent because _block_on_ready calls recv_pack which is state dep
     Postconditions:  
         Nothing left in the inflight packets buffer  
     &#39;&#39;&#39;
@@ -588,102 +717,16 @@ Nothing left in the inflight packets buffer</p></div>
     self.sock.close()</code></pre>
 </details>
 </dd>
-<dt id="armchair.Armchair.construct_head"><code class="name flex">
-<span>def <span class="ident">construct_head</span></span>(<span>self, n_bytes, pack_type)</span>
+<dt id="armchair.Armchair.recv_first"><code class="name flex">
+<span>def <span class="ident">recv_first</span></span>(<span>self, pack_type)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>params:<br>
-int n_bytes: the number of bytes in the payload<br>
-str pack_type: the type of the packet</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def construct_head(self,n_bytes, pack_type):
-    &#39;&#39;&#39;
-    params:  
-        int n_bytes: the number of bytes in the payload  
-        str pack_type: the type of the packet  
-    &#39;&#39;&#39;
-    if pack_type not in self.GHOST_TYPES:
-        self.cid+=1
-    return n_bytes.to_bytes(8,&#39;big&#39;) + self.PACK_TYPES[pack_type] + self.cid.to_bytes(8,&#39;big&#39;)</code></pre>
-</details>
-</dd>
-<dt id="armchair.Armchair.get_cid"><code class="name flex">
-<span>def <span class="ident">get_cid</span></span>(<span>self, header)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>params:<br>
-bytes header: the header of the packet<br>
+<div class="desc"><p>This method should be used sparingly, but is applicable in error handling.<br>
+It reads through packets until it finds one with the given pack_type.<br>
+Packets of other types that were read in the process are ignored<br>
+params:<br>
+str pack_type: the type of packet to wait for<br>
 returns:<br>
-int: the cid of this command</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_cid(self,header):
-    &#39;&#39;&#39;
-    params:  
-        bytes header: the header of the packet  
-    returns:  
-        int: the cid of this command  
-    &#39;&#39;&#39;
-    return int.from_bytes(header[9:17], &#39;big&#39;)</code></pre>
-</details>
-</dd>
-<dt id="armchair.Armchair.get_len"><code class="name flex">
-<span>def <span class="ident">get_len</span></span>(<span>self, header)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>params:<br>
-bytes header: the header of the packet<br>
-returns:<br>
-int: the number of bytes in payload</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_len(self,header):
-    &#39;&#39;&#39;
-    params:  
-        bytes header: the header of the packet  
-    returns:  
-        int: the number of bytes in payload  
-    &#39;&#39;&#39;
-    return int.from_bytes(header[:8], &#39;big&#39;)</code></pre>
-</details>
-</dd>
-<dt id="armchair.Armchair.get_type"><code class="name flex">
-<span>def <span class="ident">get_type</span></span>(<span>self, header)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>params:<br>
-bytes header: the header of the packet<br>
-returns:<br>
-str: the string name of the command type</p></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def get_type(self,header):
-    &#39;&#39;&#39;
-    params:  
-        bytes header: the header of the packet  
-    returns:  
-        str: the string name of the command type  
-    &#39;&#39;&#39;
-    return self.PACK_TYPES.inv[header[8:9]]</code></pre>
-</details>
-</dd>
-<dt id="armchair.Armchair.recv"><code class="name flex">
-<span>def <span class="ident">recv</span></span>(<span>self)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>If you're looking at this, you probably want recv_pack. recv is a lower level command that
-will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-next significant thing<br>
-returns: if packet in buffer<br>
 str: type of packet<br>
 int: the cid of the recived packet<br>
 Obj: the argmuents/payload</p></div>
@@ -691,28 +734,22 @@ Obj: the argmuents/payload</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def recv(self):
+<pre><code class="python">def recv_first(self,pack_type):
     &#39;&#39;&#39;
-    If you&#39;re looking at this, you probably want recv_pack. recv is a lower level command that
-    will simply get you the next thing in the pipe. recv_pack is a wrapper that gives you the
-    next significant thing  
-    returns: if packet in buffer  
+    This method should be used sparingly, but is applicable in error handling.  
+    It reads through packets until it finds one with the given pack_type.  
+    Packets of other types that were read in the process are ignored  
+    params:  
+        str pack_type: the type of packet to wait for  
+    returns:  
         str: type of packet  
         int: the cid of the recived packet  
         Obj: the argmuents/payload  
     &#39;&#39;&#39;
-    header = self.sock.recv_size(17)
-    header_len = self.get_len(header)
-    header_type = self.get_type(header)
-    header_cid = self.get_cid(header)
-    if header_len &gt; 0: #if there were arguments
-        payload = self.sock.recv_size(header_len)
-        payload = dill.loads(payload)
-    else:
-        payload = None
-    with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
-            armchair_log.write(&#34;{}\trecieved {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;),header_type,self.cid))
-    return header_type, header_cid, payload</code></pre>
+    pack_type, cid, payload = self._recv()
+    while pack_type != pack_type: #Executor will request save. Burn other prexisting packs
+        pack_type, cid, payload = self._recv()
+    return pack_type, cid, payload</code></pre>
 </details>
 </dd>
 <dt id="armchair.Armchair.recv_ftp"><code class="name flex">
@@ -744,7 +781,7 @@ list<tuple\<str:bytes>>: linked filenames and files as bytestreams</p></div>
         file_bytes = self.sock.recv_until(self.FTP_EOF)
         files.append((filename, file_bytes))
     #ack the send files
-    self.send_pack(&#39;ready&#39;)
+    self.send_pack(&#39;ready&#39;,cid)
     return files</code></pre>
 </details>
 </dd>
@@ -755,6 +792,7 @@ list<tuple\<str:bytes>>: linked filenames and files as bytestreams</p></div>
 <div class="desc"><p>processes the next packet and returns None if nothing to read
 If the next packet was a ready packet it will be ignored and corresponding send will be
 removed<br>
+Not state dependent because recv is state dependent
 returns:<br>
 str: type of packet<br>
 int: the cid of the recived packet<br>
@@ -768,6 +806,7 @@ Obj: the argmuents/payload</p></div>
     processes the next packet and returns None if nothing to read
     If the next packet was a ready packet it will be ignored and corresponding send will be
     removed  
+    Not state dependent because recv is state dependent
     returns:  
         str: type of packet  
         int: the cid of the recived packet  
@@ -775,10 +814,38 @@ Obj: the argmuents/payload</p></div>
     &#39;&#39;&#39;
     header_type = &#39;ready&#39; #do while
     while header_type == &#39;ready&#39;:
-        header_type, header_cid, payload = self.recv()
+        header_type, header_cid, payload = self._recv()
         if header_type == &#39;ready&#39;:
-            self._inflight_packs.remove(header_cid)
+            self._inflight_packs.remove(payload[0])
     return header_type, header_cid, payload</code></pre>
+</details>
+</dd>
+<dt id="armchair.Armchair.reset_error"><code class="name flex">
+<span>def <span class="ident">reset_error</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This makes a lot of sense to do if, e.g. you want to continue to use the Armchair
+connection for ftp before you shutdown
+Postconditions:<br>
+state is reset<br>
+error_payload is wiped<br>
+inflight_packs are cleared without waiting for ready</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def reset_error(self):
+    &#39;&#39;&#39;
+    This makes a lot of sense to do if, e.g. you want to continue to use the Armchair
+    connection for ftp before you shutdown
+    Postconditions:  
+        state is reset  
+        error_payload is wiped  
+        inflight_packs are cleared without waiting for ready
+    &#39;&#39;&#39;
+    self.state = 0
+    self.error_payload = None
+    self._inflight_packs = []</code></pre>
 </details>
 </dd>
 <dt id="armchair.Armchair.send_ftp"><code class="name flex">
@@ -806,54 +873,39 @@ str filepath: the path where all the files live</p></div>
 </details>
 </dd>
 <dt id="armchair.Armchair.send_pack"><code class="name flex">
-<span>def <span class="ident">send_pack</span></span>(<span>self, pack_type, *args)</span>
+<span>def <span class="ident">send_pack</span></span>(<span>*args, **kwargs)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>will first check the buffer. If buffer size is exceded will wait on a ready
-constructs a packet and sends it over network<br>
-params:<br>
-str pack_type: the type of packet being sent (string form)<br>
-args*: the objects to pickle<br>
-returns:<br>
-int: the cid of the sent packet<br>
-Postconditions:<br>
-An armchair packet has been constructed and sent over the socket<br>
-has created log entry of send<br>
-cid has been appended to self._inflight_packs</p></div>
+<div class="desc"></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def send_pack(self, pack_type, *args):
-    &#39;&#39;&#39;
-    will first check the buffer. If buffer size is exceded will wait on a ready
-    constructs a packet and sends it over network  
-    params:  
-        str pack_type: the type of packet being sent (string form)  
-        args*: the objects to pickle  
-    returns:  
-        int: the cid of the sent packet  
-    Postconditions:  
-        An armchair packet has been constructed and sent over the socket  
-        has created log entry of send  
-        cid has been appended to self._inflight_packs  
-    &#39;&#39;&#39;
-    if len(self._inflight_packs) &gt; self.buffsize and pack_type not in self.GHOST_TYPES:
-        self._block_on_ready()
-    if args:
-        payload = dill.dumps(args)
-        n_bytes = len(payload)
-        header = self.construct_head(n_bytes, pack_type)
-        self.sock.send(header+payload)
+<pre><code class="python">def decorated(*args, **kwargs):
+    self = args[0]
+    if self.state == 0:
+        return func(*args, **kwargs)
     else:
-        n_bytes = 0
-        header = self.construct_head(n_bytes, pack_type)
-        self.sock.send(header)
-    with open(os.path.join(self.log_path, &#39;{}_armchair.log&#39;.format(self.name)), &#39;a+&#39;) as armchair_log:
-        armchair_log.write(&#34;{}\tsending {}, cid {}\n&#34;.format(datetime.now().strftime(&#39;%H:%M:%S:%f&#39;), pack_type,self.cid))
-    if pack_type != &#39;ready&#39; and pack_type not in self.GHOST_TYPES:
-        self._inflight_packs.append(self.cid)
-    return self.cid</code></pre>
+        raise ConnectionError(&#39;Armchair Error: cannot send or recieve with error state {}, please call reset_error first&#39;.format(self.state))</code></pre>
+</details>
+</dd>
+<dt id="armchair.Armchair.state_dependent"><code class="name flex">
+<span>def <span class="ident">state_dependent</span></span>(<span>func)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def state_dependent(func):
+    def decorated(*args, **kwargs):
+        self = args[0]
+        if self.state == 0:
+            return func(*args, **kwargs)
+        else:
+            raise ConnectionError(&#39;Armchair Error: cannot send or recieve with error state {}, please call reset_error first&#39;.format(self.state))
+    return decorated</code></pre>
 </details>
 </dd>
 </dl>
@@ -877,15 +929,13 @@ cid has been appended to self._inflight_packs</p></div>
 <li><code><a title="armchair.Armchair.PACK_TYPES" href="#armchair.Armchair.PACK_TYPES">PACK_TYPES</a></code></li>
 <li><code><a title="armchair.Armchair.burn_pipe" href="#armchair.Armchair.burn_pipe">burn_pipe</a></code></li>
 <li><code><a title="armchair.Armchair.close" href="#armchair.Armchair.close">close</a></code></li>
-<li><code><a title="armchair.Armchair.construct_head" href="#armchair.Armchair.construct_head">construct_head</a></code></li>
-<li><code><a title="armchair.Armchair.get_cid" href="#armchair.Armchair.get_cid">get_cid</a></code></li>
-<li><code><a title="armchair.Armchair.get_len" href="#armchair.Armchair.get_len">get_len</a></code></li>
-<li><code><a title="armchair.Armchair.get_type" href="#armchair.Armchair.get_type">get_type</a></code></li>
-<li><code><a title="armchair.Armchair.recv" href="#armchair.Armchair.recv">recv</a></code></li>
+<li><code><a title="armchair.Armchair.recv_first" href="#armchair.Armchair.recv_first">recv_first</a></code></li>
 <li><code><a title="armchair.Armchair.recv_ftp" href="#armchair.Armchair.recv_ftp">recv_ftp</a></code></li>
 <li><code><a title="armchair.Armchair.recv_pack" href="#armchair.Armchair.recv_pack">recv_pack</a></code></li>
+<li><code><a title="armchair.Armchair.reset_error" href="#armchair.Armchair.reset_error">reset_error</a></code></li>
 <li><code><a title="armchair.Armchair.send_ftp" href="#armchair.Armchair.send_ftp">send_ftp</a></code></li>
 <li><code><a title="armchair.Armchair.send_pack" href="#armchair.Armchair.send_pack">send_pack</a></code></li>
+<li><code><a title="armchair.Armchair.state_dependent" href="#armchair.Armchair.state_dependent">state_dependent</a></code></li>
 </ul>
 </li>
 </ul>

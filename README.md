@@ -1,9 +1,37 @@
 # OT2Control
 software to provide detailed control of Opentrons OT2 robot
+
 ## Overview  
 The code is designed to be run from two computers. The controlling computer uses a 
 ProtocolExecutor object to run a protocol from googlesheets. The raspberry pi on the robot runs 
 a recieving code to take commands from the executor and runs them on the robot.
+
+## Usage Guide  
+This guide is intended for a nontechnical audience.  
+1. Create a reaction sheet in accordance the the preconditions explained in
+excel\_spreadsheet\_precoditions.txt  
+2. copy the key of your worksheet into the reaction key spreadsheet.  
+3. Make sure that the PlateReader software is not running. If it is, close the window.  
+4. move into the git directory and run the command `python controller.py`. (Note, for advanced
+users, controller.py has a cli to skip later input stages.
+run `python controller.py -h` for more information)  
+5. You will be prompted to specify the rxn\_sheet\_name. Enter the name of your google sheet  
+6. You will be prompted if you want to use cache, select no. The cache can be used if you want to
+run the exact same reaction as you ran previously without changing anything in the google sheets.
+This is mostly useful for debugging the software.  
+7. A precheck simulation will be run. If your spreadsheet fails to meet preconditions, the code
+will exit and ask you to fix the errors. If your spreadsheet failed, fix the errors and go to step
+3.  
+8. Once the simulation completes, you will be asked if you would like to run on the robot and
+platereader. Enter 'y'.  
+9. All data from the reaction is stored in Controller\_Out/\<Ouput Dir\>.  
+
+*Note*: The above steps assume that the ot2\_robot code is running, which is almost always the
+case. This code is designed to be very robust, and should only need to be rerun when updated or
+when the robot is powered off. To run the code, ssh into the robot and move into the directory,
+`OT2_Control`, and run the command `python ot2_robot.py`. (There's also usually a tmux session
+named *run* that is already in the directory)
+
 ## Contents  
 1. controller.py: code for the controller  
 2. ot2\_robot.py: code for the robot  
@@ -14,6 +42,7 @@ a recieving code to take commands from the executor and runs them on the robot.
 
 ## Documentation
 Documentation for the code can be found here https://science356lab.github.io/OT2Control/
+
 ## Guide For Contributing
 ### Style
 The code follows an object oriented model, and global functions should be used only for the
@@ -31,27 +60,41 @@ specified below.
 '''  
 Description of class  
 ATTRIBUTES:  
-    <type\> <name\>: <description\>  
-    ...  
-    <type\> <name\>: <description\>  
+
+- <type\> <name\>: <description\>  
+- ...  
+- <type\> <name\>: <description\>  
+
 CONSTANTS:  
-    <type\> <name\>: <description\>  
+
+- <type\> <name\>: <description\>  
+
 METHODS:  
-    <signature\> <return type\>: description  
+
+- <signature\> <return type\>: description  
+
 INHERITED METHODS: (optional)  
-    <signature/name\> <return type\>, ..., <signature/name\> <return type\>  
+
+- <signature/name\> <return type\>, ..., <signature/name\> <return type\>  
+
 INHERITED ATTRIBUTES: (optional)  
-    <type\> <name\>, ..., <type\> <name\>  
+
+- <type\> <name\>, ..., <type\> <name\>  
+
 '''  
 #### Methods/Functions  
 '''  
 Description  
 params:  
-    <type\> <name\>: <description\>  
-    ...  
-    <type\> <name\>: <description\>  
+ 
+- <type\> <name\>: <description\>  
+- ...  
+- <type\> <name\>: <description\>  
+ 
 returns:  
-    <type\>: <description\>  
+
+- <type\>: <description\>  
+
 '''  
 ### Abstractions
 The code implements a number of useful abstractions that should be preserved as new features are
@@ -72,8 +115,8 @@ flow of the program in execution, but, of course, it make no difference in what 
 implemented.
 Most features will adhere to a similar pattern.  
 
-1. *Define a new operation* in the excel sheet, lets call it 'move\_reagent'.  
-2. *Define Arguments*: This command will need three arguments, the src wellname, the dst wellname
+1. **Define a new operation** in the excel sheet, lets call it 'move\_reagent'.  
+2. **Define Arguments**: This command will need three arguments, the src wellname, the dst wellname
 it to, and the ratio of the volume to move. It is intuitive to use the existing structure of the
 excel sheet for the
 src and destination. Lets specify the destination by putting a 1 in the appropriate column, and
@@ -81,35 +124,36 @@ we'll specify the src in the reagent column. We also need to specify the amount 
 let's make a new column to hold that parameter left of the reagent column. --Note we could also
 use a float instead of 1 in order to specify what percentage to transfer, but for demonstration
 purposes, we'll add the argument.  
-3. *Update excel\_specs*: As soon as you change the rxn sheet, you should update the 
+3. **Update excel\_specs**: As soon as you change the rxn sheet, you should update the 
 excel\_specification with the changes
 you made.  
-4. Since we added a new argument, we'll need to change a little about how it's parsed. In our case
+4. **Update parsing**: Since we added a new argument, we'll need to change a little about how
+it's parsed. In our case
 this is as simple as changing \_load\_rxn\_df(input\_data) in the controller to rename your new
 column to something that's less wordy and doesn't have spaces (you don't need to do this. It's
 convenience so you can have different names in code and on sheets)  
-4. *Think about the information you need*: We now have a new type of row,
+4. **Think about the information you need**: We now have a new type of row,
 but we need to think about what information needs to be extracted
 to send to the robot. In this case it's very simple. The robot will need to know, the src, the dst,
 and the ratio of volume to transfer.  
-5. *Make a new armchair packet type*:
+5. **Make a new armchair packet type**:
     1. Go into the armchair\_spec and add a new packet type. This requires a string name, an 
     unused single byte bytecode, a desciption, and description of arguments. In our case, the
     args will be str src, str dst, float ratio.  
     2. Go into the armchair code and update the bidict with a mapping from string name
     to bytecode.  
-6. *Create a helper function* with args (row, i). This function will need to parse a 
+6. **Create a helper function** with args (row, i). This function will need to parse a 
 'move\_reagent' row of the reaction dataframe and extract the three parameters mentioned above.
 These parameters should then be sent over the Armchair portal using send\_pack.  
-7. *Update execute\_protocol\_df* in the controller to check if the operation is 'move\_reagent'
+7. **Update execute\_protocol\_df** in the controller to check if the operation is 'move\_reagent'
 if it is, you should call your helper.  
-8. *Create a new command type for the robot* in ot2\_robot.py, in execute. Add a new condition
+8. **Create a new command type for the robot** in ot2\_robot.py, in execute. Add a new condition
 to check if the command is 'move\_reagent'. Within that condition, call
 self.\_exec\_move\_reagent(\*arguments) (we'll implement this private helper in the next step),
 and after that, return 1. --Note. You must return 1 because the execute command has a return type
 of int, specifying an exit status. 1 indicates ok. 0 indicates closed, i.e. the connection between
 this robot instance and controller has been severed, and it is safe to destruct this robot.  
-9. *Create a helper function for the robot*. This is where we'll implement the helper we called
+9. **Create a helper function for the robot**. This is where we'll implement the helper we called
 under execute, self.\_exec\_move\_reagent(\*arguments). You should unpack arguments into the
 parameters you need for this function, and then write the code to make the robot do what
 you need. There are likely already helper functions defined in ot2\_robot that you should use to
@@ -119,6 +163,6 @@ following:
     2. From src, check the volume attribute.  
     3. Call self.\_liquid\_transfer with $1\over 2$ the volume of src (or whatever fraction you chose)
 from src to dst.  
-10. *That's it!* To test you can run everything locally, and just enter 'n' after the simulation,
+10. **That's it!** To test you can run everything locally, and just enter 'n' after the simulation,
 or you can run it on the robot and platereader without physically moving anything by runing
 the script with the -s flag, and entering 'y' after the simulation.  

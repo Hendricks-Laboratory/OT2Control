@@ -70,6 +70,7 @@ import logging
 import asyncio
 import threading
 import time
+import traceback
 
 from bidict import bidict
 import gspread
@@ -84,7 +85,7 @@ from boltons.socketutils import BufferedSocket
 
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
-import df_utils
+from df_utils import *
 
 #CONTAINERS
 class Container(ABC):
@@ -196,12 +197,12 @@ class Tube20000uL(Container):
     DEAD_VOL = 2000
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, labware, mass=6.6699, conc=1):
+    def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
         &#39;&#39;&#39;
         mass is defaulted to the avg_mass so that there is nothing in the container
         &#39;&#39;&#39;
         density_water_25C = 0.9970479 # g/mL
-        avg_tube_mass15 = 6.6699 # grams
+        avg_tube_mass15 = 6.9731 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
         assert (self.mass &gt;= -1e-9),&#39;the mass you entered for {} is less than the mass of the tube it\&#39;s in.&#39;.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
@@ -1008,6 +1009,7 @@ class OT2Robot():
     _exec_init_containers.priority[&#39;platereader4&#39;] = 1
     _exec_init_containers.priority[&#39;platereader7&#39;] = 2
 
+    @error_exit
     def execute(self, command_type, cid, arguments):
         &#39;&#39;&#39;
         takes the packet type and payload of an Armchair packet, and executes the command  
@@ -1053,13 +1055,14 @@ class OT2Robot():
             self.portal.send_pack(&#39;ready&#39;, cid)
             return 1
         elif command_type == &#39;save&#39;:
+            #ghost
             self._exec_save()
             return 1
         elif command_type == &#39;close&#39;:
             self._exec_close(cid) #will be acked in func
             return 0
         else:
-            raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))
+            raise Exception(&#34;Unidenified command &#39;{}&#39;&#34;.format(command_type))
 
     def _exec_mix(self, mix_list):
         &#39;&#39;&#39;
@@ -1262,7 +1265,8 @@ class OT2Robot():
         &#39;&#39;&#39;
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
-        n_substeps = int(vol // self.pipettes[arm][&#39;size&#39;]) + 1
+        #the fudge factor makes sure that if exactly 300 300//300 + 1 = 1 not 2
+        n_substeps = int((vol-1e-9) // self.pipettes[arm][&#39;size&#39;]) + 1
         substep_vol = vol / n_substeps
         
         #transfer the liquid in as many steps are necessary
@@ -1337,6 +1341,7 @@ class OT2Robot():
             volumes of src and dst have been updated  
         Preconditions:
             Both pipettes are clean or of same type  
+            src has enough volume to transfer
         &#39;&#39;&#39;
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
@@ -1347,7 +1352,7 @@ class OT2Robot():
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
         try:
-            assert (src_cont.vol &gt;= vol),&#39;{} cannot transfer {} to {} because it only has {:.3}uL&#39;.format(src,vol,dst,src_cont.aspiratible_vol)
+            assert (src_cont.aspiratible_vol &gt;= vol),&#39;{} cannot transfer {:.3}uL to {} because it only has {:.3}uL&#39;.format(src,vol,dst,float(src_cont.aspiratible_vol))
         except AssertionError as e:
             #ran out of reagent. Try to make more
             src_raw_name = src[:src.find(&#39;C&#39;)]
@@ -1461,6 +1466,19 @@ class OT2Robot():
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
         self.portal.send_ftp(filepaths)
         
+    def _error_handler(self, e):
+        try:
+            print(&#39;&#39;&#39;&lt;&lt;eve&gt;&gt; ----------------Eve Errror--------------
+            Sending Error packet&#39;&#39;&#39;)
+            self.portal.send_pack(&#39;error&#39;, e)
+            print(&#39;&lt;&lt;eve&gt;&gt; Waiting on close&#39;)
+            self.portal.recv_first(&#39;save&#39;)
+            self._exec_save()
+            pack_type, cid, payload = self.portal.recv_first(&#39;close&#39;)
+            self._exec_close(cid)
+        finally:
+            time.sleep(2) #this is just for printing format. Not critical
+            raise e
 
 def launch_eve_server(**kwargs):
     &#39;&#39;&#39;
@@ -1516,7 +1534,15 @@ def hack_to_get_ip():
 if __name__ == &#39;__main__&#39;:
     my_ip = hack_to_get_ip()
     while True:
-        launch_eve_server(my_ip=my_ip, barrier=None)</code></pre>
+        try:
+            launch_eve_server(my_ip=my_ip, barrier=None)
+        except Exception as e:
+            print(&#34;ot2_robot code encountered exception &#39;{}&#39; in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.&#34;)
+            #credit Horacio of stack overflow
+            with open(&#39;ot2_error_output.txt&#39;, &#39;a+&#39;) as file:
+                file.write(&#34;{}\n&#34;.format(datetime.now().strftime(&#39;%d-%b-%Y %H:%M:%S:%f&#39;)))
+                file.write(str(e))
+                file.write(traceback.format_exc())</code></pre>
 </details>
 </section>
 <section>
@@ -2516,6 +2542,7 @@ to operating with them</p></div>
     _exec_init_containers.priority[&#39;platereader4&#39;] = 1
     _exec_init_containers.priority[&#39;platereader7&#39;] = 2
 
+    @error_exit
     def execute(self, command_type, cid, arguments):
         &#39;&#39;&#39;
         takes the packet type and payload of an Armchair packet, and executes the command  
@@ -2561,13 +2588,14 @@ to operating with them</p></div>
             self.portal.send_pack(&#39;ready&#39;, cid)
             return 1
         elif command_type == &#39;save&#39;:
+            #ghost
             self._exec_save()
             return 1
         elif command_type == &#39;close&#39;:
             self._exec_close(cid) #will be acked in func
             return 0
         else:
-            raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))
+            raise Exception(&#34;Unidenified command &#39;{}&#39;&#34;.format(command_type))
 
     def _exec_mix(self, mix_list):
         &#39;&#39;&#39;
@@ -2770,7 +2798,8 @@ to operating with them</p></div>
         &#39;&#39;&#39;
         #choose your pipette
         arm = self._get_preffered_pipette(vol)
-        n_substeps = int(vol // self.pipettes[arm][&#39;size&#39;]) + 1
+        #the fudge factor makes sure that if exactly 300 300//300 + 1 = 1 not 2
+        n_substeps = int((vol-1e-9) // self.pipettes[arm][&#39;size&#39;]) + 1
         substep_vol = vol / n_substeps
         
         #transfer the liquid in as many steps are necessary
@@ -2845,6 +2874,7 @@ to operating with them</p></div>
             volumes of src and dst have been updated  
         Preconditions:
             Both pipettes are clean or of same type  
+            src has enough volume to transfer
         &#39;&#39;&#39;
         for arm_to_check in self.pipettes.keys():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
@@ -2855,7 +2885,7 @@ to operating with them</p></div>
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
         try:
-            assert (src_cont.vol &gt;= vol),&#39;{} cannot transfer {} to {} because it only has {:.3}uL&#39;.format(src,vol,dst,src_cont.aspiratible_vol)
+            assert (src_cont.aspiratible_vol &gt;= vol),&#39;{} cannot transfer {:.3}uL to {} because it only has {:.3}uL&#39;.format(src,vol,dst,float(src_cont.aspiratible_vol))
         except AssertionError as e:
             #ran out of reagent. Try to make more
             src_raw_name = src[:src.find(&#39;C&#39;)]
@@ -2967,7 +2997,21 @@ to operating with them</p></div>
         #ship logs
         filenames = list(os.listdir(self.logs_p))
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
-        self.portal.send_ftp(filepaths)</code></pre>
+        self.portal.send_ftp(filepaths)
+        
+    def _error_handler(self, e):
+        try:
+            print(&#39;&#39;&#39;&lt;&lt;eve&gt;&gt; ----------------Eve Errror--------------
+            Sending Error packet&#39;&#39;&#39;)
+            self.portal.send_pack(&#39;error&#39;, e)
+            print(&#39;&lt;&lt;eve&gt;&gt; Waiting on close&#39;)
+            self.portal.recv_first(&#39;save&#39;)
+            self._exec_save()
+            pack_type, cid, payload = self.portal.recv_first(&#39;close&#39;)
+            self._exec_close(cid)
+        finally:
+            time.sleep(2) #this is just for printing format. Not critical
+            raise e</code></pre>
 </details>
 <h3>Methods</h3>
 <dl>
@@ -3084,7 +3128,8 @@ int: 1=ready to recieve. 0=terminated
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def execute(self, command_type, cid, arguments):
+<pre><code class="python">@error_exit
+def execute(self, command_type, cid, arguments):
     &#39;&#39;&#39;
     takes the packet type and payload of an Armchair packet, and executes the command  
     params:  
@@ -3129,20 +3174,21 @@ int: 1=ready to recieve. 0=terminated
         self.portal.send_pack(&#39;ready&#39;, cid)
         return 1
     elif command_type == &#39;save&#39;:
+        #ghost
         self._exec_save()
         return 1
     elif command_type == &#39;close&#39;:
         self._exec_close(cid) #will be acked in func
         return 0
     else:
-        raise Exception(&#34;Unidenified command {}&#34;.format(pack_type))</code></pre>
+        raise Exception(&#34;Unidenified command &#39;{}&#39;&#34;.format(command_type))</code></pre>
 </details>
 </dd>
 </dl>
 </dd>
 <dt id="ot2_robot.Tube20000uL"><code class="flex name class">
 <span>class <span class="ident">Tube20000uL</span></span>
-<span>(</span><span>name, deck_pos, loc, labware, mass=6.6699, conc=1)</span>
+<span>(</span><span>name, deck_pos, loc, labware, mass=6.9731, conc=1)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>Spcific tube with measurements taken to provide implementations of abstract methods<br>
@@ -3174,12 +3220,12 @@ _update_height void, update_vol(float del_vol) void,
     DEAD_VOL = 2000
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, labware, mass=6.6699, conc=1):
+    def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
         &#39;&#39;&#39;
         mass is defaulted to the avg_mass so that there is nothing in the container
         &#39;&#39;&#39;
         density_water_25C = 0.9970479 # g/mL
-        avg_tube_mass15 = 6.6699 # grams
+        avg_tube_mass15 = 6.9731 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
         assert (self.mass &gt;= -1e-9),&#39;the mass you entered for {} is less than the mass of the tube it\&#39;s in.&#39;.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
