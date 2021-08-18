@@ -38,7 +38,8 @@ named *run* that is already in the directory)
 3. Armchair/: code for interapplication communication. Start with armchair\_spec.txt  
 4. df\_utils: assorted helper functions  
 5. LabwareDefs/: Opentrons Definitions for the platereader  
-6. excel\_spreadsheet\_preconditoins.txt: specs for google sheets  
+6. excel\_spreadsheet\_preconditions.txt: specs for google sheets  
+7. ml\_models.py: template code and implementations for ml models  
 
 ## Documentation
 Documentation for the code can be found here https://science356lab.github.io/OT2Control/

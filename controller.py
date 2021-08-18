@@ -1354,7 +1354,7 @@ class AutoContr(Controller):
         self.server_ip = '127.0.0.1'
         self.simulate = True
 
-        model = DummyMLModel(2, self.reagent_order.shape[0])
+        model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
 
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
@@ -1391,7 +1391,7 @@ class AutoContr(Controller):
         if model == None:
             #you're simulating with a dummy model.
             print('<<controller>> running with dummy ml')
-            model = DummyMLModel(2, self.reagent_order.shape[0])
+            model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
         self._run(port, simulate, model)
         print('<<controller>> EXITING')
 
