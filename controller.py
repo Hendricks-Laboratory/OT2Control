@@ -117,8 +117,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
     auto.run_simulation()
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         #need a new model because last is fit to sim
-        model = None
-        auto.run_protocol(model, simulate)
+        auto.run_protocol(simulate=simulate)
 
 
 class Controller(ABC):
@@ -943,12 +942,9 @@ class Controller(ABC):
         #make sure you have mapping for all files
 
         self._update_cached_locs(wellnames)
-        pr_dict = {entry.loc:chem_name 
-                    for chem_name, entry 
-                    in self._cached_reader_locs.items() 
-                    if entry.deck_pos in [4,7]}
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
         #it's not safe to plot in simulation because the scan file may not exist yet
-        df, metadata = self.pr.load_reader_data('{}.csv'.format(row['scan_filename']), pr_dict)
+        df, metadata = self.pr.load_reader_data(row['scan_filename'], pr_dict)
         #execute the plot depending on what was specified
         if plot_type == 'single_kin':
             for wellname in wellnames:
@@ -1342,8 +1338,6 @@ class AutoContr(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
-        self.well_count = 0 #used internally for unique wellnames
-        self.batch_num = 0 #used internally for unique filenames
 
     def run_simulation(self):
         '''
@@ -1383,7 +1377,7 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(self, model, simulate=False, port=50000):
+    def run_protocol(self, model=None, simulate=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
@@ -1395,9 +1389,9 @@ class AutoContr(Controller):
           simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING')
-        if simulate and model == None:
+        if model == None:
             #you're simulating with a dummy model.
-            print('<<controller>> running simulation with dummy ml')
+            print('<<controller>> running with dummy ml')
             model = DummyMLModel(2, self.reagent_order.shape[0])
         self._run(port, simulate, model)
         print('<<controller>> EXITING')
@@ -1422,6 +1416,8 @@ class AutoContr(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
+        self.batch_num = 0 #used internally for unique filenames
+        self.well_count = 0 #used internally for unique wellnames
         self._init_pr(simulate)
         #create a connection
         sock = socket.socket(socket.AF_INET)
@@ -1438,7 +1434,9 @@ class AutoContr(Controller):
             #plan and execute a reaction
             self._create_samples(wellnames, recipes)
             #pull in the scan data
-            scan_data = self._get_sample_data(wellnames, self.rxn_df['scan_filename']) 
+            filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
+            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+            scan_data = self._get_sample_data(wellnames, last_filename)
             #train on scans
             model.train(scan_data.T.to_numpy(),recipes)
             self.batch_num += 1
@@ -2158,6 +2156,7 @@ class AbstractPlateReader(ABC):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
+        print(filename)
         print('<<Reader>> generating dummy data')
         wellnames = loc_to_name.values()
         metadata = {'filename':filename, 'n_cycles':1}
@@ -2230,12 +2229,12 @@ class PlateReader(AbstractPlateReader):
         shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
-    def load_reader_data(self,filename, loc_to_name):
+    def load_reader_data(self, filename, loc_to_name):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
         params:  
-            str filename: the name of the file to read  
+            str filename: the name of the file to read without extension  
             dict<str:str> loc_to_name: maps location to name of reaction  
         returns:  
             df: the scan data for that file  
@@ -2243,15 +2242,16 @@ class PlateReader(AbstractPlateReader):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
+        filename = "{}.csv".format(filename)
         if self.simulate:
             return super().load_reader_data(filename, loc_to_name) #return dummy data
         else:
             #parse the metadata
-            start_i, metadata = self._parse_metadata(filename, self.data_path)
+            start_i, metadata = self._parse_metadata(filename)
             # Read data ignoring first metadata lines
             df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
                     header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-            headers = [loc_to_name[x[:-1]] for x in df.columns]
+            headers = [loc_to_name["{}{}".format(x[0], int(x[1:-1]))] for x in df.columns]
             df.columns = headers
             df.dropna(inplace=True)
             df = df.astype(float)
