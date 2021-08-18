@@ -975,7 +975,6 @@ class Controller(ABC):
             reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
                 row_names = True, credentials=credentials).drop(columns=['comments'])
             #cache the data
-            #DEBUG
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
         reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
@@ -2151,7 +2150,7 @@ class AbstractPlateReader(ABC):
             str filename: the name of the file to read  
             dict<str:str> loc_to_name: maps location to name of reaction  
         returns:  
-            df: the scan data for that file  
+            df: the scan data for the wellnames supplied in loc_to_name for that file.  
             dict<str:obj>: holds the metadata  
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
@@ -2233,9 +2232,10 @@ class PlateReader(AbstractPlateReader):
         '''
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
+        Note that only the wells specified in loc_to_name will be returned.  
         params:  
             str filename: the name of the file to read without extension  
-            dict<str:str> loc_to_name: maps location to name of reaction  
+            df: the scan data for the wellnames supplied in loc_to_name for that file.  
         returns:  
             df: the scan data for that file  
             dict<str:obj>: holds the metadata  
@@ -2251,8 +2251,12 @@ class PlateReader(AbstractPlateReader):
             # Read data ignoring first metadata lines
             df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
                     header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
-            headers = [loc_to_name["{}{}".format(x[0], int(x[1:-1]))] for x in df.columns]
+            headers = ["{}{}".format(x[0], int(x[1:-1])) for x in df.columns] #rename A01->A1
             df.columns = headers
+            #get only the things we want
+            df = df[loc_to_name.keys()]
+            #rename by wellname
+            df.rename(columns=loc_to_name, inplace=True)
             df.dropna(inplace=True)
             df = df.astype(float)
             return df, metadata
