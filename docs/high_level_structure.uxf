@@ -1,0 +1,303 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<diagram program="umlet" version="13.3">
+  <zoom_level>10</zoom_level>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>300</x>
+      <y>280</y>
+      <w>210</w>
+      <h>120</h>
+    </coordinates>
+    <panel_attributes>/Controller/
+--
++portal: Armchair
++pr: PlateReader
+--
+Responsibilities
+--Some sheet parsing
+--communicate with robot</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>460</x>
+      <y>430</y>
+      <w>200</w>
+      <h>80</h>
+    </coordinates>
+    <panel_attributes>ProtocolExecutor
+--
+Responsibilities
+--interface with sheets
+--execute user protocol</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>130</x>
+      <y>430</y>
+      <w>210</w>
+      <h>80</h>
+    </coordinates>
+    <panel_attributes>Auto
+--
+Responsibilites
+--Plan and execute reaction</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>430</x>
+      <y>390</y>
+      <w>160</w>
+      <h>60</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;.
+&lt;&lt;extends&gt;&gt;</panel_attributes>
+    <additional_attributes>10.0;10.0;140.0;40.0</additional_attributes>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>230</x>
+      <y>390</y>
+      <w>170</w>
+      <h>60</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;.
+&lt;&lt;extends&gt;&gt;</panel_attributes>
+    <additional_attributes>150.0;10.0;10.0;40.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>610</x>
+      <y>260</y>
+      <w>210</w>
+      <h>130</h>
+    </coordinates>
+    <panel_attributes>Armchair
+--
++sock: socket
++buffersize: int
+--
+Responsibilities
+--send and recieve data
+--block if buffer is full</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>810</x>
+      <y>330</y>
+      <w>120</w>
+      <h>30</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>100.0;10.0;10.0;10.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>910</x>
+      <y>280</y>
+      <w>240</w>
+      <h>90</h>
+    </coordinates>
+    <panel_attributes>OT2Robot
+--
++protocol: Protocol
++lab_deck: array&lt;Labware&gt;
++containers: dict&lt;str:Container&gt;
+
+</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>780</x>
+      <y>430</y>
+      <w>210</w>
+      <h>70</h>
+    </coordinates>
+    <panel_attributes>/Container/
+--
++loc: str
++deck_pos: int
+</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>1050</x>
+      <y>430</y>
+      <w>210</w>
+      <h>70</h>
+    </coordinates>
+    <panel_attributes>/Labware/
+--
+labware: Opentrons.Labware</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>870</x>
+      <y>360</y>
+      <w>120</w>
+      <h>90</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>100.0;10.0;10.0;70.0</additional_attributes>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>1050</x>
+      <y>360</y>
+      <w>130</w>
+      <h>90</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>10.0;10.0;110.0;70.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLActor</id>
+    <coordinates>
+      <x>130</x>
+      <y>160</y>
+      <w>80</w>
+      <h>100</h>
+    </coordinates>
+    <panel_attributes>Chemist</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>UMLUseCase</id>
+    <coordinates>
+      <x>310</x>
+      <y>170</y>
+      <w>120</w>
+      <h>40</h>
+    </coordinates>
+    <panel_attributes>Google Sheets</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>190</x>
+      <y>170</y>
+      <w>140</w>
+      <h>40</h>
+    </coordinates>
+    <panel_attributes/>
+    <additional_attributes>10.0;20.0;120.0;20.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLClass</id>
+    <coordinates>
+      <x>300</x>
+      <y>550</y>
+      <w>210</w>
+      <h>80</h>
+    </coordinates>
+    <panel_attributes>/PlateReader/
+--
+Responsibilities
+--Send Platereader cmds
+--Get Platereader data</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>390</x>
+      <y>390</y>
+      <w>30</w>
+      <h>180</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>10.0;10.0;10.0;160.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLUseCase</id>
+    <coordinates>
+      <x>340</x>
+      <y>700</y>
+      <w>120</w>
+      <h>40</h>
+    </coordinates>
+    <panel_attributes>SPECTROstar</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>360</x>
+      <y>200</y>
+      <w>30</w>
+      <h>100</h>
+    </coordinates>
+    <panel_attributes/>
+    <additional_attributes>10.0;80.0;10.0;10.0</additional_attributes>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>390</x>
+      <y>620</y>
+      <w>70</w>
+      <h>100</h>
+    </coordinates>
+    <panel_attributes>&lt;&lt;DDE&gt;&gt;</panel_attributes>
+    <additional_attributes>10.0;80.0;10.0;10.0</additional_attributes>
+  </element>
+  <element>
+    <id>UMLUseCase</id>
+    <coordinates>
+      <x>960</x>
+      <y>570</y>
+      <w>120</w>
+      <h>40</h>
+    </coordinates>
+    <panel_attributes>OT2</panel_attributes>
+    <additional_attributes/>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>1010</x>
+      <y>360</y>
+      <w>140</w>
+      <h>230</h>
+    </coordinates>
+    <panel_attributes>
+
+
+
+
+
+
+&lt;&lt;Opentrons API&gt;&gt;</panel_attributes>
+    <additional_attributes>10.0;210.0;10.0;10.0</additional_attributes>
+  </element>
+  <element>
+    <id>Relation</id>
+    <coordinates>
+      <x>500</x>
+      <y>330</y>
+      <w>130</w>
+      <h>30</h>
+    </coordinates>
+    <panel_attributes>lt=&lt;&lt;&lt;&lt;-</panel_attributes>
+    <additional_attributes>10.0;10.0;110.0;10.0</additional_attributes>
+  </element>
+</diagram>
