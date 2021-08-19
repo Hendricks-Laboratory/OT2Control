@@ -604,6 +604,40 @@ class OT2Robot():
     _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
+    exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
+
+    def exec_func(name, exit_code, send_ready, exec_funcs):
+        '''
+        register decorator for exec_funcs  
+        params:  
+            str name: the name of the armchair command for which to invoke this func  
+            int exit_code: the code this should return on exit  
+            bool send_ready: if true, will send a ready command  
+            dict exec_funcs: the dictionary of armchair handler funcs  
+        returns:  
+            function: the unmodified function you're decorating  
+        Postconditions:  
+            exec_funcs has had a function appended to it with that is the same as the decorated
+            function, but it has a new keyword argument, cid, and it sends a ready pack before it
+            returns if you specified send_ready=True
+        '''
+        #return the func without the ready and exit code stuff in case you want to reuse it
+        #somewhere else
+        def echo_func(func):
+            #register a version of the function that sends ready if needed and has exit code
+            @functools.wraps(func)
+            def decorated(*args, **kwargs):
+                self = args[0]
+                kwargs_copy = kwargs.copy()
+                del(kwargs_copy['cid'])
+                func(self,*args[1:],**kwargs_copy)
+                if send_ready:
+                    self.portal.send_pack('ready',kwargs['cid'])
+                return exit_code
+            exec_funcs[name] = decorated
+            #finally just echo the func
+            return func
+        return echo_func
 
     def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
         '''
@@ -913,6 +947,7 @@ class OT2Robot():
             max_idx = i
         return i
  
+    @exec_func('init_containers', 1, True, exec_funcs)
     def _exec_init_containers(self, product_df):
         '''
         used to initialize empty containers, which is useful before transfer steps to new chemicals
@@ -922,6 +957,7 @@ class OT2Robot():
         Postconditions:
             every container has been initialized according to the parameters specified  
         '''
+        product_df = pd.DataFrame(product_df)
         for chem_name, req_labware, req_container, max_vol in product_df.itertuples():
             container = None
             #if you've already initialized this complane
@@ -1002,7 +1038,6 @@ class OT2Robot():
             self._exec_loc_req(arguments[0])
             return 1
         elif command_type == 'home':
-            self.protocol.home()
             self.portal.send_pack('ready',cid)
             return 1
         elif command_type == 'make':
@@ -1023,6 +1058,25 @@ class OT2Robot():
         else:
             raise Exception("Unidenified command '{}'".format(command_type))
 
+    @error_exit
+    def execute(self, command_type, cid, arguments):
+        if command_type == 'close':
+            self._exec_close(cid)
+            return 0
+        else:
+            try:
+                self.exec_funcs[command_type](self, *arguments, cid=cid)
+            except KeyError:
+                raise Exception("Unidenified command '{}'".format(command_type))
+    
+    @exec_func('home', 1, True, exec_funcs)
+    def _exec_home(self,*args):
+        '''
+        homes the robot. Takes args for compatibility only  
+        '''
+        self.protocol.home()
+
+    @exec_func('mix', 1, True, exec_funcs)
     def _exec_mix(self, mix_list):
         '''
         executes a mix command.  
@@ -1095,6 +1149,7 @@ class OT2Robot():
         vol = milimols/conc * 1e6 #microliter conversion
         return vol
 
+    @exec_func('make', 1, True, exec_funcs)
     def _exec_make(self, name, conc):
         '''
         creates a new reagent with chem name and conc  
@@ -1135,6 +1190,7 @@ class OT2Robot():
         #mix
         self._mix(chem_name, 2)
 
+    @exec_func('loc_req', 1, False, exec_funcs)
     def _exec_loc_req(self, wellnames):
         '''
         processes a request for locations of wellnames and sends a response with their locations  
@@ -1153,6 +1209,7 @@ class OT2Robot():
                     cont.aspiratible_vol))
         self.portal.send_pack('loc_resp', response)
 
+    @exec_func('pause', 1, True, exec_funcs)
     def _exec_pause(self, pause_time):
         '''
         executes a pause command by waiting for 'time' seconds  
@@ -1163,6 +1220,7 @@ class OT2Robot():
         if not self.simulate:
             time.sleep(pause_time)
 
+    @exec_func('transfer', 1, True, exec_funcs)
     def _exec_transfer(self, src, transfer_steps, callbacks=[]):
         '''
         this command executes a transfer. It's usually pretty simple, unless you have
@@ -1202,6 +1260,7 @@ class OT2Robot():
                     elif callback == 'stop':
                         self._exec_stop()
 
+    @exec_func('stop', 1, True, exec_funcs)
     def _exec_stop(self):
         '''
         executes a stop command by creating a TCP connection, telling the controller to get
@@ -1398,6 +1457,7 @@ class OT2Robot():
         '''
         pass
 
+    @exec_func('close', 0, False, exec_funcs)
     def _exec_close(self, cid):
         '''
         close the connection in a nice way
@@ -1412,6 +1472,7 @@ class OT2Robot():
         print('<<eve>> shutting down')
         self.portal.close()
 
+    @exec_func('save', 1, False, exec_funcs)
     def _exec_save(self):
         '''
         saves state, and then ships files back to controller over FTP  
