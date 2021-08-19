@@ -8,6 +8,5 @@ Armchair_Logs/
 Cache/
 *.swp
 Data/
-TODO.txt
+TODO*.txt
 Controller_Out/
-TODO_auto.txt
