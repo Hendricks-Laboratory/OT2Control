@@ -279,7 +279,9 @@ class Well(Container, ABC):
         self.height = None
 
     @property
+    @abstractmethod
     def disp_height(self):
+        pass
         return 9 #mm
 
     @property
@@ -299,6 +301,10 @@ class Well96(Well):
     """
     DEAD_VOL = 40 #uL
 
+    @property
+    def disp_height(self):
+        return 9 #mm
+
 class Well24(Well):
     '''
     TODO
@@ -306,6 +312,10 @@ class Well24(Well):
       if they really are the same, make a well class
     '''
     DEAD_VOL = 400 #uL
+
+    @property
+    def disp_height(self):
+        return 18 #mm
 
 #LABWARE
 class Labware(ABC):
@@ -1082,7 +1092,7 @@ class OT2Robot():
         pipette.well_bottom_clearance.dispense = cont.asp_height
         #do the actual mix
         for i in range(2**mix_code):
-            pipette.mix(1,self.pipettes[arm]['size'],well,rate=50.0)
+            pipette.mix(1,self.pipettes[arm]['size'],well,rate=100.0)
             pipette.blow_out()
         
         #pull a little out of that well and shake off the drops
