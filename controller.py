@@ -860,6 +860,11 @@ class Controller(ABC):
         #you might make a reaction you don't want to specify at the start
         reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['chemical_name', 'conc']\
                 ].groupby('chemical_name').first()
+        #add water if necessary
+        needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
+        if needs_water:
+            if 'WaterC1.0' not in reagent_df.index:
+                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='WaterC1.0'))
         reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
         reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
         if not self.use_cache:

@@ -256,9 +256,9 @@ class Tube2000uL(Container):
         tip_depth = 4.5 # mm
         return self.height - tip_depth
 
-class Well96(Container):
+class Well(Container, ABC):
     """
-        a well in a 96 well plate  
+        Abstract class for a well96
         INHERITED ATTRIBUTES:  
             str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
               Opentrons.Labware labware  
@@ -267,7 +267,6 @@ class Well96(Container):
         INHERITED METHODS:  
             _update_height void, update_vol(float del_vol) void,  
     """
-
     MIN_HEIGHT = 1
 
     def __init__(self, name, deck_pos, loc, labware, vol=0, conc=1):
@@ -281,19 +280,32 @@ class Well96(Container):
 
     @property
     def disp_height(self):
-        return 10 #mm
+        return 9 #mm
 
     @property
     def asp_height(self):
         return self.MIN_HEIGHT
 
-class Well24(Well96):
+class Well96(Well):
+    """
+        a well in a 96 well plate  
+        INHERITED ATTRIBUTES:  
+            str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
+              Opentrons.Labware labware  
+        INHERITED CONSTANTS:  
+            int DEAD_VOL   
+        INHERITED METHODS:  
+            _update_height void, update_vol(float del_vol) void,  
+    """
+    DEAD_VOL = 40 #uL
+
+class Well24(Well):
     '''
     TODO
     Obviously, Well24 should not inherit from Well96. If they are different make a well class
       if they really are the same, make a well class
     '''
-    pass
+    DEAD_VOL = 400 #uL
 
 #LABWARE
 class Labware(ABC):
@@ -1060,7 +1072,7 @@ class OT2Robot():
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', chem_name]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
-        arm = self._get_preffered_pipette(0) #gets the smallest pipette 
+        arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
         pipette = self.pipettes[arm]['pipette']
         cont = self.containers[chem_name]
         well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
@@ -1070,10 +1082,7 @@ class OT2Robot():
         pipette.well_bottom_clearance.dispense = cont.asp_height
         #do the actual mix
         for i in range(2**mix_code):
-            pipette.mix(1,20,well)
-            for j in range(3):
-                pipette.touch_tip(radius=0.75,speed=40)
-                pass
+            pipette.mix(1,self.pipettes[arm]['size'],well,rate=50.0)
             pipette.blow_out()
         
         #pull a little out of that well and shake off the drops
@@ -1504,13 +1513,19 @@ def hack_to_get_ip():
 
 if __name__ == '__main__':
     my_ip = hack_to_get_ip()
+    fail_count = 0
     while True:
         try:
             launch_eve_server(my_ip=my_ip, barrier=None)
+            fail_count = 0
         except Exception as e:
+            fail_count+=1
             print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.")
             #credit Horacio of stack overflow
             with open('ot2_error_output.txt', 'a+') as file:
                 file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
                 file.write(str(e))
                 file.write(traceback.format_exc())
+        finally:
+            if fail_count > 3:
+                raise e
