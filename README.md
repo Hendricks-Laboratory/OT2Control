@@ -148,13 +148,7 @@ and the ratio of volume to transfer.
 These parameters should then be sent over the Armchair portal using send\_pack.  
 7. **Update execute\_protocol\_df** in the controller to check if the operation is 'move\_reagent'
 if it is, you should call your helper.  
-8. **Create a new command type for the robot** in ot2\_robot.py, in execute. Add a new condition
-to check if the command is 'move\_reagent'. Within that condition, call
-self.\_exec\_move\_reagent(\*arguments) (we'll implement this private helper in the next step),
-and after that, return 1. --Note. You must return 1 because the execute command has a return type
-of int, specifying an exit status. 1 indicates ok. 0 indicates closed, i.e. the connection between
-this robot instance and controller has been severed, and it is safe to destruct this robot.  
-9. **Create a helper function for the robot**. This is where we'll implement the helper we called
+8. **Create a helper function for the robot**. This is where we'll implement the helper we called
 under execute, self.\_exec\_move\_reagent(\*arguments). You should unpack arguments into the
 parameters you need for this function, and then write the code to make the robot do what
 you need. There are likely already helper functions defined in ot2\_robot that you should use to
@@ -164,6 +158,17 @@ following:
     2. From src, check the volume attribute.  
     3. Call self.\_liquid\_transfer with $1\over 2$ the volume of src (or whatever fraction you chose)
 from src to dst.  
+9. **Register your helper**: In order for the robot to invoke your helper function when it recieves
+an armchair command, you must register it with the decorator, `exec_func(str name, int exit_code,
+bool send_ready, dict_exec_funcs)`. Going through these arguments:
+    1. str name: the armchair command type, for us, 'move\_reagent'  
+    2. int exit\_code: the exit code, almost always 1. 0 is used for an exit  
+    3. bool send\_ready: If False, function will omit sending a ready. This is usually True.  
+    4. dict exec\_funcs: The argument to this is always exec\_funcs, the registry dict.  
+-- Note: your helper functions should have no return value, and should not send a ready command,
+or take in the cid of the armchair command. These things are all handled by the decorated function,
+*but* the original function is left as is and can still be accessed as a helper for other functions
+ without sending ready commands or returning exit\_code.  
 10. **That's it!** To test you can run everything locally, and just enter 'n' after the simulation,
 or you can run it on the robot and platereader without physically moving anything by runing
 the script with the -s flag, and entering 'y' after the simulation.  
