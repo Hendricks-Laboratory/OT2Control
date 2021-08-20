@@ -1310,6 +1310,12 @@ class Controller(ABC):
                 2: Critical. Abort  
         '''
         found_errors = 0
+        if self.rxn_df.loc[self.rxn_df['op']=='scan']['scan_filename'].duplicated().sum() > 0:
+            print("<<controller>> Multiple scans use same filename. It will be overwritten. Do you wish to proceed?")
+            found_errors = max(found_errors, 1)
+        if self.rxn_df.loc[self.rxn_df['op']=='plot']['plot_filename'].duplicated().sum() > 0:
+            print("<<controller>> Multiple plots use same filename. They will be overwritten. Do you wish to proceed?")
+            found_errors = max(found_errors, 1)
         for i, r in self.rxn_df.iterrows():
             r_num = i+1
             #check pauses
@@ -1324,6 +1330,32 @@ class Controller(ABC):
             if r['op'] == 'transfer' and pd.isna(r['reagent']):
                 print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
+            #check that plots have scans
+            if r['op'] == 'plot':
+                if pd.isna(r['scan_filename']):
+                    print("<<controller>> please specify a scan filename in row '{}'".format(r_num))
+                    found_errors = max(found_errors,2)
+                if pd.isna(r['plot_filename']):
+                    print("<<controller>> please specify a plot filename in row '{}'".format(r_num))
+                    found_errors = max(found_errors,2)
+                rows_above = self.rxn_df.loc[:i,:]
+                scan_rows = rows_above.loc[(rows_above['scan_filename'] == r['scan_filename']) &\
+                        (rows_above['op'] == 'scan')]
+                if scan_rows.empty:
+                        print("<<controller>> row {} plots using nonexistent scan file\
+                                ".format(r_num))
+                        found_errors = max(found_errors, 2)
+                else:
+                    last_scan_row = scan_rows.iloc[-1,:]
+                    last_scan_products = last_scan_row[self._products]
+                    scanned_products=last_scan_products.loc[last_scan_products.astype(bool)].index
+                    scanned_products = set(scanned_products)
+                    plotted_products = r[self._products]
+                    plotted_products = set(plotted_products[plotted_products.astype(bool)])
+                    if plotted_products.issubset(scanned_products):
+                        print("<<controller>> row {} plots products that have not been scanned\
+                        ".format(r_num))
+                        found_errors = max(found_errors, 2)
         return found_errors
 
 class AutoContr(Controller):
@@ -2088,11 +2120,15 @@ class AbstractPlateReader(ABC):
     ATTRIBUTES:
         str data_path: a linux path to where all the data is 
     '''
-    SPECTRO_ROOT_PATH = None
-    PROTOCOL_PATH = None
+    SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
+    PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
+    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
 
     def __init__(self, data_path):
-        pass
+        self.data_path = data_path
+        self.simulate = simulate
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2126,12 +2162,24 @@ class AbstractPlateReader(ABC):
 
     def run_protocol(self, protocol_name, filename, layout=None):
         r'''
+        In the abstract version, a dummy file will be written.  
         params:  
             str protocol_name: the name of the protocol that will be edited  
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
-        pass
+        filename = '{}.csv'.format(filename)
+        filepath = os.path.join(self.data_path,filename)
+        if os.path.exists(filepath):
+            os.system('rm {}'.format(filepath))
+        data = pd.DataFrame(.42*np.ones((701,len(layout))), columns=layout)
+        with open(filepath, 'a+', encoding='latin1') as file:
+            file.write('No. of Cycles: 1\nT[°C]: \n23.5\n')
+            for name, col in data.iteritems():
+                write_str = name[0] + name[1:].zfill(2) + ':, '
+                write_str += ', '.join([str(i) for i in col])
+                write_str += '\n'
+                file.write(write_str)
 
     def shutdown(self):
         '''
@@ -2139,28 +2187,69 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-
     def load_reader_data(self, filename, loc_to_name):
         '''
-        An new implementation should do following:  
         takes in the filename of a reader output and returns a dataframe with the scan data
         loaded, and a dictionary with relevant metadata.  
-        This implementation generates 701 dummy 1s for each row
+        Note that only the wells specified in loc_to_name will be returned.  
         params:  
-            str filename: the name of the file to read  
-            dict<str:str> loc_to_name: maps location to name of reaction  
-        returns:  
+            str filename: the name of the file to read without extension  
             df: the scan data for the wellnames supplied in loc_to_name for that file.  
+        returns:  
+            df: the scan data for that file  
             dict<str:obj>: holds the metadata  
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
-        print(filename)
-        print('<<Reader>> generating dummy data')
-        wellnames = loc_to_name.values()
-        metadata = {'filename':filename, 'n_cycles':1}
-        #.42 is a nice number to show up on plots. Also, 42 ...
-        return pd.DataFrame(.42*np.ones((701,len(wellnames))), columns=wellnames), metadata
+        filename = "{}.csv".format(filename)
+        #parse the metadata
+        start_i, metadata = self._parse_metadata(filename)
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = ["{}{}".format(x[0], int(x[1:-1])) for x in df.columns] #rename A01->A1
+        df.columns = headers
+        #get only the things we want
+        df = df[loc_to_name.keys()]
+        #rename by wellname
+        df.rename(columns=loc_to_name, inplace=True)
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df, metadata
+
+    def _parse_metadata(self, filename):
+        '''
+        parses the meta data of a platereader output, and returns a dataframe of the scans
+        and a dictionary of parameters  
+        params:  
+            str filename: the name of the file to be read  
+        returns:  
+            int: the index to start reading the dataframe at  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        found_start = False
+        i = 0
+        n_cycles = None
+        line = 'dowhile'
+        with open(os.path.join(self.data_path,filename), 'r',encoding='latin1') as file:
+            while not found_start and line != '':
+                line = file.readline()
+                if bool(re.match(r'No\. of Cycles:',line)):
+                    #is number of cycles
+                    n_cycles = int((re.search(r'\d+', line)).group(0))
+                if line[:6] == 'T[°C]:':
+                    while not bool(re.match('\D\d',line)) and line != '':
+                        #is not of form A1/B03 etc
+                        line = file.readline()
+                        i += 1
+                    i -= 1 #cause you will increment once more 
+                    found_start = True
+                i+=1
+        assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
+        assert (n_cycles != None), "corrupt reader file. num cycles not found."
+        return i, {'n_cycles':n_cycles,'filename':filename}
 
 class DummyReader(AbstractPlateReader):
     '''
@@ -2174,15 +2263,9 @@ class PlateReader(AbstractPlateReader):
     '''
     This class handles all platereader interactions. Inherits from the interface
     '''
-    SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
-    PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
 
     def __init__(self, data_path, simulate=False):
-        self.data_path = data_path
-        self.simulate = simulate
-        if not os.path.exists(self.data_path):
-            os.makedirs(self.data_path)
+        super().__init__(data_path)
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
@@ -2261,39 +2344,6 @@ class PlateReader(AbstractPlateReader):
             df = df.astype(float)
             return df, metadata
 
-    def _parse_metadata(self, filename):
-        '''
-        parses the meta data of a platereader output, and returns a dataframe of the scans
-        and a dictionary of parameters  
-        params:  
-            str filename: the name of the file to be read  
-        returns:  
-            int: the index to start reading the dataframe at  
-            dict<str:obj>: holds the metadata  
-                str filename: the filename as you passed in  
-                int n_cycles: the number of cycles  
-        '''
-        found_start = False
-        i = 0
-        n_cycles = None
-        line = 'dowhile'
-        with open(os.path.join(self.data_path,filename), 'r',encoding='latin1') as file:
-            while not found_start and line != '':
-                line = file.readline()
-                if bool(re.match(r'No\. of Cycles:',line)):
-                    #is number of cycles
-                    n_cycles = int((re.search(r'\d+', line)).group(0))
-                if line[:6] == 'T[°C]:':
-                    while not bool(re.match('\D\d',line)) and line != '':
-                        #is not of form A1/B03 etc
-                        line = file.readline()
-                        i += 1
-                    i -= 1 #cause you will increment once more 
-                    found_start = True
-                i+=1
-        assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
-        assert (n_cycles != None), "corrupt reader file. num cycles not found."
-        return i, {'n_cycles':n_cycles,'filename':filename}
 
     def edit_layout(self, protocol_name, layout):
         '''
@@ -2338,9 +2388,12 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,'w'), '', '', '', '', filename)
         #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
         #that, so we move it from the default landing zone to where I actually want it
-        if not self.simulate:
+        if self.simulate:
+            super().run_protocol()
+        else:
             shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
                     os.path.join(self.data_path, "{}.csv".format(filename)))
+        
 
 
     def _set_config_attr(self, header, attr, val):
