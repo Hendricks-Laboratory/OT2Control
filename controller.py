@@ -1458,8 +1458,8 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         
         self.init_robot(simulate)
+        recipes = model.generate_seed_rxns()
         while not model.quit:
-            recipes = model.predict(5)
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
@@ -1471,6 +1471,7 @@ class AutoContr(Controller):
             #train on scans
             model.train(scan_data.T.to_numpy(),recipes)
             self.batch_num += 1
+            recipes = model.predict()
         self.close_connection()
         self.pr.shutdown()
         return

@@ -83,6 +83,16 @@ class MLModel():
         extended by children to check if you've reached the target.  
         '''
         self.quit =  self.curr_iter >= self.max_iters
+
+    @abstractmethod
+    def generate_seed_rxns(self):
+        '''
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,y.shape) 
+        '''
+        pass
         
 class DummyMLModel(MLModel):
     '''
@@ -97,9 +107,10 @@ class DummyMLModel(MLModel):
         int curr_iter: formally, this is the number of times the train method has been called
         int max_iters: the number of iters to execute before quiting  
     '''
-    def __init__(self, y_shape, max_iters=np.inf):
+    def __init__(self, y_shape, max_iters=np.inf, batch_size=5):
         super().__init__(None, max_iters) #don't have a model
         self.y_shape = y_shape
+        self.batch_size = batch_size
 
     def _train(self, X, y):
         '''
@@ -113,17 +124,26 @@ class DummyMLModel(MLModel):
             The model has been trained on the new data
         '''
         with self.model_lock: #note for dummy this is not necessary, just an example
-            print('training!')
+            print('<<ML>> training!')
 
-    def predict(self, n_predictions):
+    def predict(self):
         '''
         This call should wait on the training thread to complete if it is has not been collected
-        yet.
+        yet.  
         params:  
             int n_predictions: the number of instances to predict  
         returns:  
             np.array: shape is n_predictions, y.shape. Features are evenly distributed
         '''
         with self.model_lock:
-            print('generating preditions')
-        return np.ones((n_predictions, self.y_shape)) / self.y_shape
+            print('<<ML>> generating preditions')
+        return np.ones((self.batch_size, self.y_shape)) / self.y_shape
+
+    def generate_seed_rxns(self):
+        '''
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        '''
+        return np.ones((self.batch_size,self.y_shape)) /self.y_shape
