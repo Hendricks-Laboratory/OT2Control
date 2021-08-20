@@ -592,6 +592,8 @@ class OT2Robot():
         str logs_p: the path to the log outputs  
         dict<str:tuple<Container,float>> dry_containers: maps container name to a container
           object and a volume of water needed to turn it into a reagent  
+        dict<str:func> exec_funcs: a registry that holds all of the functions that respond to
+          an armchair request mapped by their armchair command_type  
     METHODS:  
         execute(command_type, cid, arguments) int: Takes in the recieved output of an Armchair
           recv_pack, and executes the command. Will usually send a ready (except for GHOST type)
@@ -1006,66 +1008,15 @@ class OT2Robot():
 
     @error_exit
     def execute(self, command_type, cid, arguments):
-        '''
-        takes the packet type and payload of an Armchair packet, and executes the command  
-        params:  
-            str command_type: the type of packet to execute  
-            tuple<Obj> arguments: the arguments to this command 
-              (generally passed as list so no *args)  
-        returns:  
-            int: 1=ready to recieve. 0=terminated  
-        Postconditions:
-            the command has been executed  
-        '''
-        if command_type == 'transfer':
-            self._exec_transfer(*arguments)
-            self.portal.send_pack('ready', cid)
-            return 1
-        elif command_type == 'init_containers':
-            self._exec_init_containers(pd.DataFrame(arguments[0]))
-            self.portal.send_pack('ready', cid)
-            return 1
-        elif command_type == 'pause':
-            self._exec_pause(arguments[0])
-            self.portal.send_pack('ready', cid)
-            return 1
-        elif command_type == 'stop':
-            self._exec_stop()
-            self.portal.send_pack('ready', cid)
-            return 1
-        elif command_type == 'loc_req':
-            #ghost
-            self._exec_loc_req(arguments[0])
-            return 1
-        elif command_type == 'home':
-            self.portal.send_pack('ready',cid)
-            return 1
-        elif command_type == 'make':
-            self._exec_make(*arguments)
-            self.portal.send_pack('ready',cid)
-            return 1
-        elif command_type == 'mix':
-            self._exec_mix(arguments[0])
-            self.portal.send_pack('ready', cid)
-            return 1
-        elif command_type == 'save':
-            #ghost
-            self._exec_save()
-            return 1
-        elif command_type == 'close':
-            self._exec_close(cid) #will be acked in func
-            return 0
-        else:
-            raise Exception("Unidenified command '{}'".format(command_type))
-
-    @error_exit
-    def execute(self, command_type, cid, arguments):
         if command_type == 'close':
             self._exec_close(cid)
             return 0
         else:
             try:
-                self.exec_funcs[command_type](self, *arguments, cid=cid)
+                if arguments:
+                    return self.exec_funcs[command_type](self, *arguments, cid=cid)
+                else:
+                    return self.exec_funcs[command_type](self, cid=cid)
             except KeyError:
                 raise Exception("Unidenified command '{}'".format(command_type))
     
