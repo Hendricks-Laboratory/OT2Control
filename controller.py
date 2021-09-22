@@ -1,3 +1,4 @@
+#TODO the parsing must be updated so that we can specify a reagent sheet without the
 '''
 This module contains everything that the server needs to run. Partly seperate from the OT2 because
 it needs different packages (OT2 uses historic packages) and partly for organizational purposes.
@@ -221,7 +222,9 @@ class Controller(ABC):
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
         self._make_out_dirs(header_data)
-        self.rxn_df = self._load_rxn_df(input_data)
+        self.rxn_df = self._load_rxn_df(input_data) #products init here
+        self.total_vols = self._get_total_vols(input_data) #NOTE we're moving more and more info
+        #to the controller. It may make sense to build a class at some point
         self._query_reagents(wks_key, credentials)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
         #with a parsed reagent_df. This is exactly as is pulled from gsheets
@@ -232,7 +235,33 @@ class Controller(ABC):
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
-        self.run_all_checks()
+
+    def _insert_tot_vol_transfer(self):
+        '''
+        TODO implement this method
+        inserts a row into self.rxn_df that transfers volume from WaterC1.0 to fill
+        the necessary products  
+        Postconditions:  
+            has inserted a row into the rxn_df to transfer WaterC1.0  
+            If the reaction has already overflowed the total volume, will add negative volume
+            (which is impossible. The caller of this function must account for this.)  
+            If no total vols were specified, no transfer step will be inserted.  
+        '''
+        #TODO check the volume calc code in the checks to get an expected volume
+        #this function is called self._vol_calc
+
+    def _get_total_vols(self, input_data):
+        '''
+        params:  
+            list<obj> input_data: as parsed from the google sheets  
+        returns:  
+            dict<str:float>: maps product names to their appropriate total volumes if specified  
+        Preconditions:  
+            self._products has been initialized  
+        '''
+        product_start_i = input_data[0].index('reagent (must be uniquely named)')+1
+        product_tot_vols = input_data[3][product_start_i:]
+        return {product:tot_vol for product, tot_vol in zip(self._products, product_tot_vols)}
 
     def _check_cache_metadata(self, rxn_sheet_name):
         '''
@@ -791,7 +820,7 @@ class Controller(ABC):
             self._products has been initialized to hold the names of all the products  
         '''
         cols = make_unique(pd.Series(input_data[0])) 
-        rxn_df = pd.DataFrame(input_data[3:], columns=cols)
+        rxn_df = pd.DataFrame(input_data[4:], columns=cols)
         #rename some of the clunkier columns 
         rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
@@ -1363,6 +1392,47 @@ class Controller(ABC):
                         found_errors = max(found_errors, 2)
         return found_errors
 
+    def _check_tot_vol(self):
+        '''
+        TODO (9) implement this method (note you may not have a first row)  
+        TODO call this in run all checks  
+        This check ensures that the inserted total volume row does not contain negative floats.
+        returns:  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        pass
+
+    def _vol_calc(self, name):
+        '''
+        TODO I just yoinked this from the Protocol Executor. It might break now that I'm
+        trying to use it in the abstract controller
+        params:
+            str name: chem_name
+        returns:
+            volume at end in that name
+        '''
+        dispenses = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution') |
+                (self.rxn_df['op'] == 'transfer')][name].sum()
+        transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
+                (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
+        dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
+                (self.rxn_df['chemical_name'] == name),:]
+        def calc_dilution_vol(row):
+            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
+            return reagent_transfer_row[self._products].sum()
+
+        if dilution_rows.empty:
+            dilution_aspirations = 0.0
+        else:
+            dilution_vols = dilution_rows.apply(lambda r: calc_dilution_vol(r),axis=1)
+            dilution_aspirations = dilution_vols.sum()
+        return dispenses - transfer_aspirations - dilution_aspirations
+    
+
 class AutoContr(Controller):
     '''
     This is a completely automated controller. It takes as input a layout sheet, and then does
@@ -1370,8 +1440,10 @@ class AutoContr(Controller):
     We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
+
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
+        self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
 
@@ -1538,6 +1610,10 @@ class AutoContr(Controller):
         TODO need some sort of key to map from name of reagent to index of the 
         recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
         '''
+        #TODO (10) this is the part we're changing. This is where I left off.
+        #large chunks of this code will be deleted and reformated. Try to keep to something
+        #that can mostly be reused for the protocol executor
+
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         def build_product_rows(row):
@@ -1645,6 +1721,10 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
+        #TODO this is the part that's getting modified
+        self._insert_tot_vol_transfer() #adds total volume transfer step to start
+        self.run_all_checks() #We need to add a check here to check no negative dispense from
+        #the generated first transfer. I've called it _check_tot_vol()
 
     def run_simulation(self):
         '''
@@ -2025,30 +2105,6 @@ class ProtocolExecutor(Controller):
                     sbs.at[chem_name,'container_t'] = 'any'
         return sbs
 
-    def _vol_calc(self, name):
-        '''
-        params:
-            str name: chem_name
-        returns:
-            volume at end in that name
-        '''
-        dispenses = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution') |
-                (self.rxn_df['op'] == 'transfer')][name].sum()
-        transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
-                (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
-        dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
-                (self.rxn_df['chemical_name'] == name),:]
-        def calc_dilution_vol(row):
-            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-            return reagent_transfer_row[self._products].sum()
-
-        if dilution_rows.empty:
-            dilution_aspirations = 0.0
-        else:
-            dilution_vols = dilution_rows.apply(lambda r: calc_dilution_vol(r),axis=1)
-            dilution_aspirations = dilution_vols.sum()
-        return dispenses - transfer_aspirations - dilution_aspirations
-    
     def _is_valid_contents_sbs(self, row):
         '''
         tests if a row of contents sbs is valid

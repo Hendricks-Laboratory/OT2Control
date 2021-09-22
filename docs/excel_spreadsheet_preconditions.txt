@@ -26,7 +26,7 @@ The order of columns is unimportant with the exception that the reagent column m
 the products and there must be no other columns after it that are not products.
 (This is used to determine what rows are not parameters)
 Please do not write concentrations in different ways. It's not nice. e.g. .050 sodium hydroxide 
-and 0.05 sodium hydroxide are distinct names to the robot. It will treat them as 
+and 0.05 sodium hydroxide are distinct names to the robot. It might treat them as 
 different chemicals
 It's really not expected that you 'transfer' liquid into yourself. 
 I recommend you refrain from doing this, but I do not guarentee that the code will crash if you do
@@ -38,11 +38,15 @@ The Container row is used to specify the container you want the reagent in. (e.g
 This can also be left blank if you don't care what you put this reaction in.
 You can specify both/either/neither Container and Labware. 
 Eve will satisfy all conditions you supply (if possible).
-Every row after the first 3 is interpreted as an operation, and should have an entry in that col
+The Total Vol row is used to specify the total volume you want a reagent to have AT THE END OF THE
+REACTION. e.g. total vol 200 means that I expect the container to have a volume of 200 at the end.
+This volume will be created by filling the container with water, not aspirating from the container.
+This implied that you must not fill a column with greater than the total volume
+Every row after the first 4 is interpreted as an operation, and should have an entry in that col
 When using products the concentration is always 1 unless diluted
 One of the reagents should be 'Water' named with uppercase W if you expect to do any dilutions
 transfer:
-    Specify volum in uL under the columns you want to transfer into
+    Specify volume in uL under the columns you want to transfer into
 dilution:
     specify 'dilution concentration' for desired concentration. specify concentration and reagent
     to tell what you want to use as the reagent. Finally, mark a column 'dilution_placeholder' and
