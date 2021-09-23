@@ -42,6 +42,8 @@ The Total Vol row is used to specify the total volume you want a reagent to have
 REACTION. e.g. total vol 200 means that I expect the container to have a volume of 200 at the end.
 This volume will be created by filling the container with water, not aspirating from the container.
 This implied that you must not fill a column with greater than the total volume
+If you specify a total volume, you cannot aspirate from that container.
+This means: no transfers from that container, no dilutions using that container
 Every row after the first 4 is interpreted as an operation, and should have an entry in that col
 When using products the concentration is always 1 unless diluted
 One of the reagents should be 'Water' named with uppercase W if you expect to do any dilutions

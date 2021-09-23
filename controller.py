@@ -1,4 +1,3 @@
-#TODO the parsing must be updated so that we can specify a reagent sheet without the
 '''
 This module contains everything that the server needs to run. Partly seperate from the OT2 because
 it needs different packages (OT2 uses historic packages) and partly for organizational purposes.
@@ -207,7 +206,7 @@ class Controller(ABC):
         self.use_cache = use_cache
         self.my_ip = my_ip
         self.server_ip = server_ip
-        self.buff_size=4
+        self.buff_size = 4
         self.simulate = False #by default will be changed if a simulation is run
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
@@ -249,6 +248,22 @@ class Controller(ABC):
         '''
         #TODO check the volume calc code in the checks to get an expected volume
         #this function is called self._vol_calc
+        end_vols = pd.Series(self.total_vols)
+        start_vols = pd.Series([self._vol_calc(name) for name in end_vols.index], index=end_vols.index)
+        del_vols = end_vols - start_vols
+        transfer_row_dict = {col:del_vols[col] if col in del_vols else '' for col in self.rxn_df.columns}
+        #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
+        transfer_row_dict['op'] = 'transfer'
+        transfer_row_dict['reagent'] = 'Water'
+        transfer_row_dict['conc'] = 1.0
+        transfer_row_dict['chemical_name'] = 'WaterC1.0'
+        for chem_name in self._products:
+            if not transfer_row_dict[chem_name]:
+                transfer_row_dict[chem_name] = 0.0
+        transfer_row = pd.DataFrame(transfer_row_dict, index=[-1], columns=self.rxn_df.columns)
+        #TODO add in a concat for this row to the rxn_df (and update index
+
+
 
     def _get_total_vols(self, input_data):
         '''
@@ -261,7 +276,7 @@ class Controller(ABC):
         '''
         product_start_i = input_data[0].index('reagent (must be uniquely named)')+1
         product_tot_vols = input_data[3][product_start_i:]
-        return {product:tot_vol for product, tot_vol in zip(self._products, product_tot_vols)}
+        return {product:float(tot_vol) for product, tot_vol in zip(self._products, product_tot_vols) if tot_vol}
 
     def _check_cache_metadata(self, rxn_sheet_name):
         '''
@@ -825,7 +840,7 @@ class Controller(ABC):
         rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float) #TODO this may break when we try to drop concs, but may auto convert to NaN.
         #rename chemical names
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
