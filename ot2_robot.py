@@ -1034,13 +1034,11 @@ class OT2Robot():
             self._exec_close(cid)
             return 0
         else:
-            try:
-                if arguments:
-                    return self.exec_funcs[command_type](self, *arguments, cid=cid)
-                else:
-                    return self.exec_funcs[command_type](self, cid=cid)
-            except KeyError:
-                raise Exception("Unidenified command '{}'".format(command_type))
+            assert (command_type in self.exec_funcs), "Unidentified command '{}'".format(command_type)
+            if arguments:
+                return self.exec_funcs[command_type](self, *arguments, cid=cid)
+            else:
+                return self.exec_funcs[command_type](self, cid=cid)
     
     @exec_func('home', 1, True, exec_funcs)
     def _exec_home(self,*args):

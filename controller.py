@@ -237,7 +237,6 @@ class Controller(ABC):
 
     def _insert_tot_vol_transfer(self):
         '''
-        TODO implement this method
         inserts a row into self.rxn_df that transfers volume from WaterC1.0 to fill
         the necessary products  
         Postconditions:  
@@ -246,24 +245,28 @@ class Controller(ABC):
             (which is impossible. The caller of this function must account for this.)  
             If no total vols were specified, no transfer step will be inserted.  
         '''
-        #TODO check the volume calc code in the checks to get an expected volume
-        #this function is called self._vol_calc
-        end_vols = pd.Series(self.total_vols)
-        start_vols = pd.Series([self._vol_calc(name) for name in end_vols.index], index=end_vols.index)
-        del_vols = end_vols - start_vols
-        transfer_row_dict = {col:del_vols[col] if col in del_vols else '' for col in self.rxn_df.columns}
-        #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
-        transfer_row_dict['op'] = 'transfer'
-        transfer_row_dict['reagent'] = 'Water'
-        transfer_row_dict['conc'] = 1.0
-        transfer_row_dict['chemical_name'] = 'WaterC1.0'
-        for chem_name in self._products:
-            if not transfer_row_dict[chem_name]:
-                transfer_row_dict[chem_name] = 0.0
-        transfer_row = pd.DataFrame(transfer_row_dict, index=[-1], columns=self.rxn_df.columns)
-        #TODO add in a concat for this row to the rxn_df (and update index
-
-
+        #if there are no total vols, don't insert the row, just return
+        if self.total_vols:
+            end_vols = pd.Series(self.total_vols)
+            start_vols = pd.Series([self._vol_calc(name) 
+                                    for name in end_vols.index], index=end_vols.index)
+            del_vols = end_vols - start_vols
+            #begin building a dictionary for the row to insert
+            transfer_row_dict = {col:del_vols[col] if col in del_vols else np.nan 
+                                for col in self.rxn_df.columns}
+            #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
+            transfer_row_dict['op'] = 'transfer'
+            transfer_row_dict['reagent'] = 'Water'
+            transfer_row_dict['conc'] = 1.0
+            transfer_row_dict['chemical_name'] = 'WaterC1.0'
+            transfer_row_dict['callbacks'] = ''
+            for chem_name in self._products:
+                if pd.isna(transfer_row_dict[chem_name]):
+                    transfer_row_dict[chem_name] = 0.0
+            #convert the row to a dataframe
+            transfer_row_df = pd.DataFrame(transfer_row_dict, index=[-1], columns=self.rxn_df.columns)
+            self.rxn_df = pd.concat((transfer_row_df, self.rxn_df)) #add in column
+            self.rxn_df.index += 1 #update index to go 0-n instead of -1-n-1
 
     def _get_total_vols(self, input_data):
         '''
@@ -1407,7 +1410,7 @@ class Controller(ABC):
                         found_errors = max(found_errors, 2)
         return found_errors
 
-    def _check_tot_vol(self):
+    def check_tot_vol(self):
         '''
         TODO (9) implement this method (note you may not have a first row)  
         TODO call this in run all checks  
@@ -1419,7 +1422,7 @@ class Controller(ABC):
                 1: Some Errors, but could run  
                 2: Critical. Abort  
         '''
-        pass
+        return 0 
 
     def _vol_calc(self, name):
         '''
@@ -1738,6 +1741,7 @@ class ProtocolExecutor(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
         #TODO this is the part that's getting modified
         self._insert_tot_vol_transfer() #adds total volume transfer step to start
+        df_popout(self.rxn_df)
         self.run_all_checks() #We need to add a check here to check no negative dispense from
         #the generated first transfer. I've called it _check_tot_vol()
 
@@ -1891,6 +1895,7 @@ class ProtocolExecutor(Controller):
         found_errors = max(found_errors, self.check_labware())
         found_errors = max(found_errors, self.check_reagents())
         found_errors = max(found_errors, self.check_products())
+        found_errors = max(found_errors, self.check_tot_vol())
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
