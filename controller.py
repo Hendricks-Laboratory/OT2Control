@@ -1284,14 +1284,23 @@ class Controller(ABC):
             return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
         return pd.Series(new_cols)
 
-    @abstractmethod
     def run_all_checks(self):
         '''
-        it is expected that each subclass will implement a version of this method based
-        on the checks that they need to run.  
-        run_all_checks should run every appropriate pre rxn check  
+        runs all checks on a rxn_df converted to volumes.  
+        This code will probably be overridden by children of this class to add more checks.  
+        returns:  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
         '''
-        pass
+        found_errors = 0
+        found_errors = max(found_errors, self.check_rxn_df())
+        found_errors = max(found_errors, self.check_labware())
+        found_errors = max(found_errors, self.check_reagents())
+        found_errors = max(found_errors, self.check_tot_vol())
+        return found_errors
 
     def check_labware(self):
         '''
@@ -1657,10 +1666,7 @@ class AutoContr(Controller):
         return rxn_df
 
     def run_all_checks(self):
-        found_errors = 0
-        found_errors = max(found_errors, self.check_rxn_df())
-        found_errors = max(found_errors, self.check_labware())
-        found_errors = max(found_errors, self.check_reagents())
+        super().run_all_checks()
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
@@ -1890,12 +1896,8 @@ class ProtocolExecutor(Controller):
     #TESTING
     #PRE Simulation
     def run_all_checks(self):
-        found_errors = 0
-        found_errors = max(found_errors, self.check_rxn_df())
-        found_errors = max(found_errors, self.check_labware())
-        found_errors = max(found_errors, self.check_reagents())
+        found_errors = super().run_all_checks()
         found_errors = max(found_errors, self.check_products())
-        found_errors = max(found_errors, self.check_tot_vol())
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
