@@ -222,7 +222,7 @@ class Controller(ABC):
         self._init_robo_header_params(header_data)
         self._make_out_dirs(header_data)
         self.rxn_df = self._load_rxn_df(input_data) #products init here
-        self.total_vols = self._get_total_vols(input_data) #NOTE we're moving more and more info
+        self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
         #to the controller. It may make sense to build a class at some point
         self._query_reagents(wks_key, credentials)
         raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
@@ -246,8 +246,8 @@ class Controller(ABC):
             If no total vols were specified, no transfer step will be inserted.  
         '''
         #if there are no total vols, don't insert the row, just return
-        if self.total_vols:
-            end_vols = pd.Series(self.total_vols)
+        if self.tot_vols:
+            end_vols = pd.Series(self.tot_vols)
             start_vols = pd.Series([self._vol_calc(name) 
                                     for name in end_vols.index], index=end_vols.index)
             del_vols = end_vols - start_vols
@@ -268,7 +268,7 @@ class Controller(ABC):
             self.rxn_df = pd.concat((transfer_row_df, self.rxn_df)) #add in column
             self.rxn_df.index += 1 #update index to go 0-n instead of -1-n-1
 
-    def _get_total_vols(self, input_data):
+    def _get_tot_vols(self, input_data):
         '''
         params:  
             list<obj> input_data: as parsed from the google sheets  
