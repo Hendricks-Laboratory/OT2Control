@@ -903,16 +903,47 @@ class Controller(ABC):
         PostConditions:  
             reagent_sheet has been constructed  
         '''
-        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
         #you might make a reaction you don't want to specify at the start
-        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['chemical_name', 'conc']\
-                ].groupby('chemical_name').first()
+        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['reagent', 'conc']]
+        reagent_df = reagent_df.groupby(['reagent','conc'], dropna=False).first().reset_index()
+        reagent_df.dropna(how='all',inplace=True)
+        rows_to_drop = []
+        duplicates = reagent_df['reagent'].duplicated(keep=False)
+        for i, reagent, conc in reagent_df.itertuples():
+            if duplicates[i] and pd.isna(conc):
+                rows_to_drop.append(i)
+        reagent_df.drop(index=rows_to_drop, inplace=True)
+        reagent_df.set_index('reagent',inplace=True)
+        reagent_df.fillna('',inplace=True)
         #add water if necessary
         needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
         if needs_water:
-            if 'WaterC1.0' not in reagent_df.index:
-                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='WaterC1.0'))
-        reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
+            if 'Water' not in reagent_df.index:
+                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='Water'))
+            else:
+                reagent_df.loc['Water','conc'] = 1.0
+        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        #we now need to split the rxn_names into reagent names and concs.
+        #There may be duplicate reagents, so we will make a dictionary with list values of 
+        #concs
+        rxn_name_dict = {}
+        for name in rxn_names:
+            match_i = re.search('C\d\.\d$', name).start()
+            reagent = name[:match_i]
+            conc = float(name[match_i+1:])
+            if reagent in rxn_name_dict:
+                #already exists, append to list
+                rxn_name_dict[reagent].append(conc)
+            else:
+                #doesn't exist, create list
+                rxn_name_dict[reagent] = [conc]
+        rxn_names = pd.Series(rxn_name_dict, name='conc')
+        #rxn_names is now a series of concentrations with reagents as keys
+        reagent_df = reagent_df.join(rxn_names, how='left', rsuffix='2') 
+        reagent_df = reagent_df.loc[
+                reagent_df.apply(lambda r: (not isinstance(r['conc2'],list)) 
+                or r['conc'] not in r['conc2'], axis=1)
+                ].drop(columns='conc2')
         reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
         if not self.use_cache:
             if reagent_df.empty:
@@ -1029,6 +1060,9 @@ class Controller(ABC):
             #cache the data
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        #need to rename only the chemicals that were specified with their <name>C<conc> name
+        #this is delicate because the indices will not be unique when it is first pulled.
+        reagent_info.index = reagent_info.apply(lambda r: "{}C{}".format(r.name,r['conc']) if r['conc'] else r.name,axis=1)
         reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
         return reagent_info
 
