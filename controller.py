@@ -923,6 +923,7 @@ class Controller(ABC):
             else:
                 reagent_df.loc['Water','conc'] = 1.0
         rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        rxn_names = rxn_names.drop('Template', errors='ignore') #Template will throw error
         #we now need to split the rxn_names into reagent names and concs.
         #There may be duplicate reagents, so we will make a dictionary with list values of 
         #concs
@@ -937,7 +938,7 @@ class Controller(ABC):
             else:
                 #doesn't exist, create list
                 rxn_name_dict[reagent] = [conc]
-        rxn_names = pd.Series(rxn_name_dict, name='conc')
+        rxn_names = pd.Series(rxn_name_dict, name='conc',dtype=float)
         #rxn_names is now a series of concentrations with reagents as keys
         reagent_df = reagent_df.join(rxn_names, how='left', rsuffix='2') 
         reagent_df = reagent_df.loc[
@@ -1062,7 +1063,7 @@ class Controller(ABC):
                 dill.dump(reagent_info, reagent_info_cache)
         #need to rename only the chemicals that were specified with their <name>C<conc> name
         #this is delicate because the indices will not be unique when it is first pulled.
-        reagent_info.index = reagent_info.apply(lambda r: "{}C{}".format(r.name,r['conc']) if r['conc'] else r.name,axis=1)
+        reagent_info.index = reagent_info.apply(lambda r: "{}C{}".format(r.name,float(r['conc'])) if r['conc'] else r.name,axis=1)
         reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
         return reagent_info
 
@@ -1118,8 +1119,11 @@ class Controller(ABC):
         Postconditions:  
             The wellnames are in the cache  
         '''
+        if wellnames != 'all':
+            #can't send pandas objects over socket for package differences on robot vs laptop
+            wellnames = [wellname for wellname in wellnames]
         #couldn't find in the cache, so we got to make a query
-        self.portal.send_pack('loc_req', [wellname for wellname in wellnames])
+        self.portal.send_pack('loc_req', wellnames)
         pack_type, _, payload = self.portal.recv_pack()
         assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
         returned_well_locs = payload[0]
@@ -1493,6 +1497,16 @@ class Controller(ABC):
             dilution_aspirations = dilution_vols.sum()
         return dispenses - transfer_aspirations - dilution_aspirations
     
+    def _get_conc(self, chem_name):
+        '''
+        handy method for getting the concentration from a chemical name  
+        params:  
+            str chem_name: the chemical name to strip a concentration from  
+        returns:  
+            float: the concentration parsed from the chem_name  
+        '''
+        return float(re.search('C\d\.\d$', chem_name).group(0)[1:])
+
 
 class AutoContr(Controller):
     '''
@@ -1506,7 +1520,8 @@ class AutoContr(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
-        self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
+        reagent_order = self.rxn_df['reagent'].dropna()
+        self.reagent_order = reagent_order.loc[reagent_order!='Water'].unique()
 
     def run_simulation(self):
         '''
@@ -1653,7 +1668,7 @@ class AutoContr(Controller):
         returns:  
             str: a unique name for a new well
         '''
-        wellname = "autowell{}".format(self.well_count)
+        wellname = "autowell{}C1.0".format(self.well_count)
         self.well_count += 1
         return wellname
 
@@ -1663,6 +1678,46 @@ class AutoContr(Controller):
         of init that constructs product_df
         '''
         return 200.0
+
+    def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
+        '''
+        TODO implement this
+        This function is responsible for converting from a reagent (without concentration) to
+        a uniquely identified container that holds that reagent. This is used when rows are
+        specified as molarities as opposed to volumes because the container must be chosen
+        from a number of containers that may hold that reagent at different concentations.
+        There are a number of ways to optimize which container should be chosen. This 
+        algorithm will always take the most concentrated solution unless there is not sufficient
+        volume, or the volume that would be required to pipette is less than the minimum
+        pipettable volume. defined here as 2uL.  
+        params:  
+            str reagent: the name of the reagent that you are searching for a container for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            tuple<str, float>: if a match was found for the reagent   
+                str: the container name.  
+                float: the volume that must be transfered with this container.  
+            None: if no match was found  
+            TODO test these conditions when you get access to some wifi
+        Preconditions:
+            the cached_reader_locs should be up to date  
+        '''
+        min_vol = 2 #TODO clear this with Mark
+        containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(reagent+'C\d\.\d', key)]
+        containers.sort(key=self._get_conc)
+        for container in containers:
+            conc = self._get_conc(container)
+            vol = molarity * (total_vol*ratio) / conc
+            if vol > min_vol and vol < self._cached_reader_locs[container].aspirable_vol:
+                return container, vol
+        #if you haven't returned yet, there is no suitable reagent to satisfy your request
+        return None
 
     def _build_rxn_df(self,wellnames,recipes):
         '''
@@ -1675,8 +1730,21 @@ class AutoContr(Controller):
         #large chunks of this code will be deleted and reformated. Try to keep to something
         #that can mostly be reused for the protocol executor
 
+        #TODO This is a temporary hack it must be removed when the sheet is updated
+        self.rxn_df_template.drop(0, inplace=True)
+        self.rxn_df['conc'] = np.nan
+        self.rxn_df['chemical_name'] = np.nan
+
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        #TODO update cached_reader_locs
+        self._update_cached_locs('all')
+
+        #self._get_transfer_container(recipe_df.columns[0], 1, self.tot_vols['Template'], self.rxn_df[i, 'Template'])
+        #TODO you'll need to use this below
+        #self._insert_tot_vol_transfer() #adds total volume transfer step to start
+
+
         def build_product_rows(row):
             '''
             params:  
@@ -1687,12 +1755,19 @@ class AutoContr(Controller):
             d = {}
             if row['op'] == 'transfer':
                 #is a transfer, so we want to lookup the volume of that reagent in recipe_df
-                return recipe_df.loc[:, row['chemical_name']] * row['Template'] * 200.0
+                return recipe_df.loc[:, row['reagent']] * row['Template']
             else:
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
-        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1)).drop(
-                columns='Template')
+
+        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
+        #TODO you now have a good start. each column has the molarity desired. Trick is going to
+        #be that they may no longer share the same reagent to be transfered, so you'll need to
+        #expand the rows, which'll be a masterfully painful exercise in runtime, particularly
+        #since we are now in the mission critical part, but eh, what can ya do?
+        #LEFT OFF HERE
+        breakpoint()
+        #TODO this is outdated and needs to be refurbished or removed
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
         rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: "{}-{}".format(
@@ -1700,7 +1775,7 @@ class AutoContr(Controller):
         return rxn_df
 
     def run_all_checks(self):
-        super().run_all_checks()
+        found_errors = super().run_all_checks()
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
@@ -1729,7 +1804,7 @@ class AutoContr(Controller):
         #at this point self.rxn_df
         found_errors = super().check_rxn_df()
         reagent_ratios  = self.rxn_df.loc[self.rxn_df['op'] == 'transfer',\
-                ['Template','chemical_name']].groupby('chemical_name').sum()['Template']
+                ['Template','reagent']].groupby('reagent').sum()['Template']
         has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
                 abs_tol=1e-9)).any()
         if has_invalid_ratio:
@@ -1779,9 +1854,8 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-        #TODO this is the part that's getting modified
+        #TODO this is the part that's getting eodified
         self._insert_tot_vol_transfer() #adds total volume transfer step to start
-        df_popout(self.rxn_df)
         self.run_all_checks() #We need to add a check here to check no negative dispense from
         #the generated first transfer. I've called it _check_tot_vol()
 

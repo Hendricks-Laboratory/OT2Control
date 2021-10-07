@@ -20,6 +20,8 @@ The second sheet in the worksheet must be the input template
 Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix']
 chemical that appears in the reagent column shall be renamed with spaces replaced with underscores,
 and it's concentration appended in the format '<name>C<conc>', e.g. PotassiumC0.03
+the chemical you name must use no special characters in the python re library (i.e. be civil in
+your variable names)
 If a reagent is not a product, it will be queried later. If it is a product it will not be queried.
 This implies that the robot cannot put things into solutions that you made and put on the deck
 The order of columns is unimportant with the exception that the reagent column must come before 

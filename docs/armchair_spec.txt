@@ -113,7 +113,8 @@ x0B: 'loc_req'
         those wells in order to get their locations and labware. Note if you get platereader wells
         you'll have to translate them back to human readable
     Args:
-        list<str> wellnames: the names of the wells to be queried
+        list<str>|str wellnames: the names of the wells to be queried, or the str 'all' used to
+	  request all wells. This is uselful if you don't know what exists on the robot
 
 x0C: 'loc_resp'
     robot->controller:
