@@ -1300,6 +1300,7 @@ class Controller(ABC):
         found_errors = max(found_errors, self.check_labware())
         found_errors = max(found_errors, self.check_reagents())
         found_errors = max(found_errors, self.check_tot_vol())
+
         return found_errors
 
     def check_labware(self):
@@ -1430,8 +1431,45 @@ class Controller(ABC):
                 0: OK.  
                 1: Some Errors, but could run  
                 2: Critical. Abort  
-        '''
-        return 0 
+        '''        
+        found_errors = 0;
+        #checks for negative total volumes in tot_vol row
+        for val in self.tot_vols.values():
+            if val < 0:
+                print("<<controller>> Error in total volume row: value " + str(val) +" is negative. We cannot have negative values as input.")
+                max(found_errors,2)
+
+        #checks for scan errors
+        check_scan = self.rxn_df.loc[(self.rxn_df['op'] == 'scan')]
+        first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&check_scan.ne(0)].stack()   
+        scan_products = []
+        for prod in self.tot_vols.keys():
+            for sc in  first_scans_i.index:
+                if prod == sc[1]:
+                    scan_products.append([prod,sc[0]])  
+        for products in scan_products:
+            specific_prod = self.rxn_df[products[0]]
+            scan_index = products[1]
+            while (scan_index < len(specific_prod)):
+                if self.rxn_df['op'][scan_index] == 'transfer' and specific_prod[scan_index] != 0:
+                    print("<<controller>> Error in product: " +str(products[0]) +" in index: " +str(scan_index) + ", cannot make transfers after scan when total volume column is specified.")
+                    found_errors = max(found_errors,2)
+                    break
+                elif self.rxn_df['op'][scan_index] == 'dilution' and specific_prod[scan_index] != 0:
+                    print("<<controller>> Error in product: " + str(products[0]) + " in index: " + str(scan_index) + ", cannot make dilutions after scan when total volume column is specified")
+                    found_errors = max(found_errors,2)
+                    break
+                else:
+                    scan_index +=1
+                
+        """
+        scanRead = open("scan_df.html",'w')
+        result = first_scans_i.to_html()
+        scanRead.write(result)
+        scanRead.close()
+        """
+        print(self.tot_vols)
+        return found_errors 
 
     def _vol_calc(self, name):
         '''
