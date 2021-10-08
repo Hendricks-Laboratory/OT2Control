@@ -1520,8 +1520,7 @@ class AutoContr(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
-        reagent_order = self.rxn_df['reagent'].dropna()
-        self.reagent_order = reagent_order.loc[reagent_order!='Water'].unique()
+        self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
 
     def run_simulation(self):
         '''
@@ -1702,7 +1701,7 @@ class AutoContr(Controller):
             tuple<str, float>: if a match was found for the reagent   
                 str: the container name.  
                 float: the volume that must be transfered with this container.  
-            None: if no match was found  
+            tuple<float>: (np.nan,np.nan) if no suitable match
             TODO test these conditions when you get access to some wifi
         Preconditions:
             the cached_reader_locs should be up to date  
@@ -1717,7 +1716,7 @@ class AutoContr(Controller):
             if vol > min_vol and vol < self._cached_reader_locs[container].aspirable_vol:
                 return container, vol
         #if you haven't returned yet, there is no suitable reagent to satisfy your request
-        return None
+        return np.nan, np.nan
 
     def _build_rxn_df(self,wellnames,recipes):
         '''
@@ -1730,11 +1729,6 @@ class AutoContr(Controller):
         #large chunks of this code will be deleted and reformated. Try to keep to something
         #that can mostly be reused for the protocol executor
 
-        #TODO This is a temporary hack it must be removed when the sheet is updated
-        self.rxn_df_template.drop(0, inplace=True)
-        self.rxn_df['conc'] = np.nan
-        self.rxn_df['chemical_name'] = np.nan
-
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         #TODO update cached_reader_locs
@@ -1744,7 +1738,6 @@ class AutoContr(Controller):
         #TODO you'll need to use this below
         #self._insert_tot_vol_transfer() #adds total volume transfer step to start
 
-
         def build_product_rows(row):
             '''
             params:  
@@ -1753,26 +1746,74 @@ class AutoContr(Controller):
                 pd.Series: a row for the new df
             '''
             d = {}
-            if row['op'] == 'transfer':
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
                 #is a transfer, so we want to lookup the volume of that reagent in recipe_df
                 return recipe_df.loc[:, row['reagent']] * row['Template']
             else:
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
-
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
+        tot_vol = self.tot_vols['Template']
+        self.tot_vols.update({wellname: tot_vol for wellname in wellnames})
         #TODO you now have a good start. each column has the molarity desired. Trick is going to
         #be that they may no longer share the same reagent to be transfered, so you'll need to
         #expand the rows, which'll be a masterfully painful exercise in runtime, particularly
         #since we are now in the mission critical part, but eh, what can ya do?
         #LEFT OFF HERE
-        breakpoint()
+        rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
+        df_popout(rxn_df)
+            
         #TODO this is outdated and needs to be refurbished or removed
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
         rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
         return rxn_df
+
+    def _convert_conc_to_vol(self, rxn_df, products):
+        '''
+        TODO this function is missing functionaility for when there isn't a good match for
+        container to transfer from (need dilution), and it hasn't been tested for a row that
+        needs different chemical concs.
+        This function converts any molarity rows into volume rows  
+        params:  
+            df rxn_df: the reaction dataframe with some concentration rows  
+            str products: the names of the products  
+        returns:  
+            df: the rxn_df with all concentrations converted to volumes if things went well  
+            list<str>: the chemical_names that could not be converted to volumes (generally
+              needs a dilution) TODO this doesn't make sense as a data structure, figure something
+              out
+        '''
+        #We now need to iterate through df and for each column, calculate the container to pull
+        #from, and volume. Since one row may now pull from muliple reagents, this causes a
+        #rebuild of the dataframe. We accumulate a list of series and then rebuild
+        disassembled_df = [] # list of series
+        for i, row in rxn_df.iterrows():
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
+                #needs the concentration to be converted
+                #TODO I'm not sure you actually wanted to multiply the molarity by the
+                #template ratio. I thought we were gonna do that separate... In fact, you should
+                cont_vol_key = row[products].reset_index().apply(lambda r:
+                        pd.Series({x: y for x, y in 
+                        zip(['chem_name', 'vol'], 
+                                self._get_transfer_container(row['reagent'], r.iloc[1],
+                                        self.tot_vols[r['index']],ratio=1.0))}),axis=1)
+                cont_vol_key.index = products
+                #TODO doubtful the above works when you have a failed attempt (too little vol)
+                conts = cont_vol_key['chem_name'].dropna().unique()
+                for cont in conts:
+                    breakpoint()
+                    new_row = row.copy()
+                    new_row['chemical_name'] = cont
+                    new_row['conc'] = self._get_conc(cont)
+                    for product in products:
+                        new_row[product] = cont_vol_key.loc[product,'vol'] if \
+                            cont_vol_key.loc[product,'chem_name'] == cont else 0
+                    disassembled_df.append(new_row)
+            else:
+                disassembled_df.append(row)
+        return pd.DataFrame(disassembled_df)
 
     def run_all_checks(self):
         found_errors = super().run_all_checks()
@@ -1803,7 +1844,7 @@ class AutoContr(Controller):
         '''
         #at this point self.rxn_df
         found_errors = super().check_rxn_df()
-        reagent_ratios  = self.rxn_df.loc[self.rxn_df['op'] == 'transfer',\
+        reagent_ratios  = self.rxn_df.loc[(self.rxn_df['conc'].isna()) & (self.rxn_df['op'] == 'transfer'),\
                 ['Template','reagent']].groupby('reagent').sum()['Template']
         has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
                 abs_tol=1e-9)).any()
