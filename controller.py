@@ -1119,7 +1119,7 @@ class Controller(ABC):
         Postconditions:  
             The wellnames are in the cache  
         '''
-        if wellnames != 'all':
+        if not isinstance(wellnames,str):
             #can't send pandas objects over socket for package differences on robot vs laptop
             wellnames = [wellname for wellname in wellnames]
         #couldn't find in the cache, so we got to make a query
@@ -1612,6 +1612,7 @@ class AutoContr(Controller):
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
         while not model.quit:
+            print('<<controller>> executing batch {}'.format(self.batch_num)
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
@@ -1761,7 +1762,6 @@ class AutoContr(Controller):
         #since we are now in the mission critical part, but eh, what can ya do?
         #LEFT OFF HERE
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
-        df_popout(rxn_df)
             
         #TODO this is outdated and needs to be refurbished or removed
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
@@ -1803,7 +1803,6 @@ class AutoContr(Controller):
                 #TODO doubtful the above works when you have a failed attempt (too little vol)
                 conts = cont_vol_key['chem_name'].dropna().unique()
                 for cont in conts:
-                    breakpoint()
                     new_row = row.copy()
                     new_row['chemical_name'] = cont
                     new_row['conc'] = self._get_conc(cont)
