@@ -255,11 +255,13 @@ class Controller(ABC):
             transfer_row_dict = {col:del_vols[col] if col in del_vols else np.nan 
                                 for col in self.rxn_df.columns}
             #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
-            transfer_row_dict['op'] = 'transfer'
-            transfer_row_dict['reagent'] = 'Water'
-            transfer_row_dict['conc'] = 1.0
-            transfer_row_dict['chemical_name'] = 'WaterC1.0'
-            transfer_row_dict['callbacks'] = ''
+            transfer_row_dict.update(
+                {'op':'transfer',
+                'reagent':'Water',
+                'conc':1.0,
+                'chemical_name':'WaterC1.0',
+                'callbacks':''}
+            )
             for chem_name in self._products:
                 if pd.isna(transfer_row_dict[chem_name]):
                     transfer_row_dict[chem_name] = 0.0
@@ -1103,7 +1105,7 @@ class Controller(ABC):
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            assert (math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
             well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
@@ -1515,13 +1517,31 @@ class AutoContr(Controller):
     We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
+    def _clean_template(self):
+        '''
+        There are some traces of the template column that must be removed from the rxn_df and 
+        associated data structures at this point before further processing.  
+        Preconditions:  
+            self._products includes 'Template'  
+            self.tot_vols includes 'Template'  
+        Postconditions:  
+            'Template' has been removed from self._products  
+            'Template' has been removed from self.tot_vols  
+            self.template_tot_vol has been initialized to the template's total vol  
+            NOTE if we find more things need to be stored, we should create template metadata  
+        '''
+        self.template_tot_vol = self.tot_vols['Template']
+        self._products = []
+        del self.tot_vols['Template']
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
+        self._clean_template() #moves template data out of the data for rxn_df
 
+ 
     def run_simulation(self):
         '''
         runs a full simulation of the protocol on local machine
@@ -1608,11 +1628,10 @@ class AutoContr(Controller):
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
-        
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
         while not model.quit:
-            print('<<controller>> executing batch {}'.format(self.batch_num)
+            print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
@@ -1656,10 +1675,23 @@ class AutoContr(Controller):
         returns:  
             list<str> wellnames: the names of the wells produced ordered in accordance to the
               order of recipes
+        Postconditions:
         '''
         self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
                 'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        #add new keys
+        print(self.tot_vols.keys())
+        self.tot_vols.update({wellname:self.template_tot_vol for wellname in wellnames})
+        #remove old products
+        for product in self._products:
+            del self.tot_vols[product]
+        #build new df
         self.rxn_df = self._build_rxn_df(wellnames, recipes)
+        #add tot_vol
+        self._insert_tot_vol_transfer()
+        df_popout(self.rxn_df)
+        breakpoint()
+        #update products
         self._products = wellnames
         self.execute_protocol_df()
 
@@ -1725,6 +1757,8 @@ class AutoContr(Controller):
         TODO test bejesus out of this method
         TODO need some sort of key to map from name of reagent to index of the 
         recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
+        Postconditions:  
+            self.tot_vols has been updated to 
         '''
         #TODO (10) this is the part we're changing. This is where I left off.
         #large chunks of this code will be deleted and reformated. Try to keep to something
@@ -1754,20 +1788,18 @@ class AutoContr(Controller):
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
-        tot_vol = self.tot_vols['Template']
-        self.tot_vols.update({wellname: tot_vol for wellname in wellnames})
         #TODO you now have a good start. each column has the molarity desired. Trick is going to
         #be that they may no longer share the same reagent to be transfered, so you'll need to
         #expand the rows, which'll be a masterfully painful exercise in runtime, particularly
         #since we are now in the mission critical part, but eh, what can ya do?
         #LEFT OFF HERE
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
-            
         #TODO this is outdated and needs to be refurbished or removed
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
         rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: "{}-{}".format(
                 x, self.batch_num))
+        rxn_df.drop(columns='Template',inplace=True) #no longer need template
         return rxn_df
 
     def _convert_conc_to_vol(self, rxn_df, products):
