@@ -845,8 +845,7 @@ class Controller(ABC):
         rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float) #TODO this may break when we try to drop concs, but may auto convert to NaN.
-        #rename chemical names
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
         #go back for some non numeric columns
@@ -1475,8 +1474,7 @@ class Controller(ABC):
 
     def _vol_calc(self, name):
         '''
-        TODO I just yoinked this from the Protocol Executor. It might break now that I'm
-        trying to use it in the abstract controller
+        calculates the total volume of a column at the end of rxn  
         params:
             str name: chem_name
         returns:
@@ -1529,6 +1527,9 @@ class AutoContr(Controller):
             'Template' has been removed from self.tot_vols  
             self.template_tot_vol has been initialized to the template's total vol  
             NOTE if we find more things need to be stored, we should create template metadata  
+            TODO it really seems like this should be the case, so please figure out where you
+            specify the product template for the robot when you specify init (I guess 
+            you probably hardcoded that stuff. consider moving it here)
         '''
         self.template_tot_vol = self.tot_vols['Template']
         self._products = []
@@ -1540,6 +1541,7 @@ class AutoContr(Controller):
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         self._clean_template() #moves template data out of the data for rxn_df
+        df_popout(self.rxn_df_template)
 
  
     def run_simulation(self):
@@ -1679,21 +1681,37 @@ class AutoContr(Controller):
         '''
         self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
                 'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
-        #add new keys
-        print(self.tot_vols.keys())
-        self.tot_vols.update({wellname:self.template_tot_vol for wellname in wellnames})
-        #remove old products
-        for product in self._products:
-            del self.tot_vols[product]
+        #clean and update metadata from last reaction
+        self._clean_meta(wellnames)
         #build new df
         self.rxn_df = self._build_rxn_df(wellnames, recipes)
         #add tot_vol
         self._insert_tot_vol_transfer()
         df_popout(self.rxn_df)
-        breakpoint()
+        self.execute_protocol_df()
+
+    def _clean_meta(self, wellnames):
+        '''
+        In addition to replacing the rxn_df, there is some metadata associated with a reaction
+        and it's reagents that must be cleaned after a reaction.  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+        Preconditions:  
+            self._products_contains products from last reaction  
+            self._tot_vols has products from last reaction as keys  
+        Postconditions:  
+            self._products has been reset to be wellnames  
+            self.tot_vols has been reset to have only the wellnames as keys and template vol
+              as the value  
+        '''
+        #remove old products
+        for product in self._products:
+            del self.tot_vols[product]
+        #add new keys
+        self.tot_vols.update({wellname:self.template_tot_vol for wellname in wellnames})
         #update products
         self._products = wellnames
-        self.execute_protocol_df()
+            
 
     def _generate_wellname(self):
         '''
@@ -1783,7 +1801,7 @@ class AutoContr(Controller):
             d = {}
             if row['op'] == 'transfer' and pd.isna(row['conc']):
                 #is a transfer, so we want to lookup the volume of that reagent in recipe_df
-                return recipe_df.loc[:, row['reagent']] * row['Template']
+                return recipe_df.loc[:, row['reagent']]
             else:
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
@@ -1795,10 +1813,10 @@ class AutoContr(Controller):
         #LEFT OFF HERE
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
         #TODO this is outdated and needs to be refurbished or removed
-        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
-                x, self.batch_num))
-        rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: "{}-{}".format(
-                x, self.batch_num))
+        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
+        rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
         rxn_df.drop(columns='Template',inplace=True) #no longer need template
         return rxn_df
 
@@ -1821,11 +1839,10 @@ class AutoContr(Controller):
         #from, and volume. Since one row may now pull from muliple reagents, this causes a
         #rebuild of the dataframe. We accumulate a list of series and then rebuild
         disassembled_df = [] # list of series
+
         for i, row in rxn_df.iterrows():
             if row['op'] == 'transfer' and pd.isna(row['conc']):
                 #needs the concentration to be converted
-                #TODO I'm not sure you actually wanted to multiply the molarity by the
-                #template ratio. I thought we were gonna do that separate... In fact, you should
                 cont_vol_key = row[products].reset_index().apply(lambda r:
                         pd.Series({x: y for x, y in 
                         zip(['chem_name', 'vol'], 
@@ -1833,7 +1850,11 @@ class AutoContr(Controller):
                                         self.tot_vols[r['index']],ratio=1.0))}),axis=1)
                 cont_vol_key.index = products
                 #TODO doubtful the above works when you have a failed attempt (too little vol)
+                #UPDATE ^This definitely does not work when you have a failed attempt, but I'm
+                #working on the easy case right now
                 conts = cont_vol_key['chem_name'].dropna().unique()
+                if not conts: #debug
+                    breakpoint()
                 for cont in conts:
                     new_row = row.copy()
                     new_row['chemical_name'] = cont
@@ -1844,6 +1865,7 @@ class AutoContr(Controller):
                     disassembled_df.append(new_row)
             else:
                 disassembled_df.append(row)
+        breakpoint()
         return pd.DataFrame(disassembled_df)
 
     def run_all_checks(self):
@@ -1926,10 +1948,8 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-        #TODO this is the part that's getting eodified
         self._insert_tot_vol_transfer() #adds total volume transfer step to start
-        self.run_all_checks() #We need to add a check here to check no negative dispense from
-        #the generated first transfer. I've called it _check_tot_vol()
+        self.run_all_checks() 
 
     def run_simulation(self):
         '''

@@ -133,11 +133,11 @@ class DummyMLModel(MLModel):
         params:  
             int n_predictions: the number of instances to predict  
         returns:  
-            np.array: shape is n_predictions, y.shape. Features are evenly distributed
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
         '''
         with self.model_lock:
             print('<<ML>> generating preditions')
-        return np.ones((self.batch_size, self.y_shape)) / self.y_shape
+        return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
 
     def generate_seed_rxns(self):
         '''
@@ -146,4 +146,4 @@ class DummyMLModel(MLModel):
         returns:  
             np.array: (batch_size,n_features) 
         '''
-        return np.ones((self.batch_size,self.y_shape)) /self.y_shape
+        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
