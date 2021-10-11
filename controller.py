@@ -1607,7 +1607,7 @@ class AutoContr(Controller):
 
     def _rename_products(self, rxn_df):
         '''
-        required for class compatibility, but not used by the Auto
+        required for class compatibility, but not used by the Auto  
         '''
         pass
 
@@ -1649,9 +1649,7 @@ class AutoContr(Controller):
     
     def _get_sample_data(self,wellnames, filename):
         '''
-        TODO
-        SKELETON
-        scans a sample of wells specified by wellnames, and returns their spectra  
+        loads the spectra for the wells specified from the scan file specified  
         params:  
             list<str> wellnames: the names of the wells to be scanned  
             str filename: the name of the file that holds the scans  
@@ -1726,11 +1724,10 @@ class AutoContr(Controller):
         This is used right now because it's best I've got. Ideally, you could drop the part 
         of init that constructs product_df
         '''
-        return 200.0
+        return self.tot_vols['Template']
 
     def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
         '''
-        TODO implement this
         This function is responsible for converting from a reagent (without concentration) to
         a uniquely identified container that holds that reagent. This is used when rows are
         specified as molarities as opposed to volumes because the container must be chosen
@@ -1772,24 +1769,12 @@ class AutoContr(Controller):
         '''
         used to construct a rxn_df for this batch of reactions
         TODO test bejesus out of this method
-        TODO need some sort of key to map from name of reagent to index of the 
-        recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
         Postconditions:  
             self.tot_vols has been updated to 
         '''
-        #TODO (10) this is the part we're changing. This is where I left off.
-        #large chunks of this code will be deleted and reformated. Try to keep to something
-        #that can mostly be reused for the protocol executor
-
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
-        #TODO update cached_reader_locs
         self._update_cached_locs('all')
-
-        #self._get_transfer_container(recipe_df.columns[0], 1, self.tot_vols['Template'], self.rxn_df[i, 'Template'])
-        #TODO you'll need to use this below
-        #self._insert_tot_vol_transfer() #adds total volume transfer step to start
-
         def build_product_rows(row):
             '''
             params:  
@@ -1805,13 +1790,7 @@ class AutoContr(Controller):
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
-        #TODO you now have a good start. each column has the molarity desired. Trick is going to
-        #be that they may no longer share the same reagent to be transfered, so you'll need to
-        #expand the rows, which'll be a masterfully painful exercise in runtime, particularly
-        #since we are now in the mission critical part, but eh, what can ya do?
-        #LEFT OFF HERE
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
-        #TODO this is outdated and needs to be refurbished or removed
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
                 else "{}-{}".format(x, self.batch_num))
         rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: np.nan if pd.isna(x) 
