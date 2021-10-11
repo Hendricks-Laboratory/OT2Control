@@ -1468,7 +1468,7 @@ class Controller(ABC):
                     break
                 else:
                     scan_index +=1
-                    
+                
         #check for illegal dilutions in total vol
         check_dilutions = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution')]
         first_dilutions_i = check_dilutions[check_dilutions.eq(check_dilutions.max(1),0)&check_dilutions.ne(0)].stack()
@@ -1478,12 +1478,18 @@ class Controller(ABC):
                     print("controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
                     found_errors = max(found_errors,2)
                     break
-        """
-        scanRead = open("scan_df.html",'w')
-        result = first_scans_i.to_html()
-        scanRead.write(result)
-        scanRead.close()
-        """
+        
+        #Checks reagents to see if there is a transfer that transfers a product with tot_vol
+        check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
+        prod_transfer =[]
+        for key in self.tot_vols.keys():
+            if key[0:1] == 'P':
+                prod_transfer.append(key[0:2])
+        for idx,reag in enumerate(check_transfer['reagent']):
+            if reag in prod_transfer:
+                print("<controller>> error in reagent row index "+str(idx) +" with product "+  str(reag) + ": cannot have transfer out of product with total volume specified.")
+                found_errors = max(found_errors,2)
+                break
         
         return found_errors 
 
