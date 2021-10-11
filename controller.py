@@ -1522,16 +1522,20 @@ class AutoContr(Controller):
         Preconditions:  
             self._products includes 'Template'  
             self.tot_vols includes 'Template'  
+            self.robo_params['product_df'] holds the product info for Template  
         Postconditions:  
             'Template' has been removed from self._products  
             'Template' has been removed from self.tot_vols  
-            self.template_tot_vol has been initialized to the template's total vol  
-            NOTE if we find more things need to be stored, we should create template metadata  
-            TODO it really seems like this should be the case, so please figure out where you
-            specify the product template for the robot when you specify init (I guess 
-            you probably hardcoded that stuff. consider moving it here)
+            self.template_meta has been initialized to a dictionary with meta data for template
+            The key 'product_df' has been removed from self.robo_params (you should never have
+              need to access it.  
         '''
-        self.template_tot_vol = self.tot_vols['Template']
+        self.template_meta = {
+                'tot_vol':self.tot_vols['Template'],
+                'cont':self.robo_params['product_df'].loc['Template', 'container'],
+                'labware':self.robo_params['product_df'].loc['Template', 'labware']
+                }
+        del self.robo_params['product_df']
         self._products = []
         del self.tot_vols['Template']
 
@@ -1607,13 +1611,6 @@ class AutoContr(Controller):
         '''
         pass
 
-    def _get_product_df(self, products_to_labware):
-        '''
-        required for class compatibility, but not used by Auto
-        TODO would be nice to return something that would blow up if accessed
-        '''
-        return np.nan
-
     @error_exit
     def _run(self, port, simulate, model):
         '''
@@ -1679,8 +1676,10 @@ class AutoContr(Controller):
               order of recipes
         Postconditions:
         '''
-        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
-                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        self.portal.send_pack('init_containers', pd.DataFrame(
+                {'labware':self.template_meta['labware'],
+                'container':self.template_meta['cont'], 
+                'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
         #clean and update metadata from last reaction
         self._clean_meta(wellnames)
         #build new df
@@ -1708,7 +1707,7 @@ class AutoContr(Controller):
         for product in self._products:
             del self.tot_vols[product]
         #add new keys
-        self.tot_vols.update({wellname:self.template_tot_vol for wellname in wellnames})
+        self.tot_vols.update({wellname:self.template_meta['tot_vol'] for wellname in wellnames})
         #update products
         self._products = wellnames
             
@@ -1853,8 +1852,6 @@ class AutoContr(Controller):
                 #UPDATE ^This definitely does not work when you have a failed attempt, but I'm
                 #working on the easy case right now
                 conts = cont_vol_key['chem_name'].dropna().unique()
-                if not conts: #debug
-                    breakpoint()
                 for cont in conts:
                     new_row = row.copy()
                     new_row['chemical_name'] = cont
@@ -1865,7 +1862,6 @@ class AutoContr(Controller):
                     disassembled_df.append(new_row)
             else:
                 disassembled_df.append(row)
-        breakpoint()
         return pd.DataFrame(disassembled_df)
 
     def run_all_checks(self):
