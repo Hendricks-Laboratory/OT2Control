@@ -1471,25 +1471,26 @@ class Controller(ABC):
                 
         #check for illegal dilutions in total vol
         check_dilutions = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution')]
+        check_dilutions_name = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution'),'chemical_name']
         first_dilutions_i = check_dilutions[check_dilutions.eq(check_dilutions.max(1),0)&check_dilutions.ne(0)].stack()
         for prod in self.tot_vols.keys():
             for dil in first_dilutions_i.index:
                 if prod == dil[1]:
-                    print("controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
+                    print("<<controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
                     found_errors = max(found_errors,2)
                     break
-        
-        #Checks reagents to see if there is a transfer that transfers a product with tot_vol
-        check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
-        prod_transfer =[]
-        for key in self.tot_vols.keys():
-            if key[0:1] == 'P':
-                prod_transfer.append(key[0:2])
-        for idx,reag in enumerate(check_transfer['reagent']):
-            if reag in prod_transfer:
-                print("<controller>> error in reagent row index "+str(idx) +" with product "+  str(reag) + ": cannot have transfer out of product with total volume specified.")
+        #checks for dilutions in reagent slot--illegal!
+        for idx,dil_prod in enumerate(check_dilutions_name):
+            if dil_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(dil_prod) + ": cannot have dilutions out of product with total volume specified.")
                 found_errors = max(found_errors,2)
-                break
+                
+        #Checks reagents to see if there is a transfer that transfers a product with tot_vol
+        check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer'),'chemical_name']
+        for idx,trans_prod in enumerate(check_transfer):
+            if trans_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(trans_prod) + ": cannot have transfer out of product with total volume specified.")
+                found_errors= max(found_errors,2)
         
         return found_errors 
 
