@@ -1545,7 +1545,6 @@ class AutoContr(Controller):
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         self._clean_template() #moves template data out of the data for rxn_df
-        df_popout(self.rxn_df_template)
 
  
     def run_simulation(self):
@@ -1684,7 +1683,6 @@ class AutoContr(Controller):
         self.rxn_df = self._build_rxn_df(wellnames, recipes)
         #add tot_vol
         self._insert_tot_vol_transfer()
-        df_popout(self.rxn_df)
         self.execute_protocol_df()
 
     def _clean_meta(self, wellnames):
