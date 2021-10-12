@@ -55,6 +55,7 @@ from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel
+from exceptions import *
 
 
 def init_parser():
@@ -1149,7 +1150,7 @@ class Controller(ABC):
         #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
         self._update_cached_locs(wells_to_mix.index)
         deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
-                wellname in wells_to_mix.index}, name='deck_pos')
+                wellname in wells_to_mix.index}, name='deck_pos', dtype=int)
         wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
         #get platereader rows. true if pr
         wells_to_mix_df['platereader'] = wells_to_mix_df['deck_pos'].apply(lambda x: x in [4,7]) 
@@ -1515,6 +1516,19 @@ class AutoContr(Controller):
     We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
+
+
+    class VolOverflowError(ConversionError):
+        #TODO probably scratch this or no longer inherit from conversion error
+        '''
+        Inherits from ConversionError  
+        This error is raised when a container will be overflowed by the molarity requested.
+        The only solution in this case is to add a more concentrated solution to the deck.  
+        '''
+        def __init__(self, product):
+            #product is the product that is overflowing
+            self.product = product
+
     def _clean_template(self):
         '''
         There are some traces of the template column that must be removed from the rxn_df and 
@@ -1677,13 +1691,67 @@ class AutoContr(Controller):
                 {'labware':self.template_meta['labware'],
                 'container':self.template_meta['cont'], 
                 'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
+        #TODO shit is gonna get weird when we need to send new containers for dilutions
         #clean and update metadata from last reaction
         self._clean_meta(wellnames)
-        #build new df
-        self.rxn_df = self._build_rxn_df(wellnames, recipes)
-        #add tot_vol
-        self._insert_tot_vol_transfer()
+        successful_build = False #Flag True when a self.rxn_df using volumes has been generated
+        #from the concentrations
+        while not successful_build:
+            try:
+                #build new df
+                self.rxn_df = self._build_rxn_df(wellnames, recipes)
+                df_popout(self.rxn_df_template)
+                #TODO insert_tot_vol transfer should probably throw a different type of error
+                #and be caught here
+                #add tot_vol
+                self._insert_tot_vol_transfer()
+                successful_build = True
+            except ConversionError:
+                self._handle_conversion_err(ConversionError)
         self.execute_protocol_df()
+
+    def _handle_conversion_err(self,e):
+        '''
+        This function will handle errors caught in the conversion process from molarity to
+        volume reaction dataframe.  
+        params:  
+            ConversionError e: the conversion error raised  
+        '''
+        if e.empty_reagents:
+            #query the user
+            pass
+        else:
+            #TODO build something to from 
+            #reagent, molarity, total_vol, ratio, empty_reagents):
+            #to conc, reagent, vol
+            #send a single dilution column to the robot that will solve this problem
+            #we have the data here to do something smart with how much we want to dilute, but
+            #for now lets do something dumb like dilute 2x
+
+            #self._execute_single_dilution(self, conc, reagent, vol):
+            pass
+
+
+    def _execute_single_dilution(self, conc, reagent, vol):
+        '''
+        TODO implement this function
+        This function creates a single dilution row and executes that row.  
+        This involves:  
+        + 1 inititializing a new product with the desired name  
+        + 2 constructing a new dilution row (series)  
+        + 3 calling the send_dilution with index 0  
+        params:  
+            float conc: the end concentration of the dilution  
+            str reagent: the full chemical name of the reagent to be diluted  
+            float vol: the end volume of the dilution  
+        Postconditions:  
+            TODO this first part involves creating new entries to the header data in the sheets
+            that explain default container and labware for dilutions
+            a command has been sent to the robot requesting initialization of a container for
+            this dilution  
+            a command has been sent to the robot to perform a dilution  
+        '''
+        pass
 
     def _clean_meta(self, wellnames):
         '''
@@ -1746,8 +1814,10 @@ class AutoContr(Controller):
             tuple<str, float>: if a match was found for the reagent   
                 str: the container name.  
                 float: the volume that must be transfered with this container.  
-            tuple<float>: (np.nan,np.nan) if no suitable match
-            TODO test these conditions when you get access to some wifi
+        raises:  
+            ConversionError: when the molarity cannot be acheived without overdrawing from
+              container, or by pipetting less than min_vol  
+        TODO test raise conditions when you get access to some wifi
         Preconditions:
             the cached_reader_locs should be up to date  
         '''
@@ -1755,13 +1825,16 @@ class AutoContr(Controller):
         containers = [key for key in self._cached_reader_locs.keys() 
                 if re.fullmatch(reagent+'C\d\.\d', key)]
         containers.sort(key=self._get_conc)
-        for container in containers:
-            conc = self._get_conc(container)
+        filtered_conts = [] #this will hold the containers that are diluted enough to be able
+        #to transfer without exceeding min_vol
+        for cont in containers:
+            conc = self._get_conc(cont)
             vol = molarity * (total_vol*ratio) / conc
-            if vol > min_vol and vol < self._cached_reader_locs[container].aspirable_vol:
-                return container, vol
-        #if you haven't returned yet, there is no suitable reagent to satisfy your request
-        return np.nan, np.nan
+            if vol > min_vol:
+                filtered_conts.append(cont)
+                if vol < self._cached_reader_locs[cont].aspirable_vol:
+                    return cont, vol
+        raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
 
     def _build_rxn_df(self,wellnames,recipes):
         '''
