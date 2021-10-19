@@ -1343,6 +1343,7 @@ class Controller(ABC):
         found_errors = max(found_errors, self.check_labware())
         found_errors = max(found_errors, self.check_reagents())
         found_errors = max(found_errors, self.check_tot_vol())
+
         return found_errors
 
     def check_labware(self):
@@ -1473,8 +1474,68 @@ class Controller(ABC):
                 0: OK.  
                 1: Some Errors, but could run  
                 2: Critical. Abort  
-        '''
-        return 0 
+        '''        
+        found_errors = 0;
+        
+        #checks for negative input in tot_vol rows
+        for key,val in self.tot_vols.items():
+            product_volumes = self.rxn_df[key]
+            if val < 0:
+                print("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
+                max(found_errors,2)
+                break
+                
+        #checks for overflow in summation of transfers
+        overflow_vol = (self.rxn_df.loc[0,self.tot_vols.keys()] < 0)
+        if overflow_vol.any():
+            print("<<controller>> Error in total volume, there is overflow in "+ str(overflow_vol.loc[overflow_vol].index))
+            max(found_errors,2)
+            
+        #checks for scan errors
+        check_scan = self.rxn_df.loc[(self.rxn_df['op'] == 'scan')]
+        first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&check_scan.ne(0)].stack()   
+        scan_products = []
+        #Creates list for products that have scans
+        for prod in self.tot_vols.keys():
+            for sc in  first_scans_i.index:
+                if prod == sc[1]:
+                    scan_products.append([prod,sc[0]])  
+        #checks if all transfers happen before scan
+        for products in scan_products:
+            specific_prod = self.rxn_df[products[0]]
+            scan_index = products[1]
+            while (scan_index < len(specific_prod)):
+                if self.rxn_df['op'][scan_index] == 'transfer' and specific_prod[scan_index] != 0:
+                    print("<<controller>> Error in product: " +str(products[0]) +" in index: " +str(scan_index) + ", cannot make transfers after scan when total volume column is specified.")
+                    found_errors = max(found_errors,2)
+                    break
+                else:
+                    scan_index +=1
+                
+        #check for illegal dilutions in total vol
+        check_dilutions = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution')]
+        check_dilutions_name = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution'),'chemical_name']
+        first_dilutions_i = check_dilutions[check_dilutions.eq(check_dilutions.max(1),0)&check_dilutions.ne(0)].stack()
+        for prod in self.tot_vols.keys():
+            for dil in first_dilutions_i.index:
+                if prod == dil[1]:
+                    print("<<controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
+                    found_errors = max(found_errors,2)
+                    break
+        #checks for dilutions in reagent slot--illegal!
+        for idx,dil_prod in enumerate(check_dilutions_name):
+            if dil_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(dil_prod) + ": cannot have dilutions out of product with total volume specified.")
+                found_errors = max(found_errors,2)
+                
+        #Checks reagents to see if there is a transfer that transfers a product with tot_vol
+        check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer'),'chemical_name']
+        for idx,trans_prod in enumerate(check_transfer):
+            if trans_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(trans_prod) + ": cannot have transfer out of product with total volume specified.")
+                found_errors= max(found_errors,2)
+        
+        return found_errors 
 
     def _vol_calc(self, name):
         '''
