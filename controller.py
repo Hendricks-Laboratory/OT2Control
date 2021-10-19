@@ -2712,5 +2712,5 @@ class PlateReader(AbstractPlateReader):
 
 
 if __name__ == '__main__':
-    SERVERADDR = "10.25.16.146"
+    SERVERADDR = "10.25.10.54"
     main(SERVERADDR)
