@@ -1163,11 +1163,14 @@ class OT2Robot():
         '''
         processes a request for locations of wellnames and sends a response with their locations  
         params:  
-            list<str> wellnames: requested wells as specified in armchair documentation  
+            list<str>|str wellnames: requested wells or the string 'all' as specified 
+              in armchair documentation  
         returns:  
             list<tuple<str,str,int>: chem_name, well_loc, deck_pos. see armchair specs  
         '''
         response = []
+        #permits the str all of wellnames
+        wellnames = self.containers.keys() if wellnames == 'all' else wellnames
         for name in wellnames:
             cont = self.containers[name]
             response.append((name,

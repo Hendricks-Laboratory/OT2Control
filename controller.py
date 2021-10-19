@@ -255,11 +255,13 @@ class Controller(ABC):
             transfer_row_dict = {col:del_vols[col] if col in del_vols else np.nan 
                                 for col in self.rxn_df.columns}
             #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
-            transfer_row_dict['op'] = 'transfer'
-            transfer_row_dict['reagent'] = 'Water'
-            transfer_row_dict['conc'] = 1.0
-            transfer_row_dict['chemical_name'] = 'WaterC1.0'
-            transfer_row_dict['callbacks'] = ''
+            transfer_row_dict.update(
+                {'op':'transfer',
+                'reagent':'Water',
+                'conc':1.0,
+                'chemical_name':'WaterC1.0',
+                'callbacks':''}
+            )
             for chem_name in self._products:
                 if pd.isna(transfer_row_dict[chem_name]):
                     transfer_row_dict[chem_name] = 0.0
@@ -843,8 +845,7 @@ class Controller(ABC):
         rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float) #TODO this may break when we try to drop concs, but may auto convert to NaN.
-        #rename chemical names
+        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
         #go back for some non numeric columns
@@ -903,16 +904,48 @@ class Controller(ABC):
         PostConditions:  
             reagent_sheet has been constructed  
         '''
-        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
         #you might make a reaction you don't want to specify at the start
-        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['chemical_name', 'conc']\
-                ].groupby('chemical_name').first()
+        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['reagent', 'conc']]
+        reagent_df = reagent_df.groupby(['reagent','conc'], dropna=False).first().reset_index()
+        reagent_df.dropna(how='all',inplace=True)
+        rows_to_drop = []
+        duplicates = reagent_df['reagent'].duplicated(keep=False)
+        for i, reagent, conc in reagent_df.itertuples():
+            if duplicates[i] and pd.isna(conc):
+                rows_to_drop.append(i)
+        reagent_df.drop(index=rows_to_drop, inplace=True)
+        reagent_df.set_index('reagent',inplace=True)
+        reagent_df.fillna('',inplace=True)
         #add water if necessary
         needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
         if needs_water:
-            if 'WaterC1.0' not in reagent_df.index:
-                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='WaterC1.0'))
-        reagent_df.drop(rxn_names, errors='ignore', inplace=True) #not all rxns are reagents
+            if 'Water' not in reagent_df.index:
+                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='Water'))
+            else:
+                reagent_df.loc['Water','conc'] = 1.0
+        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        rxn_names = rxn_names.drop('Template', errors='ignore') #Template will throw error
+        #we now need to split the rxn_names into reagent names and concs.
+        #There may be duplicate reagents, so we will make a dictionary with list values of 
+        #concs
+        rxn_name_dict = {}
+        for name in rxn_names:
+            match_i = re.search('C\d\.\d$', name).start()
+            reagent = name[:match_i]
+            conc = float(name[match_i+1:])
+            if reagent in rxn_name_dict:
+                #already exists, append to list
+                rxn_name_dict[reagent].append(conc)
+            else:
+                #doesn't exist, create list
+                rxn_name_dict[reagent] = [conc]
+        rxn_names = pd.Series(rxn_name_dict, name='conc',dtype=float)
+        #rxn_names is now a series of concentrations with reagents as keys
+        reagent_df = reagent_df.join(rxn_names, how='left', rsuffix='2') 
+        reagent_df = reagent_df.loc[
+                reagent_df.apply(lambda r: (not isinstance(r['conc2'],list)) 
+                or r['conc'] not in r['conc2'], axis=1)
+                ].drop(columns='conc2')
         reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
         if not self.use_cache:
             if reagent_df.empty:
@@ -1029,6 +1062,9 @@ class Controller(ABC):
             #cache the data
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
+        #need to rename only the chemicals that were specified with their <name>C<conc> name
+        #this is delicate because the indices will not be unique when it is first pulled.
+        reagent_info.index = reagent_info.apply(lambda r: "{}C{}".format(r.name,float(r['conc'])) if r['conc'] else r.name,axis=1)
         reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
         return reagent_info
 
@@ -1068,7 +1104,7 @@ class Controller(ABC):
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-            assert (math.isclose(entry.vol, 200)), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            assert (math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
             well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
@@ -1084,8 +1120,11 @@ class Controller(ABC):
         Postconditions:  
             The wellnames are in the cache  
         '''
+        if not isinstance(wellnames,str):
+            #can't send pandas objects over socket for package differences on robot vs laptop
+            wellnames = [wellname for wellname in wellnames]
         #couldn't find in the cache, so we got to make a query
-        self.portal.send_pack('loc_req', [wellname for wellname in wellnames])
+        self.portal.send_pack('loc_req', wellnames)
         pack_type, _, payload = self.portal.recv_pack()
         assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
         returned_well_locs = payload[0]
@@ -1496,8 +1535,7 @@ class Controller(ABC):
 
     def _vol_calc(self, name):
         '''
-        TODO I just yoinked this from the Protocol Executor. It might break now that I'm
-        trying to use it in the abstract controller
+        calculates the total volume of a column at the end of rxn  
         params:
             str name: chem_name
         returns:
@@ -1520,6 +1558,16 @@ class Controller(ABC):
             dilution_aspirations = dilution_vols.sum()
         return dispenses - transfer_aspirations - dilution_aspirations
     
+    def _get_conc(self, chem_name):
+        '''
+        handy method for getting the concentration from a chemical name  
+        params:  
+            str chem_name: the chemical name to strip a concentration from  
+        returns:  
+            float: the concentration parsed from the chem_name  
+        '''
+        return float(re.search('C\d\.\d$', chem_name).group(0)[1:])
+
 
 class AutoContr(Controller):
     '''
@@ -1528,13 +1576,38 @@ class AutoContr(Controller):
     We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
+    def _clean_template(self):
+        '''
+        There are some traces of the template column that must be removed from the rxn_df and 
+        associated data structures at this point before further processing.  
+        Preconditions:  
+            self._products includes 'Template'  
+            self.tot_vols includes 'Template'  
+            self.robo_params['product_df'] holds the product info for Template  
+        Postconditions:  
+            'Template' has been removed from self._products  
+            'Template' has been removed from self.tot_vols  
+            self.template_meta has been initialized to a dictionary with meta data for template
+            The key 'product_df' has been removed from self.robo_params (you should never have
+              need to access it.  
+        '''
+        self.template_meta = {
+                'tot_vol':self.tot_vols['Template'],
+                'cont':self.robo_params['product_df'].loc['Template', 'container'],
+                'labware':self.robo_params['product_df'].loc['Template', 'labware']
+                }
+        del self.robo_params['product_df']
+        self._products = []
+        del self.tot_vols['Template']
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
-        self.reagent_order = self.robo_params['reagent_df'].index.to_numpy()
+        self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
+        self._clean_template() #moves template data out of the data for rxn_df
 
+ 
     def run_simulation(self):
         '''
         runs a full simulation of the protocol on local machine
@@ -1594,16 +1667,9 @@ class AutoContr(Controller):
 
     def _rename_products(self, rxn_df):
         '''
-        required for class compatibility, but not used by the Auto
+        required for class compatibility, but not used by the Auto  
         '''
         pass
-
-    def _get_product_df(self, products_to_labware):
-        '''
-        required for class compatibility, but not used by Auto
-        TODO would be nice to return something that would blow up if accessed
-        '''
-        return np.nan
 
     @error_exit
     def _run(self, port, simulate, model):
@@ -1621,10 +1687,10 @@ class AutoContr(Controller):
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
-        
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
         while not model.quit:
+            print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
@@ -1643,9 +1709,7 @@ class AutoContr(Controller):
     
     def _get_sample_data(self,wellnames, filename):
         '''
-        TODO
-        SKELETON
-        scans a sample of wells specified by wellnames, and returns their spectra  
+        loads the spectra for the wells specified from the scan file specified  
         params:  
             list<str> wellnames: the names of the wells to be scanned  
             str filename: the name of the file that holds the scans  
@@ -1668,19 +1732,49 @@ class AutoContr(Controller):
         returns:  
             list<str> wellnames: the names of the wells produced ordered in accordance to the
               order of recipes
+        Postconditions:
         '''
-        self.portal.send_pack('init_containers', pd.DataFrame({'labware':'platereader',
-                'container':'Well96', 'max_vol':200.0}, index=wellnames).to_dict())
+        self.portal.send_pack('init_containers', pd.DataFrame(
+                {'labware':self.template_meta['labware'],
+                'container':self.template_meta['cont'], 
+                'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
+        #clean and update metadata from last reaction
+        self._clean_meta(wellnames)
+        #build new df
         self.rxn_df = self._build_rxn_df(wellnames, recipes)
-        self._products = wellnames
+        #add tot_vol
+        self._insert_tot_vol_transfer()
         self.execute_protocol_df()
+
+    def _clean_meta(self, wellnames):
+        '''
+        In addition to replacing the rxn_df, there is some metadata associated with a reaction
+        and it's reagents that must be cleaned after a reaction.  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+        Preconditions:  
+            self._products_contains products from last reaction  
+            self._tot_vols has products from last reaction as keys  
+        Postconditions:  
+            self._products has been reset to be wellnames  
+            self.tot_vols has been reset to have only the wellnames as keys and template vol
+              as the value  
+        '''
+        #remove old products
+        for product in self._products:
+            del self.tot_vols[product]
+        #add new keys
+        self.tot_vols.update({wellname:self.template_meta['tot_vol'] for wellname in wellnames})
+        #update products
+        self._products = wellnames
+            
 
     def _generate_wellname(self):
         '''
         returns:  
             str: a unique name for a new well
         '''
-        wellname = "autowell{}".format(self.well_count)
+        wellname = "autowell{}C1.0".format(self.well_count)
         self.well_count += 1
         return wellname
 
@@ -1689,21 +1783,57 @@ class AutoContr(Controller):
         This is used right now because it's best I've got. Ideally, you could drop the part 
         of init that constructs product_df
         '''
-        return 200.0
+        return self.tot_vols['Template']
+
+    def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
+        '''
+        This function is responsible for converting from a reagent (without concentration) to
+        a uniquely identified container that holds that reagent. This is used when rows are
+        specified as molarities as opposed to volumes because the container must be chosen
+        from a number of containers that may hold that reagent at different concentations.
+        There are a number of ways to optimize which container should be chosen. This 
+        algorithm will always take the most concentrated solution unless there is not sufficient
+        volume, or the volume that would be required to pipette is less than the minimum
+        pipettable volume. defined here as 2uL.  
+        params:  
+            str reagent: the name of the reagent that you are searching for a container for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            tuple<str, float>: if a match was found for the reagent   
+                str: the container name.  
+                float: the volume that must be transfered with this container.  
+            tuple<float>: (np.nan,np.nan) if no suitable match
+            TODO test these conditions when you get access to some wifi
+        Preconditions:
+            the cached_reader_locs should be up to date  
+        '''
+        min_vol = 2 #TODO clear this with Mark
+        containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(reagent+'C\d\.\d', key)]
+        containers.sort(key=self._get_conc)
+        for container in containers:
+            conc = self._get_conc(container)
+            vol = molarity * (total_vol*ratio) / conc
+            if vol > min_vol and vol < self._cached_reader_locs[container].aspirable_vol:
+                return container, vol
+        #if you haven't returned yet, there is no suitable reagent to satisfy your request
+        return np.nan, np.nan
 
     def _build_rxn_df(self,wellnames,recipes):
         '''
         used to construct a rxn_df for this batch of reactions
         TODO test bejesus out of this method
-        TODO need some sort of key to map from name of reagent to index of the 
-        recipes, and then mul by 200 and then lookup to mul by the percentages in the reagent df
+        Postconditions:  
+            self.tot_vols has been updated to 
         '''
-        #TODO (10) this is the part we're changing. This is where I left off.
-        #large chunks of this code will be deleted and reformated. Try to keep to something
-        #that can mostly be reused for the protocol executor
-
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        self._update_cached_locs('all')
         def build_product_rows(row):
             '''
             params:  
@@ -1712,22 +1842,68 @@ class AutoContr(Controller):
                 pd.Series: a row for the new df
             '''
             d = {}
-            if row['op'] == 'transfer':
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
                 #is a transfer, so we want to lookup the volume of that reagent in recipe_df
-                return recipe_df.loc[:, row['chemical_name']] * row['Template'] * 200.0
+                return recipe_df.loc[:, row['reagent']]
             else:
                 #if not a tranfer, we want to keep whatever value was there
                 return pd.Series(row['Template'], index=recipe_df.index)
-        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1)).drop(
-                columns='Template')
-        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: "{}-{}".format(
-                x, self.batch_num))
-        rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: "{}-{}".format(
-                x, self.batch_num))
+        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
+        rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
+        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
+        rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
+        rxn_df.drop(columns='Template',inplace=True) #no longer need template
         return rxn_df
 
+    def _convert_conc_to_vol(self, rxn_df, products):
+        '''
+        TODO this function is missing functionaility for when there isn't a good match for
+        container to transfer from (need dilution), and it hasn't been tested for a row that
+        needs different chemical concs.
+        This function converts any molarity rows into volume rows  
+        params:  
+            df rxn_df: the reaction dataframe with some concentration rows  
+            str products: the names of the products  
+        returns:  
+            df: the rxn_df with all concentrations converted to volumes if things went well  
+            list<str>: the chemical_names that could not be converted to volumes (generally
+              needs a dilution) TODO this doesn't make sense as a data structure, figure something
+              out
+        '''
+        #We now need to iterate through df and for each column, calculate the container to pull
+        #from, and volume. Since one row may now pull from muliple reagents, this causes a
+        #rebuild of the dataframe. We accumulate a list of series and then rebuild
+        disassembled_df = [] # list of series
+
+        for i, row in rxn_df.iterrows():
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
+                #needs the concentration to be converted
+                cont_vol_key = row[products].reset_index().apply(lambda r:
+                        pd.Series({x: y for x, y in 
+                        zip(['chem_name', 'vol'], 
+                                self._get_transfer_container(row['reagent'], r.iloc[1],
+                                        self.tot_vols[r['index']],ratio=1.0))}),axis=1)
+                cont_vol_key.index = products
+                #TODO doubtful the above works when you have a failed attempt (too little vol)
+                #UPDATE ^This definitely does not work when you have a failed attempt, but I'm
+                #working on the easy case right now
+                conts = cont_vol_key['chem_name'].dropna().unique()
+                for cont in conts:
+                    new_row = row.copy()
+                    new_row['chemical_name'] = cont
+                    new_row['conc'] = self._get_conc(cont)
+                    for product in products:
+                        new_row[product] = cont_vol_key.loc[product,'vol'] if \
+                            cont_vol_key.loc[product,'chem_name'] == cont else 0
+                    disassembled_df.append(new_row)
+            else:
+                disassembled_df.append(row)
+        return pd.DataFrame(disassembled_df)
+
     def run_all_checks(self):
-        super().run_all_checks()
+        found_errors = super().run_all_checks()
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
@@ -1755,8 +1931,8 @@ class AutoContr(Controller):
         '''
         #at this point self.rxn_df
         found_errors = super().check_rxn_df()
-        reagent_ratios  = self.rxn_df.loc[self.rxn_df['op'] == 'transfer',\
-                ['Template','chemical_name']].groupby('chemical_name').sum()['Template']
+        reagent_ratios  = self.rxn_df.loc[(self.rxn_df['conc'].isna()) & (self.rxn_df['op'] == 'transfer'),\
+                ['Template','reagent']].groupby('reagent').sum()['Template']
         has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
                 abs_tol=1e-9)).any()
         if has_invalid_ratio:
@@ -1806,11 +1982,8 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-        #TODO this is the part that's getting modified
         self._insert_tot_vol_transfer() #adds total volume transfer step to start
-        df_popout(self.rxn_df)
-        self.run_all_checks() #We need to add a check here to check no negative dispense from
-        #the generated first transfer. I've called it _check_tot_vol()
+        self.run_all_checks() 
 
     def run_simulation(self):
         '''
