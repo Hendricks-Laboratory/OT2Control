@@ -934,9 +934,9 @@ class Controller(ABC):
         #concs
         rxn_name_dict = {}
         for name in rxn_names:
-            match_i = re.search('C\d\.\d$', name).start()
-            reagent = name[:match_i]
-            conc = float(name[match_i+1:])
+            
+            reagent = self._get_conc(name)
+            conc = self._get_reagent(name)
             if reagent in rxn_name_dict:
                 #already exists, append to list
                 rxn_name_dict[reagent].append(conc)
@@ -1572,6 +1572,18 @@ class Controller(ABC):
         '''
         return float(re.search('C\d\.\d$', chem_name).group(0)[1:])
 
+    def _get_reagent(self, chem_name)
+        '''
+        handy method for getting the reagent from a chemical name  
+        The foil of _get_conc  
+        params:  
+            str chem_name: the chemical name to strip a reagent name from  
+        returns:  
+            str: the reagent name parsed from the chem_name  
+        '''
+        
+        return chem_name[:re.search('C\d\.\d$', chem_name).start()]
+
 
 class AutoContr(Controller):
     '''
@@ -1801,10 +1813,10 @@ class AutoContr(Controller):
             stock_cont = max(containers, key=self._get_conc)
             min_conc = min(map(self._get_conc, containers))
             new_conc = min_conc / 2
-            self._execute_single_dilution(self, new_conc, stock_cont, self.dilution_params.vol)
+            self._execute_single_dilution(new_conc, stock_cont)
 
 
-    def _execute_single_dilution(self, conc, reagent, vol):
+    def _execute_single_dilution(self, conc, reagent):
         '''
         TODO implement this function
         This function creates a single dilution row and executes that row.  
@@ -1823,6 +1835,26 @@ class AutoContr(Controller):
             this dilution  
             a command has been sent to the robot to perform a dilution  
         '''
+        breakpoint()
+        #TODO there are two reagents with associated chemical names floating around here.
+        #clear that up
+        #1 initialize the new product on the robot
+        chem_name = '{}C{}'.format(self._get_reagent(reagent), conc)
+        product_df = pd.DataFrame(
+                    {'labware':'',
+                    'container':self.dilution_params.cont,
+                    'max_vol':self.dilution_params.vol}, index=[chem_name])
+        self.portal.send_pack('init_containers', product_df.to_dict())
+        #2 construct a new dilution row (series)
+        row = pd.Series(np.nan, self.rxn_df_template.columns)
+        row['dilution_conc'] = conc
+        row['chem_name'] = reagent
+        row['reagent'] = self._get_reagent(reagent)
+        row['Template'] = self.dilution_params.vol
+        row.rename(columns={'Template':chem_name},inplace=True)
+        #3 call send_dilution
+        self._send_dilution_commands(row, 0)
+        #TODO untested
         pass
 
     def _clean_meta(self, wellnames):
@@ -1900,13 +1932,31 @@ class AutoContr(Controller):
         filtered_conts = [] #this will hold the containers that are diluted enough to be able
         #to transfer without exceeding min_vol
         for cont in containers:
-            conc = self._get_conc(cont)
-            vol = molarity * (total_vol*ratio) / conc
+            vol = self._get_transfer_vol(cont,molarity,total_vol,ratio)
             if vol > min_vol:
                 filtered_conts.append(cont)
                 if vol < self._cached_reader_locs[cont].aspirable_vol:
                     return cont, vol
         raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
+
+    def _get_transfer_vol(self,reagent,molarity,total_vol,ratio):
+        '''
+        helper function to calculate the necessary volume for a transfer given a reagent and
+        desired molarity and a volume (and some other stuff)  
+        params:  
+            str reagent: the chemical name of the reagent fullname that you are searching for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            float: the volume to transfer from the reagent for desired end molarity  
+        '''
+        conc = self._get_conc(reagent)
+        vol = molarity * (total_vol*ratio) / conc
+        return vol
 
     def _build_rxn_df(self,wellnames,recipes):
         '''

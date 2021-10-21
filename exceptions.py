@@ -13,7 +13,10 @@ class ConversionError(RuntimeError):
         In the former case, empty_reagents will be empty. In the later case, empty reagents
         will contain a list of reagents that could be refilled in order to make this work.  
         params:  
-            str product: the chemical name of the product that tripped this error  
+            str: reagent: the reagent that is being used  
+            float molarity: the desired molarity  
+            float total_vol: the total volume in the container you're filling  
+            float ratio: the ratio of total volume. See convert for details  
             list<str> empty_reagents: a list of chemical names that could be used, but do not
               have sufficient volume left for the transfer.  
         '''
