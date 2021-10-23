@@ -1901,9 +1901,17 @@ class AutoContr(Controller):
             else:
                 disassembled_df.append(row)
         return pd.DataFrame(disassembled_df)
-
+    def check_conc(self):
+        found_errors = 0
+        check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
+        if check_water_conc.any():
+            print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
+            found_errors = max(found_errors,2)
+        df_popout(check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna()))
+        return found_errors
     def run_all_checks(self):
         found_errors = super().run_all_checks()
+        found_errors = max(found_errors,self.check_conc())
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
@@ -1943,6 +1951,9 @@ class AutoContr(Controller):
 
 class ProtocolExecutor(Controller): 
     '''
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+    ATTRIBUTES:  
     class to execute a protocol from the docs  
     ATTRIBUTES:  
         df rxn_df: the reaction df. Not passed in, but created in init  
@@ -2772,6 +2783,3 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('Configuration','SimulationMode', str(0))
 
 
-if __name__ == '__main__':
-    SERVERADDR = "10.25.16.146"
-    main(SERVERADDR)
