@@ -1481,7 +1481,7 @@ class Controller(ABC):
         for key,val in self.tot_vols.items():
             product_volumes = self.rxn_df[key]
             if val < 0:
-                print("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
+                print("<<controller>> error in total volume row: value " + str(val) + " is negative. we cannot have negative values as input.")
                 max(found_errors,2)
                 break
                 
@@ -1780,7 +1780,11 @@ class AutoContr(Controller):
                 #and be caught here
                 #add tot_vol
                 self._insert_tot_vol_transfer()
-                successful_build = True
+                breakpoint()
+                if self.tot_vols: #has at least one element
+                    if not (self.rxn_df.loc[0,self._products] < 0).any():
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                    successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
         self.execute_protocol_df()
@@ -1797,6 +1801,7 @@ class AutoContr(Controller):
         if e.empty_reagents:
             #You ran out of something
             #query the user
+            #It is also possible here that you might be able to perform dilution
             raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
         else:
             #you're trying to pipette an infinitesimal volume
