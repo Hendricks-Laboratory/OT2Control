@@ -89,9 +89,6 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simul
     #instantiate a controller
     if not rxn_sheet_name:
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
-    if not use_cache:
-        #using the cache bypasses google docs communication and uses the last rxn you loaded
-        use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
@@ -939,7 +936,7 @@ class Controller(ABC):
             else:
                 #doesn't exist, create list
                 rxn_name_dict[reagent] = [conc]
-        rxn_names = pd.Series(rxn_name_dict, name='conc',dtype=float)
+        rxn_names = pd.Series(rxn_name_dict, name='conc',dtype=object)
         #rxn_names is now a series of concentrations with reagents as keys
         reagent_df = reagent_df.join(rxn_names, how='left', rsuffix='2') 
         reagent_df = reagent_df.loc[
@@ -953,7 +950,7 @@ class Controller(ABC):
                 blanks = ['' for i in range(reagent_df.shape[1])]
                 reagent_df = reagent_df.append(pd.DataFrame([blanks],
                         columns=reagent_df.columns,index=pd.Index([''],name='chemical_name')))
-            d2g.upload(reagent_df.reset_index(),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
+            d2g.upload(reagent_df.reset_index().rename(columns={'index':'chemical_name'}),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
 
     def _get_product_df(self, products_to_labware):
         '''
@@ -1104,7 +1101,7 @@ class Controller(ABC):
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-            assert (math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            assert (well not in self.tot_vols or math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
             well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
@@ -1461,8 +1458,6 @@ class Controller(ABC):
 
     def check_tot_vol(self):
         '''
-        TODO (9) implement this method (note you may not have a first row)  
-        TODO call this in run all checks  
         This check ensures that the inserted total volume row does not contain negative floats.
         returns:  
             int found_errors:  
@@ -1478,17 +1473,25 @@ class Controller(ABC):
             product_volumes = self.rxn_df[key]
             if val < 0:
                 print("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
-                max(found_errors,2)
+                found_errors = max(found_errors,2)
                 break
                 
         #checks for overflow in summation of transfers
         overflow_vol = (self.rxn_df.loc[0,self.tot_vols.keys()] < 0)
         if overflow_vol.any():
             print("<<controller>> Error in total volume, there is overflow in "+ str(overflow_vol.loc[overflow_vol].index))
-            max(found_errors,2)
+            found_errors = max(found_errors,2)
             
         #checks for scan errors
         check_scan = self.rxn_df.loc[(self.rxn_df['op'] == 'scan')]
+        #make sure if you're scanning you have a total volume
+        cols_w_scans = check_scan[self._products].astype(int).any() #bool arr if product is scaned
+        cols_w_scans = cols_w_scans.loc[cols_w_scans].index #just the cols that are scanned
+        for col in cols_w_scans:
+            if col not in self.tot_vols:
+                print("<<controller>> {} is scanned, but does not have a specified total volume. Will be scanned at whatever volume it has at the time of scan.".format(col))
+                found_errors = max(found_errors,1)
+        #check more scan issues
         first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&check_scan.ne(0)].stack()   
         scan_products = []
         #Creates list for products that have scans
@@ -1908,7 +1911,7 @@ class AutoContr(Controller):
             print("<<controller>> All prechecks passed!")
             return
         elif found_errors == 1:
-            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
+            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key "):
                 return
             else:
                 raise Exception('Aborting base on user input')
