@@ -1339,7 +1339,7 @@ class Controller(ABC):
         found_errors = max(found_errors, self.check_labware())
         found_errors = max(found_errors, self.check_reagents())
         found_errors = max(found_errors, self.check_tot_vol())
-
+        found_errors = max(found_errors,self.check_conc())
         return found_errors
 
     def check_labware(self):
@@ -1567,7 +1567,16 @@ class Controller(ABC):
             float: the concentration parsed from the chem_name  
         '''
         return float(re.search('C\d\.\d$', chem_name).group(0)[1:])
-
+    
+    def check_conc(self):
+        found_errors = 0
+        check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
+        if check_water_conc.any():
+            print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
+            found_errors = max(found_errors,2)
+        check_conc = (self.rxn_df.loc[(self.rxn_df['op']== 'transfer'),'conc'].isna())
+        print(check_conc)
+        return found_errors
 
 class AutoContr(Controller):
     '''
@@ -1901,15 +1910,9 @@ class AutoContr(Controller):
             else:
                 disassembled_df.append(row)
         return pd.DataFrame(disassembled_df)
-    def check_conc(self):
-        found_errors = 0
-        check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
-        if check_water_conc.any():
-            print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
-            found_errors = max(found_errors,2)
-        df_popout(check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna()))
-        return found_errors
-    def run_all_checks(self):
+    
+
+    def run_all_checks(self): 
         found_errors = super().run_all_checks()
         found_errors = max(found_errors,self.check_conc())
         if found_errors == 0:
@@ -2781,5 +2784,7 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp','AsDDEserver','False')
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
-
+if __name__ == '__main__':
+    SERVERADDR = "10.25.10.54"
+    main(SERVERADDR)
 
