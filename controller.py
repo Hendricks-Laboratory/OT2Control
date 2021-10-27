@@ -2657,10 +2657,10 @@ class PlateReader(AbstractPlateReader):
                 str filename: the filename as you passed in  
                 int n_cycles: the number of cycles  
         '''
-        filename = "{}.csv".format(filename)
         if self.simulate:
             return super().load_reader_data(filename, loc_to_name) #return dummy data
         else:
+            filename = "{}.csv".format(filename)
             #parse the metadata
             start_i, metadata = self._parse_metadata(filename)
             # Read data ignoring first metadata lines
@@ -2721,7 +2721,7 @@ class PlateReader(AbstractPlateReader):
         #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
         #that, so we move it from the default landing zone to where I actually want it
         if self.simulate:
-            super().run_protocol()
+            super().run_protocol(protocol_name, filename, layout)
         else:
             shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
                     os.path.join(self.data_path, "{}.csv".format(filename)))
