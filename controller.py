@@ -107,9 +107,6 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
     '''
     if not rxn_sheet_name:
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
-    if not use_cache:
-        #using the cache bypasses google docs communication and uses the last rxn you loaded
-        use_cache = 'y' == input('<<controller>> would you like to use spreadsheet cache? [yn] ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     auto.run_simulation()
@@ -1595,18 +1592,6 @@ class AutoContr(Controller):
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
 
-
-    class VolOverflowError(ConversionError):
-        #TODO probably scratch this or no longer inherit from conversion error
-        '''
-        Inherits from ConversionError  
-        This error is raised when a container will be overflowed by the molarity requested.
-        The only solution in this case is to add a more concentrated solution to the deck.  
-        '''
-        def __init__(self, product):
-            #product is the product that is overflowing
-            self.product = product
-
     def _clean_template(self):
         '''
         There are some traces of the template column that must be removed from the rxn_df and 
@@ -1769,7 +1754,6 @@ class AutoContr(Controller):
                 {'labware':self.template_meta['labware'],
                 'container':self.template_meta['cont'], 
                 'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
-        #TODO shit is gonna get weird when we need to send new containers for dilutions
         #clean and update metadata from last reaction
         self._clean_meta(wellnames)
         successful_build = False #Flag True when a self.rxn_df using volumes has been generated
@@ -1778,15 +1762,11 @@ class AutoContr(Controller):
             try:
                 #build new df
                 self.rxn_df = self._build_rxn_df(wellnames, recipes)
-                #TODO insert_tot_vol transfer should probably throw a different type of error
-                #and be caught here
-                #add tot_vol
                 self._insert_tot_vol_transfer()
-                breakpoint()
                 if self.tot_vols: #has at least one element
-                    if not (self.rxn_df.loc[0,self._products] < 0).any():
+                    if (self.rxn_df.loc[0,self._products] < 0).any():
                         raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
-                    successful_build = True
+                successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
         self.execute_protocol_df()
@@ -1797,8 +1777,12 @@ class AutoContr(Controller):
         volume reaction dataframe.  
         params:  
             ConversionError e: the conversion error raised  
-        Postconditions:
-            TODO upate this 
+        Postconditions:  
+            If the error was pipetting infinitesimal volume, a dilution has been performed on
+            the robot to dilute by 2X   
+        Raises:  
+            NotImplementedError: If you ran out of a reagent you probably need to have Mark
+              restock (or you could dilute a stock maybe)  
         '''
         if e.empty_reagents:
             #You ran out of something
@@ -1932,11 +1916,10 @@ class AutoContr(Controller):
         raises:  
             ConversionError: when the molarity cannot be acheived without overdrawing from
               container, or by pipetting less than min_vol  
-        TODO test raise conditions when you get access to some wifi
         Preconditions:
             the cached_reader_locs should be up to date  
         '''
-        min_vol = 2 #TODO clear this with Mark
+        min_vol = 5
         containers = [key for key in self._cached_reader_locs.keys() 
                 if re.fullmatch(reagent+'C\d\.\d', key)]
         containers.sort(key=self._get_conc)
@@ -1972,7 +1955,6 @@ class AutoContr(Controller):
     def _build_rxn_df(self,wellnames,recipes):
         '''
         used to construct a rxn_df for this batch of reactions
-        TODO test bejesus out of this method
         Postconditions:  
             self.tot_vols has been updated to 
         '''
@@ -2004,18 +1986,15 @@ class AutoContr(Controller):
 
     def _convert_conc_to_vol(self, rxn_df, products):
         '''
-        TODO this function is missing functionaility for when there isn't a good match for
-        container to transfer from (need dilution), and it hasn't been tested for a row that
-        needs different chemical concs.
         This function converts any molarity rows into volume rows  
         params:  
             df rxn_df: the reaction dataframe with some concentration rows  
             str products: the names of the products  
         returns:  
             df: the rxn_df with all concentrations converted to volumes if things went well  
-            list<str>: the chemical_names that could not be converted to volumes (generally
-              needs a dilution) TODO this doesn't make sense as a data structure, figure something
-              out
+        raises:  
+            ConversionError: for too small vol transfer, run out of vol in a reagent, or 
+              overflow  
         '''
         #We now need to iterate through df and for each column, calculate the container to pull
         #from, and volume. Since one row may now pull from muliple reagents, this causes a
@@ -2031,9 +2010,6 @@ class AutoContr(Controller):
                                 self._get_transfer_container(row['reagent'], r.iloc[1],
                                         self.tot_vols[r['index']],ratio=1.0))}),axis=1)
                 cont_vol_key.index = products
-                #TODO doubtful the above works when you have a failed attempt (too little vol)
-                #UPDATE ^This definitely does not work when you have a failed attempt, but I'm
-                #working on the easy case right now
                 conts = cont_vol_key['chem_name'].dropna().unique()
                 for cont in conts:
                     new_row = row.copy()
