@@ -914,6 +914,17 @@ class Controller(ABC):
         reagent_df.drop(index=rows_to_drop, inplace=True)
         reagent_df.set_index('reagent',inplace=True)
         reagent_df.fillna('',inplace=True)
+
+        #breakpoint()
+        ##dropping products BAND AID TODO CLEAN UP
+        ##Reagents needs to be name stripped/restored
+        #reagent_df.reset_index(inplace=True)
+        #reagent_df['chem_name'] = reagent_df.apply(lambda r: "{}C{}".format(r['reagent'], r['conc']), axis=1)
+        #reagent_df.set_index('chem_name', inplace=True) #create temp chem_name col
+        ##switch back
+        #reagent_df.drop(index=self._products, errors='ignore',inplace=True)
+        #reagent_df.set_index('reagent',inplace=True) #remove chem_name index replace with reagent index
+
         #add water if necessary
         needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
         if needs_water:
@@ -928,7 +939,6 @@ class Controller(ABC):
         #concs
         rxn_name_dict = {}
         for name in rxn_names:
-            
             reagent = self._get_conc(name)
             conc = self._get_reagent(name)
             if reagent in rxn_name_dict:
@@ -1569,7 +1579,7 @@ class Controller(ABC):
         returns:  
             float: the concentration parsed from the chem_name  
         '''
-        return float(re.search('C\d\.\d$', chem_name).group(0)[1:])
+        return float(re.search('C\d*\.\d*$', chem_name).group(0)[1:])
 
     def _get_reagent(self, chem_name):
         '''
@@ -1581,7 +1591,7 @@ class Controller(ABC):
             str: the reagent name parsed from the chem_name  
         '''
         
-        return chem_name[:re.search('C\d\.\d$', chem_name).start()]
+        return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
 
 
 class AutoContr(Controller):
@@ -1797,7 +1807,7 @@ class AutoContr(Controller):
 
             #generate necessary parameters
             containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(e.reagent+'C\d\.\d', key)]
+                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
             stock_cont = max(containers, key=self._get_conc)
             min_conc = min(map(self._get_conc, containers))
             new_conc = min_conc / 2
@@ -1921,7 +1931,7 @@ class AutoContr(Controller):
         '''
         min_vol = 5
         containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(reagent+'C\d\.\d', key)]
+                if re.fullmatch(reagent+'C\d*\.\d*', key)]
         containers.sort(key=self._get_conc)
         filtered_conts = [] #this will hold the containers that are diluted enough to be able
         #to transfer without exceeding min_vol
