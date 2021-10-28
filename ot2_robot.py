@@ -903,7 +903,7 @@ class OT2Robot():
             if self._LABWARE_TYPES[name]['definition_path']:
                 #plate readers (or other custom?)
                 self._init_custom_labware(name, deck_pos, first_well=first_usable)
-            elif 'temp_mod' in self._LABWARE_TYPES[name]['definition_path']:
+            elif 'temp_mod' in self._LABWARE_TYPES[name]['groups']:
                 #temperature controlled racks
                 self._init_temp_mod(name, using_temp_ctrl, 
                         temp, deck_pos, empty_tubes=empty_list)
