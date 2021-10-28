@@ -616,6 +616,7 @@ class OT2Robot():
           object and a volume of water needed to turn it into a reagent  
         dict<str:func> exec_funcs: a registry that holds all of the functions that respond to
           an armchair request mapped by their armchair command_type  
+        opentrons.temp_module temp_module: the opentrons object for temperature controller  
     METHODS:  
         execute(command_type, cid, arguments) int: Takes in the recieved output of an Armchair
           recv_pack, and executes the command. Will usually send a ready (except for GHOST type)
@@ -700,6 +701,7 @@ class OT2Robot():
         dry_containers_df = pd.DataFrame(dry_containers_df).set_index('index')
         self.containers = {}
         self.pipettes = {}
+        self.temp_module = None #will be overwritten if used
         self.my_ip = my_ip
         self.portal = portal
         self.controller_ip = controller_ip
@@ -839,12 +841,13 @@ class OT2Robot():
         Postconditions:
             the temperature module has been initialized  
             the labware wrapper for these tubes has been initialized and added to the deck  
+            self.temp_module is the opentrols object for the temperature module  
         '''
         if using_temp_ctrl:
-            temp_module = self.protocol.load_module('temperature module gen2', 3)
-            temp_module.set_temperature(temp)
+            self.temp_module = self.protocol.load_module('temperature module gen2', 3)
+            self.temp_module.set_temperature(temp)
             opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
-            labware = temp_module.load_labware(opentrons_name,label=name)
+            labware = self.temp_module.load_labware(opentrons_name,label=name)
             #this will always be a tube holder
             self._add_to_deck(name, deck_pos, labware, empty_containers=empty_tubes)
 
@@ -1432,8 +1435,14 @@ class OT2Robot():
     def _exec_close(self, cid):
         '''
         close the connection in a nice way
+        Postconditions:  
+          tips have been dropped, temp module is off, socket is closed  
         '''
         print('<<eve>> initializing breakdown')
+        #shutdown temperature controller
+        if self.temp_module:
+            self.temp_module.deactivate()
+        #drop pipettes
         for arm_dict in self.pipettes.values():
             pipette = arm_dict['pipette']
             pipette.drop_tip()
