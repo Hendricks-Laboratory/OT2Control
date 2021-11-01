@@ -844,6 +844,7 @@ class Controller(ABC):
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
         rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
+        rxn_df['reagent'] = rxn_df['reagent'].apply(lambda s: s if pd.isna(s) else s.replace(' ', '_'))
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
         #go back for some non numeric columns
@@ -915,16 +916,6 @@ class Controller(ABC):
         reagent_df.set_index('reagent',inplace=True)
         reagent_df.fillna('',inplace=True)
 
-        #breakpoint()
-        ##dropping products BAND AID TODO CLEAN UP
-        ##Reagents needs to be name stripped/restored
-        #reagent_df.reset_index(inplace=True)
-        #reagent_df['chem_name'] = reagent_df.apply(lambda r: "{}C{}".format(r['reagent'], r['conc']), axis=1)
-        #reagent_df.set_index('chem_name', inplace=True) #create temp chem_name col
-        ##switch back
-        #reagent_df.drop(index=self._products, errors='ignore',inplace=True)
-        #reagent_df.set_index('reagent',inplace=True) #remove chem_name index replace with reagent index
-
         #add water if necessary
         needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
         if needs_water:
@@ -932,15 +923,16 @@ class Controller(ABC):
                 reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='Water'))
             else:
                 reagent_df.loc['Water','conc'] = 1.0
-        rxn_names = self.rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        #start dropping products
+        rxn_names = self._products.copy() #going to drop template, hence copy
         rxn_names = rxn_names.drop('Template', errors='ignore') #Template will throw error
         #we now need to split the rxn_names into reagent names and concs.
         #There may be duplicate reagents, so we will make a dictionary with list values of 
         #concs
         rxn_name_dict = {}
         for name in rxn_names:
-            reagent = self._get_conc(name)
-            conc = self._get_reagent(name)
+            reagent = self._get_reagent(name)
+            conc = self._get_conc(name)
             if reagent in rxn_name_dict:
                 #already exists, append to list
                 rxn_name_dict[reagent].append(conc)
@@ -1328,7 +1320,7 @@ class Controller(ABC):
             return np.nan
         else:
             #this uses a chemical with a conc. Probably a stock solution
-            return "{}C{}".format(row['reagent'], row['conc']).replace(' ', '_')
+            return "{}C{}".format(row['reagent'], row['conc'])
         return pd.Series(new_cols)
 
     def run_all_checks(self):
