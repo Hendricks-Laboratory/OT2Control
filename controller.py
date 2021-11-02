@@ -1573,12 +1573,28 @@ class Controller(ABC):
     
     def check_conc(self):
         found_errors = 0
+
+        #Check to make sure water always has a concentration defined
         check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
         if check_water_conc.any():
             print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
             found_errors = max(found_errors,2)
+
+        #Check to make sure you don't transfer a reagent with a concentration into a reagent with a volume
         check_conc = (self.rxn_df.loc[(self.rxn_df['op']== 'transfer'),'conc'].isna())
-        print(check_conc)
+        transfer_df = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
+        check_nan = (transfer_df.loc[(check_conc),'reagent'].unique())
+        check_vol = (transfer_df.loc[(~check_conc),'reagent'].unique())
+        for val in check_nan:
+            if val in check_vol:
+                print("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into a reagent with a concentration.")
+                found_errors = max(found_errors,2)
+        
+        #Checks to make sure all reagents with molarity get transferred into products with total volume
+        tot_vol_mol = transfer_df.loc[check_conc,self._products]
+        for i in tot_vol_mol:
+            if i not in self.tot_vols.keys():
+                print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
         return found_errors
 
 class AutoContr(Controller):
