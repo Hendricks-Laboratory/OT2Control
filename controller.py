@@ -1339,7 +1339,7 @@ class Controller(ABC):
         found_errors = max(found_errors, self.check_labware())
         found_errors = max(found_errors, self.check_reagents())
         found_errors = max(found_errors, self.check_tot_vol())
-
+        found_errors = max(found_errors,self.check_conc())
         return found_errors
 
     def check_labware(self):
@@ -1584,7 +1584,31 @@ class Controller(ABC):
         '''
         
         return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
+    
+    def check_conc(self):
+        found_errors = 0
 
+        #Check to make sure water always has a concentration defined
+        check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
+        if check_water_conc.any():
+            print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
+            found_errors = max(found_errors,2)
+        #Check to make sure you don't transfer a reagent with a concentration into a reagent with a volume
+        check_conc = (self.rxn_df.loc[(self.rxn_df['op']== 'transfer'),'conc'].isna())
+        transfer_df = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
+        check_nan = (transfer_df.loc[(check_conc),'reagent'].unique())
+        check_vol = (transfer_df.loc[(~check_conc),'reagent'].unique())
+        for val in check_nan:
+            if val in check_vol:
+                print("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into a reagent with a concentration.")
+                found_errors = max(found_errors,2)
+        
+        #Checks to make sure all reagents with molarity get transferred into products with total volume
+        tot_vol_mol = transfer_df.loc[check_conc,self._products]
+        for i in tot_vol_mol:
+            if i not in self.tot_vols.keys():
+                print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+        return found_errors
 
 class AutoContr(Controller):
     '''
@@ -2024,9 +2048,11 @@ class AutoContr(Controller):
             else:
                 disassembled_df.append(row)
         return pd.DataFrame(disassembled_df)
+    
 
-    def run_all_checks(self):
+    def run_all_checks(self): 
         found_errors = super().run_all_checks()
+        found_errors = max(found_errors,self.check_conc())
         if found_errors == 0:
             print("<<controller>> All prechecks passed!")
             return
@@ -2066,6 +2092,9 @@ class AutoContr(Controller):
 
 class ProtocolExecutor(Controller): 
     '''
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+    ATTRIBUTES:  
     class to execute a protocol from the docs  
     ATTRIBUTES:  
         df rxn_df: the reaction df. Not passed in, but created in init  
@@ -2893,8 +2922,7 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp','AsDDEserver','False')
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
-
-
 if __name__ == '__main__':
     SERVERADDR = "10.25.10.54"
     main(SERVERADDR)
+
