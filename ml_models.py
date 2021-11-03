@@ -21,6 +21,8 @@ class MLModel():
         self.quit = False
         self.model = model
         self.model_lock = threading.Lock()
+        self.X_lock = threading.lock()
+        self.X = None
         self.quit = self.update_quit()
 
     def train(self, X, y):
@@ -37,7 +39,6 @@ class MLModel():
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
-
 
     @abstractmethod
     def _train(self, X, y):
@@ -147,3 +148,50 @@ class DummyMLModel(MLModel):
             np.array: (batch_size,n_features) 
         '''
         return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+
+class KNN(MLModel):
+    '''
+    Model to use K nearest neighbor algorithm
+    '''
+    def __init__(self, model, final_spectra, max_iters, batch_size):
+        super().__init__(model, max_iters, batch_size) #don't have a model
+        self.final_spectra = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+
+    def generate_seed_rxns(self):
+        '''
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        '''
+        #TODO talk to Mark about a good set of seeds to start at
+        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+
+    def predict(self):
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        '''
+        with self.model_lock:
+            y_pred = model.predict(final_spectra)
+        return y_pred
+ 
+    def _train(self, X, y):
+        '''
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated  
+        params:  
+            np.array X: shape (num_pts, num_features) the recieved data for each new well  
+            np.array y: shape(num_pts, n_classes) the labels to predict  
+        Postconditions:  
+            The model has been trained on the new data
+        '''
+        with self.model_lock: #note for dummy this is not necessary, just an example
+            self.model.fit(X)
