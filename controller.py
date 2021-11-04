@@ -2239,8 +2239,9 @@ class ProtocolExecutor(Controller):
         rename_key = {}
         for col in rxn_cols:
             if 'dilution_placeholder' in col:
-                row = rxn_df.loc[~rxn_df[col].isna()].squeeze()
+                row = rxn_df.loc[rxn_df['op'] == 'dilution'].loc[~rxn_df[col].isna()].squeeze()
                 reagent_name = row['chemical_name']
+                assert (isinstance(reagent_name, str)), "dilution placeholder was used twice"
                 name = reagent_name[:reagent_name.rfind('C')+1]+str(row['dilution_conc'])
                 rename_key[col] = name
             else:
