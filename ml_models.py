@@ -1,6 +1,9 @@
+import time #TODO delete this debugging only
 from abc import ABC
 from abc import abstractmethod
 import threading
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
 
 import numpy as np
 
@@ -21,7 +24,7 @@ class MLModel():
         self.quit = False
         self.model = model
         self.model_lock = threading.Lock()
-        self.X_lock = threading.lock()
+        self.X_lock = threading.Lock()
         self.X = None
         self.quit = self.update_quit()
 
@@ -149,13 +152,16 @@ class DummyMLModel(MLModel):
         '''
         return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
 
-class KNN(MLModel):
+class LinReg(MLModel):
     '''
-    Model to use K nearest neighbor algorithm
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:  
+      only runs for batch size of 1  
     '''
-    def __init__(self, model, final_spectra, max_iters, batch_size):
-        super().__init__(model, max_iters, batch_size) #don't have a model
-        self.final_spectra = final_spectra
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1):
+        super().__init__(model, max_iters) #don't have a model
+        self.FINAL_SPECTRA = final_spectra
         self.y_shape = y_shape
         self.batch_size = batch_size
 
@@ -178,8 +184,9 @@ class KNN(MLModel):
         returns:  
             np.array: shape is n_predictions, y.shape. Features are pi e-2  
         '''
+        super().predict()
         with self.model_lock:
-            y_pred = model.predict(final_spectra)
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
         return y_pred
  
     def _train(self, X, y):
@@ -193,5 +200,13 @@ class KNN(MLModel):
         Postconditions:  
             The model has been trained on the new data
         '''
-        with self.model_lock: #note for dummy this is not necessary, just an example
-            self.model.fit(X)
+        #update the data with the new scans
+        time.sleep(40)
+        print('<<ML>> training')
+        with self.model_lock:
+            if isinstance(self.X,np.ndarray):
+                self.X = np.concatenate((self.X, X))
+            else:
+                self.X = X
+            self.model.fit(self.X, y)
+        print('<<ML>> done training')

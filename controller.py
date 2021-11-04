@@ -50,11 +50,13 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
 
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel
+from ml_models import *
 from exceptions import *
 
 
@@ -109,10 +111,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    auto.run_simulation()
+    model = MultiOutputRegressor(Lasso(warm_start=True))
+    final_spectra = np.random.random((1,701))
+    ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
+    auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        #need a new model because last is fit to sim
-        auto.run_protocol(simulate=simulate)
+        auto.run_protocol(simulate=simulate, model=model)
 
 
 class Controller(ABC):
@@ -1650,7 +1654,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self):
+    def run_simulation(self,model=None):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -1666,7 +1670,10 @@ class AutoContr(Controller):
         self.server_ip = '127.0.0.1'
         self.simulate = True
 
-        model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
+        if model == None:
+            #you're simulating with a dummy model.
+            print('<<controller>> running with dummy ml')
+            model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
 
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
