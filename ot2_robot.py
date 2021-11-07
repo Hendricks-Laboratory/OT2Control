@@ -1085,6 +1085,7 @@ class OT2Robot():
         self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
         arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
         pipette = self.pipettes[arm]['pipette']
+        self.pipettes[arm]['last_used'] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
         well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
         #set aspiration height
