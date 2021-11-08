@@ -2246,8 +2246,9 @@ class ProtocolExecutor(Controller):
         rename_key = {}
         for col in rxn_cols:
             if 'dilution_placeholder' in col:
-                row = rxn_df.loc[~rxn_df[col].isna()].squeeze()
+                row = rxn_df.loc[rxn_df['op'] == 'dilution'].loc[~rxn_df[col].isna()].squeeze()
                 reagent_name = row['chemical_name']
+                assert (isinstance(reagent_name, str)), "dilution placeholder was used twice"
                 name = reagent_name[:reagent_name.rfind('C')+1]+str(row['dilution_conc'])
                 rename_key[col] = name
             else:
@@ -2930,6 +2931,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 if __name__ == '__main__':
-    SERVERADDR = "10.25.10.54"
+    SERVERADDR = "10.53.10.99"
     main(SERVERADDR)
 
