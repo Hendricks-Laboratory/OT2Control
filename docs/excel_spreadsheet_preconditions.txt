@@ -116,3 +116,12 @@ the code to change will be OT2Controller._init_labware_and_pipettes
 Only one platereader needs a first well/tip argument. It doesn't matter which one. 
 Leave the other blank
 
+TOTAL VOLUME
+You must make sure that all the transfers that you do do not exceed the total volume specified. 
+For scans, you need to make sure that you have transferred everything before you do a scan.
+You do not want to do dilutions on a reagent that has total volume specified.
+
+CONCENTRATIONS
+You need to make sure that water will always have a specified volume.
+You need to make sure that you only transfer reagents with molarity into products that have total volume specified.
+You need to make sure you do not transfer reagents with molarity into reagents with volume.
