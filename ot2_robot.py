@@ -1144,6 +1144,7 @@ class OT2Robot():
             try:
                 dry_cont, mass, molar_mass = self.dry_containers[name][i]
             except IndexError:
+                breakpoint()
                 raise Exception("Ran out of dry ingredients to restock {}, or can't dilute \
                         enough to restock".format(chem_name))
             vol = self._get_necessary_vol(mass, molar_mass, conc)
@@ -1342,7 +1343,10 @@ class OT2Robot():
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
-        src_cont = self.containers[src] #the src container
+        try:
+            src_cont = self.containers[src] #the src container
+        except KeyError:
+            breakpoint()
         dst_cont = self.containers[dst] #the dst container
         try:
             assert (src_cont.aspiratible_vol >= vol),'{} cannot transfer {:.3}uL to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))

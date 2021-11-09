@@ -111,7 +111,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    model = MultiOutputRegressor(Lasso(warm_start=True))
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
     final_spectra = np.random.random((1,701))
     ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
     auto.run_simulation(ml_model)
@@ -1748,10 +1748,15 @@ class AutoContr(Controller):
             filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
-            #train on scans
+            #generate the predictions for the next round
+            if self.batch_num == 0:
+                #if you're just starting, you'll need to go one more round for the robot to train
+                recipes = model.generate_seed_rxns()
+            else:
+                recipes = model.predict()
+            #threaded train on scans. Will run while the robot is generating new materials
             model.train(scan_data.T.to_numpy(),recipes)
             self.batch_num += 1
-            recipes = model.predict()
         self.close_connection()
         self.pr.shutdown()
         return
@@ -1817,6 +1822,7 @@ class AutoContr(Controller):
             NotImplementedError: If you ran out of a reagent you probably need to have Mark
               restock (or you could dilute a stock maybe)  
         '''
+        print('<<controller>> handling conversion error')
         if e.empty_reagents:
             #You ran out of something
             #query the user
@@ -1872,7 +1878,6 @@ class AutoContr(Controller):
         row['reagent'] = self._get_reagent(reagent)
         row['Template'] = self.dilution_params.vol
         row.rename({'Template':product},inplace=True)
-        print(row)
         #3 call send_dilution
         #here we're appropriating a method that was designed to be run on the dataframe with
         #associated metaparameters (esp _products). We temporarilly overwrite products and restore

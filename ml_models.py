@@ -150,7 +150,11 @@ class DummyMLModel(MLModel):
         returns:  
             np.array: (batch_size,n_features) 
         '''
-        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
 
 class LinReg(MLModel):
     '''
@@ -173,7 +177,11 @@ class LinReg(MLModel):
             np.array: (batch_size,n_features) 
         '''
         #TODO talk to Mark about a good set of seeds to start at
-        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
 
     def predict(self):
         '''
