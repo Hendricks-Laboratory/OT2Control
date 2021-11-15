@@ -81,7 +81,7 @@ def main(serveraddr):
     elif args.mode == 'auto':
         print('launching in auto mode')
         #TODO work on auto new flags
-        launch_auto(serveraddr,args.name,args.cache,args.simulate,no_sim,no_pr)
+        launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
@@ -107,7 +107,7 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
@@ -115,10 +115,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    auto.run_simulation()
+    if not no_sim:
+        auto.run_simulation()
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         #need a new model because last is fit to sim
-        auto.run_protocol(simulate=simulate)
+        auto.run_protocol(simulate=simulate,no_pr=no_pr)
 
 
 class Controller(ABC):
@@ -1675,7 +1676,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self):
+    def run_simulation(self, no_pr=False):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -1702,7 +1703,7 @@ class AutoContr(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, True, model)
+        self._run(port, True, model, no_pr)
 
         #collect the eve thread
         eve_thread.join()
@@ -1713,12 +1714,13 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(self, model=None, simulate=False, port=50000):
+    def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
             str simulate: (this should never be used in normal operation. It is for debugging
               on the robot)  
+            bool no_pr: if True, will not use the plate reader even if possible to simulate
             MLModel model: the model to use when training and predicting  
         NOTE: the simulate here is a little different than running run_simulation(). This simulate
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
@@ -1729,7 +1731,7 @@ class AutoContr(Controller):
             #you're simulating with a dummy model.
             print('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
-        self._run(port, simulate, model)
+        self._run(port, simulate, model, no_pr)
         print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
@@ -1739,7 +1741,7 @@ class AutoContr(Controller):
         pass
 
     @error_exit
-    def _run(self, port, simulate, model):
+    def _run(self, port, simulate, model, no_pr):
         '''
         private function to run
         Returns:  
@@ -1747,7 +1749,7 @@ class AutoContr(Controller):
         '''
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
-        self._init_pr(simulate)
+        self._init_pr(simulate, no_pr)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
