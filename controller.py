@@ -1604,8 +1604,10 @@ class Controller(ABC):
                 found_errors = max(found_errors,2)
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
-        tot_vol_mol = transfer_df.loc[check_conc,self._products]
-        for i in tot_vol_mol:
+        test_tot_conc = transfer_df.loc[check_conc,self._products].any()
+        test_tot_conc = test_tot_conc.loc[test_tot_conc].index
+        print("tot_vol_mol equals",test_tot_conc)
+        for i in test_tot_conc:
             if i not in self.tot_vols.keys():
                 print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
         return found_errors
@@ -1865,7 +1867,7 @@ class AutoContr(Controller):
         row['reagent'] = self._get_reagent(reagent)
         row['Template'] = self.dilution_params.vol
         row.rename({'Template':product},inplace=True)
-        print(row)
+        #print(row)
         #3 call send_dilution
         #here we're appropriating a method that was designed to be run on the dataframe with
         #associated metaparameters (esp _products). We temporarilly overwrite products and restore
