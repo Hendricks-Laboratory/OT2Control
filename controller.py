@@ -65,6 +65,8 @@ def init_parser():
     parser.add_argument('-n','--name',help='the name of the google sheet')
     parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
     parser.add_argument('-s','--simulate',help='runs robot and pr in simulation mode',action='store_true')
+    parser.add_argument('--no-sim',help='won\'t run simulation at the start.',action='store_true')
+    parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
     return parser
 
 def main(serveraddr):
@@ -75,15 +77,16 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == 'protocol':
         print('launching in protocol mode')
-        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate)
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        launch_auto(serveraddr,args.name,args.cache,args.simulate)
+        #TODO work on auto new flags
+        launch_auto(serveraddr,args.name,args.cache,args.simulate,no_sim,no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False):
+def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch a controller and execute a protocol
     '''
@@ -93,11 +96,14 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simul
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
-    tests_passed = controller.run_simulation()
+    if not no_sim:
+        tests_passed = controller.run_simulation(no_pr=no_pr)
+    else:
+        tests_passed = True
 
     if tests_passed:
         if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol(simulate)
+            controller.run_protocol(simulate, no_pr)
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
@@ -333,12 +339,27 @@ class Controller(ABC):
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
-    def _init_pr(self,simulate):
-        try:
-            self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
-        except:
-            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+    def _init_pr(self, simulate, no_pr):
+        '''
+        params:  
+            bool simulate: True indicates that the platereader should be launched in simulation
+              mode
+            bool no_pr: True indicates that even if platereader can be run in simulation mode,
+              it should not be. This should be run only for the marginal speedup that can be
+              gained by not using the platereader for certain tests
+        Postconditions:  
+            self.pr is initialized with either a connection to the SPECTROstar if possible and
+              no_pr is false, otherwise, a Dummy with no connection, but the same interface
+              is supplied
+        '''
+        if no_pr:
             self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+        else:
+            try:
+                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+            except:
+                print('<<controller>> failed to initialize platereader, initializing dummy reader')
+                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
@@ -1605,9 +1626,13 @@ class Controller(ABC):
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
         tot_vol_mol = transfer_df.loc[check_conc,self._products]
-        for i in tot_vol_mol:
-            if i not in self.tot_vols.keys():
-                print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+        if not tot_vol_mol.empty:
+            tot_vol_mol = tot_vol_mol.sum().apply(lambda x: not math.isclose(x, 0, abs_tol=1e-9))
+            tot_vol_mol = tot_vol_mol.loc[tot_vol_mol].index
+            for i in tot_vol_mol:
+                if i not in self.tot_vols.keys():
+                    print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+                    found_errors = max(found_errors, 2)
         return found_errors
 
 class AutoContr(Controller):
@@ -2137,7 +2162,7 @@ class ProtocolExecutor(Controller):
         self._insert_tot_vol_transfer() #adds total volume transfer step to start
         self.run_all_checks() 
 
-    def run_simulation(self):
+    def run_simulation(self, no_pr=False):
         '''
         runs a full simulation of the protocol with
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -2160,7 +2185,7 @@ class ProtocolExecutor(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, simulate=True)
+        self._run(port, simulate=True, no_pr=no_pr)
 
         #run post execution tests
         tests_passed = self.run_all_tests()
@@ -2174,27 +2199,35 @@ class ProtocolExecutor(Controller):
         print('<<controller>> EXITING SIMULATION')
         return tests_passed
 
-    def run_protocol(self, simulate=False, port=50000):
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
-            str simulate: (this should never be used in normal operation. It is for debugging
+            bool simulate: (this should never be used in normal operation. It is for debugging
               on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
         NOTE: the simulate here is a little different than running run_simulation(). This simulate
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(port, simulate=simulate)
+        self._run(port, simulate=simulate, no_pr=no_pr)
         print('<<controller>> EXITING PROTOCOL')
         
     @error_exit
-    def _run(self, port, simulate):
+    def _run(self, port, simulate, no_pr):
         '''
+        params:  
+            int port: the port number to connect on  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
         Returns:  
             bool: True if all tests were passed  
         '''
-        self._init_pr(simulate)
+        self._init_pr(simulate, no_pr)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
