@@ -1541,7 +1541,7 @@ if __name__ == '__main__':
             fail_count = 0
         except Exception as e:
             fail_count+=1
-            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.")
+            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.".format(e))
             #credit Horacio of stack overflow
             with open('ot2_error_output.txt', 'a+') as file:
                 file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
