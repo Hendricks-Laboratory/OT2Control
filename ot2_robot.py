@@ -176,7 +176,7 @@ class Tube20000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -213,7 +213,7 @@ class Tube50000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -249,11 +249,11 @@ class Tube2000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
-        tip_depth = 4.5 # mm
+        tip_depth = 6 # mm
         return self.height - tip_depth
 
 class Well(Container, ABC):
