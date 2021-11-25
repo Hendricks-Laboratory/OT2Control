@@ -45,7 +45,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import numpy as np
 import opentrons.execute
-from opentrons import protocol_api, simulate, types
+import opentrons.simulate
+from opentrons import protocol_api, types
 from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -2632,7 +2633,6 @@ class AbstractPlateReader(ABC):
 
     def __init__(self, data_path):
         self.data_path = data_path
-        self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         
@@ -2772,6 +2772,7 @@ class PlateReader(AbstractPlateReader):
 
     def __init__(self, data_path, simulate=False):
         super().__init__(data_path)
+        self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
