@@ -1019,8 +1019,6 @@ class Controller(ABC):
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
             elif row['op'] == 'stop':
-                #read through the inflight packets
-                self.portal.send_pack('stop')
                 self._stop(i)
             elif row['op'] == 'scan':
                 self._execute_scan(row, i)
@@ -1268,6 +1266,7 @@ class Controller(ABC):
         Postconditions:  
             self._inflight_packs has been cleaned  
         '''
+        self.portal.send_pack('stop')
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
         if not self.simulate:
@@ -1290,27 +1289,36 @@ class Controller(ABC):
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
-        has_stop = 'stop' in callbacks
-        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
-        cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
-        if has_stop:
-            n_stops = containers.shape[0]
-            for _ in range(n_stops):
-                self._stop(i)
+        if callbacks:
+            #if there were callbacks, you must send transfer one at a time, breaking up into
+            #iterate through each transfer_step we're doing.
+            for transfer_step in transfer_steps:
+                #send just that transfer step
+                self.portal.send_pack('transfer', src, [transfer_step])
+                #then send a callback for each callback you've got 
+                for callback in callbacks:
+                    self._send_callback(callback, row, i)
+        else:
+            self.portal.send_pack('transfer', src, transfer_steps)
 
-    
-    def _get_callback_args(self, row, callback):
+    def _send_callback(self, callback, row, i):
         '''
+        This method is used to send (or execute) a single callback.  
         params:  
-            pd.Series row: a row of self.rxn_df  
-        returns:  
-            list<object>: the arguments associated with the callback or None if no arguments  
+            str callback: the string name of the callback  
+            pd.Series row: the row of this operation. (used to extract metaparameters)  
+            int i: the index of this command in rxn_df. This will be the same for all the
+              callbacks of a single transfer.  
+        Postconditions:  
+            the callback has been executed/sent
         '''
+        if callback == 'stop':
+            print('DEBUG STOPPING')
+            self._stop(i)
         if callback == 'pause':
-            return [row['pause_time']]
-        return None
+            print('DEBUG PAUSING')
+            self.portal.send_pack('pause',row['pause_time'])
     
-
     def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
         '''
         calculates the amount of reagent volume needed for a dilution  
