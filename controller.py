@@ -1160,14 +1160,14 @@ class Controller(ABC):
 
     def _mix(self,row,i):
         '''
-        For now this function just shakes the whole plate.
-        In the future, we may want to mix
-        things that aren't on the platereader, in which case a new argument should be made in 
-        excel for the wells to scan, and we should make a function to pipette mix.
+        this method mixes everything on the platereader with a shake. it mixes other things
+        by pipette
+        params:  
+            pd.Series row: the row with the mix operation
+            index i: index of the row in the dataframe
         '''
         wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
         wells_to_mix.name = 'mix_code'
-        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
         self._update_cached_locs(wells_to_mix.index)
         deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
                 wellname in wells_to_mix.index}, name='deck_pos', dtype=int)
@@ -1292,32 +1292,68 @@ class Controller(ABC):
         if callbacks:
             #if there were callbacks, you must send transfer one at a time, breaking up into
             #iterate through each transfer_step we're doing.
-            for transfer_step in transfer_steps:
+            for callback_num, transfer_step in enumerate(transfer_steps):
                 #send just that transfer step
                 self.portal.send_pack('transfer', src, [transfer_step])
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
-                    self._send_callback(callback, row, i)
+                    self._send_callback(callback, transfer_step[0], callback_num, row, i)
+            #TODO here you need to merge all the scans into a single file if there were any
+            #scans
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
 
-    def _send_callback(self, callback, row, i):
+    def _send_callback(self, callback, product, callback_num, row, i):
         '''
         This method is used to send (or execute) a single callback.  
         params:  
             str callback: the string name of the callback  
+            str product: the name of the product. Required to generate things like a 
+              scan row.  
+            int callback_num: the number of the callback. i.e. 0 if this is the first transfer,
+              1 if second, etc. If multiple callbacks, they will all be 0 for a product
             pd.Series row: the row of this operation. (used to extract metaparameters)  
             int i: the index of this command in rxn_df. This will be the same for all the
               callbacks of a single transfer.  
         Postconditions:  
             the callback has been executed/sent
+        Preconditions:  
+            #TODO add this rule to preconditions.
+            #TODO add rule that you should never scan multiple times
+            #TODO add checks for these
+            #TODO add checks for scans in callbacks
+            #TODO line 1016 is not taking into account total volumes when considering max vol
+            callback_num must not be larger than 26 (alpha numeric characters are used. If you
+              go larger than 26, you'll exceed alpha numeric)
         '''
+        callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             print('DEBUG STOPPING')
-            self._stop(i)
+            self._stop(i_ext)
         if callback == 'pause':
             print('DEBUG PAUSING')
             self.portal.send_pack('pause',row['pause_time'])
+        if callback == 'scan':
+            #TODO this was developed without wifi requires testing
+            print('DEBUG SCANNING')
+            template = row.copy()
+            template.loc[self._products] = 0 
+            template.loc[product] = 1
+            template['op'] = 'scan'
+            #rename the scans with the callback_alph appended
+            template['scan_filename'] = '{}-{}'.format(template['scan_filename'], callback_alph)
+            #note that there will be some miscellaneous crap left in the row, but shouldn't affect
+            #the scan
+            self._execute_scan(template, i_ext)
+        if callback == 'mix':
+            #TODO HEAD. This method needs to be tested when you have wifi again
+            print('DEBUG MIXING')
+            template = row.copy()
+            template.loc[self._products] = 0
+            template.loc[product] = 1
+            template['op'] = 'mix'
+            self._mix(template, i_ext)
     
     def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
         '''
@@ -2764,6 +2800,29 @@ class AbstractPlateReader(ABC):
         assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
         assert (n_cycles != None), "corrupt reader file. num cycles not found."
         return i, {'n_cycles':n_cycles,'filename':filename}
+    
+    def merge_scans(self, filenames, dst):
+        '''
+        merges the specified files together into a single scan file.  
+        params:  
+            list<str> filenames: a list of all the files you want to merge  
+            str dst: the filename of the output file  
+        Postconditions:  
+            A new file has been created with the data from all the files.  
+            NOTE metadata may change across scans. the metadata of only the first scan to
+              be merged shall be preserved.
+        Preconditions:  
+            n_cycles must be the same for each scan file.  
+        '''
+        dst_path = os.path.join(self.data_path, dst)
+        shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
+        for filename in filenames[1:]:
+            filepath = os.path.join(self.data_path, filename)
+            meta = self._parse_metadata(filename)
+            with open(filepath, 'a') as file:
+                #TODO 2nd priority. This needs to be finished. probably readlines and then append
+                raise NotImplementedError('you haven\'t finished this method')
+
 
 class DummyReader(AbstractPlateReader):
     '''
