@@ -1323,25 +1323,16 @@ class Controller(ABC):
         Postconditions:  
             the callback has been executed/sent
         Preconditions:  
-            #TODO add this rule to preconditions.
-            #TODO add rule that you should never scan multiple times
-            #TODO add checks for these
-            #TODO add checks for scans in callbacks
-            #TODO line 1016 is not taking into account total volumes when considering max vol
             callback_num must not be larger than 26 (alpha numeric characters are used. If you
               go larger than 26, you'll exceed alpha numeric)
         '''
         callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
-            print('DEBUG STOPPING')
             self._stop(i)
         if callback == 'pause':
-            print('DEBUG PAUSING')
             self.portal.send_pack('pause',row['pause_time'])
         if callback == 'scan':
-            #TODO this was developed without wifi requires testing
-            print('DEBUG SCANNING')
             template = row.copy()
             template.loc[self._products] = 0 
             template.loc[product] = 1
@@ -1352,7 +1343,6 @@ class Controller(ABC):
             #the scan
             self._execute_scan(template, i_ext)
         if callback == 'mix':
-            print('DEBUG MIXING')
             template = row.copy()
             template.loc[self._products] = 0
             template.loc[product] = 1
@@ -1502,6 +1492,17 @@ class Controller(ABC):
             if r['op'] == 'transfer' and pd.isna(r['reagent']):
                 print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
+            #check that scans have a scan file
+            if (r['op'] == 'scan' or 'scan' in r['callbacks']) and pd.isna(r['scan_filename']):
+                print('<<controller>> scan without scan filename in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+            #check no multiple scans on one callback
+            callbacks = r['callbacks'].replace(' ', '').split(',')
+            if 'scan' in callbacks:
+                callbacks.remove('scan')
+                if 'scan' in callbacks:
+                    print('<<controller>> multiple scans in a callback on line {}'.format(r_num))
+                    found_errors = max(found_errors,2)
             #check that plots have scans
             if r['op'] == 'plot':
                 if pd.isna(r['scan_filename']):

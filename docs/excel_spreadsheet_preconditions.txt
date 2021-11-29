@@ -49,6 +49,10 @@ This means: no transfers from that container, no dilutions using that container
 Every row after the first 4 is interpreted as an operation, and should have an entry in that col
 When using products the concentration is always 1 unless diluted
 One of the reagents should be 'Water' named with uppercase W if you expect to do any dilutions
+Currently, mix, scan, stop, and pause are implemented as callbacks. They should be specified in the
+callbacks column seperated by commas, e.g. 'mix, scan' or 'scan' or 'scan, pause, stop, pause'.
+Two scans in one callback is illegal. You must specify the arguments for any callbacks you use
+and they will use the same args. e.g. 'pause,stop,pause' pauses for the same time on both.
 transfer:
     Specify volume in uL under the columns you want to transfer into
 dilution:
