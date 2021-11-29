@@ -1335,7 +1335,7 @@ class Controller(ABC):
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             print('DEBUG STOPPING')
-            self._stop(i_ext)
+            self._stop(i)
         if callback == 'pause':
             print('DEBUG PAUSING')
             self.portal.send_pack('pause',row['pause_time'])
