@@ -1298,8 +1298,13 @@ class Controller(ABC):
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
                     self._send_callback(callback, transfer_step[0], callback_num, row, i)
-            #TODO here you need to merge all the scans into a single file if there were any
-            #scans
+
+            #merge all the scans into a single file if there were any scans
+            #get the names of all the scan files
+            if 'scan' in callbacks:
+                dst = row['scan_filename'] #also the base name for all files to be merged
+                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
 
@@ -1347,7 +1352,6 @@ class Controller(ABC):
             #the scan
             self._execute_scan(template, i_ext)
         if callback == 'mix':
-            #TODO HEAD. This method needs to be tested when you have wifi again
             print('DEBUG MIXING')
             template = row.copy()
             template.loc[self._products] = 0
@@ -2805,8 +2809,8 @@ class AbstractPlateReader(ABC):
         '''
         merges the specified files together into a single scan file.  
         params:  
-            list<str> filenames: a list of all the files you want to merge  
-            str dst: the filename of the output file  
+            list<str> filenames: a list of all the files you want to merge without extensions.  
+            str dst: the filename of the output file without extension.  
         Postconditions:  
             A new file has been created with the data from all the files.  
             NOTE metadata may change across scans. the metadata of only the first scan to
@@ -2814,15 +2818,30 @@ class AbstractPlateReader(ABC):
         Preconditions:  
             n_cycles must be the same for each scan file.  
         '''
+        filenames = ['{}.csv'.format(filename) for filename in filenames]
+        dst = dst+'.csv'
         dst_path = os.path.join(self.data_path, dst)
+        #create the base file you're going to be writing to
         shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
+        n_cycles = self._parse_metadata(filenames[0])[1]['n_cycles'] #n_cycles of first file
+        #iterate through the other files
         for filename in filenames[1:]:
+            #setup
             filepath = os.path.join(self.data_path, filename)
             meta = self._parse_metadata(filename)
-            with open(filepath, 'a') as file:
-                #TODO 2nd priority. This needs to be finished. probably readlines and then append
-                raise NotImplementedError('you haven\'t finished this method')
-
+            assert (n_cycles == meta[1]['n_cycles']), "scan files to merge, {} and {} had different n_cycles".format(filename, filenames[0])
+            #strip out just the data from the file
+            with open(filepath, 'r', encoding='latin1') as file:
+                #these files are generally pretty small
+                lines = file.read().split('\n')
+                lines = lines[meta[0]:] #grab the raw data without preamble
+            #write the data to the dst file
+            with open(dst_path, 'a') as file:
+                file.write('\n'.join(lines))
+        #cleanup
+        for filename in filenames:
+            filepath = os.path.join(self.data_path, filename)
+            os.remove(filepath)
 
 class DummyReader(AbstractPlateReader):
     '''
