@@ -1538,6 +1538,109 @@ class Controller(ABC):
         
         return found_errors 
 
+    def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
+        '''
+        This function is responsible for converting from a reagent (without concentration) to
+        a uniquely identified container that holds that reagent. This is used when rows are
+        specified as molarities as opposed to volumes because the container must be chosen
+        from a number of containers that may hold that reagent at different concentations.
+        There are a number of ways to optimize which container should be chosen. This 
+        algorithm will always take the most concentrated solution unless there is not sufficient
+        volume, or the volume that would be required to pipette is less than the minimum
+        pipettable volume. defined here as 2uL.  
+        params:  
+            str reagent: the name of the reagent that you are searching for a container for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            tuple<str, float>: if a match was found for the reagent   
+                str: the container name.  
+                float: the volume that must be transfered with this container.  
+        raises:  
+            ConversionError: when the molarity cannot be acheived without overdrawing from
+              container, or by pipetting less than min_vol  
+        Preconditions:
+            the cached_reader_locs should be up to date  
+        '''
+        min_vol = 5
+        containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(reagent+'C\d*\.\d*', key)]
+        containers.sort(key=self._get_conc)
+        filtered_conts = [] #this will hold the containers that are diluted enough to be able
+        #to transfer without exceeding min_vol
+        for cont in containers:
+            vol = self._get_transfer_vol(cont,molarity,total_vol,ratio)
+            if vol > min_vol:
+                filtered_conts.append(cont)
+                if vol < self._cached_reader_locs[cont].aspirable_vol:
+                    return cont, vol
+        raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
+
+
+    def _convert_conc_to_vol(self, rxn_df, products):
+        '''
+        This function converts any molarity rows into volume rows  
+        params:  
+            df rxn_df: the reaction dataframe with some concentration rows  
+            str products: the names of the products  
+        returns:  
+            df: the rxn_df with all concentrations converted to volumes if things went well  
+        raises:  
+            ConversionError: for too small vol transfer, run out of vol in a reagent, or 
+              overflow  
+        '''
+        #We now need to iterate through df and for each column, calculate the container to pull
+        #from, and volume. Since one row may now pull from muliple reagents, this causes a
+        #rebuild of the dataframe. We accumulate a list of series and then rebuild
+        disassembled_df = [] # list of series
+
+        for i, row in rxn_df.iterrows():
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
+                #needs the concentration to be converted
+                testCont = row[products].reset_index()                
+                cont_vol_key = row[products].reset_index().apply(lambda r:
+                        pd.Series({x: y for x, y in 
+                        zip(['chem_name', 'vol'], 
+                                (np.nan,np.nan) if math.isclose(r.iloc[1], 0, abs_tol=1e-9) else
+                                    self._get_transfer_container(row['reagent'], r.iloc[1],
+                                        self.tot_vols[r['index']],ratio=1.0))}),axis=1)
+                cont_vol_key.index = products
+                conts = cont_vol_key['chem_name'].dropna().unique()
+                for cont in conts:
+                    new_row = row.copy()
+                    new_row['chemical_name'] = cont
+                    new_row['conc'] = self._get_conc(cont)
+                    for product in products:
+                        new_row[product] = cont_vol_key.loc[product,'vol'] if \
+                            cont_vol_key.loc[product,'chem_name'] == cont else 0
+                    disassembled_df.append(new_row)
+            else:
+                disassembled_df.append(row)
+        return pd.DataFrame(disassembled_df)
+
+    def _get_transfer_vol(self,reagent,molarity,total_vol,ratio):
+        '''
+        helper function to calculate the necessary volume for a transfer given a reagent and
+        desired molarity and a volume (and some other stuff)  
+        params:  
+            str reagent: the chemical name of the reagent fullname that you are searching for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            float: the volume to transfer from the reagent for desired end molarity  
+        '''
+        conc = self._get_conc(reagent)
+        vol = molarity * (total_vol*ratio) / conc
+        return vol
+        
     def _vol_calc(self, name):
         '''
         calculates the total volume of a column at the end of rxn  
@@ -1606,7 +1709,6 @@ class Controller(ABC):
         #Checks to make sure all reagents with molarity get transferred into products with total volume
         test_tot_conc = transfer_df.loc[check_conc,self._products].any()
         test_tot_conc = test_tot_conc.loc[test_tot_conc].index
-        print("tot_vol_mol equals",test_tot_conc)
         for i in test_tot_conc:
             if i not in self.tot_vols.keys():
                 print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
@@ -1919,67 +2021,6 @@ class AutoContr(Controller):
         '''
         return self.tot_vols['Template']
 
-    def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
-        '''
-        This function is responsible for converting from a reagent (without concentration) to
-        a uniquely identified container that holds that reagent. This is used when rows are
-        specified as molarities as opposed to volumes because the container must be chosen
-        from a number of containers that may hold that reagent at different concentations.
-        There are a number of ways to optimize which container should be chosen. This 
-        algorithm will always take the most concentrated solution unless there is not sufficient
-        volume, or the volume that would be required to pipette is less than the minimum
-        pipettable volume. defined here as 2uL.  
-        params:  
-            str reagent: the name of the reagent that you are searching for a container for  
-            float molarity: the desired molarity at end of reaction.  
-            float total_vol: the total volume that this well will have at end of the reaction.  
-            float ratio: between 1 and 0 if specified, this specifies that this addition 
-              will only add the ratio of the reagent, (important because it affects the min
-              vol that would be added with this transfer. effectively multiplies total_vol 
-              by ratio)  
-        returns:  
-            tuple<str, float>: if a match was found for the reagent   
-                str: the container name.  
-                float: the volume that must be transfered with this container.  
-        raises:  
-            ConversionError: when the molarity cannot be acheived without overdrawing from
-              container, or by pipetting less than min_vol  
-        Preconditions:
-            the cached_reader_locs should be up to date  
-        '''
-        min_vol = 5
-        containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(reagent+'C\d*\.\d*', key)]
-        containers.sort(key=self._get_conc)
-        filtered_conts = [] #this will hold the containers that are diluted enough to be able
-        #to transfer without exceeding min_vol
-        for cont in containers:
-            vol = self._get_transfer_vol(cont,molarity,total_vol,ratio)
-            if vol > min_vol:
-                filtered_conts.append(cont)
-                if vol < self._cached_reader_locs[cont].aspirable_vol:
-                    return cont, vol
-        raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
-
-    def _get_transfer_vol(self,reagent,molarity,total_vol,ratio):
-        '''
-        helper function to calculate the necessary volume for a transfer given a reagent and
-        desired molarity and a volume (and some other stuff)  
-        params:  
-            str reagent: the chemical name of the reagent fullname that you are searching for  
-            float molarity: the desired molarity at end of reaction.  
-            float total_vol: the total volume that this well will have at end of the reaction.  
-            float ratio: between 1 and 0 if specified, this specifies that this addition 
-              will only add the ratio of the reagent, (important because it affects the min
-              vol that would be added with this transfer. effectively multiplies total_vol 
-              by ratio)  
-        returns:  
-            float: the volume to transfer from the reagent for desired end molarity  
-        '''
-        conc = self._get_conc(reagent)
-        vol = molarity * (total_vol*ratio) / conc
-        return vol
-
     def _build_rxn_df(self,wellnames,recipes):
         '''
         used to construct a rxn_df for this batch of reactions
@@ -2011,46 +2052,6 @@ class AutoContr(Controller):
                 else "{}-{}".format(x, self.batch_num))
         rxn_df.drop(columns='Template',inplace=True) #no longer need template
         return rxn_df
-
-    def _convert_conc_to_vol(self, rxn_df, products):
-        '''
-        This function converts any molarity rows into volume rows  
-        params:  
-            df rxn_df: the reaction dataframe with some concentration rows  
-            str products: the names of the products  
-        returns:  
-            df: the rxn_df with all concentrations converted to volumes if things went well  
-        raises:  
-            ConversionError: for too small vol transfer, run out of vol in a reagent, or 
-              overflow  
-        '''
-        #We now need to iterate through df and for each column, calculate the container to pull
-        #from, and volume. Since one row may now pull from muliple reagents, this causes a
-        #rebuild of the dataframe. We accumulate a list of series and then rebuild
-        disassembled_df = [] # list of series
-
-        for i, row in rxn_df.iterrows():
-            if row['op'] == 'transfer' and pd.isna(row['conc']):
-                #needs the concentration to be converted
-                cont_vol_key = row[products].reset_index().apply(lambda r:
-                        pd.Series({x: y for x, y in 
-                        zip(['chem_name', 'vol'], 
-                                self._get_transfer_container(row['reagent'], r.iloc[1],
-                                        self.tot_vols[r['index']],ratio=1.0))}),axis=1)
-                cont_vol_key.index = products
-                conts = cont_vol_key['chem_name'].dropna().unique()
-                for cont in conts:
-                    new_row = row.copy()
-                    new_row['chemical_name'] = cont
-                    new_row['conc'] = self._get_conc(cont)
-                    for product in products:
-                        new_row[product] = cont_vol_key.loc[product,'vol'] if \
-                            cont_vol_key.loc[product,'chem_name'] == cont else 0
-                    disassembled_df.append(new_row)
-            else:
-                disassembled_df.append(row)
-        return pd.DataFrame(disassembled_df)
-    
 
     def run_all_checks(self): 
         found_errors = super().run_all_checks()
@@ -2205,6 +2206,10 @@ class ProtocolExecutor(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
 
         self.init_robot(simulate)
+        self._update_cached_locs('all')
+
+        self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
+        df_popout(self.rxn_df)
         self.execute_protocol_df()
         self.close_connection()
         self.pr.shutdown()
