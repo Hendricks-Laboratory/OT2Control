@@ -79,6 +79,7 @@ class Container(ABC):
         self.loc = loc
         self.labware = labware
         self.vol = vol
+        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
         self._update_height()
         self.conc = conc
         self.history = []
@@ -104,11 +105,11 @@ class Container(ABC):
             the history has been updated  
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
-        assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without \
-                specifying src'
+        assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without specifying src'
         self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
+        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
 
     def rewrite_history_first(self):
         '''
