@@ -98,15 +98,10 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
     if not no_sim:
-        tests_passed = controller.run_simulation(no_pr=no_pr)
-    else:
-        tests_passed = True
+        controller.run_simulation(no_pr=no_pr)
 
-    if tests_passed:
-        if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol(simulate, no_pr)
-    else:
-        print('Failed Some Tests. Please fix your errors and try again')
+    if input('would you like to run the protocol? [yn] ').lower() == 'y':
+        controller.run_protocol(simulate, no_pr)
 
 def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
@@ -1813,10 +1808,7 @@ class Controller(ABC):
                     'max_vol':self.dilution_params.vol}, index=[product])
         self.portal.send_pack('init_containers', product_df.to_dict())
         #2 construct a new dilution row (series)
-        colList = self.rxn_df.loc[:,:'reagent'].columns
-        new_prod = self.robo_params['product_df'].append(product_df)
-        self.robo_params['product_df'] = new_prod
-        
+        colList = self.rxn_df.loc[:,:'reagent'].columns        
         row = pd.Series(np.nan, colList)
         row['op'] = 'dilution'
         row['callbacks'] = ''
@@ -1859,13 +1851,6 @@ class Controller(ABC):
                 found_errors = max(found_errors,2)
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
-<<<<<<< HEAD
-        test_tot_conc = transfer_df.loc[check_conc,self._products].any()
-        test_tot_conc = test_tot_conc.loc[test_tot_conc].index
-        for i in test_tot_conc:
-            if i not in self.tot_vols.keys():
-                print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
-=======
         tot_vol_mol = transfer_df.loc[check_conc,self._products]
         if not tot_vol_mol.empty:
             tot_vol_mol = tot_vol_mol.sum().apply(lambda x: not math.isclose(x, 0, abs_tol=1e-9))
@@ -1874,7 +1859,6 @@ class Controller(ABC):
                 if i not in self.tot_vols.keys():
                     print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
                     found_errors = max(found_errors, 2)
->>>>>>> main
         return found_errors
 
 class AutoContr(Controller):
@@ -2201,11 +2185,7 @@ class ProtocolExecutor(Controller):
         check_rxn_df() int: checks for errors in input.  
         check_labware() int: checks for errors in labware/labware assignments.   
         check_products() int: checks for errors in the product placement.  
-        check_reagents() int: checks for errors in the reagent_info tab.  
-        TESTS: These are run after a reaction concludes to make sure things went well  
-        run_all_tests() bool: True if you passed, else false. run when at end of simulation  
-        test_vol_lab_cont() bool: tests that labware volume and containers are correct  
-        test_contents() bool: tests that the contents of each container is ok  
+        check_reagents() int: checks for errors in the reagent_info tab.   
     INHERITED METHODS:  
         run_protocol(simulate, port) void, close_connection() void, init_robot(simulate), 
         translate_wellmap() void, run_simulation() bool  
@@ -2249,7 +2229,6 @@ class ProtocolExecutor(Controller):
         self._run(port, simulate=True, no_pr=no_pr)
 
         #run post execution tests
-        tests_passed = self.run_all_tests()
 
         #collect the eve thread
         eve_thread.join()
@@ -2258,7 +2237,6 @@ class ProtocolExecutor(Controller):
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
-        return tests_passed
 
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
@@ -2309,7 +2287,6 @@ class ProtocolExecutor(Controller):
                         raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
                 successful_build = True
             except ConversionError as e:
-                print("I am handling a dilution error!!!!!!!!!!!!!!!")
                 self._handle_conversion_err(e)        
         self.execute_protocol_df()
         self.close_connection()
@@ -2424,263 +2401,6 @@ class ProtocolExecutor(Controller):
         return found_errors
 
     #POST Simulation
-    def run_all_tests(self):
-        '''
-        runs all post rxn tests  
-        Returns:  
-            bool: True if all tests were passed  
-        '''
-        print('<<controller>> running post execution tests')
-        valid = True
-        valid = valid and self.test_vol_lab_cont()
-        valid = valid and self.test_contents()
-        return valid
-
-    def test_vol_lab_cont(self):
-        '''
-        tests that vol, labware, and containers are correct for a row of a side by side df with
-        those attributes  
-        Preconditions:  
-            labware_df, reagent_df, and products_df are all initialized as vals in robo_params  
-            self.rxn_df is initialized  
-            df labware_df:  
-            df rxn_df: as from excel  
-            df reagent_df: info on reagents. columns from sheet. See excel specification  
-            df product_df:  
-            self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
-              over in close step  
-        Postconditions:  
-            Any errors will be printed to the screen.  
-            If errors were found, a pkl of the sbs will be written  
-        Returns:  
-            bool: True if all tests were passed  
-        '''
-        sbs = self._get_vol_lab_cont_sbs()
-        sbs['flag'] = sbs.apply(lambda row: self._is_valid_vol_lab_cont_sbs(row), axis=1)
-        filtered_sbs = sbs.loc[~sbs['flag']]
-        if filtered_sbs.empty:
-            print('<<controller>> congrats! Volumes, labware, containers, and deck_poses look good!')
-        else:
-            print('<<controller>> volume/deck pos/labware/container errors')
-            with open(os.path.join(self.debug_path,'vol_lab_cont_sbs.pkl'), 'wb') as sbs_pkl:
-                dill.dump(sbs, sbs_pkl)
-            if input('<<controller>> would you like to view the full sbs? [yn] ').lower() == 'y':
-                print(sbs)
-            return False
-        return True
-
-    def test_contents(self):
-        '''
-        tests to ensure that the contents of each container is correct
-        note does not work for dilutions, and does not check reagents  
-        params:  
-            df rxn_df: from excel  
-            bool use_cache: True if data is cached  
-            str eve_logpath: the path to the eve logfiles  
-        Postconditions:  
-            if a difference was found it will be displayed,  
-            if no differences are found, a friendly print message will be displayed  
-        Returns:  
-            bool: True if all tests were passed  
-        '''
-        sbs = self._create_contents_sbs()
-        sbs['flag'] = sbs.apply(self._is_valid_contents_sbs,axis=1)
-        filtered_sbs = sbs.loc[~sbs['flag']]
-        if filtered_sbs.empty:
-            print('<<controller>> congrats! Contents are correct!')
-        else:
-            print('<<controller>> there ere some content errors')
-            with open(os.path.join(self.debug_path,'contents_sbs.pkl'), 'wb') as sbs_pkl:
-                dill.dump(sbs, sbs_pkl)
-            if input('<<controller>> would you like to view the full sbs? [yn] ').lower() == 'y':
-                print(sbs)
-            return False
-        return True
-
-    def _is_valid_vol_lab_cont_sbs(self, row):
-        '''
-        params:  
-            pd.Series row: a row of a sbs dataframe:  
-        returns:  
-            Bool: True if it is a valid row  
-        '''
-        if row['deck_pos_t'] != 'any' and row['deck_pos'] not in row['deck_pos_t']:
-            print('<<controller>> deck_pos_error:')
-            print(row.to_frame().T)
-            print()
-            return False
-        if row['vol_t'] != 'any' and not math.isclose(row['vol'],row['vol_t'], abs_tol=1e-9):
-            print('<<controller>> volume error:')
-            print(row.to_frame().T)
-            print()
-            return False
-        if row['container_t'] != 'any' and not row['container'] == row['container_t']:
-            print('<<controller>> container error:')
-            print(row.to_frame().T)
-            print()
-            return False
-        if row['loc_t'] != 'any' and row['loc'] not in row['loc_t']:
-            print('<<controller>> loc error:')
-            print(row.to_frame().T)
-            print()
-            return False
-        return True
-    
-    def _get_vol_lab_cont_sbs(self):
-        '''
-        This is for comparing the volumes, labwares, and containers  
-        params:  
-        Preconditions:  
-            labware_df, reagent_df, and products_df are all initialized as vals in robo_params  
-            self.rxn_df is initialized  
-            df labware_df:  
-            df rxn_df: as from excel  
-            df reagent_df: info on reagents. columns from sheet. See excel specification  
-            df product_df:  
-            self.eve_files_path + wellmap.tsv exists (this is a file output by eve that is shipped
-              over in close step  
-        returns  
-            df  
-                + INDEX
-                + chemical_name: the containers name
-                + COLS: symmetric. Theoretical are suffixed _t
-                + str deck_pos: position on deck
-                + float vol: the volume in the container
-                + list<tuple<str, float>> history: the chem_name paired with the amount or
-                  keyword 'aspirate' and vol
-        '''
-        #copy the locals cause we're changing them
-        labware_df = self.robo_params['labware_df'].set_index('name').rename(index={'platereader7':'platereader','platereader4':'platereader'}) #converting to dict like
-        product_df = self.robo_params['product_df'].copy()
-        reagent_df = self.robo_params['reagent_df'].copy()
-        #create a df with sets of allowable locs and deck_poses
-        def get_dry_container_cols(df):
-            '''
-            apply helper func to combine the rows of the dry_containers_df
-            '''
-            d = {'loc':set(),'deck_pos':set()}
-            for i, r in df.iterrows():
-                d['loc'].add(r['loc'])
-                d['deck_pos'].add(r['deck_pos'])
-            return pd.Series(d)
-        dry_containers = self.robo_params['dry_containers'].groupby('index').apply(get_dry_container_cols)
-        def get_deck_pos(labware):
-            '''
-            apply helper func to get the deck position for products
-            '''
-            if labware:
-                deck_pos = labware_df.loc[labware,'deck_pos']
-                if isinstance(deck_pos,np.int64):
-                    return [deck_pos]
-                else:
-                    #for platereader with two indices
-                    return deck_pos.to_list()
-            else:
-                return 'any'
-        product_df['deck_pos'] = product_df['labware'].apply(get_deck_pos)
-        product_df['vol'] = [self._vol_calc(name) for name in product_df.index]
-        product_df['loc'] = 'any'
-        product_df.replace('','any', inplace=True)
-
-        #because reagents can be built, we now need to ensure that you end up with something 
-        #that could be on a new set of labware for reagents
-        reagent_df['deck_pos'] = reagent_df['deck_pos'].apply(lambda x: {x})
-        reagent_df['loc'] = reagent_df['loc'].apply(lambda x: {x})
-        reagent_df['vol'] = 'any' #I'm not checking this because it's harder to check, and works fine
-        reagent_df['container'] = 'any' #actually fixed, but checked by combo deck_pos and loc
-        def merge_dry(row):
-            '''
-            apply helper to merge a reagent_df with a dry_container_df  
-            Note, this is meant to be applied to the reagent_df, so it doesn't generate
-            new rows if necessary. That must be done seperately.  
-            '''
-            d = {'loc':{}, 'deck_pos':{}}
-            found_match = False
-            for name in dry_containers.index.unique():
-                if name in row.name:
-                    d['loc'] = dry_containers.loc[name,'loc'].union(row['loc'])
-                    d['deck_pos'] = dry_containers.loc[name,'deck_pos'].union(row['deck_pos'])
-                    found_match = True
-            if not found_match:
-                d['loc'] = row['loc']
-                d['deck_pos'] = row['deck_pos']
-            return pd.Series(d)
-        reagent_df[['loc', 'deck_pos']] = reagent_df.apply(merge_dry, axis=1)
-                    
-        theoretical_df = pd.concat((reagent_df.loc[:,['loc', 'deck_pos',\
-                'vol','container']], product_df.loc[:,['loc', 'deck_pos','vol','container']]))
-        result_df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t').set_index('chem_name')
-        sbs = result_df.join(theoretical_df, rsuffix='_t') #side by side
-        #could still have NaNs if a dry reagent was made, but not specified at start
-        sbs_rows_w_nan = sbs.loc[sbs.isna().any(axis=1)].index
-        for chem_name in sbs_rows_w_nan:
-            for dry_name in dry_containers.index:
-                if dry_name in chem_name:
-                    sbs.at[chem_name,'loc_t'] = dry_containers.at[dry_name,'loc']
-                    sbs.at[chem_name,'deck_pos_t'] = dry_containers.at[dry_name,'deck_pos']
-                    sbs.at[chem_name,'vol_t'] = 'any'
-                    sbs.at[chem_name,'container_t'] = 'any'
-        return sbs
-
-    def _is_valid_contents_sbs(self, row):
-        '''
-        tests if a row of contents sbs is valid
-        params:  
-            pd.Series row: has vol_t and vol  
-        returns:  
-            False if vol_t!=vol else True  
-        Postconditions:  
-            If vol_t!=vol the row will be printed  
-            
-        '''
-        if not math.isclose(row['vol_t'], row['vol']):
-            print('<<controller>> contents error:')
-            print(row.to_frame().T)
-            print()
-            return False
-        return True
-
-
-        if not sbs.loc[~sbs['flag']].empty:
-            print('<<controller>> found some invalid contents. Displaying rows')
-            container_index = sbs.loc[~sbs['flag']].index.get_level_values('container')
-            print(sbs.loc[container_index])
-        else:
-            print('<<controller>> Well done! Product have correct ratios of reagents')
-
-    def _create_contents_sbs(self):
-        '''
-        constructs a side by side frame from the history in well_history.tsv and the reaction
-        df
-        NOTE: completely ignores aspiration, but if all of your dispenses are correct, and your
-        final contents are correct you're looking pretty good
-        '''
-        history = pd.read_csv(os.path.join(self.eve_files_path, 'well_history.tsv'),na_filter=False,sep='\t').rename(columns={'chemical':'chem_name'})
-        disp_hist = history.loc[history['chem_name'].astype(bool)]
-        contents = disp_hist.groupby(['container','chem_name']).sum()
-        theoretical_his_list = []
-        for _, row in self.rxn_df.loc[(self.rxn_df['op'] == 'transfer') | \
-                (self.rxn_df['op'] == 'dilution')].iterrows():
-            if row['op'] == 'transfer':
-                for product in self._products:
-                    theoretical_his_list.append((product, row[product], row['chemical_name']))
-            else: #row['op'] == 'dilution'
-                water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-                product_vols = water_transfer_row[self._products]
-                target_reagent = product_vols.loc[~product_vols.apply(lambda x: \
-                        math.isclose(x,0,abs_tol=1e-9))].index[0]
-                theoretical_his_list.append((target_reagent, water_transfer_row[target_reagent], \
-                        'WaterC1.0'))
-                theoretical_his_list.append((target_reagent, \
-                        reagent_transfer_row[target_reagent], \
-                        reagent_transfer_row['chemical_name']))
-        theoretical_his = pd.DataFrame(theoretical_his_list, \
-                columns=['container', 'vol', 'chem_name'])
-        theoretical_contents = theoretical_his.groupby(['container','chem_name']).sum()
-        theoretical_contents = theoretical_contents.loc[~theoretical_contents['vol'].apply(lambda x:\
-                math.isclose(x,0))]
-        sbs = theoretical_contents.join(contents, how='left',lsuffix='_t')
-        return sbs
 
 class AbstractPlateReader(ABC):
     '''
