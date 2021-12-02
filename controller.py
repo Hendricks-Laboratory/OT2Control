@@ -45,7 +45,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import numpy as np
 import opentrons.execute
-from opentrons import protocol_api, simulate, types
+import opentrons.simulate
+from opentrons import protocol_api, types
 from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -65,6 +66,8 @@ def init_parser():
     parser.add_argument('-n','--name',help='the name of the google sheet')
     parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
     parser.add_argument('-s','--simulate',help='runs robot and pr in simulation mode',action='store_true')
+    parser.add_argument('--no-sim',help='won\'t run simulation at the start.',action='store_true')
+    parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
     return parser
 
 def main(serveraddr):
@@ -75,15 +78,16 @@ def main(serveraddr):
     args = parser.parse_args()
     if args.mode == 'protocol':
         print('launching in protocol mode')
-        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate)
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        launch_auto(serveraddr,args.name,args.cache,args.simulate)
+        #TODO work on auto new flags
+        launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
 
-def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simulate=False):
+def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch a controller and execute a protocol
     '''
@@ -93,15 +97,18 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name=None, use_cache=False, simul
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
-    tests_passed = controller.run_simulation()
+    if not no_sim:
+        tests_passed = controller.run_simulation(no_pr=no_pr)
+    else:
+        tests_passed = True
 
     if tests_passed:
         if input('would you like to run the protocol? [yn] ').lower() == 'y':
-            controller.run_protocol(simulate)
+            controller.run_protocol(simulate, no_pr)
     else:
         print('Failed Some Tests. Please fix your errors and try again')
 
-def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
+def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
@@ -109,10 +116,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    auto.run_simulation()
+    if not no_sim:
+        auto.run_simulation()
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         #need a new model because last is fit to sim
-        auto.run_protocol(simulate=simulate)
+        auto.run_protocol(simulate=simulate,no_pr=no_pr)
 
 
 class Controller(ABC):
@@ -333,12 +341,27 @@ class Controller(ABC):
                 dill.dump(name_key_pairs, name_key_pairs_cache)
         return name_key_pairs
 
-    def _init_pr(self,simulate):
-        try:
-            self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
-        except:
-            print('<<controller>> failed to initialize platereader, initializing dummy reader')
+    def _init_pr(self, simulate, no_pr):
+        '''
+        params:  
+            bool simulate: True indicates that the platereader should be launched in simulation
+              mode
+            bool no_pr: True indicates that even if platereader can be run in simulation mode,
+              it should not be. This should be run only for the marginal speedup that can be
+              gained by not using the platereader for certain tests
+        Postconditions:  
+            self.pr is initialized with either a connection to the SPECTROstar if possible and
+              no_pr is false, otherwise, a Dummy with no connection, but the same interface
+              is supplied
+        '''
+        if no_pr:
             self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+        else:
+            try:
+                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+            except:
+                print('<<controller>> failed to initialize platereader, initializing dummy reader')
+                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
@@ -996,8 +1019,6 @@ class Controller(ABC):
             elif row['op'] == 'pause':
                 cid = self.portal.send_pack('pause',row['pause_time'])
             elif row['op'] == 'stop':
-                #read through the inflight packets
-                self.portal.send_pack('stop')
                 self._stop(i)
             elif row['op'] == 'scan':
                 self._execute_scan(row, i)
@@ -1139,14 +1160,14 @@ class Controller(ABC):
 
     def _mix(self,row,i):
         '''
-        For now this function just shakes the whole plate.
-        In the future, we may want to mix
-        things that aren't on the platereader, in which case a new argument should be made in 
-        excel for the wells to scan, and we should make a function to pipette mix.
+        this method mixes everything on the platereader with a shake. it mixes other things
+        by pipette
+        params:  
+            pd.Series row: the row with the mix operation
+            index i: index of the row in the dataframe
         '''
         wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
         wells_to_mix.name = 'mix_code'
-        #wells_to_mix = [t for t in wells_to_mix.astype(int).iteritems()]
         self._update_cached_locs(wells_to_mix.index)
         deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
                 wellname in wells_to_mix.index}, name='deck_pos', dtype=int)
@@ -1245,6 +1266,7 @@ class Controller(ABC):
         Postconditions:  
             self._inflight_packs has been cleaned  
         '''
+        self.portal.send_pack('stop')
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
         if not self.simulate:
@@ -1267,27 +1289,66 @@ class Controller(ABC):
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
-        has_stop = 'stop' in callbacks
-        callbacks = [(callback, self._get_callback_args(row, callback)) for callback in callbacks]
-        cid = self.portal.send_pack('transfer', src, transfer_steps, callbacks)
-        if has_stop:
-            n_stops = containers.shape[0]
-            for _ in range(n_stops):
-                self._stop(i)
+        if callbacks:
+            #if there were callbacks, you must send transfer one at a time, breaking up into
+            #iterate through each transfer_step we're doing.
+            for callback_num, transfer_step in enumerate(transfer_steps):
+                #send just that transfer step
+                self.portal.send_pack('transfer', src, [transfer_step])
+                #then send a callback for each callback you've got 
+                for callback in callbacks:
+                    self._send_callback(callback, transfer_step[0], callback_num, row, i)
 
-    
-    def _get_callback_args(self, row, callback):
+            #merge all the scans into a single file if there were any scans
+            #get the names of all the scan files
+            if 'scan' in callbacks:
+                dst = row['scan_filename'] #also the base name for all files to be merged
+                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                self.pr.merge_scans(scan_names, dst)
+        else:
+            self.portal.send_pack('transfer', src, transfer_steps)
+
+    def _send_callback(self, callback, product, callback_num, row, i):
         '''
+        This method is used to send (or execute) a single callback.  
         params:  
-            pd.Series row: a row of self.rxn_df  
-        returns:  
-            list<object>: the arguments associated with the callback or None if no arguments  
+            str callback: the string name of the callback  
+            str product: the name of the product. Required to generate things like a 
+              scan row.  
+            int callback_num: the number of the callback. i.e. 0 if this is the first transfer,
+              1 if second, etc. If multiple callbacks, they will all be 0 for a product
+            pd.Series row: the row of this operation. (used to extract metaparameters)  
+            int i: the index of this command in rxn_df. This will be the same for all the
+              callbacks of a single transfer.  
+        Postconditions:  
+            the callback has been executed/sent
+        Preconditions:  
+            callback_num must not be larger than 26 (alpha numeric characters are used. If you
+              go larger than 26, you'll exceed alpha numeric)
         '''
+        callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        i_ext = 'i-{}'.format(callback_alph) #extended index with callback
+        if callback == 'stop':
+            self._stop(i)
         if callback == 'pause':
-            return [row['pause_time']]
-        return None
+            self.portal.send_pack('pause',row['pause_time'])
+        if callback == 'scan':
+            template = row.copy()
+            template.loc[self._products] = 0 
+            template.loc[product] = 1
+            template['op'] = 'scan'
+            #rename the scans with the callback_alph appended
+            template['scan_filename'] = '{}-{}'.format(template['scan_filename'], callback_alph)
+            #note that there will be some miscellaneous crap left in the row, but shouldn't affect
+            #the scan
+            self._execute_scan(template, i_ext)
+        if callback == 'mix':
+            template = row.copy()
+            template.loc[self._products] = 0
+            template.loc[product] = 1
+            template['op'] = 'mix'
+            self._mix(template, i_ext)
     
-
     def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
         '''
         calculates the amount of reagent volume needed for a dilution  
@@ -1431,6 +1492,17 @@ class Controller(ABC):
             if r['op'] == 'transfer' and pd.isna(r['reagent']):
                 print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
+            #check that scans have a scan file
+            if (r['op'] == 'scan' or 'scan' in r['callbacks']) and pd.isna(r['scan_filename']):
+                print('<<controller>> scan without scan filename in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+            #check no multiple scans on one callback
+            callbacks = r['callbacks'].replace(' ', '').split(',')
+            if 'scan' in callbacks:
+                callbacks.remove('scan')
+                if 'scan' in callbacks:
+                    print('<<controller>> multiple scans in a callback on line {}'.format(r_num))
+                    found_errors = max(found_errors,2)
             #check that plots have scans
             if r['op'] == 'plot':
                 if pd.isna(r['scan_filename']):
@@ -1787,11 +1859,22 @@ class Controller(ABC):
                 found_errors = max(found_errors,2)
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
+<<<<<<< HEAD
         test_tot_conc = transfer_df.loc[check_conc,self._products].any()
         test_tot_conc = test_tot_conc.loc[test_tot_conc].index
         for i in test_tot_conc:
             if i not in self.tot_vols.keys():
                 print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+=======
+        tot_vol_mol = transfer_df.loc[check_conc,self._products]
+        if not tot_vol_mol.empty:
+            tot_vol_mol = tot_vol_mol.sum().apply(lambda x: not math.isclose(x, 0, abs_tol=1e-9))
+            tot_vol_mol = tot_vol_mol.loc[tot_vol_mol].index
+            for i in tot_vol_mol:
+                if i not in self.tot_vols.keys():
+                    print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+                    found_errors = max(found_errors, 2)
+>>>>>>> main
         return found_errors
 
 class AutoContr(Controller):
@@ -1834,7 +1917,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self):
+    def run_simulation(self, no_pr=False):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -1861,7 +1944,7 @@ class AutoContr(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, True, model)
+        self._run(port, True, model, no_pr)
 
         #collect the eve thread
         eve_thread.join()
@@ -1872,12 +1955,13 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return True
 
-    def run_protocol(self, model=None, simulate=False, port=50000):
+    def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
             str simulate: (this should never be used in normal operation. It is for debugging
               on the robot)  
+            bool no_pr: if True, will not use the plate reader even if possible to simulate
             MLModel model: the model to use when training and predicting  
         NOTE: the simulate here is a little different than running run_simulation(). This simulate
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
@@ -1888,7 +1972,7 @@ class AutoContr(Controller):
             #you're simulating with a dummy model.
             print('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
-        self._run(port, simulate, model)
+        self._run(port, simulate, model, no_pr)
         print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
@@ -1898,7 +1982,7 @@ class AutoContr(Controller):
         pass
 
     @error_exit
-    def _run(self, port, simulate, model):
+    def _run(self, port, simulate, model, no_pr):
         '''
         private function to run
         Returns:  
@@ -1906,7 +1990,7 @@ class AutoContr(Controller):
         '''
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
-        self._init_pr(simulate)
+        self._init_pr(simulate, no_pr)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -2139,7 +2223,7 @@ class ProtocolExecutor(Controller):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
         self.run_all_checks() 
 
-    def run_simulation(self):
+    def run_simulation(self, no_pr=False):
         '''
         runs a full simulation of the protocol with
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -2162,7 +2246,7 @@ class ProtocolExecutor(Controller):
 
         #do create a connection
         b.wait()
-        self._run(port, simulate=True)
+        self._run(port, simulate=True, no_pr=no_pr)
 
         #run post execution tests
         tests_passed = self.run_all_tests()
@@ -2176,27 +2260,35 @@ class ProtocolExecutor(Controller):
         print('<<controller>> EXITING SIMULATION')
         return tests_passed
 
-    def run_protocol(self, simulate=False, port=50000):
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
-            str simulate: (this should never be used in normal operation. It is for debugging
+            bool simulate: (this should never be used in normal operation. It is for debugging
               on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
         NOTE: the simulate here is a little different than running run_simulation(). This simulate
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING PROTOCOL')
-        self._run(port, simulate=simulate)
+        self._run(port, simulate=simulate, no_pr=no_pr)
         print('<<controller>> EXITING PROTOCOL')
         
     @error_exit
-    def _run(self, port, simulate):
+    def _run(self, port, simulate, no_pr):
         '''
+        params:  
+            int port: the port number to connect on  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
         Returns:  
             bool: True if all tests were passed  
         '''
-        self._init_pr(simulate)
+        self._init_pr(simulate, no_pr)
         #create a connection
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
@@ -2613,7 +2705,6 @@ class AbstractPlateReader(ABC):
 
     def __init__(self, data_path):
         self.data_path = data_path
-        self.simulate = simulate
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         
@@ -2737,6 +2828,44 @@ class AbstractPlateReader(ABC):
         assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
         assert (n_cycles != None), "corrupt reader file. num cycles not found."
         return i, {'n_cycles':n_cycles,'filename':filename}
+    
+    def merge_scans(self, filenames, dst):
+        '''
+        merges the specified files together into a single scan file.  
+        params:  
+            list<str> filenames: a list of all the files you want to merge without extensions.  
+            str dst: the filename of the output file without extension.  
+        Postconditions:  
+            A new file has been created with the data from all the files.  
+            NOTE metadata may change across scans. the metadata of only the first scan to
+              be merged shall be preserved.
+        Preconditions:  
+            n_cycles must be the same for each scan file.  
+        '''
+        filenames = ['{}.csv'.format(filename) for filename in filenames]
+        dst = dst+'.csv'
+        dst_path = os.path.join(self.data_path, dst)
+        #create the base file you're going to be writing to
+        shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
+        n_cycles = self._parse_metadata(filenames[0])[1]['n_cycles'] #n_cycles of first file
+        #iterate through the other files
+        for filename in filenames[1:]:
+            #setup
+            filepath = os.path.join(self.data_path, filename)
+            meta = self._parse_metadata(filename)
+            assert (n_cycles == meta[1]['n_cycles']), "scan files to merge, {} and {} had different n_cycles".format(filename, filenames[0])
+            #strip out just the data from the file
+            with open(filepath, 'r', encoding='latin1') as file:
+                #these files are generally pretty small
+                lines = file.read().split('\n')
+                lines = lines[meta[0]:] #grab the raw data without preamble
+            #write the data to the dst file
+            with open(dst_path, 'a') as file:
+                file.write('\n'.join(lines))
+        #cleanup
+        for filename in filenames:
+            filepath = os.path.join(self.data_path, filename)
+            os.remove(filepath)
 
 class DummyReader(AbstractPlateReader):
     '''
@@ -2753,6 +2882,7 @@ class PlateReader(AbstractPlateReader):
 
     def __init__(self, data_path, simulate=False):
         super().__init__(data_path)
+        self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")

@@ -79,6 +79,7 @@ class Container(ABC):
         self.loc = loc
         self.labware = labware
         self.vol = vol
+        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
         self._update_height()
         self.conc = conc
         self.history = []
@@ -104,11 +105,11 @@ class Container(ABC):
             the history has been updated  
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
-        assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without \
-                specifying src'
+        assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without specifying src'
         self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
+        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
 
     def rewrite_history_first(self):
         '''
@@ -176,7 +177,7 @@ class Tube20000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -213,7 +214,7 @@ class Tube50000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -249,11 +250,11 @@ class Tube2000uL(Container):
 
     @property
     def disp_height(self):
-        return self.height + 10 #mm
+        return self.height + 15 #mm
 
     @property
     def asp_height(self):
-        tip_depth = 4.5 # mm
+        tip_depth = 6 # mm
         return self.height - tip_depth
 
 class Well(Container, ABC):
@@ -308,7 +309,7 @@ class Well96(Well):
 class Well24(Well):
     '''
     TODO
-    Obviously, Well24 should not inherit from Well96. If they are different make a well class
+    Obviously, Well24 should not inherit from Well96. If they are different make a well superclass
       if they really are the same, make a well class
     '''
     DEAD_VOL = 400 #uL
@@ -1196,44 +1197,21 @@ class OT2Robot():
             time.sleep(pause_time)
 
     @exec_func('transfer', 1, True, exec_funcs)
-    def _exec_transfer(self, src, transfer_steps, callbacks=[]):
+    def _exec_transfer(self, src, transfer_steps):
         '''
-        this command executes a transfer. It's usually pretty simple, unless you have
-        a stop callback. If you have a stop callback it launches a new TCP connection and
-        stops to wait for user input at each transfer  
+        this command executes a transfer. 
         params:  
             str src: the chem_name of the source well  
             list<tuple<str,float>> transfer_steps: each element is a dst, vol pair  
-            list<str> callbacks: the ordered callbacks to perform after each transfer or []  
         '''
         #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
                 self._get_clean_tips()
                 break; #cause now they're clean
-        callback_types = [callback for callback, _ in callbacks]
-        #if you're going to be altering flow, you need to create a seperate connection with the
-        #controller
-        if 'stop' in callback_types:
-            sock = socket.socket(socket.AF_INET)
-            fail_count=0
-            connected = False
-            while not connected and fail_count < 3:
-                try:
-                    sock.connect((self.controller_ip, 50003))
-                    connected = True
-                except ConnectionRefusedError:
-                    fail_count += 1
-                    time.sleep(2**fail_count)
         for dst, vol in transfer_steps:
             self._transfer_step(src,dst,vol)
             new_tip=False #don't want to use a new tip_next_time
-            if callbacks:
-                for callback, args in callbacks:
-                    if callback == 'pause':
-                        self._exec_pause(args[0])
-                    elif callback == 'stop':
-                        self._exec_stop()
 
     @exec_func('stop', 1, True, exec_funcs)
     def _exec_stop(self):
@@ -1541,7 +1519,7 @@ if __name__ == '__main__':
             fail_count = 0
         except Exception as e:
             fail_count+=1
-            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.")
+            print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.".format(e))
             #credit Horacio of stack overflow
             with open('ot2_error_output.txt', 'a+') as file:
                 file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))

@@ -1,6 +1,0 @@
-WE WANT
-number of cycles
-
-
-NOTES
-after you get to the data part will never not be csv. Num cycles increases the time between
