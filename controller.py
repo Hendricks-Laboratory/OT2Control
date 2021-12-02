@@ -2347,22 +2347,25 @@ class ProtocolExecutor(Controller):
             float: the maximum volume that this container will ever hold at one time, not taking into 
               account aspirations for dilutions  
         '''
-        vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
-        aspirations = vol_change_rows['chemical_name'] == name
-        max_vol = 0
-        current_vol = 0
-        for i, is_aspiration in aspirations.iteritems():
-            if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
-                #This is a row where we're transfering from this well
-                current_vol -= self.rxn_df.loc[i, products].sum()
-            elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
-                _, transfer_row = self._get_dilution_transfer_rows(self.rxn_df.loc[i])
-                vol = transfer_row[self._products].sum() 
-                current_vol -= vol
-            else:
-                current_vol += self.rxn_df.loc[i,name]
-                max_vol = max(max_vol, current_vol)
-        return max_vol
+        if name in self.tot_vols:
+            return self.tot_vols[name]
+        else:
+            vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
+            aspirations = vol_change_rows['chemical_name'] == name
+            max_vol = 0
+            current_vol = 0
+            for i, is_aspiration in aspirations.iteritems():
+                if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
+                    #This is a row where we're transfering from this well
+                    current_vol -= self.rxn_df.loc[i, products].sum()
+                elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
+                    _, transfer_row = self._get_dilution_transfer_rows(self.rxn_df.loc[i])
+                    vol = transfer_row[self._products].sum() 
+                    current_vol -= vol
+                else:
+                    current_vol += self.rxn_df.loc[i,name]
+                    max_vol = max(max_vol, current_vol)
+            return max_vol
 
     
     #TESTING
