@@ -99,7 +99,6 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
 
     if not no_sim:
         controller.run_simulation(no_pr=no_pr)
-
     if input('would you like to run the protocol? [yn] ').lower() == 'y':
         controller.run_protocol(simulate, no_pr)
 
@@ -1806,6 +1805,7 @@ class Controller(ABC):
                     {'labware':'',
                     'container':self.dilution_params.cont,
                     'max_vol':self.dilution_params.vol}, index=[product])
+        print(product_df.to_dict())
         self.portal.send_pack('init_containers', product_df.to_dict())
         #2 construct a new dilution row (series)
         colList = self.rxn_df.loc[:,:'reagent'].columns        
@@ -1916,16 +1916,13 @@ class AutoContr(Controller):
         stored_simulate = self.simulate
         self.server_ip = '127.0.0.1'
         self.simulate = True
-
         model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
-
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
         eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
         eve_thread.start()
-
         #do create a connection
         b.wait()
         self._run(port, True, model, no_pr)
@@ -1957,6 +1954,7 @@ class AutoContr(Controller):
             print('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
         self._run(port, simulate, model, no_pr)
+        print(self.__dict__)
         print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
@@ -2216,7 +2214,7 @@ class ProtocolExecutor(Controller):
         stored_simulate = self.simulate
         self.server_ip = '127.0.0.1'
         self.simulate = True
-
+        print(self.__dict__)
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
