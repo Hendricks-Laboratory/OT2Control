@@ -1477,12 +1477,6 @@ class Controller(ABC):
             if val < 0:
                 print("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
                 found_errors = max(found_errors,2)
-                
-        #checks for overflow in summation of transfers
-        overflow_vol = (self.rxn_df.loc[0,self.tot_vols.keys()] < 0)
-        if overflow_vol.any():
-            print("<<controller>> Error in total volume, there is overflow in "+ str(overflow_vol.loc[overflow_vol].index))
-            found_errors = max(found_errors,2)
             
         #checks for scan errors
         check_scan = self.rxn_df.loc[(self.rxn_df['op'] == 'scan')]
@@ -1687,6 +1681,92 @@ class Controller(ABC):
         '''
         
         return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
+
+    def _handle_conversion_err(self,e):
+        '''
+        This function will handle errors caught in the conversion process from molarity to
+        volume reaction dataframe.  
+        params:  
+            ConversionError e: the conversion error raised  
+        Postconditions:  
+            If the error was pipetting infinitesimal volume, a dilution has been performed on
+            the robot to dilute by 2X   
+        Raises:  
+            NotImplementedError: If you ran out of a reagent you probably need to have Mark
+              restock (or you could dilute a stock maybe)  
+        '''
+        if e.empty_reagents:
+            #You ran out of something
+            #query the user
+            #It is also possible here that you might be able to perform dilution
+            raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
+        else:
+            #you're trying to pipette an infinitesimal volume
+            #send a single dilution column to the robot that will solve this problem
+            #we have the data here to do something smart with how much we want to dilute, but
+            #for now lets do something dumb like dilute 2x
+
+            #generate necessary parameters
+            containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
+            stock_cont = max(containers, key=self._get_conc)
+            min_conc = min(map(self._get_conc, containers))
+            new_conc = min_conc / 2
+            #execute dilution
+            self._execute_single_dilution(new_conc, stock_cont)
+
+
+    def _execute_single_dilution(self, end_conc, reagent):
+        '''
+        This function creates a single dilution row and executes that row.  
+        This involves:  
+        + 1 inititializing a new product with the desired name  
+        + 2 constructing a new dilution row (series), and then turn that into a dataframe  
+        + 3 save rxn_df and associated metadata and overwrite with the dilution row.
+            restore immediately after execution
+        params:  
+            float end_conc: the end concentration of the dilution  
+            str reagent: the full chemical name of the reagent to be diluted  
+            float vol: the end volume of the dilution  
+        Postconditions:  
+            a command has been sent to the robot requesting initialization of a container for
+            this dilution  
+            a command has been sent to the robot to perform a dilution  
+        '''
+        #1 initialize the new product on the robot
+        product = '{}C{}'.format(self._get_reagent(reagent), end_conc)
+        product_df = pd.DataFrame(
+                    {'labware':'',
+                    'container':self.dilution_params.cont,
+                    'max_vol':self.dilution_params.vol}, index=[product])
+        self.portal.send_pack('init_containers', product_df.to_dict())
+        #2 construct a new dilution row (series)
+        colList = self.rxn_df.loc[:,:'reagent'].columns
+        new_prod = self.robo_params['product_df'].append(product_df)
+        self.robo_params['product_df'] = new_prod
+        
+        row = pd.Series(np.nan, colList)
+        row['op'] = 'dilution'
+        row['callbacks'] = ''
+        row['dilution_conc'] = end_conc
+        row['chemical_name'] = reagent
+        row['conc'] = self._get_conc(reagent)
+        row['reagent'] = self._get_reagent(reagent)
+        row['Template'] = self.dilution_params.vol
+        row.rename({'Template':product},inplace=True)
+        #print(row)
+        #3 call send_dilution
+        #here we're appropriating a method that was designed to be run on the dataframe with
+        #associated metaparameters (esp _products). We temporarilly overwrite products and restore
+        #immediately afterwards
+        cached_products = self._products
+        cached_rxn_df = self.rxn_df
+        self._products = [product]
+        self.rxn_df = pd.DataFrame([row])
+        self.execute_protocol_df()
+        self._products = cached_products
+        self.rxn_df = cached_rxn_df
+
     
     def check_conc(self):
         found_errors = 0
@@ -1901,86 +1981,6 @@ class AutoContr(Controller):
                 self._handle_conversion_err(e)
         self.execute_protocol_df()
 
-    def _handle_conversion_err(self,e):
-        '''
-        This function will handle errors caught in the conversion process from molarity to
-        volume reaction dataframe.  
-        params:  
-            ConversionError e: the conversion error raised  
-        Postconditions:  
-            If the error was pipetting infinitesimal volume, a dilution has been performed on
-            the robot to dilute by 2X   
-        Raises:  
-            NotImplementedError: If you ran out of a reagent you probably need to have Mark
-              restock (or you could dilute a stock maybe)  
-        '''
-        if e.empty_reagents:
-            #You ran out of something
-            #query the user
-            #It is also possible here that you might be able to perform dilution
-            raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
-        else:
-            #you're trying to pipette an infinitesimal volume
-            #send a single dilution column to the robot that will solve this problem
-            #we have the data here to do something smart with how much we want to dilute, but
-            #for now lets do something dumb like dilute 2x
-
-            #generate necessary parameters
-            containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
-            stock_cont = max(containers, key=self._get_conc)
-            min_conc = min(map(self._get_conc, containers))
-            new_conc = min_conc / 2
-            #execute dilution
-            self._execute_single_dilution(new_conc, stock_cont)
-
-
-    def _execute_single_dilution(self, end_conc, reagent):
-        '''
-        This function creates a single dilution row and executes that row.  
-        This involves:  
-        + 1 inititializing a new product with the desired name  
-        + 2 constructing a new dilution row (series), and then turn that into a dataframe  
-        + 3 save rxn_df and associated metadata and overwrite with the dilution row.
-            restore immediately after execution
-        params:  
-            float end_conc: the end concentration of the dilution  
-            str reagent: the full chemical name of the reagent to be diluted  
-            float vol: the end volume of the dilution  
-        Postconditions:  
-            a command has been sent to the robot requesting initialization of a container for
-            this dilution  
-            a command has been sent to the robot to perform a dilution  
-        '''
-        #1 initialize the new product on the robot
-        product = '{}C{}'.format(self._get_reagent(reagent), end_conc)
-        product_df = pd.DataFrame(
-                    {'labware':'',
-                    'container':self.dilution_params.cont,
-                    'max_vol':self.dilution_params.vol}, index=[product])
-        self.portal.send_pack('init_containers', product_df.to_dict())
-        #2 construct a new dilution row (series)
-        row = pd.Series(np.nan, self.rxn_df_template.columns)
-        row['op'] = 'dilution'
-        row['callbacks'] = ''
-        row['dilution_conc'] = end_conc
-        row['chemical_name'] = reagent
-        row['conc'] = self._get_conc(reagent)
-        row['reagent'] = self._get_reagent(reagent)
-        row['Template'] = self.dilution_params.vol
-        row.rename({'Template':product},inplace=True)
-        #print(row)
-        #3 call send_dilution
-        #here we're appropriating a method that was designed to be run on the dataframe with
-        #associated metaparameters (esp _products). We temporarilly overwrite products and restore
-        #immediately afterwards
-        cached_products = self._products
-        cached_rxn_df = self.rxn_df
-        self._products = [product]
-        self.rxn_df = pd.DataFrame([row])
-        self.execute_protocol_df()
-        self._products = cached_products
-        self.rxn_df = cached_rxn_df
 
     def _clean_meta(self, wellnames):
         '''
@@ -2137,7 +2137,6 @@ class ProtocolExecutor(Controller):
         is instantiated in run
         '''
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
-        self._insert_tot_vol_transfer() #adds total volume transfer step to start
         self.run_all_checks() 
 
     def run_simulation(self):
@@ -2206,10 +2205,20 @@ class ProtocolExecutor(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
 
         self.init_robot(simulate)
-        self._update_cached_locs('all')
-
-        self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
-        df_popout(self.rxn_df)
+        successful_build = False
+        while not successful_build:
+            try:
+                self._update_cached_locs('all')
+                #build new df
+                self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
+                self._insert_tot_vol_transfer()
+                if self.tot_vols: #has at least one element
+                    if (self.rxn_df.loc[0,self._products] < 0).any():
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                successful_build = True
+            except ConversionError as e:
+                print("I am handling a dilution error!!!!!!!!!!!!!!!")
+                self._handle_conversion_err(e)        
         self.execute_protocol_df()
         self.close_connection()
         self.pr.shutdown()
