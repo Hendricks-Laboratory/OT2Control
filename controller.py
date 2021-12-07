@@ -2248,6 +2248,7 @@ class ProtocolExecutor(Controller):
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
+        print(self.__dict__)
         print('<<controller>> RUNNING PROTOCOL')
         self._run(port, simulate=simulate, no_pr=no_pr)
         print('<<controller>> EXITING PROTOCOL')
