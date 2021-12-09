@@ -214,7 +214,9 @@ class LinReg(MLModel):
         with self.model_lock:
             if isinstance(self.X,np.ndarray):
                 self.X = np.concatenate((self.X, X))
+                self.y = np.concatenate((self.y, y))
             else:
                 self.X = X
-            self.model.fit(self.X, y)
+                self.y = y
+            self.model.fit(self.X, self.y)
         print('<<ML>> done training')

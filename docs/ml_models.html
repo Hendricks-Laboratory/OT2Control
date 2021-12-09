@@ -26,9 +26,12 @@
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">from abc import ABC
+<pre><code class="python">import time #TODO delete this debugging only
+from abc import ABC
 from abc import abstractmethod
 import threading
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
 
 import numpy as np
 
@@ -48,7 +51,9 @@ class MLModel():
         self.max_iters = max_iters
         self.quit = False
         self.model = model
-        self.model_lock = threading.lock
+        self.model_lock = threading.Lock()
+        self.X_lock = threading.Lock()
+        self.X = None
         self.quit = self.update_quit()
 
     def train(self, X, y):
@@ -65,7 +70,6 @@ class MLModel():
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
-
 
     @abstractmethod
     def _train(self, X, y):
@@ -111,6 +115,16 @@ class MLModel():
         extended by children to check if you&#39;ve reached the target.  
         &#39;&#39;&#39;
         self.quit =  self.curr_iter &gt;= self.max_iters
+
+    @abstractmethod
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,y.shape) 
+        &#39;&#39;&#39;
+        pass
         
 class DummyMLModel(MLModel):
     &#39;&#39;&#39;
@@ -125,9 +139,10 @@ class DummyMLModel(MLModel):
         int curr_iter: formally, this is the number of times the train method has been called
         int max_iters: the number of iters to execute before quiting  
     &#39;&#39;&#39;
-    def __init__(self, y_shape, max_iters=np.inf):
+    def __init__(self, y_shape, max_iters=np.inf, batch_size=5):
         super().__init__(None, max_iters) #don&#39;t have a model
         self.y_shape = y_shape
+        self.batch_size = batch_size
 
     def _train(self, X, y):
         &#39;&#39;&#39;
@@ -141,20 +156,98 @@ class DummyMLModel(MLModel):
             The model has been trained on the new data
         &#39;&#39;&#39;
         with self.model_lock: #note for dummy this is not necessary, just an example
-            print(&#39;training!&#39;)
+            print(&#39;&lt;&lt;ML&gt;&gt; training!&#39;)
 
-    def predict(self, n_predictions):
+    def predict(self):
         &#39;&#39;&#39;
         This call should wait on the training thread to complete if it is has not been collected
-        yet.
+        yet.  
         params:  
             int n_predictions: the number of instances to predict  
         returns:  
-            np.array: shape is n_predictions, y.shape. Features are evenly distributed
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
         &#39;&#39;&#39;
         with self.model_lock:
-            print(&#39;generating preditions&#39;)
-        return np.ones((n_predictions, self.y_shape)) / self.y_shape</code></pre>
+            print(&#39;&lt;&lt;ML&gt;&gt; generating preditions&#39;)
+        return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
+
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        &#39;&#39;&#39;
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
+
+class LinReg(MLModel):
+    &#39;&#39;&#39;
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:  
+      only runs for batch size of 1  
+    &#39;&#39;&#39;
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1):
+        super().__init__(model, max_iters) #don&#39;t have a model
+        self.FINAL_SPECTRA = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        &#39;&#39;&#39;
+        #TODO talk to Mark about a good set of seeds to start at
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
+
+    def predict(self):
+        &#39;&#39;&#39;
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        &#39;&#39;&#39;
+        super().predict()
+        with self.model_lock:
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
+        return y_pred
+ 
+    def _train(self, X, y):
+        &#39;&#39;&#39;
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated  
+        params:  
+            np.array X: shape (num_pts, num_features) the recieved data for each new well  
+            np.array y: shape(num_pts, n_classes) the labels to predict  
+        Postconditions:  
+            The model has been trained on the new data
+        &#39;&#39;&#39;
+        #update the data with the new scans
+        time.sleep(40)
+        print(&#39;&lt;&lt;ML&gt;&gt; training&#39;)
+        with self.model_lock:
+            if isinstance(self.X,np.ndarray):
+                self.X = np.concatenate((self.X, X))
+                self.y = np.concatenate((self.y, y))
+            else:
+                self.X = X
+                self.y = y
+            self.model.fit(self.X, self.y)
+        print(&#39;&lt;&lt;ML&gt;&gt; done training&#39;)</code></pre>
 </details>
 </section>
 <section>
@@ -168,7 +261,7 @@ class DummyMLModel(MLModel):
 <dl>
 <dt id="ml_models.DummyMLModel"><code class="flex name class">
 <span>class <span class="ident">DummyMLModel</span></span>
-<span>(</span><span>y_shape, max_iters=inf)</span>
+<span>(</span><span>y_shape, max_iters=inf, batch_size=5)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>This is the base class of any machine learning model.<br>
@@ -198,9 +291,10 @@ int max_iters: the number of iters to execute before quiting</p></div>
         int curr_iter: formally, this is the number of times the train method has been called
         int max_iters: the number of iters to execute before quiting  
     &#39;&#39;&#39;
-    def __init__(self, y_shape, max_iters=np.inf):
+    def __init__(self, y_shape, max_iters=np.inf, batch_size=5):
         super().__init__(None, max_iters) #don&#39;t have a model
         self.y_shape = y_shape
+        self.batch_size = batch_size
 
     def _train(self, X, y):
         &#39;&#39;&#39;
@@ -214,20 +308,33 @@ int max_iters: the number of iters to execute before quiting</p></div>
             The model has been trained on the new data
         &#39;&#39;&#39;
         with self.model_lock: #note for dummy this is not necessary, just an example
-            print(&#39;training!&#39;)
+            print(&#39;&lt;&lt;ML&gt;&gt; training!&#39;)
 
-    def predict(self, n_predictions):
+    def predict(self):
         &#39;&#39;&#39;
         This call should wait on the training thread to complete if it is has not been collected
-        yet.
+        yet.  
         params:  
             int n_predictions: the number of instances to predict  
         returns:  
-            np.array: shape is n_predictions, y.shape. Features are evenly distributed
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
         &#39;&#39;&#39;
         with self.model_lock:
-            print(&#39;generating preditions&#39;)
-        return np.ones((n_predictions, self.y_shape)) / self.y_shape</code></pre>
+            print(&#39;&lt;&lt;ML&gt;&gt; generating preditions&#39;)
+        return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
+
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        &#39;&#39;&#39;
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
@@ -235,32 +342,207 @@ int max_iters: the number of iters to execute before quiting</p></div>
 </ul>
 <h3>Methods</h3>
 <dl>
-<dt id="ml_models.DummyMLModel.predict"><code class="name flex">
-<span>def <span class="ident">predict</span></span>(<span>self, n_predictions)</span>
+<dt id="ml_models.DummyMLModel.generate_seed_rxns"><code class="name flex">
+<span>def <span class="ident">generate_seed_rxns</span></span>(<span>self)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>This call should wait on the training thread to complete if it is has not been collected
-yet.
-params:<br>
-int n_predictions: the number of instances to predict<br>
+<div class="desc"><p>This method is called before the model is trained to generate a batch of training
+points<br>
 returns:<br>
-np.array: shape is n_predictions, y.shape. Features are evenly distributed</p></div>
+np.array: (batch_size,n_features)</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def predict(self, n_predictions):
+<pre><code class="python">def generate_seed_rxns(self):
+    &#39;&#39;&#39;
+    This method is called before the model is trained to generate a batch of training
+    points  
+    returns:  
+        np.array: (batch_size,n_features) 
+    &#39;&#39;&#39;
+    if self.generate_seed_rxns.n_calls == 0:
+        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+    else:
+        return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2</code></pre>
+</details>
+</dd>
+<dt id="ml_models.DummyMLModel.predict"><code class="name flex">
+<span>def <span class="ident">predict</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This call should wait on the training thread to complete if it is has not been collected
+yet.<br>
+params:<br>
+int n_predictions: the number of instances to predict<br>
+returns:<br>
+np.array: shape is n_predictions, y.shape. Features are pi e-2</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def predict(self):
     &#39;&#39;&#39;
     This call should wait on the training thread to complete if it is has not been collected
-    yet.
+    yet.  
     params:  
         int n_predictions: the number of instances to predict  
     returns:  
-        np.array: shape is n_predictions, y.shape. Features are evenly distributed
+        np.array: shape is n_predictions, y.shape. Features are pi e-2  
     &#39;&#39;&#39;
     with self.model_lock:
-        print(&#39;generating preditions&#39;)
-    return np.ones((n_predictions, self.y_shape)) / self.y_shape</code></pre>
+        print(&#39;&lt;&lt;ML&gt;&gt; generating preditions&#39;)
+    return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="ml_models.MLModel" href="#ml_models.MLModel">MLModel</a></b></code>:
+<ul class="hlist">
+<li><code><a title="ml_models.MLModel.train" href="#ml_models.MLModel.train">train</a></code></li>
+<li><code><a title="ml_models.MLModel.update_quit" href="#ml_models.MLModel.update_quit">update_quit</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="ml_models.LinReg"><code class="flex name class">
+<span>class <span class="ident">LinReg</span></span>
+<span>(</span><span>model, final_spectra, y_shape, max_iters, batch_size=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Model to use Linear Regression algorithm
+model_lock also locks X
+UNIMPLEMENTED:<br>
+only runs for batch size of 1</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class LinReg(MLModel):
+    &#39;&#39;&#39;
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:  
+      only runs for batch size of 1  
+    &#39;&#39;&#39;
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1):
+        super().__init__(model, max_iters) #don&#39;t have a model
+        self.FINAL_SPECTRA = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        &#39;&#39;&#39;
+        #TODO talk to Mark about a good set of seeds to start at
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
+
+    def predict(self):
+        &#39;&#39;&#39;
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        &#39;&#39;&#39;
+        super().predict()
+        with self.model_lock:
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
+        return y_pred
+ 
+    def _train(self, X, y):
+        &#39;&#39;&#39;
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated  
+        params:  
+            np.array X: shape (num_pts, num_features) the recieved data for each new well  
+            np.array y: shape(num_pts, n_classes) the labels to predict  
+        Postconditions:  
+            The model has been trained on the new data
+        &#39;&#39;&#39;
+        #update the data with the new scans
+        time.sleep(40)
+        print(&#39;&lt;&lt;ML&gt;&gt; training&#39;)
+        with self.model_lock:
+            if isinstance(self.X,np.ndarray):
+                self.X = np.concatenate((self.X, X))
+                self.y = np.concatenate((self.y, y))
+            else:
+                self.X = X
+                self.y = y
+            self.model.fit(self.X, self.y)
+        print(&#39;&lt;&lt;ML&gt;&gt; done training&#39;)</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="ml_models.MLModel" href="#ml_models.MLModel">MLModel</a></li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="ml_models.LinReg.generate_seed_rxns"><code class="name flex">
+<span>def <span class="ident">generate_seed_rxns</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This method is called before the model is trained to generate a batch of training
+points<br>
+returns:<br>
+np.array: (batch_size,n_features)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def generate_seed_rxns(self):
+    &#39;&#39;&#39;
+    This method is called before the model is trained to generate a batch of training
+    points  
+    returns:  
+        np.array: (batch_size,n_features) 
+    &#39;&#39;&#39;
+    #TODO talk to Mark about a good set of seeds to start at
+    if self.generate_seed_rxns.n_calls == 0:
+        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+    else:
+        return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2</code></pre>
+</details>
+</dd>
+<dt id="ml_models.LinReg.predict"><code class="name flex">
+<span>def <span class="ident">predict</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This call should wait on the training thread to complete if it is has not been collected
+yet.<br>
+params:<br>
+int n_predictions: the number of instances to predict<br>
+returns:<br>
+np.array: shape is n_predictions, y.shape. Features are pi e-2</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def predict(self):
+    &#39;&#39;&#39;
+    This call should wait on the training thread to complete if it is has not been collected
+    yet.  
+    params:  
+        int n_predictions: the number of instances to predict  
+    returns:  
+        np.array: shape is n_predictions, y.shape. Features are pi e-2  
+    &#39;&#39;&#39;
+    super().predict()
+    with self.model_lock:
+        y_pred = self.model.predict(self.FINAL_SPECTRA)
+    return y_pred</code></pre>
 </details>
 </dd>
 </dl>
@@ -308,7 +590,9 @@ to keep going</p></div>
         self.max_iters = max_iters
         self.quit = False
         self.model = model
-        self.model_lock = threading.lock
+        self.model_lock = threading.Lock()
+        self.X_lock = threading.Lock()
+        self.X = None
         self.quit = self.update_quit()
 
     def train(self, X, y):
@@ -325,7 +609,6 @@ to keep going</p></div>
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
-
 
     @abstractmethod
     def _train(self, X, y):
@@ -370,14 +653,48 @@ to keep going</p></div>
         This method will just check that you have not exceded max_iters, but should be
         extended by children to check if you&#39;ve reached the target.  
         &#39;&#39;&#39;
-        self.quit =  self.curr_iter &gt;= self.max_iters</code></pre>
+        self.quit =  self.curr_iter &gt;= self.max_iters
+
+    @abstractmethod
+    def generate_seed_rxns(self):
+        &#39;&#39;&#39;
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,y.shape) 
+        &#39;&#39;&#39;
+        pass</code></pre>
 </details>
 <h3>Subclasses</h3>
 <ul class="hlist">
 <li><a title="ml_models.DummyMLModel" href="#ml_models.DummyMLModel">DummyMLModel</a></li>
+<li><a title="ml_models.LinReg" href="#ml_models.LinReg">LinReg</a></li>
 </ul>
 <h3>Methods</h3>
 <dl>
+<dt id="ml_models.MLModel.generate_seed_rxns"><code class="name flex">
+<span>def <span class="ident">generate_seed_rxns</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This method is called before the model is trained to generate a batch of training
+points<br>
+returns:<br>
+np.array: (batch_size,y.shape)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@abstractmethod
+def generate_seed_rxns(self):
+    &#39;&#39;&#39;
+    This method is called before the model is trained to generate a batch of training
+    points  
+    returns:  
+        np.array: (batch_size,y.shape) 
+    &#39;&#39;&#39;
+    pass</code></pre>
+</details>
+</dd>
 <dt id="ml_models.MLModel.predict"><code class="name flex">
 <span>def <span class="ident">predict</span></span>(<span>self)</span>
 </code></dt>
@@ -471,12 +788,21 @@ extended by children to check if you've reached the target.</p></div>
 <li>
 <h4><code><a title="ml_models.DummyMLModel" href="#ml_models.DummyMLModel">DummyMLModel</a></code></h4>
 <ul class="">
+<li><code><a title="ml_models.DummyMLModel.generate_seed_rxns" href="#ml_models.DummyMLModel.generate_seed_rxns">generate_seed_rxns</a></code></li>
 <li><code><a title="ml_models.DummyMLModel.predict" href="#ml_models.DummyMLModel.predict">predict</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="ml_models.LinReg" href="#ml_models.LinReg">LinReg</a></code></h4>
+<ul class="">
+<li><code><a title="ml_models.LinReg.generate_seed_rxns" href="#ml_models.LinReg.generate_seed_rxns">generate_seed_rxns</a></code></li>
+<li><code><a title="ml_models.LinReg.predict" href="#ml_models.LinReg.predict">predict</a></code></li>
 </ul>
 </li>
 <li>
 <h4><code><a title="ml_models.MLModel" href="#ml_models.MLModel">MLModel</a></code></h4>
 <ul class="">
+<li><code><a title="ml_models.MLModel.generate_seed_rxns" href="#ml_models.MLModel.generate_seed_rxns">generate_seed_rxns</a></code></li>
 <li><code><a title="ml_models.MLModel.predict" href="#ml_models.MLModel.predict">predict</a></code></li>
 <li><code><a title="ml_models.MLModel.train" href="#ml_models.MLModel.train">train</a></code></li>
 <li><code><a title="ml_models.MLModel.update_quit" href="#ml_models.MLModel.update_quit">update_quit</a></code></li>
