@@ -241,7 +241,35 @@ class Controller(ABC):
             has inserted a row into the rxn_df to transfer WaterC1.0  
             If the reaction has already overflowed the total volume, will add negative volume
             (which is impossible. The caller of this function must account for this.)  
-            If no total vols were specified, no transfer step will be inserted.  
+chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
+R1	1.0	A1	1	16.139		
+R2	0.25	A2	1	14.206		
+R3	4.66	A3	1	45.168		
+Water	1.0	A4	1	60		
+R2		B1	1	0.0045	5500	powdered R2
+R2		B2	1	0.0032	5500	powdered R2
+empty		A1	5			
+empty		A2	5			
+empty		A3	5			
+empty		A4	5			
+empty		B1	5			
+empty		B2	5			
+empty		B3	5			
+empty		B4	5			chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
+R1	1.0	A1	1	16.139		
+R2	0.25	A2	1	14.206		
+R3	4.66	A3	1	45.168		
+Water	1.0	A4	1	60		
+R2		B1	1	0.0045	5500	powdered R2
+R2		B2	1	0.0032	5500	powdered R2
+empty		A1	5			
+empty		A2	5			
+empty		A3	5			
+empty		A4	5			
+empty		B1	5			
+empty		B2	5			
+empty		B3	5			
+empty		B4	5			            If no total vols were specified, no transfer step will be inserted.  
         '''
         #if there are no total vols, don't insert the row, just return
         if self.tot_vols:
@@ -1773,6 +1801,7 @@ class Controller(ABC):
             #for now lets do something dumb like dilute 2x
 
             #generate necessary parameters
+            print(self._cached_reader_locs.keys())
             containers = [key for key in self._cached_reader_locs.keys() 
                 if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
             stock_cont = max(containers, key=self._get_conc)
@@ -2209,12 +2238,14 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
+        with open("simulation_dict.pkl",'wb') as file:
+            dill.dump(self.__dict__,file)
         #cache some things before you overwrite them for the simulation
         stored_server_ip = self.server_ip
         stored_simulate = self.simulate
+        stored_cached_reader_locs = self._cached_reader_locs
         self.server_ip = '127.0.0.1'
         self.simulate = True
-        print(self.__dict__)
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
@@ -2234,8 +2265,11 @@ class ProtocolExecutor(Controller):
         #restore changed vars
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
+        self._cached_reader_locs = stored_cached_reader_locs
         print('<<controller>> EXITING SIMULATION')
-
+        with open("protocol.pkl",'wb') as file:
+            dill.dump(self.__dict__,file)
+    
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
@@ -2248,7 +2282,6 @@ class ProtocolExecutor(Controller):
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
-        print(self.__dict__)
         print('<<controller>> RUNNING PROTOCOL')
         self._run(port, simulate=simulate, no_pr=no_pr)
         print('<<controller>> EXITING PROTOCOL')
