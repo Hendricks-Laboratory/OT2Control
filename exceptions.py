@@ -2,6 +2,7 @@
 This module contains useful Exceptions used in other modules.  
 '''
 
+#controller
 class ConversionError(RuntimeError):
     '''
     This is an error used by the controller raised during the conversion from molarity to volume.  
@@ -25,3 +26,19 @@ class ConversionError(RuntimeError):
         self.total_vol = total_vol
         self.ratio = ratio
         self.empty_reagents = empty_reagents
+
+#ot2_robot
+class EmptyReagent(RuntimeError):
+    '''
+    This is used for when you run out of a reagent on a container and try to aspirate from it.  
+    Specifically it can be used for triggering a make.  
+    '''
+
+    def __init__(self, message, chem_name):
+        '''
+        params:  
+            str message: the message associated with the error  
+            str chem_name: the chemical name of this reagent
+        '''
+        self.chem_name = chem_name
+        super().__init__(message)

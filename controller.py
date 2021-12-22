@@ -58,7 +58,7 @@ from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
-from exceptions import *
+from exceptions import ConversionError
 
 
 def init_parser():
