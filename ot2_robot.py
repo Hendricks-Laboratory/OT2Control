@@ -325,7 +325,7 @@ class MultiContainer(Container):
 
     @property
     def aspiratible_vol(self):
-        return sum([container.aspiratible_vol for container in self.cont_list[cont_i:]])
+        return sum([container.aspiratible_vol for container in self.cont_list[self._cont_i:]])
 
     #properties using the current object
     #these are just wrappers to direct calls to the current container
@@ -351,20 +351,24 @@ class MultiContainer(Container):
     def history(self):
         return self.cont.history
     @property
-    def _update_height(self, *args, **kwargs):
-        return self.conc._update_height(args,kwargs)
-    @property
-    def update_vol(self, *args, **kwargs):
-        return self.conc.update_vol(args,kwargs)
-    @property
-    def rewrite_history_first(self):
-        return self.cont.rewrite_history_first
-    @property
     def disp_height(self):
         return self.cont.disp_height
     @property
     def asp_height(self):
         return self.cont.asp_height
+    #methods
+    @property
+    def _update_height(self):
+        return self.cont._update_height
+    @property
+    def update_vol(self):
+        return self.cont.update_vol
+    @property
+    def _aspirate_cleanup(self):
+        return self.cont._aspirate_cleanup
+    @property
+    def rewrite_history_first(self):
+        return self.cont.rewrite_history_first
     #constants
     @property
     def MAX_VOL(self):
@@ -950,7 +954,9 @@ class OT2Robot():
         '''
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
-        reagent_df = pd.DataFrame(reagent_df)
+        #index of reagent_df needs to be set because it can have multiple chemicals of same
+        #name, in which case it doesn't reduce nicely to a dict
+        reagent_df = pd.DataFrame(reagent_df).set_index('index')
         dry_containers_df = pd.DataFrame(dry_containers_df).set_index('index')
         self.containers = {}
         self.pipettes = {}
@@ -1041,12 +1047,31 @@ class OT2Robot():
         '''
         reagent_df['container_types'] = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
-        #TODO left off here this probably requires a clever groupby on the names in order 
-        #to get out
-        #lists of chemicals if they have the same name
-        for name, conc, loc, deck_pos, mass, container_type in reagent_df.itertuples():
-            self.containers[name] = self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
-    
+        for name in reagent_df.index.unique():
+            chem_info = reagent_df.loc[name]
+            if isinstance(chem_info, pd.DataFrame):
+                #multiple instances with the same name, so must create multicontainers
+                self.containers[name] = self._construct_multicontainer(chem_info)
+            else:
+                #only one container with name. In this case is a series
+                self.containers[name] = self._construct_container(
+                        chem_info['container_types'], name, chem_info['deck_pos'],
+                        chem_info['loc'], mass=chem_info['mass'], conc=chem_info['conc'])
+
+    def _construct_multicontainer(self, chem_info):
+        '''
+        params:  
+            df chem_info: dataframe of structure of reagent_df, but has a single chemical name
+              for all indices  
+        returns:  
+            MultiContainer: a Container with all of the reagents in its cont_list  
+        '''
+        cont_list = [
+            self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
+            for name, conc, loc, deck_pos, mass, container_type in chem_info.itertuples()
+            ]
+        return MultiContainer(cont_list)
+
     def _construct_container(self, container_type, name, deck_pos, loc, **kwargs):
         '''
         params:  
@@ -1608,6 +1633,7 @@ class OT2Robot():
                 self.pipettes[arm]['last_used'] = src
                 sufficient_vol=True
             except EmptyReagent as e:
+                breakpoint()
                 src_raw_name = self._get_reagent(e.chem_name)
                 src_conc = self._get_conc(e.chem_name)
                 try:

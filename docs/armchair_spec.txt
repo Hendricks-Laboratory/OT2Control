@@ -19,8 +19,10 @@ x00: 'init'
         bool using_temp_ctrl: True if using temperature control
         float temp: the temperature to keep unit at
         dict labware: labware information see OT2Controller.__init__ (should be a 
-	  dataframe with.to_dict())
-        dict reagents: reagents information see excel spec DataFrame.to_dict()
+	  dataframe with .to_dict())
+        dict reagents: reagents information see excel spec DataFrame.to_dict() *note that the
+	  reagents can have multiple entries for same reagent, in which case the to dict will
+	  not work. Adding a new temporary index is required.  
 	str controller_ip: the ip address of the controller
         dict dry_containers: actually df with .to_dict()
             note: cannot be sent over pickle as is because the index has duplicates.

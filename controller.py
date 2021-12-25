@@ -809,10 +809,11 @@ class Controller(ABC):
             robot has been initialized with necessary params  
         '''
         #send robot data to initialize itself
+        #note reagent_df can have index with same name so index is reset for transfer
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
-                self.robo_params['reagent_df'].to_dict(), self.my_ip,
+                self.robo_params['reagent_df'].reset_index().to_dict(), self.my_ip,
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
