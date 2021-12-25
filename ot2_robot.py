@@ -62,7 +62,7 @@ class Container(ABC):
         float disp_height: the height to dispense at  
         float asp_height: the height to aspirate from  
         list<tup<timestamp, str, float> history: the history of this container. Contents:
-          timestamp timestamp: the time of the addition/removal
+          timestamp timestamp: the time of the addition/removal. Note that it may not be sorted
           str chem_name: the name of the chemical added or blank if aspiration
           float vol: the volume of chemical added/removed  
     CONSTANTS:  
@@ -137,7 +137,7 @@ class Container(ABC):
             it is the responsibility of the caller to update the pipette as dirty because
             this is a robot level attribute  
         Postconditions:  
-            The pipette has aspirated vol from this container
+            The pipette has aspirated vol from this container  
         '''
         #check to ensure you can pipette
         if self.aspiratible_vol < vol:
@@ -216,7 +216,6 @@ class Container(ABC):
         return self.labware.wells_by_name()[self.loc]._geometry._max_volume
 
 class MultiContainer(Container):
-    #TODO this class is finished, but untested
     '''
     In some cases, it is necessary to have multiple reagents of the same name.
     However, we maintain the assumption that you should only need to use one of 
@@ -227,10 +226,10 @@ class MultiContainer(Container):
     used. It will use that container until it runs out of volume at which point any
     call to aspirate will cause cont to be updated to the next Container in the
     list.  
-    All inherited attributes, loc, vol, history, etc. refer to the corresponding
-    attributes of the current cont. With the EXCEPTION of aspirable_vol. This
+    All inherited attributes, loc, vol,  etc. refer to the corresponding
+    attributes of the current cont. With the EXCEPTION of aspirable_vol and history. aspirable_vol
     value corresponds to the sum of aspirable volumes of all of the containers
-    in the list.  
+    in the list, and histoyr is the concatenated list of all of the containers.  
     Dispensing into a MultiContainer is a terrible idea. (which Container would
     you dispense into?). This class is meant for multiple stock reagents
     (especially water). If you want to make a product name it something else.
@@ -240,6 +239,8 @@ class MultiContainer(Container):
           object, excpet aspirable vol.  
         int _cont_i: index of current cont in cont_list
         list<Containers> cont_list: The list of containers this class wraps.  
+        df history: the history of this MultiContainer. This is a property that runs on top of
+          the histories of the container_list  
     INHERITED ATTRIBUTES:  
         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
           Opentrons.Labware labware  
@@ -247,7 +248,7 @@ class MultiContainer(Container):
         float DEAD_VOL: the volume at which this container is considered empty  
         float MIN_HEIGHT: the minimum height a tip can go  
         NOTE these also correspond to the current cont, so they will change. They're not
-          technically const, but user should not mess with them ever.
+          technically const, but user should not write them ever.  
     INHERITED METHODS:  
         _update_height void, update_vol(float del_vol) void,  
     '''
@@ -326,6 +327,13 @@ class MultiContainer(Container):
     @property
     def aspiratible_vol(self):
         return sum([container.aspiratible_vol for container in self.cont_list[self._cont_i:]])
+    
+    @property
+    def history(self):
+        hist = []
+        for cont in self.cont_list:
+            hist += cont.history
+        return hist
 
     #properties using the current object
     #these are just wrappers to direct calls to the current container
@@ -347,9 +355,6 @@ class MultiContainer(Container):
     @property
     def conc(self):
         return self.cont.conc
-    @property
-    def history(self):
-        return self.cont.history
     @property
     def disp_height(self):
         return self.cont.disp_height
@@ -1652,15 +1657,35 @@ class OT2Robot():
         '''
         path=os.path.join(self.logs_p,'wellmap.tsv')
         names = self.containers.keys()
-        locs = [self.containers[name].loc for name in names]
-        deck_poses = [self.containers[name].deck_pos for name in names]
-        vols = [self.containers[name].vol for name in names]
-        def lookup_container_type(name):
-            container = self.containers[name]
-            labware = self.lab_deck[container.deck_pos]
-            return labware.get_container_type(container.loc)
-        container_types = [lookup_container_type(name) for name in names]
-        well_map = pd.DataFrame({'chem_name':list(names), 'loc':locs, 'deck_pos':deck_poses, 
+        locs = []
+        deck_poses = []
+        vols = []
+        chem_names = []
+        container_types = []
+        for name in names:
+            cont = self.containers[name]
+            if isinstance(cont, MultiContainer):
+                #this is one of the few instances where the loc, deck_pos, and vol
+                #you want is not the attribute of the current cont for this multicontainer
+                #instead, you want a list of all of the raw containers.
+                for subcont in cont.cont_list:
+                    locs.append(subcont.loc)
+                    deck_poses.append(subcont.deck_pos)
+                    vols.append(subcont.vol)
+                    chem_names.append(name)
+                    container_types.append(
+                            self.lab_deck[cont.deck_pos].get_container_type(cont.loc)
+                            )
+            else:
+                #is just a regular container
+                locs.append(cont.loc)
+                deck_poses.append(cont.deck_pos)
+                vols.append(cont.vol)
+                chem_names.append(name)
+                container_types.append(
+                        self.lab_deck[cont.deck_pos].get_container_type(cont.loc)
+                        )
+        well_map = pd.DataFrame({'chem_name':list(chem_names), 'loc':locs, 'deck_pos':deck_poses, 
                 'vol':vols,'container':container_types})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
         well_map.to_csv(path, index=False, sep='\t')
