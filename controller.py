@@ -1230,17 +1230,38 @@ class Controller(ABC):
               see self._construct_dilution_transfer_row for details  
         '''
         reagent = row['chemical_name']
-        reagent_conc = row['conc']
         product_cols = row.loc[self._products]
         dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #TODO investigate if this works
         #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
-        total_vol = dilution_name_vol.iloc[0]
         target_name = dilution_name_vol.index[0]
-        target_conc = row['dilution_conc']
-        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(row)
         water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
         reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
         return water_transfer_row, reagent_transfer_row
+
+    def _get_dilution_transfer_vols(self, row):
+        '''
+        calculates the amount of reagent volume needed for a dilution  
+        params:  
+            float target_conc: the concentration desired at the end  
+            float reagent_conc: the concentration of the reagent  
+            float total_vol: the total volume requested  
+        returns:  
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer  
+        '''
+        reagent_conc = row['conc']
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        total_vol = dilution_name_vol.iloc[0]
+        target_conc = row['dilution_conc']
+
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
 
     def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
         '''
@@ -1354,23 +1375,6 @@ class Controller(ABC):
             template['op'] = 'mix'
             self._mix(template, i_ext)
     
-    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
-        '''
-        calculates the amount of reagent volume needed for a dilution  
-        params:  
-            float target_conc: the concentration desired at the end  
-            float reagent_conc: the concentration of the reagent  
-            float total_vol: the total volume requested  
-        returns:  
-            tuple<float>: size 2
-                volume of water to transfer
-                volume of reagent to transfer  
-        '''
-        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
-        vol_reagent = mols_reagent/reagent_conc
-        vol_water = total_vol - vol_reagent
-        return vol_water, vol_reagent
-
     def _get_chemical_name(self,row):
         '''
         create a chemical name
@@ -1630,8 +1634,7 @@ class Controller(ABC):
         dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
                 (self.rxn_df['chemical_name'] == name),:]
         def calc_dilution_vol(row):
-            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-            return reagent_transfer_row[self._products].sum()
+            return self._get_dilution_transfer_vols(row)[1]
 
         if dilution_rows.empty:
             dilution_aspirations = 0.0
@@ -2385,9 +2388,7 @@ class ProtocolExecutor(Controller):
                     #This is a row where we're transfering from this well
                     current_vol -= self.rxn_df.loc[i, products].sum()
                 elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
-                    _, transfer_row = self._get_dilution_transfer_rows(self.rxn_df.loc[i])
-                    vol = transfer_row[self._products].sum() 
-                    current_vol -= vol
+                    current_vol -= self._get_dilution_transfer_vols(self.rxn_df.loc[i])[1]
                 else:
                     current_vol += self.rxn_df.loc[i,name]
                     max_vol = max(max_vol, current_vol)
