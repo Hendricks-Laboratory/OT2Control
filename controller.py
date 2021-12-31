@@ -1221,22 +1221,38 @@ class Controller(ABC):
 
     def _get_dilution_transfer_rows(self, row):
         '''
-        Takes in a dilution row and builds two transfer rows to be used by the transfer command  
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
+        This command will communicate with the robot to get the current deck position of the
+        thing being diluted.  
+        This is required because if that thing is on a temperature controller, ColdWater shall
+        be used instead of Water.  
         params:  
             pd.Series row: a row of self.rxn_df  
         returns:  
             tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
               reagent
               see self._construct_dilution_transfer_row for details  
+        Preconditions:  
+            robot has been initialized  
+            Water or ColdWater is on the deck (depending on if this is on temperature module
+            or not.  
         '''
         reagent = row['chemical_name']
+        #figure out if it is on temperature module
+        self._update_cached_locs([reagent])
+        deck_pos = self._cached_reader_locs[reagent].deck_pos
+        df = self.robo_params['labware_df'] #cause typing hurts
+        #iloc is necessary because will give a series by default, but always has one element
+        is_temp_cont = df.loc[df['deck_pos'] == deck_pos,'name'].iloc[0] == 'temp_mod_24_tube'
+        water_src = 'ColdWaterC1.0' if is_temp_cont else 'WaterC1.0'
         product_cols = row.loc[self._products]
         dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
         #TODO investigate if this works
         #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
         target_name = dilution_name_vol.index[0]
         vol_water, vol_reagent = self._get_dilution_transfer_vols(row)
-        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
+        water_transfer_row = self._construct_dilution_transfer_row(water_src, target_name, vol_water)
+
         reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
         return water_transfer_row, reagent_transfer_row
 
