@@ -233,7 +233,7 @@ class MultiContainer(Container):
     Dispensing into a MultiContainer is a terrible idea. (which Container would
     you dispense into?). This class is meant for multiple stock reagents
     (especially water). If you want to make a product name it something else.
-    Therefore, the dispense method is overriden to raise a TODO error  
+    Therefore, the dispense method is overriden to raise a NotImplemented error  
     ATTRIBUTES:
         Container cont: the current container. all inherited attributes correspond to this
           object, excpet aspirable vol.  
