@@ -110,7 +110,7 @@ class Container(ABC):
         self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
-        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
+        assert (self.vol < self.MAX_VOL + 1e-9), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL) #1e-9 is fudge
 
     def rewrite_history_first(self):
         '''
@@ -990,7 +990,7 @@ class OT2Robot():
         self._init_labware(labware_df, using_temp_ctrl, temp)
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
-        self._init_containers(reagent_df)
+        self._init_reagents(reagent_df)
 
     def _init_directories(self):
         '''
@@ -1042,7 +1042,7 @@ class OT2Robot():
         else:
             self.dry_containers = {}
 
-    def _init_containers(self, reagent_df):
+    def _init_reagents(self, reagent_df):
         '''
         params:  
             df reagent_df: as passed to init  
@@ -1638,7 +1638,6 @@ class OT2Robot():
                 self.pipettes[arm]['last_used'] = src
                 sufficient_vol=True
             except EmptyReagent as e:
-                breakpoint()
                 src_raw_name = self._get_reagent(e.chem_name)
                 src_conc = self._get_conc(e.chem_name)
                 try:
