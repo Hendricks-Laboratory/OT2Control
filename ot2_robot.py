@@ -1405,7 +1405,6 @@ class OT2Robot():
             pipette.blow_out()
         
         #pull a little out of that well and shake off the drops
-        #TODO my assumption is that this will blow out above, but could be wrong
         pipette.well_bottom_clearance.dispense = cont.disp_height
         #blowout
         for i in range(4):
@@ -1462,8 +1461,11 @@ class OT2Robot():
         #update some things you didn't know when you initialized
         self.containers[chem_name].conc = conc
         self.containers[chem_name].name = chem_name
+        #figure out what your water source should be
+        is_cold = self.containers[chem_name].labware.name == 'temp_mod_24_tube'
+        water_src = 'ColdWaterC1.0' if is_cold else 'WaterC1.0'
         #dilute the thing
-        self._exec_transfer('WaterC1.0',[(chem_name,vol)])
+        self._exec_transfer(water_src,[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
         self.containers[chem_name].rewrite_history_first()
         #mix

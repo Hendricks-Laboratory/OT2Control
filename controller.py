@@ -83,7 +83,6 @@ def main(serveraddr):
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        #TODO work on auto new flags
         launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
