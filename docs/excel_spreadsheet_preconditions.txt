@@ -58,7 +58,10 @@ transfer:
 dilution:
     specify 'dilution concentration' for desired concentration. specify concentration and reagent
     to tell what you want to use as the reagent. Finally, mark a column 'dilution_placeholder' and
-    put the desired final volume in that column
+    put the desired final volume in that column. Note that if you are diluting onto a temperature
+    module tube, it is expected that you will be using a ColdWater instead of Water. You do not
+    need to specify this. It shall be done automatically, but ColdWater must be specified in the 
+    reagents. 
 stop:
     thats it. no args. program will grind to a halt
 pause:

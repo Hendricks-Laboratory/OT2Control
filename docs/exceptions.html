@@ -31,6 +31,7 @@
 This module contains useful Exceptions used in other modules.  
 &#39;&#39;&#39;
 
+#controller
 class ConversionError(RuntimeError):
     &#39;&#39;&#39;
     This is an error used by the controller raised during the conversion from molarity to volume.  
@@ -53,7 +54,23 @@ class ConversionError(RuntimeError):
         self.molarity = molarity
         self.total_vol = total_vol
         self.ratio = ratio
-        self.empty_reagents = empty_reagents</code></pre>
+        self.empty_reagents = empty_reagents
+
+#ot2_robot
+class EmptyReagent(RuntimeError):
+    &#39;&#39;&#39;
+    This is used for when you run out of a reagent on a container and try to aspirate from it.  
+    Specifically it can be used for triggering a make.  
+    &#39;&#39;&#39;
+
+    def __init__(self, message, chem_name):
+        &#39;&#39;&#39;
+        params:  
+            str message: the message associated with the error  
+            str chem_name: the chemical name of this reagent
+        &#39;&#39;&#39;
+        self.chem_name = chem_name
+        super().__init__(message)</code></pre>
 </details>
 </section>
 <section>
@@ -118,6 +135,43 @@ have sufficient volume left for the transfer.</p></div>
 <li>builtins.BaseException</li>
 </ul>
 </dd>
+<dt id="exceptions.EmptyReagent"><code class="flex name class">
+<span>class <span class="ident">EmptyReagent</span></span>
+<span>(</span><span>message, chem_name)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This is used for when you run out of a reagent on a container and try to aspirate from it.<br>
+Specifically it can be used for triggering a make.
+</p>
+<p>params:<br>
+str message: the message associated with the error<br>
+str chem_name: the chemical name of this reagent</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class EmptyReagent(RuntimeError):
+    &#39;&#39;&#39;
+    This is used for when you run out of a reagent on a container and try to aspirate from it.  
+    Specifically it can be used for triggering a make.  
+    &#39;&#39;&#39;
+
+    def __init__(self, message, chem_name):
+        &#39;&#39;&#39;
+        params:  
+            str message: the message associated with the error  
+            str chem_name: the chemical name of this reagent
+        &#39;&#39;&#39;
+        self.chem_name = chem_name
+        super().__init__(message)</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li>builtins.RuntimeError</li>
+<li>builtins.Exception</li>
+<li>builtins.BaseException</li>
+</ul>
+</dd>
 </dl>
 </section>
 </article>
@@ -131,6 +185,9 @@ have sufficient volume left for the transfer.</p></div>
 <ul>
 <li>
 <h4><code><a title="exceptions.ConversionError" href="#exceptions.ConversionError">ConversionError</a></code></h4>
+</li>
+<li>
+<h4><code><a title="exceptions.EmptyReagent" href="#exceptions.EmptyReagent">EmptyReagent</a></code></h4>
 </li>
 </ul>
 </li>
