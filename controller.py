@@ -2267,8 +2267,6 @@ class ProtocolExecutor(Controller):
         self.simulate = stored_simulate
         self._cached_reader_locs = stored_cached_reader_locs
         print('<<controller>> EXITING SIMULATION')
-        with open("protocol.pkl",'wb') as file:
-            dill.dump(self.__dict__,file)
     
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
@@ -2822,6 +2820,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 if __name__ == '__main__':
-    SERVERADDR = "10.25.9.247"
+    SERVERADDR = "10.25.17.168"
     main(SERVERADDR)
 
