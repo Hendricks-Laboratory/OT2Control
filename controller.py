@@ -1037,8 +1037,13 @@ class Controller(ABC):
                 self.save()
             elif row['op'] == 'plot':
                 self._create_plot(row, i)
+            elif row['op'] == 'print':
+                self._execute_print(row,i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
+    def _execute_print(self, row, i):
+        print(row['message'])
 
     def _create_plot(self, row, i):
         '''
