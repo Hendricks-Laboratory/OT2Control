@@ -1789,26 +1789,9 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             NotImplementedError: If you ran out of a reagent you probably need to have Mark
               restock (or you could dilute a stock maybe)  
         '''
-        if e.empty_reagents:
-            #You ran out of something
-            #query the user
-            #It is also possible here that you might be able to perform dilution
-            raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
-        else:
-            #you're trying to pipette an infinitesimal volume
-            #send a single dilution column to the robot that will solve this problem
-            #we have the data here to do something smart with how much we want to dilute, but
-            #for now lets do something dumb like dilute 2x
-
-            #generate necessary parameters
-            print(self._cached_reader_locs.keys())
-            containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
-            stock_cont = max(containers, key=self._get_conc)
-            min_conc = min(map(self._get_conc, containers))
-            new_conc = min_conc / 2
-            #execute dilution
-            self._execute_single_dilution(new_conc, stock_cont)
+        #TO DO!! IMPLEMENT HANDLE_CONVERSION ERROR INTO ABSTRACT, Currently it will produce many errors as we try to integrate this functionality.
+        raise NotImplementedError("We need to implement the handling of dilution errors into the controller. Currently it does not work.")
+           
 
 
     def _execute_single_dilution(self, end_conc, reagent):
@@ -1870,14 +1853,25 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
             found_errors = max(found_errors,2)
         #Check to make sure you don't transfer a reagent with a concentration into a reagent with a volume
+        #boolean list of all concentrations that are nan
+                
         check_conc = (self.rxn_df.loc[(self.rxn_df['op']== 'transfer'),'conc'].isna())
         transfer_df = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
+        #Check_nan a list of all reagents that dont have a concentration
         check_nan = (transfer_df.loc[(check_conc),'reagent'].unique())
+        #check_vol list of all reagents that dont have a volume
         check_vol = (transfer_df.loc[(~check_conc),'reagent'].unique())
-        for val in check_nan:
-            if val in check_vol:
-                print("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into a reagent with a concentration.")
-                found_errors = max(found_errors,2)
+        
+        for prod in self._products:
+            col = self.rxn_df[prod].ne(0)
+            product_df = self.rxn_df.loc[col]
+            check_concs = (product_df.loc[(product_df['op'] == 'transfer'),'conc'].isna())
+            transfer_dfs = product_df.loc[(product_df['op'] == 'transfer')]
+            check_nans = (transfer_dfs.loc[(check_concs),'reagent'].unique())
+            check_vols = (transfer_dfs.loc[(~check_concs),'reagent'].unique())
+            for val in check_nans:
+                if val in check_vols:
+                    print("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into the same product with a reagent with concentration.")
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
         tot_vol_mol = transfer_df.loc[check_conc,self._products]
@@ -2162,6 +2156,42 @@ class AutoContr(Controller):
         elif found_errors == 2:
             raise Exception('Critical Errors encountered during prechecks. Aborting')
 
+    def _handle_conversion_err(self,e):
+        '''
+        This function will handle errors caught in the conversion process from molarity to
+        volume reaction dataframe.  
+        params:  
+            ConversionError e: the conversion error raised  
+        Postconditions:  
+            If the error was pipetting infinitesimal volume, a dilution has been performed on
+            the robot to dilute by 2X   
+        Raises:  
+            NotImplementedError: If you ran out of a reagent you probably need to have Mark
+              restock (or you could dilute a stock maybe)  
+        '''
+        if e.empty_reagents:
+            #You ran out of something
+            #query the user
+            #It is also possible here that you might be able to perform dilution
+            raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
+        else:
+            #you're trying to pipette an infinitesimal volume
+            #send a single dilution column to the robot that will solve this problem
+            #we have the data here to do something smart with how much we want to dilute, but
+            #for now lets do something dumb like dilute 2x
+
+            #generate necessary parameters
+            print(self._cached_reader_locs.keys())
+            containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
+            stock_cont = max(containers, key=self._get_conc)
+            min_conc = min(map(self._get_conc, containers))
+            new_conc = min_conc / 2
+            #execute dilution
+            self._execute_single_dilution(new_conc, stock_cont)
+
+
+
     def check_rxn_df(self):
         '''
         Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
@@ -2267,8 +2297,6 @@ class ProtocolExecutor(Controller):
         self.simulate = stored_simulate
         self._cached_reader_locs = stored_cached_reader_locs
         print('<<controller>> EXITING SIMULATION')
-        with open("protocol.pkl",'wb') as file:
-            dill.dump(self.__dict__,file)
     
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
