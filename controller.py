@@ -1018,6 +1018,7 @@ class Controller(ABC):
             every step in the protocol has been sent to the robot  
         '''
         for i, row in self.rxn_df.iterrows():
+            print("<<controller>> executing command {} of the protocol df with operation {}.".format(i, row['op']))
             if row['op'] == 'transfer':
                 self._send_transfer_command(row,i)
             elif row['op'] == 'pause':
