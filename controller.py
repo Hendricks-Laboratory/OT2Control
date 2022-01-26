@@ -123,7 +123,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     if not no_sim:
         auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
+        model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+        ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
+        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
 
 class Controller(ABC):
