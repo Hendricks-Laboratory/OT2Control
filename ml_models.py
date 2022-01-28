@@ -1,6 +1,9 @@
+import time #TODO delete this debugging only
 from abc import ABC
 from abc import abstractmethod
 import threading
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
 
 import numpy as np
 
@@ -21,6 +24,8 @@ class MLModel():
         self.quit = False
         self.model = model
         self.model_lock = threading.Lock()
+        self.X_lock = threading.Lock()
+        self.X = None
         self.quit = self.update_quit()
 
     def train(self, X, y):
@@ -37,7 +42,6 @@ class MLModel():
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
-
 
     @abstractmethod
     def _train(self, X, y):
@@ -146,4 +150,73 @@ class DummyMLModel(MLModel):
         returns:  
             np.array: (batch_size,n_features) 
         '''
-        return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
+
+class LinReg(MLModel):
+    '''
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:  
+      only runs for batch size of 1  
+    '''
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1):
+        super().__init__(model, max_iters) #don't have a model
+        self.FINAL_SPECTRA = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+
+    def generate_seed_rxns(self):
+        '''
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        '''
+        #TODO talk to Mark about a good set of seeds to start at
+        if self.generate_seed_rxns.n_calls == 0:
+            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+        else:
+            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+    generate_seed_rxns.n_calls = 0
+
+    def predict(self):
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        '''
+        super().predict()
+        with self.model_lock:
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
+        return y_pred
+ 
+    def _train(self, X, y):
+        '''
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated  
+        params:  
+            np.array X: shape (num_pts, num_features) the recieved data for each new well  
+            np.array y: shape(num_pts, n_classes) the labels to predict  
+        Postconditions:  
+            The model has been trained on the new data
+        '''
+        #update the data with the new scans
+        time.sleep(40)
+        print('<<ML>> training')
+        with self.model_lock:
+            if isinstance(self.X,np.ndarray):
+                self.X = np.concatenate((self.X, X))
+                self.y = np.concatenate((self.y, y))
+            else:
+                self.X = X
+                self.y = y
+            self.model.fit(self.X, self.y)
+        print('<<ML>> done training')
