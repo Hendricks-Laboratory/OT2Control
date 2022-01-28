@@ -2268,8 +2268,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        with open("simulation_dict.pkl",'wb') as file:
-            dill.dump(self.__dict__,file)
+        
         #cache some things before you overwrite them for the simulation
         stored_server_ip = self.server_ip
         stored_simulate = self.simulate
