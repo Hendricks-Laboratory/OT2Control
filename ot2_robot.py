@@ -30,6 +30,7 @@ import asyncio
 import threading
 import time
 import traceback
+import re
 
 from bidict import bidict
 import gspread
@@ -45,11 +46,11 @@ from boltons.socketutils import BufferedSocket
 from Armchair.armchair import Armchair
 import Armchair.armchair as armchair
 from df_utils import *
+from exceptions import EmptyReagent
 
 #CONTAINERS
 class Container(ABC):
     """
-    
     Abstract container class to be overwritten for well, tube, etc.  
     ABSTRACT ATTRIBUTES:  
         str name: the common name we use to refer to this container  
@@ -61,7 +62,7 @@ class Container(ABC):
         float disp_height: the height to dispense at  
         float asp_height: the height to aspirate from  
         list<tup<timestamp, str, float> history: the history of this container. Contents:
-          timestamp timestamp: the time of the addition/removal
+          timestamp timestamp: the time of the addition/removal. Note that it may not be sorted
           str chem_name: the name of the chemical added or blank if aspiration
           float vol: the volume of chemical added/removed  
     CONSTANTS:  
@@ -109,7 +110,7 @@ class Container(ABC):
         self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
-        assert (self.vol < self.MAX_VOL), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL)
+        assert (self.vol < self.MAX_VOL + 1e-9), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL) #1e-9 is fudge
 
     def rewrite_history_first(self):
         '''
@@ -123,6 +124,80 @@ class Container(ABC):
             The first transfer in history is a transfer of this chemical into this well  
         '''
         self.history = [(self.history[0][0], self.name, self.history[0][2])]
+
+    def aspirate(self, vol, pipette, lab_deck):
+        '''
+        params:  
+            float vol: the volume to pipette in uL  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+            np.array<Labware> lab_deck: the indexed arrray of labware  
+        raises:  
+            EmptyReagent if don't have enough volume to pipette  
+        Note:  
+            it is the responsibility of the caller to update the pipette as dirty because
+            this is a robot level attribute  
+        Postconditions:  
+            The pipette has aspirated vol from this container  
+        '''
+        #check to ensure you can pipette
+        if self.aspiratible_vol < vol:
+            #if you can't raise error to show that you are empty
+            raise EmptyReagent('cannot aspirate {:.3}uL from {} because it only has {:.3}uL'.format(vol,self.name,float(self.aspiratible_vol)), self.name)
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #aspirate(well_obj)
+        pipette.aspirate(vol, lab_deck[self.deck_pos].get_well(self.loc))
+        #update the vol of src
+        self.update_vol(-vol)
+        #call cleanup
+        self._aspirate_cleanup(pipette)
+
+    def _aspirate_cleanup(self, pipette):
+        '''
+        This method is called at the end of an aspiration.
+        It is used to do any end of aspiration cleanup like touching tip.  
+        Implemented as a seperate method because it will likely be overridden
+        for subclasses.
+        params:  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+        '''
+        pipette.touch_tip()
+
+    def dispense(self, vol, pipette, lab_deck, src):
+        '''
+        params:  
+            float vol: the volume to pipette in uL  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+            np.array<Labware> lab_deck: the indexed arrray of labware  
+            float src: the name of the reagent being put into this container
+        Note:  
+            it is the responsibility of the caller to update the pipette  
+        Postconditions:  
+            The pipette has aspirated vol from this container
+        '''
+        #set dispense height
+        pipette.well_bottom_clearance.dispense = self.disp_height
+        #dispense(well_obj)
+        pipette.dispense(vol, lab_deck[self.deck_pos].get_well(self.loc))
+        #update vol of dst
+        self.update_vol(vol,src)
+        #cleanup
+        self._dispense_cleanup(pipette)
+
+    def _dispense_cleanup(self, pipette):
+        '''
+        This method is called at the end of a dispense.
+        It is used to do any end of dispense cleanup like touching tip.  
+        Implemented as a seperate method because it will likely be overridden
+        for subclasses.
+        params:  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+        '''
+        #blowout
+        for i in range(4):
+            pipette.blow_out()
+        #wiggle - touch tip (spin fast inside well)
+        pipette.touch_tip(radius=0.3,speed=40)
 
     @property
     def disp_height(self):
@@ -140,8 +215,176 @@ class Container(ABC):
     def MAX_VOL(self):
         return self.labware.wells_by_name()[self.loc]._geometry._max_volume
 
-
+class MultiContainer(Container):
+    '''
+    In some cases, it is necessary to have multiple reagents of the same name.
+    However, we maintain the assumption that you should only need to use one of 
+    those reagents at a time.  
+    The MultiContainer class is designed to meet this need. It takes as input an
+    ordered list of Containers, and maintains that list as an attribute.  
+    It also keeps a cont attribute that represents the current container being
+    used. It will use that container until it runs out of volume at which point any
+    call to aspirate will cause cont to be updated to the next Container in the
+    list.  
+    All inherited attributes, loc, vol,  etc. refer to the corresponding
+    attributes of the current cont. With the EXCEPTION of aspirable_vol and history. aspirable_vol
+    value corresponds to the sum of aspirable volumes of all of the containers
+    in the list, and histoyr is the concatenated list of all of the containers.  
+    Dispensing into a MultiContainer is a terrible idea. (which Container would
+    you dispense into?). This class is meant for multiple stock reagents
+    (especially water). If you want to make a product name it something else.
+    Therefore, the dispense method is overriden to raise a NotImplemented error  
+    ATTRIBUTES:
+        Container cont: the current container. all inherited attributes correspond to this
+          object, excpet aspirable vol.  
+        int _cont_i: index of current cont in cont_list
+        list<Containers> cont_list: The list of containers this class wraps.  
+        df history: the history of this MultiContainer. This is a property that runs on top of
+          the histories of the container_list  
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
+          Opentrons.Labware labware  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+        float MIN_HEIGHT: the minimum height a tip can go  
+        NOTE these also correspond to the current cont, so they will change. They're not
+          technically const, but user should not write them ever.  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
+    '''
+    def __init__(self,cont_list):
+        self.cont_list = cont_list
+        self._cont_i = 0
+        self.cont = cont_list[self._cont_i]
         
+    def aspirate(self, vol, pipette, lab_deck):
+        '''
+        params:  
+            float vol: the volume to pipette in uL  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+            np.array<Labware> lab_deck: the indexed arrray of labware  
+        raises:  
+            EmptyReagent if don't have enough volume to pipette  
+        Note:  
+            it is the responsibility of the caller to update the pipette as dirty because
+            this is a robot level attribute.  
+            This method is also somewhat inefficient. It cyles the reagent if it doesn't
+            have enough volume for this entire aspiration, even if there is some volume
+            left. Alternatively, one could aspirate that volume, and then aspirate the
+            difference from the next container, but this would cause two moves of pipette,
+            and will likely not save much liquid. (especially because the most volume you
+            can aspirate in one go is the volume of the pipette.)  
+        Postconditions:  
+            The pipette has aspirated vol from this container
+        '''
+        #check to ensure you can pipette
+        while self.aspiratible_vol < vol:
+            #if you can't (not enough vol left)
+            try:
+                #try to just move to the next one in the list
+                self._update_cont()
+            except IndexError:
+                #you ran out of reagents in the list
+                raise EmptyReagent('cannot aspirate {:.3}uL from {} because it only has {:.3}uL'.format(vol,self.name,float(self.aspiratible_vol)), self.name)
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #aspirate(well_obj)
+        pipette.aspirate(vol, lab_deck[self.deck_pos].get_well(self.loc))
+        #update the vol of src
+        self.update_vol(-vol)
+        #call cleanup
+        self._aspirate_cleanup(pipette)
+
+    def _update_cont(self):
+        '''
+        this method is called when one reagent is out and the current cont
+        needs to be updated to the next in the list  
+        Postconditions:  
+            _cont_i has been incremented
+            cont has been updated to next in the list
+        raises:  
+            IndexError if the cont index is out of bounds
+        '''
+        self._cont_i += 1
+        self.cont = self.cont_list[self._cont_i]
+
+    def dispense(self, vol, pipette, lab_deck, src):
+        '''
+        This should never be called on a multicontainer. It exists for class
+        compatability, but will raise an error if called.  
+        params:  
+            float vol: the volume to pipette in uL  
+            Opentrons.pipette pipette: the pipette to use in the transfer  
+            np.array<Labware> lab_deck: the indexed arrray of labware  
+            float src: the name of the reagent being put into this container
+        Note:  
+            it is the responsibility of the caller to update the pipette  
+        Postconditions:  
+            The pipette has aspirated vol from this container
+        '''
+        raise NotImplemented("A dispense was called on {}, but {} is a multicontainer. It should not be dispensed into".format(self.name,self.name))
+
+    @property
+    def aspiratible_vol(self):
+        return sum([container.aspiratible_vol for container in self.cont_list[self._cont_i:]])
+    
+    @property
+    def history(self):
+        hist = []
+        for cont in self.cont_list:
+            hist += cont.history
+        return hist
+
+    #properties using the current object
+    #these are just wrappers to direct calls to the current container
+    @property
+    def name(self):
+        return self.cont.name
+    @property
+    def deck_pos(self):
+        return self.cont.deck_pos
+    @property
+    def loc(self):
+        return self.cont.loc
+    @property
+    def labware(self):
+        return self.cont.labware
+    @property
+    def vol(self):
+        return self.cont.vol
+    @property
+    def conc(self):
+        return self.cont.conc
+    @property
+    def disp_height(self):
+        return self.cont.disp_height
+    @property
+    def asp_height(self):
+        return self.cont.asp_height
+    #methods
+    @property
+    def _update_height(self):
+        return self.cont._update_height
+    @property
+    def update_vol(self):
+        return self.cont.update_vol
+    @property
+    def _aspirate_cleanup(self):
+        return self.cont._aspirate_cleanup
+    @property
+    def rewrite_history_first(self):
+        return self.cont.rewrite_history_first
+    #constants
+    @property
+    def MAX_VOL(self):
+        return self.cont.MAX_VOL
+    @property
+    def DEAD_VOL(self):
+        return self.cont.DEAD_VOL
+    @property
+    def MIN_HEIGHT(self):
+        return self.cont.MIN_HEIGHT
+
 class Tube20000uL(Container):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods  
@@ -149,7 +392,8 @@ class Tube20000uL(Container):
         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
           Opentrons.Labware labware  
     OVERRIDDEN CONSTANTS:  
-        float DEAD_VOL: the volume at which this   
+        float DEAD_VOL: the volume at which this container is considered empty  
+        float MIN_HEIGHT: the minimum height a tip can go  
     INHERITED METHODS:  
         _update_height void, update_vol(float del_vol) void,  
     """
@@ -190,6 +434,9 @@ class Tube50000uL(Container):
     INHERITED ATTRIBUTES:  
         str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
           Opentrons.Labware labware  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+        float MIN_HEIGHT: the minimum height a tip can go  
     INHERITED METHODS:  
         _update_height void, update_vol(float del_vol) void,  
     """
@@ -227,6 +474,9 @@ class Tube2000uL(Container):
     INHERITED ATTRIBUTES:  
          str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
           Opentrons.Labware labware  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+        float MIN_HEIGHT: the minimum height a tip can go  
     INHERITED METHODS:  
         _update_height void, update_vol(float del_vol) void,  
     """
@@ -259,14 +509,16 @@ class Tube2000uL(Container):
 
 class Well(Container, ABC):
     """
-        Abstract class for a well96
-        INHERITED ATTRIBUTES:  
-            str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
-              Opentrons.Labware labware  
-        INHERITED CONSTANTS:  
-            int DEAD_VOL   
-        INHERITED METHODS:  
-            _update_height void, update_vol(float del_vol) void,  
+    Abstract class for a well96
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
+          Opentrons.Labware labware  
+    INHERITED CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+    OVERRIDDEN CONSTANTS:  
+        float MIN_HEIGHT: the minimum height a tip can go  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     """
     MIN_HEIGHT = 1
 
@@ -291,14 +543,16 @@ class Well(Container, ABC):
 
 class Well96(Well):
     """
-        a well in a 96 well plate  
-        INHERITED ATTRIBUTES:  
-            str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
-              Opentrons.Labware labware  
-        INHERITED CONSTANTS:  
-            int DEAD_VOL   
-        INHERITED METHODS:  
-            _update_height void, update_vol(float del_vol) void,  
+    a well in a 96 well plate  
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
+          Opentrons.Labware labware  
+    INHERITED CONSTANTS:  
+        float MIN_HEIGHT: the minimum height a tip can go  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     """
     DEAD_VOL = 40 #uL
 
@@ -308,9 +562,16 @@ class Well96(Well):
 
 class Well24(Well):
     '''
-    TODO
-    Obviously, Well24 should not inherit from Well96. If they are different make a well superclass
-      if they really are the same, make a well class
+    a well in a 24 well plate
+    INHERITED ATTRIBUTES:  
+        str name, float vol, int deck_pos, str loc, float disp_height, float asp_height,
+          Opentrons.Labware labware  
+    INHERITED CONSTANTS:  
+        float MIN_HEIGHT: the minimum height a tip can go  
+    OVERRIDDEN CONSTANTS:  
+        float DEAD_VOL: the volume at which this container is considered empty  
+    INHERITED METHODS:  
+        _update_height void, update_vol(float del_vol) void,  
     '''
     DEAD_VOL = 400 #uL
 
@@ -698,7 +959,9 @@ class OT2Robot():
         '''
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
-        reagent_df = pd.DataFrame(reagent_df)
+        #index of reagent_df needs to be set because it can have multiple chemicals of same
+        #name, in which case it doesn't reduce nicely to a dict
+        reagent_df = pd.DataFrame(reagent_df).set_index('index')
         dry_containers_df = pd.DataFrame(dry_containers_df).set_index('index')
         self.containers = {}
         self.pipettes = {}
@@ -727,7 +990,7 @@ class OT2Robot():
         self._init_labware(labware_df, using_temp_ctrl, temp)
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
-        self._init_containers(reagent_df)
+        self._init_reagents(reagent_df)
 
     def _init_directories(self):
         '''
@@ -779,7 +1042,7 @@ class OT2Robot():
         else:
             self.dry_containers = {}
 
-    def _init_containers(self, reagent_df):
+    def _init_reagents(self, reagent_df):
         '''
         params:  
             df reagent_df: as passed to init  
@@ -789,9 +1052,31 @@ class OT2Robot():
         '''
         reagent_df['container_types'] = reagent_df[['deck_pos','loc']].apply(lambda row: 
                 self.lab_deck[row['deck_pos']].get_container_type(row['loc']),axis=1)
-        for name, conc, loc, deck_pos, mass, container_type in reagent_df.itertuples():
-            self.containers[name] = self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
-    
+        for name in reagent_df.index.unique():
+            chem_info = reagent_df.loc[name]
+            if isinstance(chem_info, pd.DataFrame):
+                #multiple instances with the same name, so must create multicontainers
+                self.containers[name] = self._construct_multicontainer(chem_info)
+            else:
+                #only one container with name. In this case is a series
+                self.containers[name] = self._construct_container(
+                        chem_info['container_types'], name, chem_info['deck_pos'],
+                        chem_info['loc'], mass=chem_info['mass'], conc=chem_info['conc'])
+
+    def _construct_multicontainer(self, chem_info):
+        '''
+        params:  
+            df chem_info: dataframe of structure of reagent_df, but has a single chemical name
+              for all indices  
+        returns:  
+            MultiContainer: a Container with all of the reagents in its cont_list  
+        '''
+        cont_list = [
+            self._construct_container(container_type, name, deck_pos,loc, mass=mass, conc=conc)
+            for name, conc, loc, deck_pos, mass, container_type in chem_info.itertuples()
+            ]
+        return MultiContainer(cont_list)
+
     def _construct_container(self, container_type, name, deck_pos, loc, **kwargs):
         '''
         params:  
@@ -1025,6 +1310,27 @@ class OT2Robot():
             self.containers[chem_name] = self._construct_container(container_type, 
                     chem_name, deck_pos, loc)
 
+    def _get_conc(self, chem_name):
+        '''
+        handy method for getting the concentration from a chemical name  
+        params:  
+            str chem_name: the chemical name to strip a concentration from  
+        returns:  
+            float: the concentration parsed from the chem_name  
+        '''
+        return float(re.search('C\d*\.\d*$', chem_name).group(0)[1:])
+
+    def _get_reagent(self, chem_name):
+        '''
+        handy method for getting the reagent from a chemical name  
+        The foil of _get_conc  
+        params:  
+            str chem_name: the chemical name to strip a reagent name from  
+        returns:  
+            str: the reagent name parsed from the chem_name  
+        '''
+        
+        return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
 
     #a dictionary to assign priorities to different labwares. Right now used only to prioritize
     #platereader when no other labware has been specified
@@ -1099,7 +1405,6 @@ class OT2Robot():
             pipette.blow_out()
         
         #pull a little out of that well and shake off the drops
-        #TODO my assumption is that this will blow out above, but could be wrong
         pipette.well_bottom_clearance.dispense = cont.disp_height
         #blowout
         for i in range(4):
@@ -1156,8 +1461,11 @@ class OT2Robot():
         #update some things you didn't know when you initialized
         self.containers[chem_name].conc = conc
         self.containers[chem_name].name = chem_name
+        #figure out what your water source should be
+        is_cold = self.containers[chem_name].labware.name == 'temp_mod_24_tube'
+        water_src = 'ColdWaterC1.0' if is_cold else 'WaterC1.0'
         #dilute the thing
-        self._exec_transfer('WaterC1.0',[(chem_name,vol)])
+        self._exec_transfer(water_src,[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
         self.containers[chem_name].rewrite_history_first()
         #mix
@@ -1322,41 +1630,27 @@ class OT2Robot():
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
-        try:
-            assert (src_cont.aspiratible_vol >= vol),'{} cannot transfer {:.3}uL to {} because it only has {:.3}uL'.format(src,vol,dst,float(src_cont.aspiratible_vol))
-        except AssertionError as e:
-            #ran out of reagent. Try to make more
-            src_raw_name = src[:src.find('C')]
-            src_conc = float(src[src.find('C')+1:])
+
+        sufficient_vol = False
+        #attempt to aspirate and make if you can't
+        while not sufficient_vol:
             try:
-                print('<<eve>> ran out of {}. Attempting to make more'.format(src))
-                self._exec_make(src_raw_name, src_conc)
-            except:
-                raise e
-        #It is not necessary to check that the dst will not overflow because this is done when
-        #containers are initialized
-        #set aspiration height
-        pipette.well_bottom_clearance.aspirate = self.containers[src].asp_height
-        #aspirate(well_obj)
-        pipette.aspirate(vol, self.lab_deck[src_cont.deck_pos].get_well(src_cont.loc))
-        #update the vol of src
-        src_cont.update_vol(-vol)
-        #pipette is now dirty
+                src_cont.aspirate(vol, pipette, self.lab_deck)
+                #pipette is now dirty
+                self.pipettes[arm]['last_used'] = src
+                sufficient_vol=True
+            except EmptyReagent as e:
+                src_raw_name = self._get_reagent(e.chem_name)
+                src_conc = self._get_conc(e.chem_name)
+                try:
+                    print('<<eve>> ran out of {}. Attempting to make more'.format(src))
+                    self._exec_make(src_raw_name, src_conc)
+                except:
+                    raise e
+        #update the pipette to be dirty
         self.pipettes[arm]['last_used'] = src
-        #touch tip
-        pipette.touch_tip()
-        #maybe move up if clipping
-        #set dispense height 
-        pipette.well_bottom_clearance.dispense = self.containers[dst].disp_height
-        #dispense(well_obj)
-        pipette.dispense(vol, self.lab_deck[dst_cont.deck_pos].get_well(dst_cont.loc))
-        #update vol of dst
-        dst_cont.update_vol(vol,src)
-        #blowout
-        for i in range(4):
-            pipette.blow_out()
-        #wiggle - touch tip (spin fast inside well)
-        pipette.touch_tip(radius=0.3,speed=40)
+        #dispense into destination container
+        dst_cont.dispense(vol, pipette, self.lab_deck, src)
 
     def dump_well_map(self):
         '''
@@ -1364,15 +1658,35 @@ class OT2Robot():
         '''
         path=os.path.join(self.logs_p,'wellmap.tsv')
         names = self.containers.keys()
-        locs = [self.containers[name].loc for name in names]
-        deck_poses = [self.containers[name].deck_pos for name in names]
-        vols = [self.containers[name].vol for name in names]
-        def lookup_container_type(name):
-            container = self.containers[name]
-            labware = self.lab_deck[container.deck_pos]
-            return labware.get_container_type(container.loc)
-        container_types = [lookup_container_type(name) for name in names]
-        well_map = pd.DataFrame({'chem_name':list(names), 'loc':locs, 'deck_pos':deck_poses, 
+        locs = []
+        deck_poses = []
+        vols = []
+        chem_names = []
+        container_types = []
+        for name in names:
+            cont = self.containers[name]
+            if isinstance(cont, MultiContainer):
+                #this is one of the few instances where the loc, deck_pos, and vol
+                #you want is not the attribute of the current cont for this multicontainer
+                #instead, you want a list of all of the raw containers.
+                for subcont in cont.cont_list:
+                    locs.append(subcont.loc)
+                    deck_poses.append(subcont.deck_pos)
+                    vols.append(subcont.vol)
+                    chem_names.append(name)
+                    container_types.append(
+                            self.lab_deck[cont.deck_pos].get_container_type(cont.loc)
+                            )
+            else:
+                #is just a regular container
+                locs.append(cont.loc)
+                deck_poses.append(cont.deck_pos)
+                vols.append(cont.vol)
+                chem_names.append(name)
+                container_types.append(
+                        self.lab_deck[cont.deck_pos].get_container_type(cont.loc)
+                        )
+        well_map = pd.DataFrame({'chem_name':list(chem_names), 'loc':locs, 'deck_pos':deck_poses, 
                 'vol':vols,'container':container_types})
         well_map.sort_values(by=['deck_pos', 'loc'], inplace=True)
         well_map.to_csv(path, index=False, sep='\t')

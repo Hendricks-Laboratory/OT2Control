@@ -51,12 +51,14 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
 
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel
-from exceptions import *
+from ml_models import DummyMLModel, LinReg
+from exceptions import ConversionError
 
 
 def init_parser():
@@ -81,7 +83,6 @@ def main(serveraddr):
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         print('launching in auto mode')
-        #TODO work on auto new flags
         launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
@@ -110,11 +111,15 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+    final_spectra = np.random.random((1,701))
+    ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
     if not no_sim:
-        auto.run_simulation()
+        auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        #need a new model because last is fit to sim
-        auto.run_protocol(simulate=simulate,no_pr=no_pr)
+        model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+        ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
+        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
 
 class Controller(ABC):
@@ -827,10 +832,11 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             robot has been initialized with necessary params  
         '''
         #send robot data to initialize itself
+        #note reagent_df can have index with same name so index is reset for transfer
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
-                self.robo_params['reagent_df'].to_dict(), self.my_ip,
+                self.robo_params['reagent_df'].reset_index().to_dict(), self.my_ip,
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
@@ -1036,6 +1042,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             every step in the protocol has been sent to the robot  
         '''
         for i, row in self.rxn_df.iterrows():
+            print("<<controller>> executing command {} of the protocol df with operation {}.".format(i, row['op']))
             if row['op'] == 'transfer':
                 self._send_transfer_command(row,i)
             elif row['op'] == 'pause':
@@ -1054,8 +1061,13 @@ empty		B4	5			            If no total vols were specified, no transfer step will
                 self.save()
             elif row['op'] == 'plot':
                 self._create_plot(row, i)
+            elif row['op'] == 'print':
+                self._execute_print(row,i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
+    def _execute_print(self, row, i):
+        print(row['message'])
 
     def _create_plot(self, row, i):
         '''
@@ -1238,26 +1250,63 @@ empty		B4	5			            If no total vols were specified, no transfer step will
 
     def _get_dilution_transfer_rows(self, row):
         '''
-        Takes in a dilution row and builds two transfer rows to be used by the transfer command  
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
+        This command will communicate with the robot to get the current deck position of the
+        thing being diluted.  
+        This is required because if that thing is on a temperature controller, ColdWater shall
+        be used instead of Water.  
         params:  
             pd.Series row: a row of self.rxn_df  
         returns:  
             tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
               reagent
               see self._construct_dilution_transfer_row for details  
+        Preconditions:  
+            robot has been initialized  
+            Water or ColdWater is on the deck (depending on if this is on temperature module
+            or not.  
         '''
         reagent = row['chemical_name']
+        #figure out if it is on temperature module
+        self._update_cached_locs([reagent])
+        deck_pos = self._cached_reader_locs[reagent].deck_pos
+        df = self.robo_params['labware_df'] #cause typing hurts
+        #iloc is necessary because will give a series by default, but always has one element
+        is_temp_cont = df.loc[df['deck_pos'] == deck_pos,'name'].iloc[0] == 'temp_mod_24_tube'
+        water_src = 'ColdWaterC1.0' if is_temp_cont else 'WaterC1.0'
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #TODO investigate if this works
+        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
+        target_name = dilution_name_vol.index[0]
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(row)
+        water_transfer_row = self._construct_dilution_transfer_row(water_src, target_name, vol_water)
+
+        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        return water_transfer_row, reagent_transfer_row
+
+    def _get_dilution_transfer_vols(self, row):
+        '''
+        calculates the amount of reagent volume needed for a dilution  
+        params:  
+            float target_conc: the concentration desired at the end  
+            float reagent_conc: the concentration of the reagent  
+            float total_vol: the total volume requested  
+        returns:  
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer  
+        '''
         reagent_conc = row['conc']
         product_cols = row.loc[self._products]
         dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
-        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
         total_vol = dilution_name_vol.iloc[0]
-        target_name = dilution_name_vol.index[0]
         target_conc = row['dilution_conc']
-        vol_water, vol_reagent = self._get_dilution_transfer_vols(target_conc, reagent_conc, total_vol)
-        water_transfer_row = self._construct_dilution_transfer_row('WaterC1.0', target_name, vol_water)
-        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
-        return water_transfer_row, reagent_transfer_row
+
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
 
     def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
         '''
@@ -1371,23 +1420,6 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             template['op'] = 'mix'
             self._mix(template, i_ext)
     
-    def _get_dilution_transfer_vols(self, target_conc, reagent_conc, total_vol):
-        '''
-        calculates the amount of reagent volume needed for a dilution  
-        params:  
-            float target_conc: the concentration desired at the end  
-            float reagent_conc: the concentration of the reagent  
-            float total_vol: the total volume requested  
-        returns:  
-            tuple<float>: size 2
-                volume of water to transfer
-                volume of reagent to transfer  
-        '''
-        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
-        vol_reagent = mols_reagent/reagent_conc
-        vol_water = total_vol - vol_reagent
-        return vol_water, vol_reagent
-
     def _get_chemical_name(self,row):
         '''
         create a chemical name
@@ -1744,8 +1776,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
                 (self.rxn_df['chemical_name'] == name),:]
         def calc_dilution_vol(row):
-            _, reagent_transfer_row = self._get_dilution_transfer_rows(row) #the _ is water
-            return reagent_transfer_row[self._products].sum()
+            return self._get_dilution_transfer_vols(row)[1]
 
         if dilution_rows.empty:
             dilution_aspirations = 0.0
@@ -1924,7 +1955,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self, no_pr=False):
+    def run_simulation(self,model=None,no_pr=False):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -1939,7 +1970,10 @@ class AutoContr(Controller):
         stored_simulate = self.simulate
         self.server_ip = '127.0.0.1'
         self.simulate = True
-        model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
+        if model == None:
+            #you're simulating with a dummy model.
+            print('<<controller>> running with dummy ml')
+            model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
         print('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
@@ -2004,7 +2038,25 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
+
+        #do the first one
+        print('<<controller>> executing batch {}'.format(self.batch_num))
+        #don't have data to train, so, not training
+        #generate new wellnames for next batch
+        wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+        #plan and execute a reaction
+        self._create_samples(wellnames, recipes)
+        #pull in the scan data
+        filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
+        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+        scan_data = self._get_sample_data(wellnames, last_filename)
+        #this is different because we don't want to use untrained model to generate predictions
+        recipes = model.generate_seed_rxns()
+        self.batch_num += 1
+
+        #enter iterative while loop now that we have data
         while not model.quit:
+            model.train(scan_data.T.to_numpy(),recipes)
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2014,10 +2066,10 @@ class AutoContr(Controller):
             filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
-            #train on scans
-            model.train(scan_data.T.to_numpy(),recipes)
-            self.batch_num += 1
+            #generate the predictions for the next round
             recipes = model.predict()
+            #threaded train on scans. Will run while the robot is generating new materials
+            self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
         return
@@ -2069,6 +2121,7 @@ class AutoContr(Controller):
             except ConversionError as e:
                 self._handle_conversion_err(e)
         self.execute_protocol_df()
+
 
 
     def _clean_meta(self, wellnames):
@@ -2169,6 +2222,7 @@ class AutoContr(Controller):
             NotImplementedError: If you ran out of a reagent you probably need to have Mark
               restock (or you could dilute a stock maybe)  
         '''
+        print('<<controller>> handling conversion error')
         if e.empty_reagents:
             #You ran out of something
             #query the user
@@ -2286,7 +2340,7 @@ class ProtocolExecutor(Controller):
         b.wait()
         self._run(port, simulate=True, no_pr=no_pr)
 
-        #run post execution tests
+
 
         #collect the eve thread
         eve_thread.join()
@@ -2406,22 +2460,23 @@ class ProtocolExecutor(Controller):
             float: the maximum volume that this container will ever hold at one time, not taking into 
               account aspirations for dilutions  
         '''
-        vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
-        aspirations = vol_change_rows['chemical_name'] == name
-        max_vol = 0
-        current_vol = 0
-        for i, is_aspiration in aspirations.iteritems():
-            if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
-                #This is a row where we're transfering from this well
-                current_vol -= self.rxn_df.loc[i, products].sum()
-            elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
-                _, transfer_row = self._get_dilution_transfer_rows(self.rxn_df.loc[i])
-                vol = transfer_row[self._products].sum() 
-                current_vol -= vol
-            else:
-                current_vol += self.rxn_df.loc[i,name]
-                max_vol = max(max_vol, current_vol)
-        return max_vol
+        if name in self.tot_vols:
+            return self.tot_vols[name]
+        else:
+            vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
+            aspirations = vol_change_rows['chemical_name'] == name
+            max_vol = 0
+            current_vol = 0
+            for i, is_aspiration in aspirations.iteritems():
+                if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
+                    #This is a row where we're transfering from this well
+                    current_vol -= self.rxn_df.loc[i, products].sum()
+                elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
+                    current_vol -= self._get_dilution_transfer_vols(self.rxn_df.loc[i])[1]
+                else:
+                    current_vol += self.rxn_df.loc[i,name]
+                    max_vol = max(max_vol, current_vol)
+            return max_vol
 
     
     #TESTING
