@@ -72,6 +72,14 @@ class Container(ABC):
         _update_height void: updates self.height to height at which to pipet (a bit below water line)  
     IMPLEMENTED METHODS:  
         update_vol(float del_vol) void: updates the volume upon an aspiration  
+        rewrite_history_first() void: esoteric method for rewriting the first entry of this
+          container. useful for powders.  
+        aspirate(float vol, Opentrons...pipette pipette, np.array<labware> lab_deck): 
+          aspirates volume from this container.  
+        dispense(float vol, Opentrons...pipette pipette, np.array<labware> lab_deck, float src): 
+          dispenses volume from pipette into this container.  
+        get_well(): returns the Opentrons well object associated with this container
+        mix(Opentrons...pipette pipette, float mix_vol, int mix_code): mixes this container
     """
 
     def __init__(self, name, deck_pos, loc, labware, vol=0,  conc=1):
@@ -198,6 +206,34 @@ class Container(ABC):
             pipette.blow_out()
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
+
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = self.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+            pipette.blow_out()
+
+    def get_well(self):
+        '''
+        returns Opentrons...Well: the well object this container is in
+        '''
+        return self.labware.wells_by_name()[self.loc]
 
     @property
     def disp_height(self):
@@ -1394,15 +1430,8 @@ class OT2Robot():
         pipette = self.pipettes[arm]['pipette']
         self.pipettes[arm]['last_used'] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
-        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
-        #set aspiration height
-        pipette.well_bottom_clearance.aspirate = cont.asp_height
-        #set dispense height to same as asp
-        pipette.well_bottom_clearance.dispense = cont.asp_height
-        #do the actual mix
-        for i in range(2**mix_code):
-            pipette.mix(1,self.pipettes[arm]['size'],well,rate=100.0)
-            pipette.blow_out()
+        #perform the mix
+        cont.mix(pipette, self.pipettes[arm]['size'], mix_code)
         
         #pull a little out of that well and shake off the drops
         pipette.well_bottom_clearance.dispense = cont.disp_height
