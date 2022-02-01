@@ -455,6 +455,31 @@ class Tube20000uL(Container):
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        #create an array of heights with the first height just a little lower than the surface
+        heights = np.linspace(self.MIN_HEIGHT, self.height-1, num=4)
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
+
     @property
     def disp_height(self):
         return self.height + 15 #mm
@@ -542,6 +567,31 @@ class Tube2000uL(Container):
     def asp_height(self):
         tip_depth = 6 # mm
         return self.height - tip_depth
+
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        #create an array of heights with the first height just a little lower than the surface
+        heights = [self.MIN_HEIGHT, self.asp_height]
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
 
 class Well(Container, ABC):
     """
