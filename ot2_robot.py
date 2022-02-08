@@ -468,8 +468,25 @@ class Tube20000uL(Container):
               just uses it for mix iterations, and many subclasses might
               choose to ignore it.  
         '''
-        #create an array of heights with the first height just a little lower than the surface
-        heights = np.linspace(self.MIN_HEIGHT, self.height-1, num=4)
+        NUM_HEIGHTS = 4
+        # create an array of heights with the first height just a little lower
+        # than the surface
+        # top height -4 is carefully tuned to get tip in liquid
+        top_height = max(self.height - 4, self.MIN_HEIGHT) 
+        # The next part assumes you use a 300 uL pipette
+        # it could be implemented for 20uL, but realistically, you
+        # probably won't mix a tube with a 20uL pipette
+        assert (mix_vol > 20), "Trying to mix 20000uL tube with 20uL pipette"
+        # it is important that tip doesn't submerge itself, hence 55mm max depth
+        if (top_height - self.MIN_HEIGHT < 55):
+            # this is normal case.
+            bottom_height = self.MIN_HEIGHT
+        else:
+            # this is case where you need to change the height so you don't dip
+            # too deep
+            bottom_height = top_height - 55
+            print("<<eve>> warning tube is too full to mix completely")
+        heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
         for height in heights:
             #set aspiration height
             pipette.well_bottom_clearance.aspirate = height
@@ -528,6 +545,48 @@ class Tube50000uL(Container):
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
+
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        NUM_HEIGHTS = 4
+        # create an array of heights with the first height just a little lower
+        # than the surface
+        # top height -4 is carefully tuned to get tip in liquid
+        top_height = max(self.height - 4, self.MIN_HEIGHT) 
+        # The next part assumes you use a 300 uL pipette
+        # it could be implemented for 20uL, but realistically, you
+        # probably won't mix a tube with a 20uL pipette
+        assert (mix_vol > 20), "Trying to mix 50000uL tube with 20uL pipette"
+        # it is important that tip doesn't submerge itself, hence 55mm max depth
+        if (top_height - self.MIN_HEIGHT < 55):
+            # this is normal case.
+            bottom_height = self.MIN_HEIGHT
+        else:
+            # this is case where you need to change the height so you don't dip
+            # too deep
+            bottom_height = top_height - 55
+            print("<<eve>> warning tube is too full to mix completely")
+        heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
 
 class Tube2000uL(Container):
     """

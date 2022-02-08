@@ -74,8 +74,10 @@ scan:
     IF YOU HAVE ALREADY RUN THIS PROTOCOL AND HAVE A SCAN OF THE SAME NOW IN THE SCAN DIR
     IT WILL BE OVERWRITTEN. YOU'VE BEEN WARNED
 mix:
-    specify wells to mix with a 1. This is redundant for now because only platereader wells can be
-    mixed, but for anything that's not on the plate reader future features would pipette mix it
+    specify wells to mix with either a 1 or a 2. A 1 indicates a low level mix
+    a 2 indicates more vigorous. Mixing is specialized to run on different
+    labware. A platereader will always shake the entire plate. If you specify
+    2 for anything on the plate, everything will be mixed at a 2.
 plot:
     specify the wells to plot with a 1. Specify the filename in the slot for plot filename.
     Options for plot protocol are: single_kin, overlay, multi_kin.

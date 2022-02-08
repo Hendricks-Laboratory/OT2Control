@@ -1219,7 +1219,10 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             self.portal.send_pack('home')
             self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
             self.pr.exec_macro('PlateIn')
-            self.pr.shake()
+            if (row.loc[self._products] == 2).any():
+                self.pr.shake(60)
+            else:
+                self.pr.shake(30)
             self.pr.exec_macro('PlateOut')
         if (~wells_to_mix_df['platereader']).sum() > 0:
             #at least one needs to be mixed by hand
@@ -2555,7 +2558,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def shake(self):
+    def shake(self, shake_time):
         '''
         executes a shake
         '''
@@ -2752,14 +2755,13 @@ class PlateReader(AbstractPlateReader):
             else:
                 raise Exception("PlateReader Error. Exited with code {}".format(exit_code))
 
-    def shake(self):
+    def shake(self, shake_time):
         '''
         executes a shake
         '''
         macro = "Shake"
         shake_type = 2
         shake_freq = 300
-        shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
     def load_reader_data(self, filename, loc_to_name):
