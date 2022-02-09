@@ -448,7 +448,7 @@ class Tube(Container):
         # The next part assumes you use a 300 uL pipette
         # it could be implemented for 20uL, but realistically, you
         # probably won't mix a tube with a 20uL pipette
-        assert (mix_vol > 20), "Trying to mix tube with 20uL pipette"
+        assert (mix_vol > 20), "Trying to mix {} on tube with 20uL pipette".format(self.name)
         # it is important that tip doesn't submerge itself, hence 55mm max depth
         if (top_height - self.MIN_HEIGHT < 55):
             # this is normal case.
@@ -1491,7 +1491,7 @@ class OT2Robot():
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', chem_name]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
-        arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
+        arm = self._get_preffered_pipette(300) #gets the larger pipette
         pipette = self.pipettes[arm]['pipette']
         self.pipettes[arm]['last_used'] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
