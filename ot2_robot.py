@@ -469,6 +469,10 @@ class Tube(Container):
                 pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
                 pipette.blow_out()
 
+    @property
+    def disp_height(self):
+        return self.height + 20 #mm
+
 class Tube20000uL(Tube):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods  
@@ -503,9 +507,6 @@ class Tube20000uL(Tube):
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
-    @property
-    def disp_height(self):
-        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -544,10 +545,6 @@ class Tube50000uL(Tube):
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
@@ -581,10 +578,6 @@ class Tube2000uL(Tube):
         height_bottom_cylinder = 10.5 #mm
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_2/2)**2)) + height_bottom_cylinder
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
-
-    @property
-    def disp_height(self):
-        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -644,7 +637,6 @@ class Well(Container, ABC):
     @abstractmethod
     def disp_height(self):
         pass
-        return 9 #mm
 
     @property
     def asp_height(self):
