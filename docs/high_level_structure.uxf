@@ -56,8 +56,7 @@ Responsibilites
       <w>160</w>
       <h>60</h>
     </coordinates>
-    <panel_attributes>lt=&lt;.
-&lt;&lt;extends&gt;&gt;</panel_attributes>
+    <panel_attributes>lt=&lt;&lt;-</panel_attributes>
     <additional_attributes>10.0;10.0;140.0;40.0</additional_attributes>
   </element>
   <element>
@@ -68,8 +67,8 @@ Responsibilites
       <w>170</w>
       <h>60</h>
     </coordinates>
-    <panel_attributes>lt=&lt;.
-&lt;&lt;extends&gt;&gt;</panel_attributes>
+    <panel_attributes>lt=&lt;&lt;-
+</panel_attributes>
     <additional_attributes>150.0;10.0;10.0;40.0</additional_attributes>
   </element>
   <element>
@@ -124,13 +123,15 @@ Responsibilities
       <x>780</x>
       <y>430</y>
       <w>210</w>
-      <h>70</h>
+      <h>100</h>
     </coordinates>
     <panel_attributes>/Container/
 --
 +loc: str
 +deck_pos: int
-</panel_attributes>
+--
++aspirate: void
++dispense: void</panel_attributes>
     <additional_attributes/>
   </element>
   <element>
