@@ -59,9 +59,6 @@ x04: 'transfer'
     Args:
         str src: the chemical_name of the source well to be transfered from 
         list<tuple<str, float>> transfer_steps
-        list<tuple<str,list<object>>> callbacks: the ordered callbacks to perform as first elemetn
-	    of tuple. Second element is a list of the arguments associated with the callback, 
-	    or None if none are used.
 
 x05: 'init_containers'
     controller->robot

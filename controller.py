@@ -1353,8 +1353,6 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             pd.Series row: a row of self.rxn_df
               uses the chemical_name, callbacks (and associated args), product_columns  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         Postconditions:  
             a transfer command has been sent to the robot  
         '''
