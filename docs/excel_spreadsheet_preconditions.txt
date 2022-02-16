@@ -84,6 +84,10 @@ plot:
     Options for plot protocol are: single_kin, overlay, multi_kin.
     If single_kin is chosen, the name of the file will be your "{wellname}_{filename}" for
     for each well you specified
+make:
+    specify the reagent and concentration you want to make. That reagent must
+    be added in the Reagent Info tab as a powdered reagent. The mass of the
+    reagent is expected to be the mass of the powder as opposed to the tube.
 
 AUTO INPUT TEMPLATE
 Same as for input template, with two major changes.
