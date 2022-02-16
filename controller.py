@@ -246,35 +246,7 @@ class Controller(ABC):
             has inserted a row into the rxn_df to transfer WaterC1.0  
             If the reaction has already overflowed the total volume, will add negative volume
             (which is impossible. The caller of this function must account for this.)  
-chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
-R1	1.0	A1	1	16.139		
-R2	0.25	A2	1	14.206		
-R3	4.66	A3	1	45.168		
-Water	1.0	A4	1	60		
-R2		B1	1	0.0045	5500	powdered R2
-R2		B2	1	0.0032	5500	powdered R2
-empty		A1	5			
-empty		A2	5			
-empty		A3	5			
-empty		A4	5			
-empty		B1	5			
-empty		B2	5			
-empty		B3	5			
-empty		B4	5			chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
-R1	1.0	A1	1	16.139		
-R2	0.25	A2	1	14.206		
-R3	4.66	A3	1	45.168		
-Water	1.0	A4	1	60		
-R2		B1	1	0.0045	5500	powdered R2
-R2		B2	1	0.0032	5500	powdered R2
-empty		A1	5			
-empty		A2	5			
-empty		A3	5			
-empty		A4	5			
-empty		B1	5			
-empty		B2	5			
-empty		B3	5			
-empty		B4	5			            If no total vols were specified, no transfer step will be inserted.  
+            If no total vols were specified, no transfer step will be inserted.  
         '''
         #if there are no total vols, don't insert the row, just return
         if self.tot_vols:

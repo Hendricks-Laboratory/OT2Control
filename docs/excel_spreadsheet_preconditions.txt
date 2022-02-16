@@ -53,6 +53,7 @@ Currently, mix, scan, stop, and pause are implemented as callbacks. They should 
 callbacks column seperated by commas, e.g. 'mix, scan' or 'scan' or 'scan, pause, stop, pause'.
 Two scans in one callback is illegal. You must specify the arguments for any callbacks you use
 and they will use the same args. e.g. 'pause,stop,pause' pauses for the same time on both.
+A mix will default to mixcode=2.
 transfer:
     Specify volume in uL under the columns you want to transfer into
 dilution:

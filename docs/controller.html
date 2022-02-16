@@ -291,35 +291,7 @@ class Controller(ABC):
             has inserted a row into the rxn_df to transfer WaterC1.0  
             If the reaction has already overflowed the total volume, will add negative volume
             (which is impossible. The caller of this function must account for this.)  
-chemical_name   conc    loc     deck_pos        mass    molar_mass (for dry only)       comments
-R1      1.0     A1      1       16.139          
-R2      0.25    A2      1       14.206          
-R3      4.66    A3      1       45.168          
-Water   1.0     A4      1       60              
-R2              B1      1       0.0045  5500    powdered R2
-R2              B2      1       0.0032  5500    powdered R2
-empty           A1      5                       
-empty           A2      5                       
-empty           A3      5                       
-empty           A4      5                       
-empty           B1      5                       
-empty           B2      5                       
-empty           B3      5                       
-empty           B4      5                       chemical_name   conc    loc     deck_pos        mass    molar_mass (for dry only)       comments
-R1      1.0     A1      1       16.139          
-R2      0.25    A2      1       14.206          
-R3      4.66    A3      1       45.168          
-Water   1.0     A4      1       60              
-R2              B1      1       0.0045  5500    powdered R2
-R2              B2      1       0.0032  5500    powdered R2
-empty           A1      5                       
-empty           A2      5                       
-empty           A3      5                       
-empty           A4      5                       
-empty           B1      5                       
-empty           B2      5                       
-empty           B3      5                       
-empty           B4      5                                   If no total vols were specified, no transfer step will be inserted.  
+            If no total vols were specified, no transfer step will be inserted.  
         &#39;&#39;&#39;
         #if there are no total vols, don&#39;t insert the row, just return
         if self.tot_vols:
@@ -1264,7 +1236,10 @@ empty           B4      5                                   If no total vols wer
             self.portal.send_pack(&#39;home&#39;)
             self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
             self.pr.exec_macro(&#39;PlateIn&#39;)
-            self.pr.shake()
+            if (row.loc[self._products] == 2).any():
+                self.pr.shake(60)
+            else:
+                self.pr.shake(30)
             self.pr.exec_macro(&#39;PlateOut&#39;)
         if (~wells_to_mix_df[&#39;platereader&#39;]).sum() &gt; 0:
             #at least one needs to be mixed by hand
@@ -1395,8 +1370,6 @@ empty           B4      5                                   If no total vols wer
             pd.Series row: a row of self.rxn_df
               uses the chemical_name, callbacks (and associated args), product_columns  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         Postconditions:  
             a transfer command has been sent to the robot  
         &#39;&#39;&#39;
@@ -2600,7 +2573,7 @@ class AbstractPlateReader(ABC):
         &#39;&#39;&#39;
         pass
 
-    def shake(self):
+    def shake(self, shake_time):
         &#39;&#39;&#39;
         executes a shake
         &#39;&#39;&#39;
@@ -2797,14 +2770,13 @@ class PlateReader(AbstractPlateReader):
             else:
                 raise Exception(&#34;PlateReader Error. Exited with code {}&#34;.format(exit_code))
 
-    def shake(self):
+    def shake(self, shake_time):
         &#39;&#39;&#39;
         executes a shake
         &#39;&#39;&#39;
         macro = &#34;Shake&#34;
         shake_type = 2
         shake_freq = 300
-        shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
     def load_reader_data(self, filename, loc_to_name):
@@ -2949,7 +2921,7 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr(&#39;ControlApp&#39;, &#39;DisablePlateCmds&#39;,&#39;False&#39;)
         self._set_config_attr(&#39;Configuration&#39;,&#39;SimulationMode&#39;, str(0))
 if __name__ == &#39;__main__&#39;:
-    SERVERADDR = &#34;10.25.17.168&#34;
+    SERVERADDR = &#34;10.25.8.83&#34;
     main(SERVERADDR)</code></pre>
 </details>
 </section>
@@ -3128,7 +3100,7 @@ metadata.
         &#39;&#39;&#39;
         pass
 
-    def shake(self):
+    def shake(self, shake_time):
         &#39;&#39;&#39;
         executes a shake
         &#39;&#39;&#39;
@@ -3499,7 +3471,7 @@ list<str> layout: the wells that you want to be used for the protocol ordered.
 </details>
 </dd>
 <dt id="controller.AbstractPlateReader.shake"><code class="name flex">
-<span>def <span class="ident">shake</span></span>(<span>self)</span>
+<span>def <span class="ident">shake</span></span>(<span>self, shake_time)</span>
 </code></dt>
 <dd>
 <div class="desc"><p>executes a shake</p></div>
@@ -3507,7 +3479,7 @@ list<str> layout: the wells that you want to be used for the protocol ordered.
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def shake(self):
+<pre><code class="python">def shake(self, shake_time):
     &#39;&#39;&#39;
     executes a shake
     &#39;&#39;&#39;
@@ -4277,35 +4249,7 @@ is instantiated in run</p></div>
             has inserted a row into the rxn_df to transfer WaterC1.0  
             If the reaction has already overflowed the total volume, will add negative volume
             (which is impossible. The caller of this function must account for this.)  
-chemical_name   conc    loc     deck_pos        mass    molar_mass (for dry only)       comments
-R1      1.0     A1      1       16.139          
-R2      0.25    A2      1       14.206          
-R3      4.66    A3      1       45.168          
-Water   1.0     A4      1       60              
-R2              B1      1       0.0045  5500    powdered R2
-R2              B2      1       0.0032  5500    powdered R2
-empty           A1      5                       
-empty           A2      5                       
-empty           A3      5                       
-empty           A4      5                       
-empty           B1      5                       
-empty           B2      5                       
-empty           B3      5                       
-empty           B4      5                       chemical_name   conc    loc     deck_pos        mass    molar_mass (for dry only)       comments
-R1      1.0     A1      1       16.139          
-R2      0.25    A2      1       14.206          
-R3      4.66    A3      1       45.168          
-Water   1.0     A4      1       60              
-R2              B1      1       0.0045  5500    powdered R2
-R2              B2      1       0.0032  5500    powdered R2
-empty           A1      5                       
-empty           A2      5                       
-empty           A3      5                       
-empty           A4      5                       
-empty           B1      5                       
-empty           B2      5                       
-empty           B3      5                       
-empty           B4      5                                   If no total vols were specified, no transfer step will be inserted.  
+            If no total vols were specified, no transfer step will be inserted.  
         &#39;&#39;&#39;
         #if there are no total vols, don&#39;t insert the row, just return
         if self.tot_vols:
@@ -5250,7 +5194,10 @@ empty           B4      5                                   If no total vols wer
             self.portal.send_pack(&#39;home&#39;)
             self.portal.burn_pipe() # can&#39;t be pulling plate in if you&#39;re still mixing
             self.pr.exec_macro(&#39;PlateIn&#39;)
-            self.pr.shake()
+            if (row.loc[self._products] == 2).any():
+                self.pr.shake(60)
+            else:
+                self.pr.shake(30)
             self.pr.exec_macro(&#39;PlateOut&#39;)
         if (~wells_to_mix_df[&#39;platereader&#39;]).sum() &gt; 0:
             #at least one needs to be mixed by hand
@@ -5381,8 +5328,6 @@ empty           B4      5                                   If no total vols wer
             pd.Series row: a row of self.rxn_df
               uses the chemical_name, callbacks (and associated args), product_columns  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         Postconditions:  
             a transfer command has been sent to the robot  
         &#39;&#39;&#39;
@@ -6748,14 +6693,13 @@ anything. useful for some simulations</p></div>
             else:
                 raise Exception(&#34;PlateReader Error. Exited with code {}&#34;.format(exit_code))
 
-    def shake(self):
+    def shake(self, shake_time):
         &#39;&#39;&#39;
         executes a shake
         &#39;&#39;&#39;
         macro = &#34;Shake&#34;
         shake_type = 2
         shake_freq = 300
-        shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
     def load_reader_data(self, filename, loc_to_name):
