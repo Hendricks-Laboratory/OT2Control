@@ -314,7 +314,7 @@ class MultiContainer(Container):
             The pipette has aspirated vol from this container
         '''
         #check to ensure you can pipette
-        while self.aspiratible_vol < vol:
+        while self.cont.aspiratible_vol < vol:
             #if you can't (not enough vol left)
             try:
                 #try to just move to the next one in the list
