@@ -1236,6 +1236,7 @@ class Controller(ABC):
             tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
               reagent
               see self._construct_dilution_transfer_row for details  
+            Note the second row (the reagent row) will have have whichever callbacks are passed.
         Preconditions:  
             robot has been initialized  
             Water or ColdWater is on the deck (depending on if this is on temperature module
@@ -1258,6 +1259,7 @@ class Controller(ABC):
         water_transfer_row = self._construct_dilution_transfer_row(water_src, target_name, vol_water)
 
         reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        reagent_transfer_row['callbacks'] = row['callbacks'] #give the second row whatever callbacks you had
         return water_transfer_row, reagent_transfer_row
 
     def _get_dilution_transfer_vols(self, row):
