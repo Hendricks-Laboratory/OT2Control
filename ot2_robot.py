@@ -450,7 +450,7 @@ class Tube(Container):
         # probably won't mix a tube with a 20uL pipette
         assert (mix_vol > 20), "Trying to mix {} on tube with 20uL pipette".format(self.name)
         # it is important that tip doesn't submerge itself, hence 55mm max depth
-        if (top_height - self.MIN_HEIGHT < 55):
+        if (top_height - self.MIN_HEIGHT < 50):
             # this is normal case.
             bottom_height = self.MIN_HEIGHT
         else:
