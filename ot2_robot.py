@@ -423,7 +423,7 @@ class MultiContainer(Container):
 
 class Tube(Container):
     '''
-    This class implements shared features of all the tubes. Right now
+    This abstract class implements shared features of all the tubes. Right now
     this is just the mix method for 20000 and 50000. 2000 overrides this method
     anyways.
     '''
@@ -469,10 +469,6 @@ class Tube(Container):
                 pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
                 pipette.blow_out()
 
-    @property
-    def disp_height(self):
-        return self.height + 20 #mm
-
 class Tube20000uL(Tube):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods  
@@ -512,6 +508,12 @@ class Tube20000uL(Tube):
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
+
+    @property
+    def disp_height(self):
+        min_disp_height = 40 #mm above the bottom of the tube
+        disp_height_above_liquid = 10 #mm above the liquid level
+        return max(self.height + disp_height_above_liquid, min_disp_height)
             
 class Tube50000uL(Tube):
     """
@@ -548,6 +550,12 @@ class Tube50000uL(Tube):
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
+    
+    @property
+    def disp_height(self):
+        min_disp_height = 30 #mm above the bottom of the tube
+        disp_height_above_liquid = 10 #mm above the liquid level
+        return max(self.height + disp_height_above_liquid, min_disp_height)
 
 class Tube2000uL(Tube):
     """
@@ -583,6 +591,13 @@ class Tube2000uL(Tube):
     def asp_height(self):
         tip_depth = 6 # mm
         return self.height - tip_depth
+
+    @property
+    def disp_height(self):
+        height_disp_cutoff = 32 #mm above the bottom of the tube
+        min_disp_height = 40 #mm above the bottom of the tube
+        disp_height_above_liquid = 7 #mm above the liquid level
+        return self.height + disp_height_above_liquid if self.height > height_disp_cutoff else min_disp_height
 
     def mix(self, pipette, mix_vol, mix_code):
         '''
