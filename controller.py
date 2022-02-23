@@ -891,10 +891,10 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[4:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc']] = rxn_df[['pause_time','dilution_conc','conc']].astype(float)
+        rxn_df[['pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['pause_time','dilution_conc','conc','max_num_scans']].astype(float)
         rxn_df['reagent'] = rxn_df['reagent'].apply(lambda s: s if pd.isna(s) else s.replace(' ', '_'))
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
@@ -1063,6 +1063,8 @@ empty		B4	5			            If no total vols were specified, no transfer step will
                 self._create_plot(row, i)
             elif row['op'] == 'print':
                 self._execute_print(row,i)
+            elif row['op'] == 'scan_until_complete':
+                self._scan_until_complete(row,i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
@@ -1535,7 +1537,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         for i, r in self.rxn_df.iterrows():
             r_num = i+1
             #check pauses
-            if (not ('pause' in r['op'] or 'pause' in r['callbacks'])) == (not pd.isna(r['pause_time'])):
+            if (not ('pause' in r['op'] or 'pause' in r['callbacks'] or r['op'] == 'scan_until_complete')) == (not pd.isna(r['pause_time'])):
                 print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
                 found_errors = max(found_errors, 2)
             #check that there's always a volume when you transfer
@@ -1567,7 +1569,9 @@ empty		B4	5			            If no total vols were specified, no transfer step will
                     found_errors = max(found_errors,2)
                 rows_above = self.rxn_df.loc[:i,:]
                 scan_rows = rows_above.loc[(rows_above['scan_filename'] == r['scan_filename']) &\
-                        (rows_above['op'] == 'scan')]
+                        ((rows_above['op'] == 'scan')| (rows_above['op'] == 'scan_until_complete'))]
+                
+                
                 if scan_rows.empty:
                         print("<<controller>> row {} plots using nonexistent scan file\
                                 ".format(r_num))
@@ -1874,10 +1878,73 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         self._products = cached_products
         self.rxn_df = cached_rxn_df
 
-    
-    def check_conc(self):
-        found_errors = 0
+    def _scan_until_complete(self,row,i):
+        """
+        This function handles the scan_until_complete operation.
+        This involves:
+            executing and creating a new scan row, that takes in the scan row,
+            executes the scan, and then compares the oldScan to the newScan with a different
+            filename to allow spacing between the two scans until they are indifferentiably the same
+        """
+        #Count is declared to track how long we want the process to run if it is going to take too long for there to be distinction
+        count = 1.0
+        
+        #Eps represents the difference variable that we want in order to check if the scans are similar enough
+        eps = 3
+            
+        scan_product_index = row[self._products].ne(0)
+        
+        wellnames = row[self._products][scan_product_index].index
+        oldScan = self._build_suc_row(row,count)
+        self._execute_scan(oldScan,i)
+        
+        #cached reader locs updated by scan
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        
+        old_scan_data, metadata = self.pr.load_reader_data(oldScan['scan_filename'], pr_dict)
+        
+        if not self.simulate: 
+            time.sleep(row['pause_time'])
+        
+        count += 1
+        
+        newScan = self._build_suc_row(row,count)
+        self._execute_scan(newScan,i)
+        new_scan_data,metadata =  self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
+        scan_sum = (((((new_scan_data - old_scan_data)**2)))) 
+        #checks difference, defines old_scan to new scan, until they are similar
+        while ((((((new_scan_data - old_scan_data)**2)>eps).any()).any()) and (count < row['max_num_scans'])):    
+            oldScan = newScan
+            old_scan_data = new_scan_data
+            
+            if not self.simulate:
+                time.sleep(row['pause_time'])
+            
+            newScan = self._build_suc_row(row,count)
+            self._execute_scan(newScan,i)
+            new_scan_data,metadata = self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
+            
+            count += 1
+        #Renames the unique filename back to what it was declared as in the sheet    
+        self.pr._rename_scan(newScan['scan_filename'],row['scan_filename'])
+        
 
+    def _build_suc_row(self,row,count):
+       #Builds a row for the scan_until_complete function
+        
+        newFilename =  "{}_suc_{}".format(row['scan_filename'], count)
+        newRow = row.copy()
+        newRow['op'] = 'scan'
+        newRow['scan_filename'] = newFilename
+        
+        return newRow
+
+    def check_conc(self):
+        """
+        Makes checks about concentration to see if the concentrations declared are legal declarations
+        """
+
+        found_errors = 0
         #Check to make sure water always has a concentration defined
         check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
         if check_water_conc.any():
@@ -2584,6 +2651,7 @@ class AbstractPlateReader(ABC):
         filepath = os.path.join(self.data_path,filename)
         if os.path.exists(filepath):
             os.system('rm {}'.format(filepath))
+
         data = pd.DataFrame(.42*np.ones((701,len(layout))), columns=layout)
         with open(filepath, 'a+', encoding='latin1') as file:
             file.write('No. of Cycles: 1\nT[°C]: \n23.5\n')
@@ -2593,6 +2661,16 @@ class AbstractPlateReader(ABC):
                 write_str += '\n'
                 file.write(write_str)
 
+    def _rename_scan(self,new_scan_file,old_scan_file):
+        """
+        Helper function for scan until complete,
+        renames the filename back to the original to help deal with
+        scan until complete rows
+        """
+
+        shutil.move(os.path.join(self.data_path, "{}.csv".format(new_scan_file)),
+        os.path.join(self.data_path, "{}.csv".format(old_scan_file)))
+    
     def shutdown(self):
         '''
         closes connection. Use this if you're done with this object at cleanup stage
