@@ -1220,9 +1220,14 @@ class Controller(ABC):
             Will block on ready if the buffer is filled  
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        prod_transfer = reagent_transfer_row.loc[self._products].ne(0)
+        product_val = reagent_transfer_row[self._products][prod_transfer].index
+        mix_row = row.copy()
+        mix_row['op'] = 'mix'
+        mix_row.loc[product_val] = 2 
         self._send_transfer_command(water_transfer_row, i)
         self._send_transfer_command(reagent_transfer_row, i)
-
+        self._mix(mix_row,i)
     def _get_dilution_transfer_rows(self, row):
         '''
         Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
