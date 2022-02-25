@@ -1252,8 +1252,10 @@ class OT2Robot():
             labware = self.temp_module.load_labware(opentrons_name,label=name)
             #this will always be a tube holder
             self._add_to_deck(name, deck_pos, labware, empty_containers=empty_tubes)
+            assert( temp >= 4 and temp <= 95), "invalid temperature defined"
+    
 
-
+        
     def _init_custom_labware(self, name, deck_pos, **kwargs):
         '''
         initializes custom built labware by reading from json
