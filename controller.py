@@ -1913,6 +1913,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         new_scan_data,metadata =  self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
         scan_sum = (((((new_scan_data - old_scan_data)**2)))) 
         #checks difference, defines old_scan to new scan, until they are similar
+        #Divide by 700 eps should = 3/700
         while ((((((new_scan_data - old_scan_data)**2)>eps).any()).any()) and (count < row['max_num_scans'])):    
             oldScan = newScan
             old_scan_data = new_scan_data
