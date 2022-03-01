@@ -1004,7 +1004,7 @@ class OT2Robot():
     """
 
     #Don't try to read this. Use an online json formatter 
-    _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
+    _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "plate_reader_4", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "plate_reader_7", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
@@ -1073,6 +1073,7 @@ class OT2Robot():
               it is the client's responsibility to make sure that these are initialized prior
               to operating with them  
         '''
+        self._load_calibrations()
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
         #index of reagent_df needs to be set because it can have multiple chemicals of same
@@ -1092,9 +1093,9 @@ class OT2Robot():
 
         if simulate:
             # define version number and define protocol object
-            self.protocol = opentrons.simulate.get_protocol_api('2.9')
+            self.protocol = opentrons.simulate.get_protocol_api('2.12')
         else:
-            self.protocol = opentrons.execute.get_protocol_api('2.9')
+            self.protocol = opentrons.execute.get_protocol_api('2.12')
             self.protocol.set_rail_lights(on = True)
             self.protocol.rail_lights_on 
         self.protocol.home() # Homes the pipette tip
@@ -1107,6 +1108,13 @@ class OT2Robot():
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
         self._init_reagents(reagent_df)
+
+    def _load_calibrations(self):
+        '''
+        Loads in the calibrations file
+        '''
+        with open("calibrations.json", 'r') as file:
+            self._CALIBRATIONS = json.load(file)
 
     def _init_directories(self):
         '''
@@ -1294,6 +1302,10 @@ class OT2Robot():
             self.lab_deck[deck_pos] = WellPlate24(labware, kwargs['first_well'], deck_pos)
         else:
             raise Exception("Sorry, Illegal Labware Option, {}. {} is not a tube or plate".format(name,name))
+        #after you've added the labware, you must calibrate
+        #offset is a dictionary with keys, x,y,z and float offset vals
+        offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]
+        labware.set_offset(**offset)
 
     def _init_labware(self, labware_df, using_temp_ctrl, temp):
         '''

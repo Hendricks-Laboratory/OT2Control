@@ -1,0 +1,25 @@
+{
+"opentrons_1_trash_1100ml_fixed" : {"x":0.00, "y":0.00, "z":0.00},
+    
+"opentrons_96_tiprack_20ul" : {"x":-0.50, "y":1.50, "z":-0.70},
+    
+"opentrons_96_tiprack_300ul" : {"x":0.00, "y":0.00, "z":0.00},
+    
+"opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical" : {"x":-0.10, "y":1.20, "z":4.90},
+    
+"opentrons_24_aluminumblock_generic_2ml_screwcap" :{"x":0.30, "y":2.50, "z":-6.60},
+    
+"opentrons_96_tiprack_300ul" : {"x":0.30, "y":0.50, "z":-0.30},
+    
+"opentrons_96_tiprack_20ul" : {"x":0.00, "y":0.00, "z":0.00},
+    
+"plate_reader_4" : {"x":-0.30, "y":0.30, "z":-0.90},
+    
+"plate_reader_7" : {"x":0.00, "y":-0.10, "z":-0.80},
+    
+"opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical" : {"x":-0.20, "y":1.80, "z":4.60},
+
+"corning_96_wellplate_360ul_flat" : {"x" : 0.0, "y" : 0.0, "z" : 0.0},
+
+"corning_24_wellplate_3.4ml_flat" : {"x" : 0.0, "y" : 0.0, "z" : 0.0}
+}
