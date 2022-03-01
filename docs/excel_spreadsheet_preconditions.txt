@@ -17,7 +17,7 @@ will crash if you do other strange things
 
 INPUT TEMPlATE
 The second sheet in the worksheet must be the input template
-Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix']
+Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix','make','print']
 chemical that appears in the reagent column shall be renamed with spaces replaced with underscores,
 and it's concentration appended in the format '<name>C<conc>', e.g. PotassiumC0.03
 the chemical you name must use no special characters in the python re library (i.e. be civil in
@@ -88,6 +88,8 @@ make:
     specify the reagent and concentration you want to make. That reagent must
     be added in the Reagent Info tab as a powdered reagent. The mass of the
     reagent is expected to be the mass of the powder as opposed to the tube.
+print:
+    specify the message you want to say, and the console will output a message where you issued the print command.
 
 AUTO INPUT TEMPLATE
 Same as for input template, with two major changes.
