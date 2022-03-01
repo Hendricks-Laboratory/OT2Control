@@ -571,7 +571,7 @@ class Tube2000uL(Tube):
     """
 
     DEAD_VOL = 250 #uL
-    MIN_HEIGHT = 4
+    MIN_HEIGHT = 5
 
     def __init__(self, name, deck_pos, loc, labware, mass=1.4, conc=2):
         density_water_4C = 0.9998395 # g/mL
