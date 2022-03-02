@@ -456,7 +456,7 @@ class Tube(Container):
         else:
             # this is case where you need to change the height so you don't dip
             # too deep
-            bottom_height = top_height - 55
+            bottom_height = top_height - 50
             print("<<eve>> warning tube is too full to mix completely")
         heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
         for height in heights:
