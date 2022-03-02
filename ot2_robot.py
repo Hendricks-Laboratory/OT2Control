@@ -483,7 +483,7 @@ class Tube20000uL(Tube):
     """
 
     DEAD_VOL = 2000
-    MIN_HEIGHT = 5
+    MIN_HEIGHT = 4
 
     def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
         '''
@@ -571,7 +571,7 @@ class Tube2000uL(Tube):
     """
 
     DEAD_VOL = 250 #uL
-    MIN_HEIGHT = 5
+    MIN_HEIGHT = 6
 
     def __init__(self, name, deck_pos, loc, labware, mass=1.4, conc=2):
         density_water_4C = 0.9998395 # g/mL
