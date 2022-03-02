@@ -331,7 +331,7 @@ class MultiContainer(Container):
         #update the vol of src
         self.update_vol(-vol)
         #call cleanup
-        self._aspirate_cleanup(pipette)
+        self._aspirate_cleanup(pipette, lab_deck)
 
     def _update_cont(self):
         '''
