@@ -483,7 +483,7 @@ class Tube20000uL(Tube):
     """
 
     DEAD_VOL = 2000
-    MIN_HEIGHT = 4
+    MIN_HEIGHT = 5
 
     def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
         '''
