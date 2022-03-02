@@ -170,6 +170,8 @@ class Container(ABC):
             Opentrons.pipette pipette: the pipette to use in the transfer  
         '''
         pipette.touch_tip()
+        #move tip *directly* to center of well/tube so it doesn't interact with the well/tube when it lifts up
+        pipette.move_to(self.get_well(self.loc).top(), force_direct=True)
 
     def dispense(self, vol, pipette, lab_deck, src):
         '''
@@ -613,7 +615,7 @@ class Tube2000uL(Tube):
               choose to ignore it.  
         '''
         #create an array of heights with the first height just a little lower than the surface
-        heights = [self.MIN_HEIGHT, self.asp_height]
+        heights = np.linspace(self.MIN_HEIGHT, self.asp_height, 3)
         for height in heights:
             #set aspiration height
             pipette.well_bottom_clearance.aspirate = height
