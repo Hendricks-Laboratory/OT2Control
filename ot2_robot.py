@@ -171,7 +171,8 @@ class Container(ABC):
         '''
         pipette.touch_tip()
         #move tip *directly* to center of well/tube so it doesn't interact with the well/tube when it lifts up
-        pipette.move_to(lab_deck[self.deck_pos].get_well(self.loc).top(), force_direct=True)
+        current_well = self.get_well(self.loc)
+        pipette.move_to(current_well.top(), force_direct=True)
 
     def dispense(self, vol, pipette, lab_deck, src):
         '''
