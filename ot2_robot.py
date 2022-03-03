@@ -158,9 +158,9 @@ class Container(ABC):
         #update the vol of src
         self.update_vol(-vol)
         #call cleanup
-        self._aspirate_cleanup(pipette, lab_deck)
+        self._aspirate_cleanup(pipette)
 
-    def _aspirate_cleanup(self, pipette, lab_deck):
+    def _aspirate_cleanup(self, pipette):
         '''
         This method is called at the end of an aspiration.
         It is used to do any end of aspiration cleanup like touching tip.  
@@ -171,7 +171,7 @@ class Container(ABC):
         '''
         pipette.touch_tip()
         #move tip *directly* to center of well/tube so it doesn't interact with the well/tube when it lifts up
-        pipette.move_to(lab_deck[self.deck_pos].get_well(self.loc).top(), force_direct=True)
+        pipette.move_to(self.get_well().top(), force_direct=True)
 
     def dispense(self, vol, pipette, lab_deck, src):
         '''
@@ -331,7 +331,7 @@ class MultiContainer(Container):
         #update the vol of src
         self.update_vol(-vol)
         #call cleanup
-        self._aspirate_cleanup(pipette, lab_deck)
+        self._aspirate_cleanup(pipette)
 
     def _update_cont(self):
         '''
