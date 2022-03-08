@@ -1890,7 +1890,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         count = 1.0
         
         #Eps represents the difference variable that we want in order to check if the scans are similar enough
-        eps = 3
+        eps = 3/700 
             
         scan_product_index = row[self._products].ne(0)
         
@@ -1911,10 +1911,11 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         newScan = self._build_suc_row(row,count)
         self._execute_scan(newScan,i)
         new_scan_data,metadata =  self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
-        scan_sum = (((((new_scan_data - old_scan_data)**2)))) 
+         
         #checks difference, defines old_scan to new scan, until they are similar
         #Divide by 700 eps should = 3/700
-        while ((((((new_scan_data - old_scan_data)**2)>eps).any()).any()) and (count < row['max_num_scans'])):    
+        #divide result by 700 aswell
+        while (((((((new_scan_data - old_scan_data)**2)/700)>eps).any()).any()) and (count < row['max_num_scans'])):    
             oldScan = newScan
             old_scan_data = new_scan_data
             
@@ -1923,8 +1924,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             
             newScan = self._build_suc_row(row,count)
             self._execute_scan(newScan,i)
-            new_scan_data,metadata = self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
-            
+            new_scan_data,metadata = self.pr.load_reader_data(newScan['scan_filename'], pr_dict) 
             count += 1
         #Renames the unique filename back to what it was declared as in the sheet    
         self.pr._rename_scan(newScan['scan_filename'],row['scan_filename'])
@@ -2654,6 +2654,8 @@ class AbstractPlateReader(ABC):
             os.system('rm {}'.format(filepath))
 
         data = pd.DataFrame(.42*np.ones((701,len(layout))), columns=layout)
+        
+
         with open(filepath, 'a+', encoding='latin1') as file:
             file.write('No. of Cycles: 1\nT[°C]: \n23.5\n')
             for name, col in data.iteritems():
