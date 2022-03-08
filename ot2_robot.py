@@ -72,6 +72,14 @@ class Container(ABC):
         _update_height void: updates self.height to height at which to pipet (a bit below water line)  
     IMPLEMENTED METHODS:  
         update_vol(float del_vol) void: updates the volume upon an aspiration  
+        rewrite_history_first() void: esoteric method for rewriting the first entry of this
+          container. useful for powders.  
+        aspirate(float vol, Opentrons...pipette pipette, np.array<labware> lab_deck): 
+          aspirates volume from this container.  
+        dispense(float vol, Opentrons...pipette pipette, np.array<labware> lab_deck, float src): 
+          dispenses volume from pipette into this container.  
+        get_well(): returns the Opentrons well object associated with this container
+        mix(Opentrons...pipette pipette, float mix_vol, int mix_code): mixes this container
     """
 
     def __init__(self, name, deck_pos, loc, labware, vol=0,  conc=1):
@@ -199,6 +207,34 @@ class Container(ABC):
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
 
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = self.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+            pipette.blow_out()
+
+    def get_well(self):
+        '''
+        returns Opentrons...Well: the well object this container is in
+        '''
+        return self.labware.wells_by_name()[self.loc]
+
     @property
     def disp_height(self):
         pass
@@ -278,7 +314,7 @@ class MultiContainer(Container):
             The pipette has aspirated vol from this container
         '''
         #check to ensure you can pipette
-        while self.aspiratible_vol < vol:
+        while self.cont.aspiratible_vol < vol:
             #if you can't (not enough vol left)
             try:
                 #try to just move to the next one in the list
@@ -385,7 +421,55 @@ class MultiContainer(Container):
     def MIN_HEIGHT(self):
         return self.cont.MIN_HEIGHT
 
-class Tube20000uL(Container):
+class Tube(Container):
+    '''
+    This abstract class implements shared features of all the tubes. Right now
+    this is just the mix method for 20000 and 50000. 2000 overrides this method
+    anyways.
+    '''
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        NUM_HEIGHTS = 4
+        # create an array of heights with the first height just a little lower
+        # than the surface
+        # top height -4 is carefully tuned to get tip in liquid
+        top_height = max(self.height - 8, self.MIN_HEIGHT) 
+        # The next part assumes you use a 300 uL pipette
+        # it could be implemented for 20uL, but realistically, you
+        # probably won't mix a tube with a 20uL pipette
+        assert (mix_vol > 20), "Trying to mix {} on tube with 20uL pipette".format(self.name)
+        # it is important that tip doesn't submerge itself, hence 55mm max depth
+        if (top_height - self.MIN_HEIGHT < 50):
+            # this is normal case.
+            bottom_height = self.MIN_HEIGHT
+        else:
+            # this is case where you need to change the height so you don't dip
+            # too deep
+            bottom_height = top_height - 50
+            print("<<eve>> warning tube is too full to mix completely")
+        heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
+
+class Tube20000uL(Tube):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -419,16 +503,19 @@ class Tube20000uL(Container):
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
-    @property
-    def disp_height(self):
-        return self.height + 15 #mm
 
     @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
+
+    @property
+    def disp_height(self):
+        min_disp_height = 40 #mm above the bottom of the tube
+        disp_height_above_liquid = 10 #mm above the liquid level
+        return max(self.height + disp_height_above_liquid, min_disp_height)
             
-class Tube50000uL(Container):
+class Tube50000uL(Tube):
     """
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -460,15 +547,17 @@ class Tube50000uL(Container):
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
+    
+    @property
+    def disp_height(self):
+        min_disp_height = 30 #mm above the bottom of the tube
+        disp_height_above_liquid = 10 #mm above the liquid level
+        return max(self.height + disp_height_above_liquid, min_disp_height)
 
-class Tube2000uL(Container):
+class Tube2000uL(Tube):
     """
     2000uL tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -482,7 +571,7 @@ class Tube2000uL(Container):
     """
 
     DEAD_VOL = 250 #uL
-    MIN_HEIGHT = 4
+    MIN_HEIGHT = 6
 
     def __init__(self, name, deck_pos, loc, labware, mass=1.4, conc=2):
         density_water_4C = 0.9998395 # g/mL
@@ -499,13 +588,41 @@ class Tube2000uL(Container):
         self.height = height if height > height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 6 # mm
         return self.height - tip_depth
+
+    @property
+    def disp_height(self):
+        height_disp_cutoff = 32 #mm above the bottom of the tube
+        min_disp_height = 40 #mm above the bottom of the tube
+        disp_height_above_liquid = 7 #mm above the liquid level
+        return self.height + disp_height_above_liquid if self.height > height_disp_cutoff else min_disp_height
+
+    def mix(self, pipette, mix_vol, mix_code):
+        '''
+        This method is used to mix the well. Part of the container because
+        many of it's children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        '''
+        #create an array of heights with the first height just a little lower than the surface
+        heights = [self.MIN_HEIGHT, self.asp_height]
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
 
 class Well(Container, ABC):
     """
@@ -535,7 +652,6 @@ class Well(Container, ABC):
     @abstractmethod
     def disp_height(self):
         pass
-        return 9 #mm
 
     @property
     def asp_height(self):
@@ -888,7 +1004,7 @@ class OT2Robot():
     """
 
     #Don't try to read this. Use an online json formatter 
-    _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
+    _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "plate_reader_4", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "plate_reader_7", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
@@ -957,6 +1073,7 @@ class OT2Robot():
               it is the client's responsibility to make sure that these are initialized prior
               to operating with them  
         '''
+        self._load_calibrations()
         #convert args back to df
         labware_df = pd.DataFrame(labware_df)
         #index of reagent_df needs to be set because it can have multiple chemicals of same
@@ -976,9 +1093,9 @@ class OT2Robot():
 
         if simulate:
             # define version number and define protocol object
-            self.protocol = opentrons.simulate.get_protocol_api('2.9')
+            self.protocol = opentrons.simulate.get_protocol_api('2.12')
         else:
-            self.protocol = opentrons.execute.get_protocol_api('2.9')
+            self.protocol = opentrons.execute.get_protocol_api('2.12')
             self.protocol.set_rail_lights(on = True)
             self.protocol.rail_lights_on 
         self.protocol.home() # Homes the pipette tip
@@ -991,6 +1108,13 @@ class OT2Robot():
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
         self._init_reagents(reagent_df)
+
+    def _load_calibrations(self):
+        '''
+        Loads in the calibrations file
+        '''
+        with open("calibrations.json", 'r') as file:
+            self._CALIBRATIONS = json.load(file)
 
     def _init_directories(self):
         '''
@@ -1136,8 +1260,10 @@ class OT2Robot():
             labware = self.temp_module.load_labware(opentrons_name,label=name)
             #this will always be a tube holder
             self._add_to_deck(name, deck_pos, labware, empty_containers=empty_tubes)
+            assert( temp >= 4 and temp <= 95), "invalid temperature defined"
+    
 
-
+        
     def _init_custom_labware(self, name, deck_pos, **kwargs):
         '''
         initializes custom built labware by reading from json
@@ -1178,6 +1304,10 @@ class OT2Robot():
             self.lab_deck[deck_pos] = WellPlate24(labware, kwargs['first_well'], deck_pos)
         else:
             raise Exception("Sorry, Illegal Labware Option, {}. {} is not a tube or plate".format(name,name))
+        #after you've added the labware, you must calibrate
+        #offset is a dictionary with keys, x,y,z and float offset vals
+        offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]
+        labware.set_offset(**offset)
 
     def _init_labware(self, labware_df, using_temp_ctrl, temp):
         '''
@@ -1390,19 +1520,12 @@ class OT2Robot():
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', chem_name]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
         self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
-        arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
+        arm = self._get_preffered_pipette(300) #gets the larger pipette
         pipette = self.pipettes[arm]['pipette']
         self.pipettes[arm]['last_used'] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
-        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
-        #set aspiration height
-        pipette.well_bottom_clearance.aspirate = cont.asp_height
-        #set dispense height to same as asp
-        pipette.well_bottom_clearance.dispense = cont.asp_height
-        #do the actual mix
-        for i in range(2**mix_code):
-            pipette.mix(1,self.pipettes[arm]['size'],well,rate=100.0)
-            pipette.blow_out()
+        #perform the mix
+        cont.mix(pipette, self.pipettes[arm]['size'], mix_code)
         
         #pull a little out of that well and shake off the drops
         pipette.well_bottom_clearance.dispense = cont.disp_height

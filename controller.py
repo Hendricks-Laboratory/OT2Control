@@ -246,35 +246,7 @@ class Controller(ABC):
             has inserted a row into the rxn_df to transfer WaterC1.0  
             If the reaction has already overflowed the total volume, will add negative volume
             (which is impossible. The caller of this function must account for this.)  
-chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
-R1	1.0	A1	1	16.139		
-R2	0.25	A2	1	14.206		
-R3	4.66	A3	1	45.168		
-Water	1.0	A4	1	60		
-R2		B1	1	0.0045	5500	powdered R2
-R2		B2	1	0.0032	5500	powdered R2
-empty		A1	5			
-empty		A2	5			
-empty		A3	5			
-empty		A4	5			
-empty		B1	5			
-empty		B2	5			
-empty		B3	5			
-empty		B4	5			chemical_name	conc	loc	deck_pos	mass	molar_mass (for dry only)	comments
-R1	1.0	A1	1	16.139		
-R2	0.25	A2	1	14.206		
-R3	4.66	A3	1	45.168		
-Water	1.0	A4	1	60		
-R2		B1	1	0.0045	5500	powdered R2
-R2		B2	1	0.0032	5500	powdered R2
-empty		A1	5			
-empty		A2	5			
-empty		A3	5			
-empty		A4	5			
-empty		B1	5			
-empty		B2	5			
-empty		B3	5			
-empty		B4	5			            If no total vols were specified, no transfer step will be inserted.  
+            If no total vols were specified, no transfer step will be inserted.  
         '''
         #if there are no total vols, don't insert the row, just return
         if self.tot_vols:
@@ -517,6 +489,8 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
         self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
+        if self.robo_params['temp'] != None:
+            assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
         self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
                 float(header_dict['dilution_vol']))
 
@@ -1221,7 +1195,10 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             self.portal.send_pack('home')
             self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
             self.pr.exec_macro('PlateIn')
-            self.pr.shake()
+            if (row.loc[self._products] == 2).any():
+                self.pr.shake(60)
+            else:
+                self.pr.shake(30)
             self.pr.exec_macro('PlateOut')
         if (~wells_to_mix_df['platereader']).sum() > 0:
             #at least one needs to be mixed by hand
@@ -1247,9 +1224,14 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             Will block on ready if the buffer is filled  
         '''
         water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        prod_transfer = reagent_transfer_row.loc[self._products].ne(0)
+        product_val = reagent_transfer_row[self._products][prod_transfer].index
+        mix_row = row.copy()
+        mix_row['op'] = 'mix'
+        mix_row.loc[product_val] = 2 
         self._send_transfer_command(water_transfer_row, i)
         self._send_transfer_command(reagent_transfer_row, i)
-
+        self._mix(mix_row,i)
     def _get_dilution_transfer_rows(self, row):
         '''
         Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
@@ -1263,6 +1245,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
               reagent
               see self._construct_dilution_transfer_row for details  
+            Note the second row (the reagent row) will have have whichever callbacks are passed.
         Preconditions:  
             robot has been initialized  
             Water or ColdWater is on the deck (depending on if this is on temperature module
@@ -1285,6 +1268,7 @@ empty		B4	5			            If no total vols were specified, no transfer step will
         water_transfer_row = self._construct_dilution_transfer_row(water_src, target_name, vol_water)
 
         reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        reagent_transfer_row['callbacks'] = row['callbacks'] #give the second row whatever callbacks you had
         return water_transfer_row, reagent_transfer_row
 
     def _get_dilution_transfer_vols(self, row):
@@ -1352,8 +1336,6 @@ empty		B4	5			            If no total vols were specified, no transfer step will
             pd.Series row: a row of self.rxn_df
               uses the chemical_name, callbacks (and associated args), product_columns  
             int i: index of this row  
-        returns:  
-            int: the cid of this command  
         Postconditions:  
             a transfer command has been sent to the robot  
         '''
@@ -2623,7 +2605,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def shake(self):
+    def shake(self, shake_time):
         '''
         executes a shake
         '''
@@ -2833,14 +2815,13 @@ class PlateReader(AbstractPlateReader):
             else:
                 raise Exception("PlateReader Error. Exited with code {}".format(exit_code))
 
-    def shake(self):
+    def shake(self, shake_time):
         '''
         executes a shake
         '''
         macro = "Shake"
         shake_type = 2
         shake_freq = 300
-        shake_time = 60
         self.exec_macro(macro, shake_type, shake_freq, shake_time)
 
     def load_reader_data(self, filename, loc_to_name):
@@ -2985,6 +2966,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 if __name__ == '__main__':
-    SERVERADDR = "10.25.17.168"
+    SERVERADDR = "10.25.8.83"
     main(SERVERADDR)
 

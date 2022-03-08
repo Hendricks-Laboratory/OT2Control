@@ -17,7 +17,7 @@ will crash if you do other strange things
 
 INPUT TEMPlATE
 The second sheet in the worksheet must be the input template
-Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix']
+Every operation is one of the values ['transfer', 'scan', 'pause','stop','dilution','mix','make','print']
 chemical that appears in the reagent column shall be renamed with spaces replaced with underscores,
 and it's concentration appended in the format '<name>C<conc>', e.g. PotassiumC0.03
 the chemical you name must use no special characters in the python re library (i.e. be civil in
@@ -53,6 +53,7 @@ Currently, mix, scan, stop, and pause are implemented as callbacks. They should 
 callbacks column seperated by commas, e.g. 'mix, scan' or 'scan' or 'scan, pause, stop, pause'.
 Two scans in one callback is illegal. You must specify the arguments for any callbacks you use
 and they will use the same args. e.g. 'pause,stop,pause' pauses for the same time on both.
+A mix will default to mixcode=2.
 transfer:
     Specify volume in uL under the columns you want to transfer into
 dilution:
@@ -74,13 +75,21 @@ scan:
     IF YOU HAVE ALREADY RUN THIS PROTOCOL AND HAVE A SCAN OF THE SAME NOW IN THE SCAN DIR
     IT WILL BE OVERWRITTEN. YOU'VE BEEN WARNED
 mix:
-    specify wells to mix with a 1. This is redundant for now because only platereader wells can be
-    mixed, but for anything that's not on the plate reader future features would pipette mix it
+    specify wells to mix with either a 1 or a 2. A 1 indicates a low level mix
+    a 2 indicates more vigorous. Mixing is specialized to run on different
+    labware. A platereader will always shake the entire plate. If you specify
+    2 for anything on the plate, everything will be mixed at a 2.
 plot:
     specify the wells to plot with a 1. Specify the filename in the slot for plot filename.
     Options for plot protocol are: single_kin, overlay, multi_kin.
     If single_kin is chosen, the name of the file will be your "{wellname}_{filename}" for
     for each well you specified
+make:
+    specify the reagent and concentration you want to make. That reagent must
+    be added in the Reagent Info tab as a powdered reagent. The mass of the
+    reagent is expected to be the mass of the powder as opposed to the tube.
+print:
+    specify the message you want to say, and the console will output a message where you issued the print command.
 
 AUTO INPUT TEMPLATE
 Same as for input template, with two major changes.

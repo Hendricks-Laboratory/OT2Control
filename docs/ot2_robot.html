@@ -113,6 +113,14 @@ class Container(ABC):
         _update_height void: updates self.height to height at which to pipet (a bit below water line)  
     IMPLEMENTED METHODS:  
         update_vol(float del_vol) void: updates the volume upon an aspiration  
+        rewrite_history_first() void: esoteric method for rewriting the first entry of this
+          container. useful for powders.  
+        aspirate(float vol, Opentrons...pipette pipette, np.array&lt;labware&gt; lab_deck): 
+          aspirates volume from this container.  
+        dispense(float vol, Opentrons...pipette pipette, np.array&lt;labware&gt; lab_deck, float src): 
+          dispenses volume from pipette into this container.  
+        get_well(): returns the Opentrons well object associated with this container
+        mix(Opentrons...pipette pipette, float mix_vol, int mix_code): mixes this container
     &#34;&#34;&#34;
 
     def __init__(self, name, deck_pos, loc, labware, vol=0,  conc=1):
@@ -239,6 +247,34 @@ class Container(ABC):
             pipette.blow_out()
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
+
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = self.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+            pipette.blow_out()
+
+    def get_well(self):
+        &#39;&#39;&#39;
+        returns Opentrons...Well: the well object this container is in
+        &#39;&#39;&#39;
+        return self.labware.wells_by_name()[self.loc]
 
     @property
     def disp_height(self):
@@ -426,7 +462,59 @@ class MultiContainer(Container):
     def MIN_HEIGHT(self):
         return self.cont.MIN_HEIGHT
 
-class Tube20000uL(Container):
+class Tube(Container):
+    &#39;&#39;&#39;
+    This class implements shared features of all the tubes. Right now
+    this is just the mix method for 20000 and 50000. 2000 overrides this method
+    anyways.
+    &#39;&#39;&#39;
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        NUM_HEIGHTS = 4
+        # create an array of heights with the first height just a little lower
+        # than the surface
+        # top height -4 is carefully tuned to get tip in liquid
+        top_height = max(self.height - 8, self.MIN_HEIGHT) 
+        # The next part assumes you use a 300 uL pipette
+        # it could be implemented for 20uL, but realistically, you
+        # probably won&#39;t mix a tube with a 20uL pipette
+        assert (mix_vol &gt; 20), &#34;Trying to mix {} on tube with 20uL pipette&#34;.format(self.name)
+        # it is important that tip doesn&#39;t submerge itself, hence 55mm max depth
+        if (top_height - self.MIN_HEIGHT &lt; 55):
+            # this is normal case.
+            bottom_height = self.MIN_HEIGHT
+        else:
+            # this is case where you need to change the height so you don&#39;t dip
+            # too deep
+            bottom_height = top_height - 55
+            print(&#34;&lt;&lt;eve&gt;&gt; warning tube is too full to mix completely&#34;)
+        heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
+
+    @property
+    def disp_height(self):
+        return self.height + 20 #mm
+
+class Tube20000uL(Tube):
     &#34;&#34;&#34;
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -460,16 +548,13 @@ class Tube20000uL(Container):
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
-    @property
-    def disp_height(self):
-        return self.height + 15 #mm
 
     @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
             
-class Tube50000uL(Container):
+class Tube50000uL(Tube):
     &#34;&#34;&#34;
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -501,15 +586,11 @@ class Tube50000uL(Container):
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth
 
-class Tube2000uL(Container):
+class Tube2000uL(Tube):
     &#34;&#34;&#34;
     2000uL tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -540,13 +621,34 @@ class Tube2000uL(Container):
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 6 # mm
         return self.height - tip_depth
+
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        #create an array of heights with the first height just a little lower than the surface
+        heights = [self.MIN_HEIGHT, self.asp_height]
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
 
 class Well(Container, ABC):
     &#34;&#34;&#34;
@@ -576,7 +678,6 @@ class Well(Container, ABC):
     @abstractmethod
     def disp_height(self):
         pass
-        return 9 #mm
 
     @property
     def asp_height(self):
@@ -1431,19 +1532,12 @@ class OT2Robot():
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check][&#39;last_used&#39;] in [&#39;clean&#39;, &#39;WaterC1.0&#39;, chem_name]), &#34;trying to transfer {}-&gt;{}, with {} arm, but {} arm was dirty with {}&#34;.format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check][&#39;last_used&#39;])
         self.protocol._commands.append(&#39;HEAD: {} : mixing {} &#39;.format(datetime.now().strftime(&#39;%d-%b-%Y %H:%M:%S:%f&#39;), chem_name))
-        arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
+        arm = self._get_preffered_pipette(300) #gets the larger pipette
         pipette = self.pipettes[arm][&#39;pipette&#39;]
         self.pipettes[arm][&#39;last_used&#39;] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
-        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
-        #set aspiration height
-        pipette.well_bottom_clearance.aspirate = cont.asp_height
-        #set dispense height to same as asp
-        pipette.well_bottom_clearance.dispense = cont.asp_height
-        #do the actual mix
-        for i in range(2**mix_code):
-            pipette.mix(1,self.pipettes[arm][&#39;size&#39;],well,rate=100.0)
-            pipette.blow_out()
+        #perform the mix
+        cont.mix(pipette, self.pipettes[arm][&#39;size&#39;], mix_code)
         
         #pull a little out of that well and shake off the drops
         pipette.well_bottom_clearance.dispense = cont.disp_height
@@ -1995,7 +2089,15 @@ float MIN_HEIGHT: the minimum height at which to pipette from <br>
 ABSTRACT METHODS:<br>
 _update_height void: updates self.height to height at which to pipet (a bit below water line)<br>
 IMPLEMENTED METHODS:<br>
-update_vol(float del_vol) void: updates the volume upon an aspiration</p></div>
+update_vol(float del_vol) void: updates the volume upon an aspiration<br>
+rewrite_history_first() void: esoteric method for rewriting the first entry of this
+container. useful for powders.<br>
+aspirate(float vol, Opentrons&hellip;pipette pipette, np.array<labware> lab_deck):
+aspirates volume from this container.<br>
+dispense(float vol, Opentrons&hellip;pipette pipette, np.array<labware> lab_deck, float src):
+dispenses volume from pipette into this container.<br>
+get_well(): returns the Opentrons well object associated with this container
+mix(Opentrons&hellip;pipette pipette, float mix_vol, int mix_code): mixes this container</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -2023,6 +2125,14 @@ update_vol(float del_vol) void: updates the volume upon an aspiration</p></div>
         _update_height void: updates self.height to height at which to pipet (a bit below water line)  
     IMPLEMENTED METHODS:  
         update_vol(float del_vol) void: updates the volume upon an aspiration  
+        rewrite_history_first() void: esoteric method for rewriting the first entry of this
+          container. useful for powders.  
+        aspirate(float vol, Opentrons...pipette pipette, np.array&lt;labware&gt; lab_deck): 
+          aspirates volume from this container.  
+        dispense(float vol, Opentrons...pipette pipette, np.array&lt;labware&gt; lab_deck, float src): 
+          dispenses volume from pipette into this container.  
+        get_well(): returns the Opentrons well object associated with this container
+        mix(Opentrons...pipette pipette, float mix_vol, int mix_code): mixes this container
     &#34;&#34;&#34;
 
     def __init__(self, name, deck_pos, loc, labware, vol=0,  conc=1):
@@ -2150,6 +2260,34 @@ update_vol(float del_vol) void: updates the volume upon an aspiration</p></div>
         #wiggle - touch tip (spin fast inside well)
         pipette.touch_tip(radius=0.3,speed=40)
 
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        #set aspiration height
+        pipette.well_bottom_clearance.aspirate = self.asp_height
+        #set dispense height to same as asp
+        pipette.well_bottom_clearance.dispense = self.asp_height
+        #do the actual mix
+        for i in range(2**mix_code):
+            pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+            pipette.blow_out()
+
+    def get_well(self):
+        &#39;&#39;&#39;
+        returns Opentrons...Well: the well object this container is in
+        &#39;&#39;&#39;
+        return self.labware.wells_by_name()[self.loc]
+
     @property
     def disp_height(self):
         pass
@@ -2173,9 +2311,7 @@ update_vol(float del_vol) void: updates the volume upon an aspiration</p></div>
 <h3>Subclasses</h3>
 <ul class="hlist">
 <li><a title="ot2_robot.MultiContainer" href="#ot2_robot.MultiContainer">MultiContainer</a></li>
-<li><a title="ot2_robot.Tube20000uL" href="#ot2_robot.Tube20000uL">Tube20000uL</a></li>
-<li><a title="ot2_robot.Tube2000uL" href="#ot2_robot.Tube2000uL">Tube2000uL</a></li>
-<li><a title="ot2_robot.Tube50000uL" href="#ot2_robot.Tube50000uL">Tube50000uL</a></li>
+<li><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></li>
 <li><a title="ot2_robot.Well" href="#ot2_robot.Well">Well</a></li>
 </ul>
 <h3>Class variables</h3>
@@ -2326,6 +2462,63 @@ The pipette has aspirated vol from this container</p></div>
     self.update_vol(vol,src)
     #cleanup
     self._dispense_cleanup(pipette)</code></pre>
+</details>
+</dd>
+<dt id="ot2_robot.Container.get_well"><code class="name flex">
+<span>def <span class="ident">get_well</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>returns Opentrons&hellip;Well: the well object this container is in</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def get_well(self):
+    &#39;&#39;&#39;
+    returns Opentrons...Well: the well object this container is in
+    &#39;&#39;&#39;
+    return self.labware.wells_by_name()[self.loc]</code></pre>
+</details>
+</dd>
+<dt id="ot2_robot.Container.mix"><code class="name flex">
+<span>def <span class="ident">mix</span></span>(<span>self, pipette, mix_vol, mix_code)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This method is used to mix the well. Part of the container because
+many of it's children will override this method to mix in a special way.<br>
+params:<br>
+Opentrons.pipette pipette: the piptette to use for the mix
+float mix_vol: the volume to mix with (this is almost always
+the volume of the pipette<br>
+int mix_code: integer code for what type of mix. This allows for
+different mix behaviors within a class, though the container
+just uses it for mix iterations, and many subclasses might
+choose to ignore it.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def mix(self, pipette, mix_vol, mix_code):
+    &#39;&#39;&#39;
+    This method is used to mix the well. Part of the container because
+    many of it&#39;s children will override this method to mix in a special way.  
+    params:  
+        Opentrons.pipette pipette: the piptette to use for the mix
+        float mix_vol: the volume to mix with (this is almost always
+          the volume of the pipette  
+        int mix_code: integer code for what type of mix. This allows for
+          different mix behaviors within a class, though the container
+          just uses it for mix iterations, and many subclasses might
+          choose to ignore it.  
+    &#39;&#39;&#39;
+    #set aspiration height
+    pipette.well_bottom_clearance.aspirate = self.asp_height
+    #set dispense height to same as asp
+    pipette.well_bottom_clearance.dispense = self.asp_height
+    #do the actual mix
+    for i in range(2**mix_code):
+        pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+        pipette.blow_out()</code></pre>
 </details>
 </dd>
 <dt id="ot2_robot.Container.rewrite_history_first"><code class="name flex">
@@ -3102,6 +3295,8 @@ The pipette has aspirated vol from this container</p></div>
 <ul class="hlist">
 <li><code><b><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></b></code>:
 <ul class="hlist">
+<li><code><a title="ot2_robot.Container.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Container.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
 <li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
 <li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
@@ -3713,19 +3908,12 @@ to operating with them</p></div>
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check][&#39;last_used&#39;] in [&#39;clean&#39;, &#39;WaterC1.0&#39;, chem_name]), &#34;trying to transfer {}-&gt;{}, with {} arm, but {} arm was dirty with {}&#34;.format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check][&#39;last_used&#39;])
         self.protocol._commands.append(&#39;HEAD: {} : mixing {} &#39;.format(datetime.now().strftime(&#39;%d-%b-%Y %H:%M:%S:%f&#39;), chem_name))
-        arm = self._get_preffered_pipette(self.containers[chem_name].aspiratible_vol) 
+        arm = self._get_preffered_pipette(300) #gets the larger pipette
         pipette = self.pipettes[arm][&#39;pipette&#39;]
         self.pipettes[arm][&#39;last_used&#39;] = chem_name #gotta update the last used
         cont = self.containers[chem_name]
-        well = self.lab_deck[cont.deck_pos].get_well(cont.loc)
-        #set aspiration height
-        pipette.well_bottom_clearance.aspirate = cont.asp_height
-        #set dispense height to same as asp
-        pipette.well_bottom_clearance.dispense = cont.asp_height
-        #do the actual mix
-        for i in range(2**mix_code):
-            pipette.mix(1,self.pipettes[arm][&#39;size&#39;],well,rate=100.0)
-            pipette.blow_out()
+        #perform the mix
+        cont.mix(pipette, self.pipettes[arm][&#39;size&#39;], mix_code)
         
         #pull a little out of that well and shake off the drops
         pipette.well_bottom_clearance.dispense = cont.disp_height
@@ -4298,6 +4486,110 @@ def execute(self, command_type, cid, arguments):
 </dd>
 </dl>
 </dd>
+<dt id="ot2_robot.Tube"><code class="flex name class">
+<span>class <span class="ident">Tube</span></span>
+<span>(</span><span>name, deck_pos, loc, labware, vol=0, conc=1)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This class implements shared features of all the tubes. Right now
+this is just the mix method for 20000 and 50000. 2000 overrides this method
+anyways.</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class Tube(Container):
+    &#39;&#39;&#39;
+    This class implements shared features of all the tubes. Right now
+    this is just the mix method for 20000 and 50000. 2000 overrides this method
+    anyways.
+    &#39;&#39;&#39;
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        NUM_HEIGHTS = 4
+        # create an array of heights with the first height just a little lower
+        # than the surface
+        # top height -4 is carefully tuned to get tip in liquid
+        top_height = max(self.height - 8, self.MIN_HEIGHT) 
+        # The next part assumes you use a 300 uL pipette
+        # it could be implemented for 20uL, but realistically, you
+        # probably won&#39;t mix a tube with a 20uL pipette
+        assert (mix_vol &gt; 20), &#34;Trying to mix {} on tube with 20uL pipette&#34;.format(self.name)
+        # it is important that tip doesn&#39;t submerge itself, hence 55mm max depth
+        if (top_height - self.MIN_HEIGHT &lt; 55):
+            # this is normal case.
+            bottom_height = self.MIN_HEIGHT
+        else:
+            # this is case where you need to change the height so you don&#39;t dip
+            # too deep
+            bottom_height = top_height - 55
+            print(&#34;&lt;&lt;eve&gt;&gt; warning tube is too full to mix completely&#34;)
+        heights = np.linspace(bottom_height, top_height, num=NUM_HEIGHTS)
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()
+
+    @property
+    def disp_height(self):
+        return self.height + 20 #mm</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></li>
+<li>abc.ABC</li>
+</ul>
+<h3>Subclasses</h3>
+<ul class="hlist">
+<li><a title="ot2_robot.Tube20000uL" href="#ot2_robot.Tube20000uL">Tube20000uL</a></li>
+<li><a title="ot2_robot.Tube2000uL" href="#ot2_robot.Tube2000uL">Tube2000uL</a></li>
+<li><a title="ot2_robot.Tube50000uL" href="#ot2_robot.Tube50000uL">Tube50000uL</a></li>
+</ul>
+<h3>Instance variables</h3>
+<dl>
+<dt id="ot2_robot.Tube.disp_height"><code class="name">var <span class="ident">disp_height</span></code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@property
+def disp_height(self):
+    return self.height + 20 #mm</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></b></code>:
+<ul class="hlist">
+<li><code><a title="ot2_robot.Container.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
+<li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Container.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Container.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
+<li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
+<li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
 <dt id="ot2_robot.Tube20000uL"><code class="flex name class">
 <span>class <span class="ident">Tube20000uL</span></span>
 <span>(</span><span>name, deck_pos, loc, labware, mass=6.9731, conc=1)</span>
@@ -4318,7 +4610,7 @@ _update_height void, update_vol(float del_vol) void,
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Tube20000uL(Container):
+<pre><code class="python">class Tube20000uL(Tube):
     &#34;&#34;&#34;
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -4352,9 +4644,6 @@ _update_height void, update_vol(float del_vol) void,
         height = ((self.vol - self.DEAD_VOL)/(math.pi*(diameter_15/2)**2))+height_bottom_cylinder
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
-    @property
-    def disp_height(self):
-        return self.height + 15 #mm
 
     @property
     def asp_height(self):
@@ -4363,6 +4652,7 @@ _update_height void, update_vol(float del_vol) void,
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
+<li><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></li>
 <li><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></li>
 <li>abc.ABC</li>
 </ul>
@@ -4392,27 +4682,17 @@ def asp_height(self):
     return self.height - tip_depth</code></pre>
 </details>
 </dd>
-<dt id="ot2_robot.Tube20000uL.disp_height"><code class="name">var <span class="ident">disp_height</span></code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@property
-def disp_height(self):
-    return self.height + 15 #mm</code></pre>
-</details>
-</dd>
 </dl>
 <h3>Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></b></code>:
+<li><code><b><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></b></code>:
 <ul class="hlist">
-<li><code><a title="ot2_robot.Container.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
-<li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
-<li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
-<li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
+<li><code><a title="ot2_robot.Tube.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
+<li><code><a title="ot2_robot.Tube.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Tube.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Tube.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
+<li><code><a title="ot2_robot.Tube.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
+<li><code><a title="ot2_robot.Tube.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
 </li>
 </ul>
@@ -4435,7 +4715,7 @@ _update_height void, update_vol(float del_vol) void,</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Tube2000uL(Container):
+<pre><code class="python">class Tube2000uL(Tube):
     &#34;&#34;&#34;
     2000uL tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -4466,16 +4746,38 @@ _update_height void, update_vol(float del_vol) void,</p></div>
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 6 # mm
-        return self.height - tip_depth</code></pre>
+        return self.height - tip_depth
+
+    def mix(self, pipette, mix_vol, mix_code):
+        &#39;&#39;&#39;
+        This method is used to mix the well. Part of the container because
+        many of it&#39;s children will override this method to mix in a special way.  
+        params:  
+            Opentrons.pipette pipette: the piptette to use for the mix
+            float mix_vol: the volume to mix with (this is almost always
+              the volume of the pipette  
+            int mix_code: integer code for what type of mix. This allows for
+              different mix behaviors within a class, though the container
+              just uses it for mix iterations, and many subclasses might
+              choose to ignore it.  
+        &#39;&#39;&#39;
+        #create an array of heights with the first height just a little lower than the surface
+        heights = [self.MIN_HEIGHT, self.asp_height]
+        for height in heights:
+            #set aspiration height
+            pipette.well_bottom_clearance.aspirate = height
+            #set dispense height to same as asp
+            pipette.well_bottom_clearance.dispense = height
+            #do the actual mix
+            for i in range(2**mix_code):
+                pipette.mix(1, mix_vol, self.get_well(), rate=100.0)
+                pipette.blow_out()</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
+<li><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></li>
 <li><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></li>
 <li>abc.ABC</li>
 </ul>
@@ -4505,27 +4807,17 @@ def asp_height(self):
     return self.height - tip_depth</code></pre>
 </details>
 </dd>
-<dt id="ot2_robot.Tube2000uL.disp_height"><code class="name">var <span class="ident">disp_height</span></code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@property
-def disp_height(self):
-    return self.height + 15 #mm</code></pre>
-</details>
-</dd>
 </dl>
 <h3>Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></b></code>:
+<li><code><b><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></b></code>:
 <ul class="hlist">
-<li><code><a title="ot2_robot.Container.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
-<li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
-<li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
-<li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
+<li><code><a title="ot2_robot.Tube.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
+<li><code><a title="ot2_robot.Tube.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Tube.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Tube.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
+<li><code><a title="ot2_robot.Tube.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
+<li><code><a title="ot2_robot.Tube.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
 </li>
 </ul>
@@ -4548,7 +4840,7 @@ _update_height void, update_vol(float del_vol) void,</p></div>
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">class Tube50000uL(Container):
+<pre><code class="python">class Tube50000uL(Tube):
     &#34;&#34;&#34;
     Spcific tube with measurements taken to provide implementations of abstract methods  
     INHERITED ATTRIBUTES:  
@@ -4580,16 +4872,13 @@ _update_height void, update_vol(float del_vol) void,</p></div>
         self.height = height if height &gt; height_bottom_cylinder else self.MIN_HEIGHT
 
     @property
-    def disp_height(self):
-        return self.height + 15 #mm
-
-    @property
     def asp_height(self):
         tip_depth = 5
         return self.height - tip_depth</code></pre>
 </details>
 <h3>Ancestors</h3>
 <ul class="hlist">
+<li><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></li>
 <li><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></li>
 <li>abc.ABC</li>
 </ul>
@@ -4619,27 +4908,17 @@ def asp_height(self):
     return self.height - tip_depth</code></pre>
 </details>
 </dd>
-<dt id="ot2_robot.Tube50000uL.disp_height"><code class="name">var <span class="ident">disp_height</span></code></dt>
-<dd>
-<div class="desc"></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">@property
-def disp_height(self):
-    return self.height + 15 #mm</code></pre>
-</details>
-</dd>
 </dl>
 <h3>Inherited members</h3>
 <ul class="hlist">
-<li><code><b><a title="ot2_robot.Container" href="#ot2_robot.Container">Container</a></b></code>:
+<li><code><b><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></b></code>:
 <ul class="hlist">
-<li><code><a title="ot2_robot.Container.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
-<li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
-<li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
-<li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
+<li><code><a title="ot2_robot.Tube.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
+<li><code><a title="ot2_robot.Tube.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Tube.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Tube.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
+<li><code><a title="ot2_robot.Tube.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
+<li><code><a title="ot2_robot.Tube.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
 </li>
 </ul>
@@ -4969,7 +5248,6 @@ _update_height void, update_vol(float del_vol) void,</p></div>
     @abstractmethod
     def disp_height(self):
         pass
-        return 9 #mm
 
     @property
     def asp_height(self):
@@ -5016,8 +5294,7 @@ def asp_height(self):
 <pre><code class="python">@property
 @abstractmethod
 def disp_height(self):
-    pass
-    return 9 #mm</code></pre>
+    pass</code></pre>
 </details>
 </dd>
 </dl>
@@ -5027,6 +5304,8 @@ def disp_height(self):
 <ul class="hlist">
 <li><code><a title="ot2_robot.Container.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
 <li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Container.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Container.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
 <li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
 <li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
@@ -5105,6 +5384,8 @@ def disp_height(self):
 <ul class="hlist">
 <li><code><a title="ot2_robot.Well.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
 <li><code><a title="ot2_robot.Well.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Well.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Well.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
 <li><code><a title="ot2_robot.Well.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
 <li><code><a title="ot2_robot.Well.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
@@ -5183,6 +5464,8 @@ def disp_height(self):
 <ul class="hlist">
 <li><code><a title="ot2_robot.Well.aspirate" href="#ot2_robot.Container.aspirate">aspirate</a></code></li>
 <li><code><a title="ot2_robot.Well.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Well.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Well.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
 <li><code><a title="ot2_robot.Well.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
 <li><code><a title="ot2_robot.Well.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
@@ -5543,6 +5826,8 @@ str: the type of container</p></div>
 <li><code><a title="ot2_robot.Container.aspiratible_vol" href="#ot2_robot.Container.aspiratible_vol">aspiratible_vol</a></code></li>
 <li><code><a title="ot2_robot.Container.disp_height" href="#ot2_robot.Container.disp_height">disp_height</a></code></li>
 <li><code><a title="ot2_robot.Container.dispense" href="#ot2_robot.Container.dispense">dispense</a></code></li>
+<li><code><a title="ot2_robot.Container.get_well" href="#ot2_robot.Container.get_well">get_well</a></code></li>
+<li><code><a title="ot2_robot.Container.mix" href="#ot2_robot.Container.mix">mix</a></code></li>
 <li><code><a title="ot2_robot.Container.rewrite_history_first" href="#ot2_robot.Container.rewrite_history_first">rewrite_history_first</a></code></li>
 <li><code><a title="ot2_robot.Container.update_vol" href="#ot2_robot.Container.update_vol">update_vol</a></code></li>
 </ul>
@@ -5590,12 +5875,17 @@ str: the type of container</p></div>
 </ul>
 </li>
 <li>
+<h4><code><a title="ot2_robot.Tube" href="#ot2_robot.Tube">Tube</a></code></h4>
+<ul class="">
+<li><code><a title="ot2_robot.Tube.disp_height" href="#ot2_robot.Tube.disp_height">disp_height</a></code></li>
+</ul>
+</li>
+<li>
 <h4><code><a title="ot2_robot.Tube20000uL" href="#ot2_robot.Tube20000uL">Tube20000uL</a></code></h4>
 <ul class="">
 <li><code><a title="ot2_robot.Tube20000uL.DEAD_VOL" href="#ot2_robot.Tube20000uL.DEAD_VOL">DEAD_VOL</a></code></li>
 <li><code><a title="ot2_robot.Tube20000uL.MIN_HEIGHT" href="#ot2_robot.Tube20000uL.MIN_HEIGHT">MIN_HEIGHT</a></code></li>
 <li><code><a title="ot2_robot.Tube20000uL.asp_height" href="#ot2_robot.Tube20000uL.asp_height">asp_height</a></code></li>
-<li><code><a title="ot2_robot.Tube20000uL.disp_height" href="#ot2_robot.Tube20000uL.disp_height">disp_height</a></code></li>
 </ul>
 </li>
 <li>
@@ -5604,7 +5894,6 @@ str: the type of container</p></div>
 <li><code><a title="ot2_robot.Tube2000uL.DEAD_VOL" href="#ot2_robot.Tube2000uL.DEAD_VOL">DEAD_VOL</a></code></li>
 <li><code><a title="ot2_robot.Tube2000uL.MIN_HEIGHT" href="#ot2_robot.Tube2000uL.MIN_HEIGHT">MIN_HEIGHT</a></code></li>
 <li><code><a title="ot2_robot.Tube2000uL.asp_height" href="#ot2_robot.Tube2000uL.asp_height">asp_height</a></code></li>
-<li><code><a title="ot2_robot.Tube2000uL.disp_height" href="#ot2_robot.Tube2000uL.disp_height">disp_height</a></code></li>
 </ul>
 </li>
 <li>
@@ -5613,7 +5902,6 @@ str: the type of container</p></div>
 <li><code><a title="ot2_robot.Tube50000uL.DEAD_VOL" href="#ot2_robot.Tube50000uL.DEAD_VOL">DEAD_VOL</a></code></li>
 <li><code><a title="ot2_robot.Tube50000uL.MIN_HEIGHT" href="#ot2_robot.Tube50000uL.MIN_HEIGHT">MIN_HEIGHT</a></code></li>
 <li><code><a title="ot2_robot.Tube50000uL.asp_height" href="#ot2_robot.Tube50000uL.asp_height">asp_height</a></code></li>
-<li><code><a title="ot2_robot.Tube50000uL.disp_height" href="#ot2_robot.Tube50000uL.disp_height">disp_height</a></code></li>
 </ul>
 </li>
 <li>
