@@ -17,6 +17,7 @@ class MLModel():
           thread executor object
         bool quit: True indicates MLModel is ready to quit, False indicates MLModel would like
           to keep going  
+        y_shape is the number of reagents you're guessing at in recipes
     '''
     def __init__(self, model, max_iters=np.inf):
         self.curr_iter = 0

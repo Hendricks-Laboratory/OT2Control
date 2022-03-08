@@ -112,8 +112,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
-    final_spectra = np.random.random((1,701))
-    ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
+    final_spectra = np.loadtxt(
+            "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+    ml_model = LinReg(model, final_spectra, y_shape=1, max_iters=3)
     if not no_sim:
         auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2098,6 +2099,8 @@ class AutoContr(Controller):
         self._create_samples(wellnames, recipes)
         #pull in the scan data
         filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
+        breakpoint()
+        #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
         #this is different because we don't want to use untrained model to generate predictions
