@@ -114,12 +114,13 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
-    ml_model = LinReg(model, final_spectra, y_shape=1, max_iters=3)
+    Y_SHAPE = 1 #number of reagents to learn on
+    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3)
     if not no_sim:
         auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
-        ml_model = LinReg(model, final_spectra, y_shape=2, max_iters=3)
+        ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=15)
         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
 
@@ -1835,7 +1836,6 @@ class Controller(ABC):
                     {'labware':'',
                     'container':self.dilution_params.cont,
                     'max_vol':self.dilution_params.vol}, index=[product])
-        print(product_df.to_dict())
         self.portal.send_pack('init_containers', product_df.to_dict())
         #2 construct a new dilution row (series)
         colList = self.rxn_df.loc[:,:'reagent'].columns        
@@ -2062,7 +2062,6 @@ class AutoContr(Controller):
             print('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
         self._run(port, simulate, model, no_pr)
-        print(self.__dict__)
         print('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
@@ -2098,8 +2097,10 @@ class AutoContr(Controller):
         #plan and execute a reaction
         self._create_samples(wellnames, recipes)
         #pull in the scan data
-        filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
-        breakpoint()
+        filenames = self.rxn_df[
+                (self.rxn_df['op'] == 'scan') |
+                (self.rxn_df['op'] == 'scan_until_complete')
+                ].reset_index()
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
@@ -2116,7 +2117,10 @@ class AutoContr(Controller):
             #plan and execute a reaction
             self._create_samples(wellnames, recipes)
             #pull in the scan data
-            filenames = self.rxn_df[self.rxn_df['op'] == 'scan'].reset_index()
+            filenames = self.rxn_df[
+                    (self.rxn_df['op'] == 'scan') |
+                    (self.rxn_df['op'] == 'scan_until_complete')
+                    ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
@@ -2288,7 +2292,6 @@ class AutoContr(Controller):
             #for now lets do something dumb like dilute 2x
 
             #generate necessary parameters
-            print(self._cached_reader_locs.keys())
             containers = [key for key in self._cached_reader_locs.keys() 
                 if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
             stock_cont = max(containers, key=self._get_conc)
