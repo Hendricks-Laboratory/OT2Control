@@ -2972,6 +2972,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 if __name__ == '__main__':
-    SERVERADDR = "10.25.15.2"
+    SERVERADDR = "10.25.15.162"
     main(SERVERADDR)
 
