@@ -177,11 +177,15 @@ class LinReg(MLModel):
         returns:  
             np.array: (batch_size,n_features) 
         '''
-        #TODO talk to Mark about a good set of seeds to start at
+        upper_bound = 2.5
+        lower_bound = 0.25
         if self.generate_seed_rxns.n_calls == 0:
-            return np.ones((self.batch_size,self.y_shape)) * 3.1415e-2
+            print("DEBUG ", 
+            np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
+            )
+            return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
         else:
-            return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
+            return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
     generate_seed_rxns.n_calls = 0
 
     def predict(self):

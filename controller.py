@@ -1870,7 +1870,7 @@ class Controller(ABC):
             filename to allow spacing between the two scans until they are indifferentiably the same
         """
         #Count is declared to track how long we want the process to run if it is going to take too long for there to be distinction
-        count = 1.0
+        count = 1
         
         #Eps represents the difference variable that we want in order to check if the scans are similar enough
         eps = 3/700 
