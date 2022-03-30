@@ -159,14 +159,26 @@ class DummyMLModel(MLModel):
 
 class LinReg(MLModel):
     '''
+    params:
+        tuple<int> scan_bounds: size 2. If you wish to ignore aspects of the
+          scan, and only focus
+          on a single peak for learning, you may specify manually the start
+          and stop index of the data you are interested in. Only this data
+          will be used for training.
     Model to use Linear Regression algorithm
     model_lock also locks X
     UNIMPLEMENTED:  
       only runs for batch size of 1  
     '''
-    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1):
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
+            scan_bounds=None):
         super().__init__(model, max_iters) #don't have a model
-        self.FINAL_SPECTRA = final_spectra
+        self.scan_bounds = scan_bounds
+        if scan_bounds:
+            #if you only want to pay attention in bounds, predict on those vals
+            self.FINAL_SPECTRA = final_spectra[:, scan_bounds[0]:scan_bounds[1]]
+        else:
+            self.FINAL_SPECTRA = final_spectra
         self.y_shape = y_shape
         self.batch_size = batch_size
 
@@ -179,14 +191,7 @@ class LinReg(MLModel):
         '''
         upper_bound = 2.5
         lower_bound = 0.25
-        if self.generate_seed_rxns.n_calls == 0:
-            print("DEBUG ", 
-            np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
-            )
-            return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
-        else:
-            return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
-    generate_seed_rxns.n_calls = 0
+        return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
 
     def predict(self):
         '''
@@ -213,15 +218,21 @@ class LinReg(MLModel):
         Postconditions:  
             The model has been trained on the new data
         '''
+        #NOTE we may get fancier in the future here and do more preprocessing
+        if self.scan_bounds:
+            #if you only want to pay attention in bounds, train on those vals
+            processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
+        else:
+            processedX = X
         #update the data with the new scans
         time.sleep(40)
         print('<<ML>> training')
         with self.model_lock:
             if isinstance(self.X,np.ndarray):
-                self.X = np.concatenate((self.X, X))
+                self.X = np.concatenate((self.X, processedX))
                 self.y = np.concatenate((self.y, y))
             else:
-                self.X = X
+                self.X = processedX
                 self.y = y
             self.model.fit(self.X, self.y)
         print('<<ML>> done training')

@@ -115,12 +115,14 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
-    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3)
+    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
+                scan_bounds=(540,560))
     if not no_sim:
         auto.run_simulation(ml_model)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
-        ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=15)
+        ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=25, 
+                scan_bounds=(540,560))
         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
 
