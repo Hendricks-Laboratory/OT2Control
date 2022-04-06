@@ -1950,7 +1950,8 @@ def hack_to_get_ip():
     return my_ip
 
 if __name__ == '__main__':
-    my_ip = hack_to_get_ip()
+    #my_ip = hack_to_get_ip()
+    my_ip = "169.254.44.249"
     fail_count = 0
     while True:
         try:
