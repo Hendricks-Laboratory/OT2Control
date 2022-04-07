@@ -111,7 +111,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+    #note shorter iterations for testing
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
@@ -2076,8 +2077,6 @@ class AutoContr(Controller):
     def _run(self, port, simulate, model, no_pr):
         '''
         private function to run
-        Returns:  
-            bool: True if all tests were passed  
         '''
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
@@ -2106,6 +2105,7 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
+        model.train(scan_data.T.to_numpy(),recipes)
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
         self.batch_num += 1
@@ -2124,6 +2124,7 @@ class AutoContr(Controller):
                     (self.rxn_df['op'] == 'scan_until_complete')
                     ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+            print(last_filename)
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
             recipes = model.predict()
@@ -2643,7 +2644,7 @@ class AbstractPlateReader(ABC):
         if os.path.exists(filepath):
             os.system('rm {}'.format(filepath))
 
-        data = pd.DataFrame(.42*np.ones((701,len(layout))), columns=layout)
+        data = pd.DataFrame(.42*np.random.rand(701,len(layout)), columns=layout)
         
 
         with open(filepath, 'a+', encoding='latin1') as file:

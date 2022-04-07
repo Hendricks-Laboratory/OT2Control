@@ -197,6 +197,7 @@ class LinReg(MLModel):
         lower_bound = 0.25
         recipes = np.random.rand(self.batch_size, self.y_shape) \
                 * (upper_bound - lower_bound) + lower_bound
+        print("seed,", recipes)
         recipes = np.repeat(recipes, self.duplication, axis=0)
         return recipes
 
@@ -213,6 +214,8 @@ class LinReg(MLModel):
         super().predict()
         with self.model_lock:
             y_pred = self.model.predict(self.FINAL_SPECTRA)
+        print("predicted", y_pred)
+        breakpoint()
         return np.repeat(y_pred, self.duplication, axis=0);
  
     def _train(self, X, y):
@@ -242,5 +245,7 @@ class LinReg(MLModel):
             else:
                 self.X = processedX
                 self.y = y
+            print("model fitting on X", self.X)
+            print("model fitting on y", self.y)
             self.model.fit(self.X, self.y)
         print('<<ML>> done training')
