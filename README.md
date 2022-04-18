@@ -42,7 +42,7 @@ named *run* that is already in the directory)
 7. ml\_models.py: template code and implementations for ml models  
 
 ## Documentation
-Documentation for the code can be found here https://science356lab.github.io/OT2Control/
+Documentation for the code can be found here https://hendricks-laboratory.github.io/OT2Control/
 
 ## Guide For Contributing
 ### Style
