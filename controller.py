@@ -513,9 +513,9 @@ class Controller(ABC):
         plt.ylabel('Absorbance (a.u.)', fontsize = 16)
         plt.tick_params(axis = "both", width = 2)
         plt.tick_params(axis = "both", width = 2)
-        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.xticks([270,320,370])
         plt.yticks([i/10 for i in range(0,11,1)])
-        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.axis([270, 400, 0.0 , 1.0])
         plt.xticks(fontsize = 10)
         plt.yticks(fontsize = 10)
         plt.title(str(title), fontsize = 16, pad = 20)
@@ -534,14 +534,14 @@ class Controller(ABC):
         '''
         if not filename:
             filename = "overlay"
-        x_vals = list(range(300,1001))
+        x_vals = list(range(270,401))
         #overlays only things you specify
         y = []
         #df = df[df_reorder]
         #headers = [well_key[k] for k in df.columns]
         #legend_colors = []
         for chem_name in wells:
-            y.append(df[chem_name].iloc[-701:].to_list())
+            y.append(df[chem_name].iloc[-131:].to_list())
         self._plot_setup_overlay(filename)
         colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
         for i in range(len(y)):
@@ -567,7 +567,7 @@ class Controller(ABC):
         '''
         if not filename:
             filename=kin_subplots
-        x_vals = list(range(300,1001))
+        x_vals = list(range(270,401))
         colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
         fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
         for idx, (chem_name, ax) in enumerate(zip(wells, axes.flatten())):
@@ -582,11 +582,11 @@ class Controller(ABC):
                 right='off',
                 top='off'
             )
-            ax.set_xlim((300,1000))
+            ax.set_xlim((270,400))
             ax.set_ylim((0,1.0))
             ax.set_xlabel("Wavlength (nm)")
             ax.set_ylabel("Absorbance (A.U.)")
-            ax.set_xticks(range(301, 1100, 100))
+            ax.set_xticks(range(271, 400, 100))
             #ax.set_aspect(adjustable='box')
             #ax.set_yticks(range(0,1))
         else:
@@ -605,12 +605,12 @@ class Controller(ABC):
         Postconditions:  
             a kinetics plot of the well has been plotted on ax  
         '''
-        x_vals = list(range(300,1001))
+        x_vals = list(range(270,401))
         colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
         kin = 0
         col = df[chem_name]
         for kin in range(n_cycles):
-            ax.plot(x_vals, df[chem_name].iloc[kin*701:(kin+1)*701],color=tuple(colors[kin]))
+            ax.plot(x_vals, df[chem_name].iloc[kin*131:(kin+1)*131],color=tuple(colors[kin]))
         
     
     def plot_single_kin(self, df, n_cycles, chem_name, filename=None):
