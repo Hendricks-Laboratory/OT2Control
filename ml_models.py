@@ -165,13 +165,16 @@ class LinReg(MLModel):
           on a single peak for learning, you may specify manually the start
           and stop index of the data you are interested in. Only this data
           will be used for training.
+        int duplication: This is used to copy the reactions you're running if
+          you are worried about redundancy. the number is the number of times
+          you duplicate each reaction.
     Model to use Linear Regression algorithm
     model_lock also locks X
     UNIMPLEMENTED:  
       only runs for batch size of 1  
     '''
     def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
-            scan_bounds=None):
+            scan_bounds=None, duplication=1):
         super().__init__(model, max_iters) #don't have a model
         self.scan_bounds = scan_bounds
         if scan_bounds:
@@ -181,6 +184,7 @@ class LinReg(MLModel):
             self.FINAL_SPECTRA = final_spectra
         self.y_shape = y_shape
         self.batch_size = batch_size
+        self.duplication = duplication
 
     def generate_seed_rxns(self):
         '''
@@ -191,7 +195,12 @@ class LinReg(MLModel):
         '''
         upper_bound = 2.5
         lower_bound = 0.25
-        return np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
+        recipes = np.random.rand(self.batch_size, self.y_shape) \
+                * (upper_bound - lower_bound) + lower_bound
+        print("seed,", recipes)
+        recipes = np.repeat(recipes, self.duplication, axis=0)
+        return recipes
+
 
     def predict(self):
         '''
@@ -205,7 +214,9 @@ class LinReg(MLModel):
         super().predict()
         with self.model_lock:
             y_pred = self.model.predict(self.FINAL_SPECTRA)
-        return y_pred
+        print("predicted", y_pred)
+        breakpoint()
+        return np.repeat(y_pred, self.duplication, axis=0);
  
     def _train(self, X, y):
         '''
@@ -234,5 +245,7 @@ class LinReg(MLModel):
             else:
                 self.X = processedX
                 self.y = y
+            print("model fitting on X", self.X)
+            print("model fitting on y", self.y)
             self.model.fit(self.X, self.y)
         print('<<ML>> done training')

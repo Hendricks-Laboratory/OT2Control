@@ -111,18 +111,19 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         rxn_sheet_name = input('<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+    #note shorter iterations for testing
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
-                scan_bounds=(540,560))
+                scan_bounds=(540,560), duplication=2)
     if not no_sim:
         auto.run_simulation(ml_model, no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
-                scan_bounds=(540,560))
+                scan_bounds=(540,560),duplication=2)
         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
 
@@ -2076,8 +2077,6 @@ class AutoContr(Controller):
     def _run(self, port, simulate, model, no_pr):
         '''
         private function to run
-        Returns:  
-            bool: True if all tests were passed  
         '''
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
@@ -2106,6 +2105,7 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
+        model.train(scan_data.T.to_numpy(),recipes)
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
         self.batch_num += 1
@@ -2643,7 +2643,7 @@ class AbstractPlateReader(ABC):
         if os.path.exists(filepath):
             os.system('rm {}'.format(filepath))
 
-        data = pd.DataFrame(.42*np.ones((701,len(layout))), columns=layout)
+        data = pd.DataFrame(.42*np.random.rand(701,len(layout)), columns=layout)
         
 
         with open(filepath, 'a+', encoding='latin1') as file:
@@ -2974,6 +2974,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 if __name__ == '__main__':
-    SERVERADDR = "10.25.8.2"
+    SERVERADDR = "169.254.134.34"
     main(SERVERADDR)
 
