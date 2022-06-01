@@ -2508,7 +2508,7 @@ class ProtocolExecutor(Controller):
     def _get_rxn_max_vol(self, name, products):
         '''
         Preconditions:  
-            volume in a container can change only during a 'transfer' or 'dilution'. Easy to add more
+            volume in a  container can change only during a 'transfer' or 'dilution'. Easy to add more
             by changing the vol_change_rows
             self.rxn_df is initialized  
         params:  
