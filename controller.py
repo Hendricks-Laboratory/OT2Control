@@ -2653,6 +2653,10 @@ class AbstractPlateReader(ABC):
                 write_str += ', '.join([str(i) for i in col])
                 write_str += '\n'
                 file.write(write_str)
+        
+        data.AddToDF(filepath)
+
+        data.df.to_csv("hmm_very_nice.csv")
 
     def _rename_scan(self,new_scan_file,old_scan_file):
         """
@@ -2698,6 +2702,9 @@ class AbstractPlateReader(ABC):
         df.rename(columns=loc_to_name, inplace=True)
         df.dropna(inplace=True)
         df = df.astype(float)
+    
+        
+        
         return df, metadata
 
     def _parse_metadata(self, filename):
@@ -2793,6 +2800,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
+        self.data = ScanDataFrame(data_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2915,6 +2923,11 @@ class PlateReader(AbstractPlateReader):
             shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
                     os.path.join(self.data_path, "{}.csv".format(filename)))
         
+       
+        data.AddToDF("{}.csv".format(filename), "final")
+
+        data.df.to_csv("hmm_very_nice.csv")
+        
 
 
     def _set_config_attr(self, header, attr, val):
@@ -2973,6 +2986,148 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp','AsDDEserver','False')
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
+
+    '''
+    This class handles data output.
+    '''
+    def doAScan:
+        pass
+    
+    def addScan:
+        pass
+    
+    def merge_stuff(self, filenames, dst):
+        filenames = ['{}.csv'.format(filename) for filename in filenames]
+        dst = dst+'.csv'
+        dst_path = os.path.join(self.data_path, dst)
+        #create the base file you're going to be writing to
+        shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
+        n_cycles = self._parse_metadata(filenames[0])[1]['n_cycles'] #n_cycles of first file
+        #iterate through the other files
+        for filename in filenames[1:]:
+            #setup
+            filepath = os.path.join(self.data_path, filename)
+            meta = self._parse_metadata(filename)
+            assert (n_cycles == meta[1]['n_cycles']), "scan files to merge, {} and {} had different n_cycles".format(filename, filenames[0])
+            #strip out just the data from the file
+            with open(filepath, 'r', encoding='latin1') as file:
+                #these files are generally pretty small
+                lines = file.read().split('\n')
+                lines = lines[meta[0]:] #grab the raw data without preamble
+            #write the data to the dst file
+            with open(dst_path, 'a') as file:
+                file.write('\n'.join(lines))
+        #cleanup
+        for filename in filenames:
+            filepath = os.path.join(self.data_path, filename)
+            os.remove(filepath)
+class ScanDataFrame():
+    '''
+    This class handles data output.
+    '''
+    
+    def __init__(self, data_path):
+        self.df = pd.DataFrame()
+        self.data_path = data_path
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
+        self.isEmpty = True
+        
+    def AddToDF(self, file_name):
+        
+        temp_file = file_name
+    
+ #Creates first dataframe to extract date/time metadata   
+    
+        df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
+        am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
+        hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0]) + 12 if am_pm == "PM" else int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+        date_time = datetime.datetime(int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[2]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[0]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[1]), hour, int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[1]), int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[2]))
+        num_cycles = int(df_read_data_1.iloc[4][0][15:])
+        if num_cycles != 1:
+            raise Exception('Error due to Bad Scan Protocol: too many cycles')
+        
+#Creates second dataframe to extract wavelength metadata
+
+        df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
+        wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
+        wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
+        wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
+
+#Creates third dataframe to extract temp metadata
+        df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    
+        temp = float(df_read_data_3[0][2].split(" ")[-1])
+        
+    
+#Creates fourth dataframe for data   
+        
+        data_df = pd.read_csv(temp_file,skiprows=48,header=None,na_values=["       -"],encoding = 'latin1',)
+        
+        g=data_df.iloc[:,0]
+        g = [x.rstrip(':') for x in g]
+        print(g)
+        data_df = data_df.drop(data_df.columns[0], axis=1)
+        wavvelengths = []
+        for x in range (wavelength_blue-1,wavelength_red+1, wavelength_steps):
+            wavvelengths = wavvelengths + [str(x)]
+        wavvelength_df = pd.DataFrame()
+        wavvelength_df.insert(0, "Wavelength (nm)", wavvelengths)
+        
+    
+        wavvelength_df = wavvelength_df.T
+        wavvelength_df=wavvelength_df.drop(wavvelength_df.columns[0], axis=1)
+        
+        
+        
+        data_df.insert(0,"Temp",temp)
+        data_df.insert(0,"Time",date_time) 
+        data_df.insert(0, 'Well', g)
+        data_df.insert(0,"Scan ID",file_name)
+        #data_df.loc['wavelength (nm)','temp'] = 0
+        #data_df.loc['Scan ID','temp'] = 0
+        
+        
+    
+#Prints export values    
+        print(" \n \nUseful Parameters:")
+        print("Number of cycles")
+        print(num_cycles)
+        print("Date Time")
+        print(date_time)  
+        print("wavelength_blue")
+        print(wavelength_blue)    
+        print("wavelength_red")
+        print(wavelength_red)    
+        print("wavelength_steps")
+        print(wavelength_steps)
+        print("Temperature")
+        print(temp)
+        print("Scan ID")
+        print(file_name)
+    
+        full_df = pd.concat([wavvelength_df,data_df])
+        
+        self.df = pd.concat([full_df,self.df])
+        
+        one= self.df.pop('Scan ID')
+        two= self.df.pop('Well')
+        three= self.df.pop('Time')
+        four = self.df.pop('Temp')
+        
+        
+        self.df.insert(0, 'Time', three)
+        self.df.insert(0, 'Temp', four)
+        self.df.insert(0, 'Well', two)
+        self.df.insert(0, 'Scan ID', one)
+        
+        
+            
+
+        
+class Plotter()
+    
+    
+
 if __name__ == '__main__':
     SERVERADDR = "10.25.13.81"
     main(SERVERADDR)
