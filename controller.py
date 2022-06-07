@@ -3091,7 +3091,7 @@ class ScanDataFrame():
             
 
         
-class Plotter()
+
     
     
 
