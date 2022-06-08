@@ -2654,9 +2654,6 @@ class AbstractPlateReader(ABC):
                 write_str += '\n'
                 file.write(write_str)
         
-        data.AddToDF(filepath)
-
-        data.df.to_csv("hmm_very_nice.csv")
 
     def _rename_scan(self,new_scan_file,old_scan_file):
         """
