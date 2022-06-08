@@ -35,7 +35,7 @@ import time
 import argparse
 import re
 import functools
-import datetime
+from datetime import datetime
 
 from bidict import bidict
 import gspread
