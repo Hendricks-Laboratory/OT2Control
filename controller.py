@@ -3095,6 +3095,5 @@ class ScanDataFrame():
     
 
 if __name__ == '__main__':
-    SERVERADDR = "10.25.13.81"
+    SERVERADDR = "169.254.243.85"
     main(SERVERADDR)
-
