@@ -3001,7 +3001,7 @@ class ScanDataFrame():
         
     def AddToDF(self, file_name):
         
-        temp_file = os.path.join(data_path,file_name)
+        temp_file = os.path.join(self.data_path,file_name)
     
  #Creates first dataframe to extract date/time metadata   
         print(self.data_path)
