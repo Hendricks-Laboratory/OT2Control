@@ -3001,10 +3001,11 @@ class ScanDataFrame():
         
     def AddToDF(self, file_name):
         
-        temp_file = file_name
+        temp_file = os.path.join(data_path,file_name)
     
  #Creates first dataframe to extract date/time metadata   
-    
+        print(self.data_path)
+        
         df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
         am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
         hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0]) + 12 if am_pm == "PM" else int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
