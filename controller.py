@@ -2923,7 +2923,7 @@ class PlateReader(AbstractPlateReader):
                     os.path.join(self.data_path, "{}.csv".format(filename)))
         
        
-        self.data.AddToDF("{}.csv".format(filename), "final")
+        self.data.AddToDF("{}.csv".format(filename))
 
         self.data.df.to_csv("hmm_very_nice.csv")
         
