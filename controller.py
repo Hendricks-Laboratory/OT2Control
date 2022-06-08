@@ -35,7 +35,7 @@ import time
 import argparse
 import re
 import functools
-from datetime import datetime
+import datetime
 
 from bidict import bidict
 import gspread
@@ -311,7 +311,7 @@ class Controller(ABC):
             print("<<controller>> using cached data for '{}', last updated '{}'".format(
                     metadata['name'],metadata['timestamp']))
         else:
-            metadata = {'timestamp':datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
+            metadata = {'timestamp':datetime.datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
                         'name':rxn_sheet_name}
             with open(os.path.join(self.cache_path, '.metadata.json'), 'w') as file:
                 json.dump(metadata, file)
