@@ -2599,6 +2599,7 @@ class AbstractPlateReader(ABC):
         self.data_path = data_path
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
+        self.data = ScanDataFrame(data_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2654,6 +2655,12 @@ class AbstractPlateReader(ABC):
                 write_str += '\n'
                 file.write(write_str)
         
+<<<<<<< HEAD
+=======
+        self.data.AddToDF(filepath)
+
+        self.data.df.to_csv("hmm_very_nice.csv")
+>>>>>>> 1f176af226f0d31d7acbacf2dd43eb9171b24942
 
     def _rename_scan(self,new_scan_file,old_scan_file):
         """
@@ -2921,9 +2928,9 @@ class PlateReader(AbstractPlateReader):
                     os.path.join(self.data_path, "{}.csv".format(filename)))
         
        
-        data.AddToDF("{}.csv".format(filename), "final")
+        self.data.AddToDF("{}.csv".format(filename), "final")
 
-        data.df.to_csv("hmm_very_nice.csv")
+        self.data.df.to_csv("hmm_very_nice.csv")
         
 
 
@@ -2984,40 +2991,7 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 
-    '''
-    This class handles data output.
-    '''
-    def doAScan:
-        pass
-    
-    def addScan:
-        pass
-    
-    def merge_stuff(self, filenames, dst):
-        filenames = ['{}.csv'.format(filename) for filename in filenames]
-        dst = dst+'.csv'
-        dst_path = os.path.join(self.data_path, dst)
-        #create the base file you're going to be writing to
-        shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
-        n_cycles = self._parse_metadata(filenames[0])[1]['n_cycles'] #n_cycles of first file
-        #iterate through the other files
-        for filename in filenames[1:]:
-            #setup
-            filepath = os.path.join(self.data_path, filename)
-            meta = self._parse_metadata(filename)
-            assert (n_cycles == meta[1]['n_cycles']), "scan files to merge, {} and {} had different n_cycles".format(filename, filenames[0])
-            #strip out just the data from the file
-            with open(filepath, 'r', encoding='latin1') as file:
-                #these files are generally pretty small
-                lines = file.read().split('\n')
-                lines = lines[meta[0]:] #grab the raw data without preamble
-            #write the data to the dst file
-            with open(dst_path, 'a') as file:
-                file.write('\n'.join(lines))
-        #cleanup
-        for filename in filenames:
-            filepath = os.path.join(self.data_path, filename)
-            os.remove(filepath)
+  
 class ScanDataFrame():
     '''
     This class handles data output.
@@ -3121,7 +3095,7 @@ class ScanDataFrame():
             
 
         
-class Plotter()
+
     
     
 
