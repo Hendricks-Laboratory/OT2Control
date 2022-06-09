@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jun  7 16:35:53 2022
+
+@author: grantdidway
+"""
+
+import json
+
+import math
+import os
+import shutil
+import webbrowser
+from tempfile import NamedTemporaryFile
+import logging
+import asyncio
+import threading
+import time
+import argparse
+import re
+import functools
+import datetime
+
+
+
+import pandas as pd
+import numpy as np
+
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+
+def run_protocol(protocol_name, filename, layout=None):
+    r'''
+    In the abstract version, a dummy file will be written.  
+    params:  
+        str protocol_name: the name of the protocol that will be edited  
+        list<str> layout: the wells that you want to be used for the protocol ordered.
+          (first will be X1, second X2 etc. If not specified will not alter layout)  
+    '''
+    filename = '{}.csv'.format(filename)
+    filepath = os.path.join("/Users/grantdidway/Documents/OT2Robot/OT2Control/",filename)
+    if os.path.exists(filepath):
+        os.system('rm {}'.format(filepath))
+
+    data = pd.DataFrame(.42*np.random.rand(701,len(layout)), columns=layout)
+    
+
+    with open(filepath, 'a+', encoding='latin1') as file:
+        file.write('No. of Cycles: 1\nT[°C]: \n23.5\n')
+        for name, col in data.iteritems():
+            write_str = name[0] + name[1:].zfill(2) + ':, '
+            write_str += ', '.join([str(i) for i in col])
+            write_str += '\n'
+            file.write(write_str)
+         
+        
+        wavelengths=[]
+        for x in range (300,1001):
+            wavelengths = wavelengths + [str(x)]
+        data_df = pd.DataFrame(columns=wavelengths)
+        #data_df = data_df.T
+        temp = [i for i in range(10,250, 2)]
+        data_df.insert(0,"Temp", temp)
+        data_df.insert(0,"Time",0) 
+        data_df.insert(0, 'Well', 0)
+        data_df.insert(0,"Scan ID",0)
+        data_df.to_csv('yes.csv')
+    data_yeah = pd.DataFrame(.42*np.random.rand(701,len(layout)))
+    data_yeah.to_csv('128163264.csv')
+        
+        
+        
+
+run_protocol('scan', 'lolololol', ['A01,B02'])
