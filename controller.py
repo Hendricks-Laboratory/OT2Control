@@ -2921,7 +2921,7 @@ class PlateReader(AbstractPlateReader):
             super().run_protocol(protocol_name, filename, layout)
         else:
             shutil.copyfile(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
-                    self.data_path)
+                    os.path.join(self.data_path, "{}.csv".format(filename)))
         
        
             self.data.AddToDF("{}.csv".format(filename))
