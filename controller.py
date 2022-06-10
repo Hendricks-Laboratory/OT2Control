@@ -2639,8 +2639,8 @@ class AbstractPlateReader(ABC):
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
-        isDummy = 'dummy_'
-        filename = '{}{}.csv'.format(isDummy,filename)
+        
+        filename = '{}.csv'.format(filename)
         filepath = os.path.join(self.data_path,filename)
         if os.path.exists(filepath):
             os.system('rm {}'.format(filepath))
