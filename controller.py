@@ -1040,7 +1040,6 @@ class Controller(ABC):
                 self.save()
             elif row['op'] == 'plot':
                 self._create_plot(row, i)
-                plot = Plotter(row, i)
             elif row['op'] == 'print':
                 self._execute_print(row,i)
             elif row['op'] == 'scan_until_complete':
