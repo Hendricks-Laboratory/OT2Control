@@ -2593,7 +2593,7 @@ class AbstractPlateReader(ABC):
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
+    SPECTRO_DATA_PATH = "/mnt/c/Users/science_356_lab/Robot_Files/Plate Reader Data"
 
     def __init__(self, data_path):
         self.data_path = data_path
@@ -3185,8 +3185,7 @@ class Plotter():
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
-    # below until ~end is all not used yet needs to be worked up
-    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
+f    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
         '''
         TODO this function doesn't save properly, but it does show. Don't know issue  
         plots kinetics for each well in the order given by wells.  
