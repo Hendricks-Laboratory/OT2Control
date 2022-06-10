@@ -185,8 +185,7 @@ class ScanDataFrame():
         wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
         wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
         wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
-        if file_name == 'CNH_004_fullscan_1.csv':
-            wavelength_blue+=100
+
  
 #Creates third dataframe to extract temp metadata
         df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    

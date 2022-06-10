@@ -400,7 +400,7 @@ class Controller(ABC):
         out_path = 'Ideally this would be a gdrive path, but for now everything is local'
         if not os.path.exists(out_path):
             #not on the laptop
-            out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs'
+            out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outpu'
         #get the root folder
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
