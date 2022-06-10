@@ -3185,7 +3185,7 @@ class Plotter():
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
-f    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
+    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
         '''
         TODO this function doesn't save properly, but it does show. Don't know issue  
         plots kinetics for each well in the order given by wells.  
