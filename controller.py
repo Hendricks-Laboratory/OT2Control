@@ -51,6 +51,8 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib import rcParams
+rcParams.update({'figure.autolayout': True})
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
 
@@ -59,6 +61,7 @@ from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
 from exceptions import ConversionError
+
 
 
 def init_parser():
@@ -225,6 +228,7 @@ class Controller(ABC):
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
+        self.header_data = header_data
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
@@ -359,13 +363,13 @@ class Controller(ABC):
               is supplied
         '''
         if no_pr:
-            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
         else:
             try:
                 self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
             except:
                 print('<<controller>> failed to initialize platereader, initializing dummy reader')
-                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
@@ -2595,11 +2599,11 @@ class AbstractPlateReader(ABC):
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
     SPECTRO_DATA_PATH = "/mnt/c/Users/science_356_lab/Robot_Files/Plate Reader Data"
 
-    def __init__(self, data_path):
+    def __init__(self, data_path, header_data, eve_files_path):
         self.data_path = data_path
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
-        self.data = ScanDataFrame(data_path)
+        self.data = ScanDataFrame(data_path, header_data, eve_files_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2792,15 +2796,15 @@ class PlateReader(AbstractPlateReader):
     This class handles all platereader interactions. Inherits from the interface
     '''
 
-    def __init__(self, data_path, simulate=False):
-        super().__init__(data_path)
+    def __init__(self, data_path, header_data, eve_files_path, simulate=False):
+        super().__init__(data_path, self.eve_files_path)
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
-        self.data = ScanDataFrame(data_path)
+        self.data = ScanDataFrame(data_path, header_data, eve_files_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2903,7 +2907,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, layout=None):
+    def run_protocol(self, protocol_name, filename,layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
@@ -2926,7 +2930,7 @@ class PlateReader(AbstractPlateReader):
        
             self.data.AddToDF("{}.csv".format(filename))
 
-            self.data.df.to_csv(os.path.join(self.data_path, "{}.csv".format('all_the_data')))
+            self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.header_data, 'full_df')))
         
 
 
@@ -3002,9 +3006,13 @@ class ScanDataFrame():
         
     '''
     
-    def __init__(self, data_path):
+    def __init__(self, data_path, header_data, eve_files_path):
         self.df = pd.DataFrame()
         self.data_path = data_path
+        self.eve_files_path = eve_files_path
+        self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
+        self.isFirst = True
+        
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         
@@ -3043,25 +3051,32 @@ class ScanDataFrame():
         g = [x.rstrip(':') for x in g]
         print(g)
         data_df = data_df.drop(data_df.columns[0], axis=1)
-        
         wavvelengths = []
-        for x in range (wavelength_blue-1,wavelength_red+1, wavelength_steps):
-            wavvelengths = wavvelengths + [str(x)]
-        wavvelength_df = pd.DataFrame()
-        wavvelength_df.insert(0, "Wavelength (nm)", wavvelengths)
-        wavvelength_df = wavvelength_df.T
-        wavvelength_df=wavvelength_df.drop(wavvelength_df.columns[0], axis=1)
+        for x in range (wavelength_blue,wavelength_red+1, wavelength_steps):
+            wavvelengths = wavvelengths + [x]
+    
+        data_df.columns = wavvelengths
+        
+        data_df.insert(0,"Time",date_time) 
+        data_df.insert(0,"Temp",temp)
+        data_df.insert(0, 'Well', g)
+        data_df.insert(0,"Scan ID",file_name.rstrip('.csv'))
         
 #Combines metadata with absorbance data
         data_df.insert(0,"Temp",temp)
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0, 'Well', g)
         data_df.insert(0,"Scan ID",file_name)
+    
         
-#Formatted dataframe of current scan
-        full_df = pd.concat([wavvelength_df,data_df])
-#Adds current scan df to df of full run
-        self.df = pd.concat([full_df,self.df])
+        if self.isFirst:
+            self.df = data_df
+            #full_df = pd.concat([wavvelength_df,data_df])
+            self.isFirst = False
+        else:
+            full_df = data_df
+        
+            self.df = pd.concat([self.df,full_df])
         
 #Reorders columns in df
         one= self.df.pop('Scan ID')
@@ -3090,6 +3105,46 @@ class ScanDataFrame():
         print(temp)
         print("Scan ID")
         print(file_name)
+        
+        df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
+        #df = pd.read_csv('CNH_008_full_df1.csv')
+
+        self.df = self.df.reset_index()
+
+        wavelengths = list(self.df.iloc[0][self.df.columns.get_loc("Time")+1:])
+        for i in range(1,len(wavelengths)+1):
+          self.df = self.df.rename({str(i):wavelengths[i-1] }, axis='columns')
+        self.df = self.df.rename({"Unnamed: 0":"Scan_Number" }, axis='columns')
+
+          
+        wells = list(set(self.df.loc[1:,"Well"]))
+        scans = list(set(self.df.loc[1:,"Scan ID"]))
+        self.df.drop('index', inplace=True, axis=1)
+        self.df = self.df.set_index(["Scan ID", "Well"]).sort_index()
+
+        col_list  = self.df.index.get_level_values('Well').tolist()
+
+        well_names = []
+
+        for well_with_zeros_in_name in col_list:
+            x = ''
+            #Turn A01 into A1
+            well = str(well_with_zeros_in_name)
+            well = "{}{}".format(well[0], int(well[2:]))
+           
+            y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
+            #print(y)
+            for i in y:
+                if 'CNH_008' in i:
+                    x=i
+                    if 'control' in x:
+                        x = 'blank'
+            
+            well_names.append(x)
+
+        self.df.insert(0, 'Well Name', well_names)
+
+        self.df.to_csv('nicenice.csv')
     
 class Plotter():
     '''
