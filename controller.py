@@ -139,10 +139,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
-<<<<<<< HEAD
     print("Launch_auto FUNCTION;    Initialize the Linear Model 1 recipe")
-=======
->>>>>>> 4fb7226a92d0b7eabe740c03dc0432188e1bf1a3
+
     ml_model = LinearRegress(model, final_spectra, 1,1)
 
     #try 1 
@@ -2177,61 +2175,84 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
+
+
+
         recipes = model.generate_seed_rxns(3) #number of recipes
         print("Our initital recipes:",recipes)
-
-        #do the first one
-        print('<<controller>> executing batch {}'.format(self.batch_num))
-        #don't have data to train, so, not training
-        #generate new wellnames for next batch
-        wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-        #plan and execute a reaction
-        self._create_samples(wellnames, recipes)
-        #pull in the scan data
-        filenames = self.rxn_df[
-                (self.rxn_df['op'] == 'scan') |
-                (self.rxn_df['op'] == 'scan_until_complete')
-                ].reset_index()
-        #TODO filenames is empty. dunno why
-        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-        scan_data = self._get_sample_data(wellnames, last_filename)
-        model.train(recipes, scan_data.T.to_numpy())
-        #this is different because we don't want to use untrained model to generate predictions
-        recipes = model.generate_seed_rxns(1)
-        self.batch_num += 1
-
-        print("Before entering to the while loop: scan_data",scan_data)        
-        #enter iterative while loop now that we have data
-        while not model.quit:
-            model_trained= model.train(scan_data.T.to_numpy(),recipes)
+        #we would get observance for each recipe:
+        observances=[]
+        for r in range(len(recipes[0])):
+            recipe_unit = recipes[0][r]
+        
+            #do the first one
             print('<<controller>> executing batch {}'.format(self.batch_num))
+            #don't have data to train, so, not training
             #generate new wellnames for next batch
-            wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+            wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
             #plan and execute a reaction
-            self._create_samples(wellnames, recipes)
+            self._create_samples(wellnames, recipe_unit)
             #pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
                     (self.rxn_df['op'] == 'scan_until_complete')
                     ].reset_index()
+            #TODO filenames is empty. dunno why
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
-            #generate the predictions for the next round
-            #recipes = model.predict()
-            ##
-
-            prediction = model.predict(model_trained)
             
-            print(prediction)
+            #scan_data = observance
+            #We process scan_data to get lambda
+            Y= scan_data.T.to_numpy()
 
-            print()
-            print("---")
-            print("Closing")
-            model.quit=True
-            ##test_error = 
-            ##
-            #threaded train on scans. Will run while the robot is generating new materials
-            self.batch_num += 1
+            observances.append(Y)
+
+        print("Checking our input: obse")
+        print(observances)
+        print("---recipes")
+        print(recipes)
+        model_trained = model.train(recipes, Y)
+        print(model_trained)
+        
+        ##Possible for Online ln.  
+        #this is different because we don't want to use untrained model to generate predictions
+        recipes = model.generate_seed_rxns(1)
+
+
+        # self.batch_num += 1
+
+        print("Before entering to the while loop: scan_data",scan_data)        
+        #enter iterative while loop now that we have data
+        # while not model.quit:
+        #     model_trained= model.train(scan_data.T.to_numpy(),recipes)
+        #     print('<<controller>> executing batch {}'.format(self.batch_num))
+        #     #generate new wellnames for next batch
+        #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+        #     #plan and execute a reaction
+        #     self._create_samples(wellnames, recipes)
+        #     #pull in the scan data
+        #     filenames = self.rxn_df[
+        #             (self.rxn_df['op'] == 'scan') |
+        #             (self.rxn_df['op'] == 'scan_until_complete')
+        #             ].reset_index()
+        #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+        #     scan_data = self._get_sample_data(wellnames, last_filename)
+        #     #generate the predictions for the next round
+        #     #recipes = model.predict()
+        #     ##
+
+        #     prediction = model.predict(model_trained)
+            
+        #     print(prediction)
+
+        #     print()
+        #     print("---")
+        #     print("Closing")
+        #     model.quit=True
+        #     ##test_error = 
+        #     ##
+        #     #threaded train on scans. Will run while the robot is generating new materials
+        #     self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
         return
