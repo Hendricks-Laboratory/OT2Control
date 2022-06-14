@@ -44,6 +44,12 @@ class MLModel():
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
+    def mainModel(self):
+
+        #train_thread = threading.Thread(target=self._train, name='train thread', args=(X,y))
+        #train_thread.start()
+        self.curr_iter += 1
+        self.update_quit()
 
     @abstractmethod
     def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
