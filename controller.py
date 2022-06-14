@@ -57,7 +57,7 @@ from sklearn.linear_model import Lasso
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel, LinReg
+from ml_models import DummyMLModel, LinReg, LinearRegress
 from exceptions import ConversionError
 
 
@@ -103,6 +103,28 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
     if input('would you like to run the protocol? [yn] ').lower() == 'y':
         controller.run_protocol(simulate, no_pr)
 
+# def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+#     '''
+#     main function to launch an auto scientist that designs it's own experiments
+#     '''
+#     if not rxn_sheet_name:
+#         rxn_sheet_name = input('<<controller>> please input the sheet name ')
+#     my_ip = socket.gethostbyname(socket.gethostname())
+#     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+#     #note shorter iterations for testing
+#     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
+#     final_spectra = np.loadtxt(
+#             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+#     Y_SHAPE = 1 #number of reagents to learn on
+#     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
+#                 scan_bounds=(540,560), duplication=2)
+#     if not no_sim:
+#         auto.run_simulation(ml_model, no_pr=no_pr)
+#     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+#         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+#         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
+#                 scan_bounds=(540,560),duplication=2)
+#         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch an auto scientist that designs it's own experiments
@@ -112,14 +134,18 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
-    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
+    #model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
-    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
-                scan_bounds=(540,560), duplication=2)
+    #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
+    ml_model = LinearRegress()
+
+    #try 1 
     if not no_sim:
         auto.run_simulation(ml_model, no_pr=no_pr)
+
+    #try 2
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
@@ -2074,6 +2100,65 @@ class AutoContr(Controller):
         pass
 
     @error_exit
+    # def _run(self, port, simulate, model, no_pr):
+    #     '''
+    #     private function to run
+    #     '''
+    #     self.batch_num = 0 #used internally for unique filenames
+    #     self.well_count = 0 #used internally for unique wellnames
+    #     self._init_pr(simulate, no_pr)
+    #     #create a connection
+    #     sock = socket.socket(socket.AF_INET)
+    #     sock.connect((self.server_ip, port))
+    #     buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
+    #     print("<<controller>> connected")
+    #     self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
+    #     self.init_robot(simulate)
+    #     recipes = model.generate_seed_rxns()
+
+    #     #do the first one
+    #     print('<<controller>> executing batch {}'.format(self.batch_num))
+    #     #don't have data to train, so, not training
+    #     #generate new wellnames for next batch
+    #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+    #     #plan and execute a reaction
+    #     self._create_samples(wellnames, recipes)
+    #     #pull in the scan data
+    #     filenames = self.rxn_df[
+    #             (self.rxn_df['op'] == 'scan') |
+    #             (self.rxn_df['op'] == 'scan_until_complete')
+    #             ].reset_index()
+    #     #TODO filenames is empty. dunno why
+    #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+    #     scan_data = self._get_sample_data(wellnames, last_filename)
+    #     model.train(scan_data.T.to_numpy(),recipes)
+    #     #this is different because we don't want to use untrained model to generate predictions
+    #     recipes = model.generate_seed_rxns()
+    #     self.batch_num += 1
+
+    #     #enter iterative while loop now that we have data
+    #     while not model.quit:
+    #         model.train(scan_data.T.to_numpy(),recipes)
+    #         print('<<controller>> executing batch {}'.format(self.batch_num))
+    #         #generate new wellnames for next batch
+    #         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+    #         #plan and execute a reaction
+    #         self._create_samples(wellnames, recipes)
+    #         #pull in the scan data
+    #         filenames = self.rxn_df[
+    #                 (self.rxn_df['op'] == 'scan') |
+    #                 (self.rxn_df['op'] == 'scan_until_complete')
+    #                 ].reset_index()
+    #         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+    #         scan_data = self._get_sample_data(wellnames, last_filename)
+    #         #generate the predictions for the next round
+    #         recipes = model.predict()
+    #         #threaded train on scans. Will run while the robot is generating new materials
+    #         self.batch_num += 1
+    #     self.close_connection()
+    #     self.pr.shutdown()
+    #     return
+    
     def _run(self, port, simulate, model, no_pr):
         '''
         private function to run
@@ -2088,7 +2173,8 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
-        recipes = model.generate_seed_rxns()
+        recipes = model.generate_seed_rxns(3) #number of recipes
+        print("Our initital recipes:",recipes)
 
         #do the first one
         print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -2112,7 +2198,7 @@ class AutoContr(Controller):
 
         #enter iterative while loop now that we have data
         while not model.quit:
-            model.train(scan_data.T.to_numpy(),recipes)
+            model_trained= model.train(scan_data.T.to_numpy(),recipes)
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2126,13 +2212,28 @@ class AutoContr(Controller):
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
-            recipes = model.predict()
+            #recipes = model.predict()
+            ##
+
+            prediction = model.predict(model_trained)
+            
+            print(prediction)
+
+            print()
+            print("---")
+            print("Closing")
+            model.quit=True
+            ##test_error = 
+            ##
             #threaded train on scans. Will run while the robot is generating new materials
             self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
         return
-    
+
+
+
+
     def _get_sample_data(self,wellnames, filename):
         '''
         loads the spectra for the wells specified from the scan file specified  
@@ -2976,3 +3077,4 @@ class PlateReader(AbstractPlateReader):
 if __name__ == '__main__':
     SERVERADDR = "169.254.243.85"
     main(SERVERADDR)
+
