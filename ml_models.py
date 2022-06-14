@@ -44,6 +44,12 @@ class MLModel():
         train_thread.start()
         self.curr_iter += 1
         self.update_quit()
+    def mainModel(self):
+
+        #train_thread = threading.Thread(target=self._train, name='train thread', args=(X,y))
+        #train_thread.start()
+        self.curr_iter += 1
+        self.update_quit()
 
     @abstractmethod
     def _train(self, X, y):
@@ -201,9 +207,11 @@ class LinearRegress(MLModel):
         lower_bound = 0.25
         recipes = np.random.rand(self.batch_size, self.y_shape) \
                 * (upper_bound - lower_bound) + lower_bound
-        print("seed,", recipes)
+	# print("seed,", recipes)
         #recipes = np.repeat(recipes, self.duplication, axis=0)
-        recipes =  np.random.rand(1,number_recipes) * (2.5 - 0.2) + 0.2 
+        #recipes =  np.random.rand(1,number_recipes) * (2.5 - 0.2) + 0.2 
+        recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+        print("our recipes", recipes)
         #recipes =  np.random.rand(1,3) * (2.5 - 0.2) + 0.2 
 
         return recipes
@@ -267,7 +275,7 @@ class LinearRegress(MLModel):
         else:
             return 0
  
-    def mainModel(N,recipes,learning_rate,X=None,Y):
+    def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
     
         cacheError=[]
         cacheErrorAvg=[]

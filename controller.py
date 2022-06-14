@@ -134,12 +134,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
-    #model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
-    ml_model = LinearRegress()
+    ml_model = LinearRegress(model, final_spectra, 1,1)
 
     #try 1 
     if not no_sim:
@@ -2191,9 +2191,9 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
-        model.train(scan_data.T.to_numpy(),recipes)
+        model.train(recipes, scan_data.T.to_numpy())
         #this is different because we don't want to use untrained model to generate predictions
-        recipes = model.generate_seed_rxns()
+        recipes = model.generate_seed_rxns(1)
         self.batch_num += 1
 
         #enter iterative while loop now that we have data
