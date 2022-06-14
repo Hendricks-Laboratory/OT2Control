@@ -139,10 +139,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
-<<<<<<< HEAD
     print("Launch_auto FUNCTION;    Initialize the Linear Model 1 recipe")
-=======
->>>>>>> 4fb7226a92d0b7eabe740c03dc0432188e1bf1a3
+
     ml_model = LinearRegress(model, final_spectra, 1,1)
 
     #try 1 
