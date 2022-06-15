@@ -363,13 +363,13 @@ class Controller(ABC):
               is supplied
         '''
         if no_pr:
-            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
+            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
         else:
             try:
                 self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path, simulate)
             except:
                 print('<<controller>> failed to initialize platereader, initializing dummy reader')
-                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
+                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
 
     def _download_sheet(self, rxn_spreadsheet, index):
         '''
@@ -2603,7 +2603,7 @@ class AbstractPlateReader(ABC):
         self.data_path = data_path
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
-        self.data = ScanDataFrame(data_path, header_data, eve_files_path)
+        #self.data = ScanDataFrame(data_path, header_data, eve_files_path)
         
     def exec_macro(self, macro, *args):
         '''
