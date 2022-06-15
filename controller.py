@@ -2800,6 +2800,7 @@ class PlateReader(AbstractPlateReader):
         print('1**************************************************')
         super().__init__(data_path)
         print('2**************************************************')
+        self.header_data = header_data
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
