@@ -2797,7 +2797,7 @@ class PlateReader(AbstractPlateReader):
     '''
 
     def __init__(self, data_path, header_data, eve_files_path, simulate=False):
-        super().__init__(data_path, , header_data, self.eve_files_path)
+        super().__init__(data_path, header_data, self.eve_files_path)
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
