@@ -2165,6 +2165,14 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
+
+        def maxWaveLe(arr):
+            obs=[]
+            for r in range(50,len(arr)-100):
+                obs.append(arr[r])
+                
+            waveL= obs.index(np.max(obs))+300
+            return waveL
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
         self._init_pr(simulate, no_pr)
@@ -2181,12 +2189,13 @@ class AutoContr(Controller):
         recipes = model.generate_seed_rxns(3) #number of recipes
         print("Our initital recipes:",recipes)
         #we would get observance for each recipe:
-        observances=[]
+        wavelengths=[]
         for r in range(len(recipes[0])):
             recipe_unit = np.array([recipes[0][r]])
         
             #do the first one
-            print('<<controller>> executing batch {}'.format(self.batch_num))
+            #print('<<controller>> executing batch {}'.format(self.batch_num))
+            print('<<controller>> executing batch {}'.format(str(r+1)))
             #don't have data to train, so, not training
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
@@ -2203,20 +2212,27 @@ class AutoContr(Controller):
             
             #scan_data = observance
             #We process scan_data to get lambda
-            Y= scan_data.T.to_numpy()
+            scan_Y= scan_data.T.to_numpy()
+            print("len",len(scan_Y),len(scan_Y[0]))
+            Y= maxWaveLe(scan_Y)
+            print("len",len(Y),len(Y[0]))
+            wavelengths.append(Y)
 
-            observances.append(Y)
-
-        print("Checking our input: obse")
-        print(observances)
+        print("Checking our input: wavelengths")
+        print(wavelengths)
         print("---recipes")
         print(recipes)
         model_trained = model.train(recipes, Y)
-        print(model_trained)
+        print("Model Trained",model_trained)
+
+        print("Predicting---")
+
+        prediction= model.predict(model_trained)
         
+        print("Controler/prediction/used ml",prediction)
         ##Possible for Online ln.  
         #this is different because we don't want to use untrained model to generate predictions
-        recipes = model.generate_seed_rxns(1)
+        #recipes = model.generate_seed_rxns(1)
 
 
         # self.batch_num += 1
