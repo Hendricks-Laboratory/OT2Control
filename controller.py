@@ -3060,17 +3060,11 @@ class ScanDataFrame():
             wavvelengths = wavvelengths + [x]
     
         data_df.columns = wavvelengths
-        
+        #Combines metadata with absorbance data
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0,"Temp",temp)
         data_df.insert(0, 'Well', g)
         data_df.insert(0,"Scan ID",file_name.rstrip('.csv'))
-        
-#Combines metadata with absorbance data
-        data_df.insert(0,"Temp",temp)
-        data_df.insert(0,"Time",date_time) 
-        data_df.insert(0, 'Well', g)
-        data_df.insert(0,"Scan ID",file_name)
     
         
         if self.isFirst:
