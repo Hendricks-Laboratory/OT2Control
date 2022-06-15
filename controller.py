@@ -2245,13 +2245,14 @@ class AutoContr(Controller):
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
                 print("len",len(scan_Y),len(scan_Y[0]))
-                Y= maxWaveLe(scan_Y)
-                print("len",len(Y),len(Y[0]))
+                Y= maxWaveLe(scan_Y[0])
+                #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
             print("Checking our input: wavelengths")
             print(wavelengths)
-            print("---recipes")
+            Y= np.array([wavelengths])
+            print("recipes----")
             print(recipes)
             model_trained = model.train(recipes, Y)
             print("Model Trained",model_trained)
@@ -2260,7 +2261,7 @@ class AutoContr(Controller):
 
             ml_predict= model.predict(model_trained)
             prediction = ml_predict["prediction"]
-            
+           
             print("Controler/prediction/used ml",prediction)
             ##Possible for Online ln.  
             #this is different because we don't want to use untrained model to generate predictions
@@ -2335,13 +2336,13 @@ class AutoContr(Controller):
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
                 print("len",len(scan_Y),len(scan_Y[0]))
-                Y= maxWaveLe(scan_Y)
-                print("len",len(Y),len(Y[0]))
+                Y= maxWaveLe(scan_Y[0])
+                #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
             print("Checking our input: wavelengths")
             print(wavelengths)
-            true_wave= np.array([wavelength])
+            true_wave= np.array([wavelengths])
             print("Our recipes generated on the simulation phase---")
             print(recipes)
             print("Simple prediction")
