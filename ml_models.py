@@ -299,16 +299,16 @@ class LinearRegress(MLModel):
 
         
         print("b predict",modelCall)
-        print(",",modelCall["cacheErrorAvg"])
+        #print(",",modelCall["cacheErrorAvg"])
         plots_error_avg(modelCall)
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
-            prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            prediction = predictLinearModel(predict,modelCall["Theta"], modelCall["Bias"])
             print(prediction)
-            return {"prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            return {"prediction":prediction , "par_theta":modelCall["Theta"], "par_bias":modelCall["Bias"] }
         else:
-            return {"par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            return {"par_theta":modelCall["Theta"], "par_bias":modelCall["Bias"] }
  
     # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
     
@@ -493,7 +493,7 @@ class LinearRegress(MLModel):
             
                 print("Y",Y)
                 print("-----------------------")
-                print("Error avg",np.sum(error)/np.sqrt(recipes))
+                print("Error avg",np.sum(error)/(2*recipes))
                 print("Error in epoch #"+str(i+1))
             
                 print(error)
@@ -516,9 +516,10 @@ class LinearRegress(MLModel):
                 #after three epochs 
                 
                 if i > 2:
-                    if np.sum(error)/(2*recipes) < np.sum(cacheError[i-2])/(2*recipes) + 5:
+                    if np.sum(error)/(2*recipes) > np.sum(cacheError[i-2])/(2*recipes) + 5:
                         breakEpoch= i
                         print("n",i)
+                        print("Error avg",np.sum(cacheError[i-2])/(2*recipes))
                         print("Last param",np.sum(cacheTheta[i-2])/(2*recipes))
                         print("Last param",np.sum(cacheBias[i-2])/(2*recipes))
                         cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
@@ -539,11 +540,11 @@ class LinearRegress(MLModel):
         print("--------")
         print('<<ML>> training')
 
-        ml_model_trained = mainModel(self,10,3,0.05,X,y)
+        #ml_model_trained = mainModel(self,10,3,0.05,X,y)
 
         print('<<ML>> done training')
 
-        return ml_model_trained
+        return mainModel(self, 10,3,0.05,X,y)
 
 
         # with self.model_lock:

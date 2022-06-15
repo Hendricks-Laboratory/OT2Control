@@ -2255,11 +2255,12 @@ class AutoContr(Controller):
             print("recipes----")
             print(recipes)
             model_trained = model.train(recipes, Y)
+            time.sleep(40)
             print("Model Trained",model_trained)
 
             print("Predicting---")
-
-            ml_predict= model.predict(model_trained)
+            model_params_trained= model_trained["ParamsToUse"]
+            ml_predict= model.predict(model_params_trained)
             prediction = ml_predict["prediction"]
            
             print("Controler/prediction/used ml",prediction)
