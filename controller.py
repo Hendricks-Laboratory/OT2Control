@@ -3133,7 +3133,7 @@ class ScanDataFrame():
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
             #print(y)
             for i in y:
-                if 'self.experiment_name in i:
+                if self.experiment_name in i:
                     x=i
                     if 'control' in x:
                         x = 'blank'
