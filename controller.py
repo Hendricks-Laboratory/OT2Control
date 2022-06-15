@@ -2599,7 +2599,7 @@ class AbstractPlateReader(ABC):
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
     SPECTRO_DATA_PATH = "/mnt/c/Users/science_356_lab/Robot_Files/Plate Reader Data"
 
-    def __init__(self, data_path, header_data, eve_files_path):
+    def __init__(self, data_path):
         self.data_path = data_path
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
