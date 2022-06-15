@@ -2800,7 +2800,7 @@ class PlateReader(AbstractPlateReader):
         print('1**************************************************')
         super().__init__(data_path)
         print('2**************************************************')
-        self.header_data = header_data
+        self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
@@ -2935,7 +2935,7 @@ class PlateReader(AbstractPlateReader):
        
             self.data.AddToDF("{}.csv".format(filename))
 
-            self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.header_data, 'full_df')))
+            self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.experiment_name, 'full_df')))
         
 
 
@@ -3015,7 +3015,6 @@ class ScanDataFrame():
         self.df = pd.DataFrame()
         self.data_path = data_path
         self.eve_files_path = eve_files_path
-        self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
         self.isFirst = True
         
         if not os.path.exists(self.data_path):
@@ -3134,7 +3133,7 @@ class ScanDataFrame():
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
             #print(y)
             for i in y:
-                if 'CNH_008' in i:
+                if 'self.experiment_name in i:
                     x=i
                     if 'control' in x:
                         x = 'blank'
