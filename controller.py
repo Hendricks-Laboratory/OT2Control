@@ -2797,18 +2797,18 @@ class PlateReader(AbstractPlateReader):
     '''
 
     def __init__(self, data_path, header_data, eve_files_path, simulate=False):
-        print('1**************************************************)
+        print('1**************************************************')
         super().__init__(data_path, header_data, self.eve_files_path)
-        print('2**************************************************)
+        print('2**************************************************')
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
-        print('3**************************************************)
+        print('3**************************************************')
         self.data = ScanDataFrame(data_path, header_data, eve_files_path)
-        print('4**************************************************)      
+        print('4**************************************************')      
         
     def exec_macro(self, macro, *args):
         '''
