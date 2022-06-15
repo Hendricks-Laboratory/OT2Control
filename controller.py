@@ -2804,6 +2804,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
+        print('**************************************************)
         self.data = ScanDataFrame(data_path, header_data, eve_files_path)
         
     def exec_macro(self, macro, *args):
