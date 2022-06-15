@@ -305,9 +305,10 @@ class LinearRegress(MLModel):
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
             prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            return prediction
+            print(prediction)
+            return {"prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         else:
-            return 0
+            return {"par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
  
     # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
     

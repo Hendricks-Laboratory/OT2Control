@@ -20,6 +20,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 from collections import namedtuple
+from ctypes.wintypes import PINT
 import socket
 import json
 import dill
@@ -139,16 +140,21 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
-    print("Launch_auto FUNCTION;    Initialize the Linear Model 1 recipe")
+    print("Launch_auto FUNCTION;  Initialize the Linear Model 3 recipes")
 
     ml_model = LinearRegress(model, final_spectra, 1,1)
 
     #try 1 
     if not no_sim:
-        auto.run_simulation(ml_model, no_pr=no_pr)
-
+        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr)
+        ml_par_theta= ml_model_trained["par_theta"]
+        ml_par_bias = ml_model_trained["par_bias"]
+        print("Params afte TRY 1",ml_par_theta,ml_par_bias)
+    print("It is passing to TRY 2")
     #try 2
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+        #We have trained in the simulation the model so we can reuse the parameters unless we pass no_sim
+        
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
                 scan_bounds=(540,560),duplication=2)
@@ -2064,8 +2070,9 @@ class AutoContr(Controller):
         eve_thread.start()
         #do create a connection
         b.wait()
-        self._run(port, True, model, no_pr)
+        returned_ml= self._run(port, True, model, no_pr)
 
+        time.sleep(20)
         #collect the eve thread
         eve_thread.join()
 
@@ -2073,7 +2080,7 @@ class AutoContr(Controller):
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
-        return True
+        return {"True": True, "par_theta":returned_ml["par_theta"], "par_bias":returned_ml["par_bias"]}
 
     def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False):
         '''
@@ -2227,7 +2234,8 @@ class AutoContr(Controller):
 
         print("Predicting---")
 
-        prediction= model.predict(model_trained)
+        ml_predict= model.predict(model_trained)
+        prediction = ml_predict["prediction"]
         
         print("Controler/prediction/used ml",prediction)
         ##Possible for Online ln.  
@@ -2271,7 +2279,7 @@ class AutoContr(Controller):
         #     self.batch_num += 1
         self.close_connection()
         self.pr.shutdown()
-        return
+        return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"]}
 
 
 
