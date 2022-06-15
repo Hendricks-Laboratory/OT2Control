@@ -366,7 +366,7 @@ class Controller(ABC):
             self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
         else:
             try:
-                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path, simulate)
             except:
                 print('<<controller>> failed to initialize platereader, initializing dummy reader')
                 self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path)
