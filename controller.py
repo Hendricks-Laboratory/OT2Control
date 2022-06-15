@@ -146,7 +146,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
 
     #try 1 
     if not no_sim:
-        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr)
+        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None)
         ml_par_theta= ml_model_trained["par_theta"]
         ml_par_bias = ml_model_trained["par_bias"]
         ml_par_recipes = ml_model_trained["par_recipes"]
@@ -2048,7 +2048,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self,model=None,no_pr=False):
+    def run_simulation(self,model=None,no_pr=False,params=None,initial_recipes=None):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -2075,7 +2075,7 @@ class AutoContr(Controller):
         eve_thread.start()
         #do create a connection
         b.wait()
-        returned_ml= self._run(port, True, model, no_pr)
+        returned_ml= self._run(port, True, model, no_pr,params,initial_recipes)
 
         time.sleep(20)
         #collect the eve thread
