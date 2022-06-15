@@ -2183,7 +2183,7 @@ class AutoContr(Controller):
         #we would get observance for each recipe:
         observances=[]
         for r in range(len(recipes[0])):
-            recipe_unit = recipes[0][r]
+            recipe_unit = np.array([recipes[0][r]])
         
             #do the first one
             print('<<controller>> executing batch {}'.format(self.batch_num))
