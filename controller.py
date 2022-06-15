@@ -2798,7 +2798,7 @@ class PlateReader(AbstractPlateReader):
 
     def __init__(self, data_path, header_data, eve_files_path, simulate=False):
         print('1**************************************************')
-        super().__init__(data_path, header_data, self.eve_files_path)
+        super().__init__(data_path)
         print('2**************************************************')
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
