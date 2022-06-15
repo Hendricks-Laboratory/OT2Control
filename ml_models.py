@@ -85,11 +85,12 @@ class MLModel():
         This call should wait on the training thread to complete if it is has not been collected
         yet.  
         '''
-        train_thread = [thread for thread in threading.enumerate() \
-                            if thread.name == 'train thread']
-        if train_thread:
-            train_thread = train_thread[0]
-            train_thread.join() #wait till you're done training
+        pass
+        # train_thread = [thread for thread in threading.enumerate() \
+        #                     if thread.name == 'train thread']
+        # if train_thread:
+        #     train_thread = train_thread[0]
+        #     train_thread.join() #wait till you're done training
 
     def update_quit(self):
         '''
@@ -106,6 +107,12 @@ class MLModel():
         points  
         returns:  
             np.array: (batch_size,y.shape) 
+        '''
+        pass
+    @abstractmethod
+    def prediction(self):
+        '''
+        This method is for predict
         '''
         pass
         
@@ -247,21 +254,21 @@ class LinearRegress(MLModel):
     #     breakpoint()
     #     return np.repeat(y_pred, self.duplication, axis=0);
 
-    #def predict(N,recipes,learning_rate,X=None):
-    def predictLinearModel(X, W, b):
-    #Overcome Overflow dtype=np.uint32
-        X= np.array([X],dtype=float)
-        W= np.array([W],dtype=float)
-        b= np.array([b],dtype=float)
-        print(X)
-        print(W)
-        print(b)
+    # def predict(N,recipes,learning_rate,X=None):
+    # def predictLinearModel(self, X, W, b):
+    # #Overcome Overflow dtype=np.uint32
+    #     X= np.array([X],dtype=float)
+    #     W= np.array([W],dtype=float)
+    #     b= np.array([b],dtype=float)
+    #     print(X)
+    #     print(W)
+    #     print(b)
         
-        Y_hat = X * W + b
-        return Y_hat
-    def predict(modelCall):
+    #     Y_hat = X * W + b
+    #     return Y_hat
+    def prediction(self, modelCall):
         #modelCall= LinearModel(N,recipes,learning_rate,X)
-        super().predict()
+        #super().predict()
         # with self.model_lock:
         #     y_pred = self.model.predict(self.FINAL_SPECTRA)
         # print("predicted", y_pred)
@@ -304,11 +311,11 @@ class LinearRegress(MLModel):
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
-            prediction = predictLinearModel(predict,modelCall["Theta"], modelCall["Bias"])
+            prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             print(prediction)
-            return {"prediction":prediction , "par_theta":modelCall["Theta"], "par_bias":modelCall["Bias"] }
+            return {"prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         else:
-            return {"par_theta":modelCall["Theta"], "par_bias":modelCall["Bias"] }
+            return {"par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
  
     # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
     

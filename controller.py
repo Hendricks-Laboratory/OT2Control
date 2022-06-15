@@ -2085,7 +2085,7 @@ class AutoContr(Controller):
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
-        return {"True": True, "par_theta":returned_ml["par_theta"], "par_bias":returned_ml["par_bias"],"par_recipes":par_recipes}
+        return {"True": True, "par_theta":returned_ml["par_theta"], "par_bias":returned_ml["par_bias"],"par_recipes":returned_ml["par_recipes"]}
 
     def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False, params=None, initial_recipes= None):
         '''
@@ -2254,13 +2254,14 @@ class AutoContr(Controller):
             Y= np.array([wavelengths])
             print("recipes----")
             print(recipes)
-            model_trained = model.train(recipes, Y)
-            time.sleep(40)
+            model_trained = model._train(recipes, Y)
+            #time.sleep(1)
             print("Model Trained",model_trained)
 
             print("Predicting---")
-            model_params_trained= model_trained["ParamsToUse"]
-            ml_predict= model.predict(model_params_trained)
+            #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
+            #print("params pr",model_params_trained)
+            ml_predict= model.prediction(model_trained)
             prediction = ml_predict["prediction"]
            
             print("Controler/prediction/used ml",prediction)
