@@ -213,8 +213,8 @@ class LinearRegress(MLModel):
         returns:  
             np.array: (batch_size,n_features) 
         '''
-        upper_bound = 2.5
-        lower_bound = 0.25
+        upper_bound = 0.003
+        lower_bound = 0.00025
         # recipes = np.random.rand(self.batch_size, self.y_shape) \
         #         * (upper_bound - lower_bound) + lower_bound
 	    # print("seed,", recipes)
