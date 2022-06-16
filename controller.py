@@ -2198,6 +2198,8 @@ class AutoContr(Controller):
             Y_hat = X * W + b
             return Y_hat
 
+        #maxwav
+        
         def maxWaveLe(arr):
             obs=[]
             for r in range(50,len(arr)-100):
@@ -2205,6 +2207,7 @@ class AutoContr(Controller):
                 
             waveL= obs.index(np.max(obs))+300
             return waveL
+        
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
         self._init_pr(simulate, no_pr)
