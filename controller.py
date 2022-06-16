@@ -3011,9 +3011,10 @@ class ScanDataFrame():
         
     '''
     
-    def __init__(self, data_path, header_data, eve_files_path):
+    def __init__(self, data_path, experiment_name, eve_files_path):
         self.df = pd.DataFrame()
         self.data_path = data_path
+        self.experiment_name = experiment_name
         self.eve_files_path = eve_files_path
         self.isFirst = True
         
