@@ -276,7 +276,7 @@ class LinearRegress(MLModel):
         #return np.repeat(y_pred, self.duplication, axis=0);
         def predictLinearModel(X, W, b):
             #Overcome Overflow dtype=np.uint32
-            X= np.array([X],dtype=float)
+            X= np.array([[X]],dtype=float)
             W= np.array([W],dtype=float)
             b= np.array([b],dtype=float)
             print("predicting",X)
@@ -288,10 +288,10 @@ class LinearRegress(MLModel):
 
         def predictLinearModelInverse(Y_wt, W, b):
             #Overcome Overflow dtype=np.uint32
-            X= np.array([X],dtype=float)
+            Y_wt= np.array([[Y_wt]],dtype=float)
             W= np.array([W],dtype=float)
             b= np.array([b],dtype=float)
-            print("predicting",X)
+            print("predicting",Y_wt)
             print("predictor W",W)
             print("predictor W",b)
             
@@ -313,7 +313,8 @@ class LinearRegress(MLModel):
             print("AAAAAAAAA",errorsSca)
             plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
             plt.show()
-            # for saving
+            
+            return plt.show()# for saving
             #plt.savefig('pic.png')
 
         
@@ -328,7 +329,7 @@ class LinearRegress(MLModel):
             print("Predicted concentration [] given a wavelenght", prediction)
             return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         else:
-            return {"par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
  
     # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
     

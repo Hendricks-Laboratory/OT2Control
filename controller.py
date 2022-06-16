@@ -161,10 +161,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         # ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
         #         scan_bounds=(540,560),duplication=2)
         # auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
-        if not no_sim:
-            auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=parameters_trained,initial_recipes=ml_par_recipes)
-        else:
-            auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=None,initial_recipes=None)
+        #if not no_sim:
+        #    auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=parameters_trained,initial_recipes=ml_par_recipes)
+        #else:
+        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=None,initial_recipes=None)
 
 
 class Controller(ABC):
