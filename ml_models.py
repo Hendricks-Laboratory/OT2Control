@@ -286,6 +286,18 @@ class LinearRegress(MLModel):
             Y_hat = X * W + b
             return Y_hat
 
+        def predictLinearModelInverse(Y_wt, W, b):
+            #Overcome Overflow dtype=np.uint32
+            X= np.array([X],dtype=float)
+            W= np.array([W],dtype=float)
+            b= np.array([b],dtype=float)
+            print("predicting",X)
+            print("predictor W",W)
+            print("predictor W",b)
+            
+            X_predicted = (Y_wt -b) /W
+            return X_predicted
+
 
 
 
@@ -311,9 +323,10 @@ class LinearRegress(MLModel):
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
-            prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            print(prediction)
-            return {"prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            print("Predicted concentration [] given a wavelenght", prediction)
+            return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         else:
             return {"par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
  
