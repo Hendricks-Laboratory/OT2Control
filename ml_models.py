@@ -5,7 +5,7 @@ import threading
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
 import matplotlib.pyplot as plt
-
+import  pandas as pd
 import numpy as np
 
 class MLModel():
@@ -114,6 +114,9 @@ class MLModel():
         '''
         This method is for predict
         '''
+        pass
+    @abstractmethod
+    def training(self):
         pass
         
 class DummyMLModel(MLModel):
@@ -434,7 +437,61 @@ class LinearRegress(MLModel):
     #     return {"receipt":X, "cacheErrorAvg":cacheErrorAvg, "cacheTheta":cacheTheta,"cacheBias":cacheBias, "break_epoch":breakEpoch+1, "ParamsToUse":cacheParamsToUse}
 
 
+    
 
+    def training(self, df,input_user,r):
+
+            def getting_params(self, concentration,wavelength):
+                print("Parasn", concentration)
+                W = sum(wavelength*(concentration-np.mean(concentration))) / sum((concentration-np.mean(concentration))**2)
+                b = np.mean(wavelength) - W*np.mean(concentration)
+                print("--->", W,b)
+                return W, b
+            
+            #Training //Computing the parameters
+            print("---->Model training")
+            print("Computing W and b")
+
+            W, b = getting_params(self,df['Concentration'],df['Wavelength']) 
+
+            #making predictions based on our current data to see plot and the error
+            print("making predictions based on our current data to see plot and the error")
+            train_prediction= df['Concentration'] * W + b
+            #our error 
+            training_error= df['Wavelength']-train_prediction
+            print("----")
+            print("Train_prediction:",train_prediction)
+            print("----")
+            print("Error", training_error)
+            #ploting
+            train_fig = plt.figure(figsize=(5,7)) 
+            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+            plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+            plt.xlabel("Concentration")
+            plt.ylabel("Wavelength")
+            plt.legend()
+            plt.show()
+            train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
+            #User input for Wavelength wanted
+
+
+            #conputing the inverse --> from Wavelength to Concentration
+            
+            while True:
+                user_concentration = (input_user- b) / W
+                print("Model predictied concentration given the wavelength: ",user_concentration)
+                if user_concentration < 0.00025 or user_concentration >0.003:
+                    print("Sorry, the wanted wavelength is not reached given the current concentration of KBr allowed to process")
+                else:
+
+                    break
+
+
+            print("------------")
+            print("Making prediction")
+            print("passing ", user_concentration, " to robot")
+            return user_concentration, train_prediction , W, b
+    
     def _train(self, X, y):
         '''
         This call should wait on any current training threads to complete  
@@ -446,126 +503,198 @@ class LinearRegress(MLModel):
         Postconditions:  
             The model has been trained on the new data
         '''
-        #NOTE we may get fancier in the future here and do more preprocessing
-        if self.scan_bounds:
-            #if you only want to pay attention in bounds, train on those vals
-            processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
-        else:
-            processedX = X
+        # #NOTE we may get fancier in the future here and do more preprocessing
+        # if self.scan_bounds:
+        #     #if you only want to pay attention in bounds, train on those vals
+        #     processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
+        # else:
+        #     processedX = X
+
+
+
+        
+            
+            #plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+            #plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+            #plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+            #plt.xlabel("Concentration")
+            #plt.ylabel("Wavelength")
+            #plt.legend()
+
+        # def MainModel(X,Y):
+        #     #passing to list
+        #     X_df = [X[0][r] for r in range(len(X[0]))]
+        #     Y_df = [Y[0][m] for m in range(len(Y[0]))]
+        #     #Checking that they are list Y_df
+        #     print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+
+        #     ##creadting the dataframe
+        #     df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+        #     #sorting by Concentration
+        #     df = df.sort_values(by=['Concentration'])
+
+        #     input_user= input("Please eneter the desire Wavelength: ")
+        #     input_user= float(input_user)
+
+        #     W_list=[]
+        #     b_list=[]
+        #     ##Training 
+        #     #Receive data from robot
+        #     for r in range(10):
+        #         print("Epoch", r+1)
+        #         user_concentration, train_prediction, W, b = training(self, df,input_user,r)
+        #         W_list.append(W)
+        #         b_list.append(b)
+        #         ##pas to the robot THE USER_CONCEN
+        #         Robot_answer= 465
+        #         print("Robot send back a wavelenght of", Robot_answer)
+        #         print("User input was ", input_user)
+        #         test_error= Robot_answer- input_user
+        #         print("Our test error is ", test_error)
+                
+        #         ##Plot
+        #         fig = plt.figure(figsize=(5,8)) 
+        #         plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+        #         plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+        #         plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+        #         plt.xlabel("Concentration")
+        #         plt.ylabel("Wavelength")
+        #         plt.legend()
+        #         plt.show()
+        #         fig.savefig("predictions-"+str(r)+"png",dpi=fig.dpi)
+                
+                # if test_error < 10 and test_error>-10:
+                #     print("The model is trained----")
+                #     break
+                # else:
+                #     print("Model would try to reduce the error")
+                #     if r == 9:
+                #         print("---->Done training<----")
+                #     else:
+                #         print("-----")
+                #     new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
+                #     df = df.append(new_data, ignore_index = True)
+                # r += 1
+                
+
+
+
+
+
         #update the data with the new scans
-        def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
-            cacheError=[]
-            cacheErrorAvg=[]
-            cacheTheta=[]
-            cacheBias =[]
-            cacheParamsToUse={}
-            breakEpoch=0
-            Y_values=[]
+        # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
+        #     cacheError=[]
+        #     cacheErrorAvg=[]
+        #     cacheTheta=[]
+        #     cacheBias =[]
+        #     cacheParamsToUse={}
+        #     breakEpoch=0
+        #     Y_values=[]
         
         
-            for i in range(N):
+        #     for i in range(N):
             
-                ##
+        #         ##
             
-                if i !=0:
-                    theta = cacheTheta[i-1]-learning_rate*cacheError[i-1]/(recipes)
-                    bias = cacheBias[i-1]-learning_rate*cacheBias[i-1]/(recipes)
-                    print(theta.shape,"NNN")
-                    print(bias.shape,"NNN")
+        #         if i !=0:
+        #             theta = cacheTheta[i-1]-learning_rate*cacheError[i-1]/(recipes)
+        #             bias = cacheBias[i-1]-learning_rate*cacheBias[i-1]/(recipes)
+        #             print(theta.shape,"NNN")
+        #             print(bias.shape,"NNN")
                  
-                else:
-                    #Generating random parameters at the beginning
-                    #theta = np.random.rand(recipes,1)
-                    #bias  = np.random.rand(recipes,1)
-                    #bias  = random.uniform(0,1)
-                    X_mean=np.mean(X)
-                    theta= Y*(X-X_mean) / (X-X_mean)**2
-                    bias= np.mean(Y) - theta*np.mean(X)
+        #         else:
+        #             #Generating random parameters at the beginning
+        #             #theta = np.random.rand(recipes,1)
+        #             #bias  = np.random.rand(recipes,1)
+        #             #bias  = random.uniform(0,1)
+        #             X_mean=np.mean(X)
+        #             theta= Y*(X-X_mean) / (X-X_mean)**2
+        #             bias= np.mean(Y) - theta*np.mean(X)
 
             
             
-                ##
-                #Linear Model
+        #         ##
+        #         #Linear Model
             
-                #X_mean=np.mean(X)
-                #theta= Y*(X-X_mean) / (X-X_mean)**2
-                print("Bias", bias)
-                print("Theta.shape", theta.shape)
-                print("Bias.shape", bias.shape)
-                print("X Shape", X.shape)
+        #         #X_mean=np.mean(X)
+        #         #theta= Y*(X-X_mean) / (X-X_mean)**2
+        #         print("Bias", bias)
+        #         print("Theta.shape", theta.shape)
+        #         print("Bias.shape", bias.shape)
+        #         print("X Shape", X.shape)
 
 
-                Y_hat= theta@X.T + bias
-                print("Y_hat",Y_hat)
+        #         Y_hat= theta@X.T + bias
+        #         print("Y_hat",Y_hat)
             
-                ##SEND X
-                ##back y
+        #         ##SEND X
+        #         ##back y
             
-                #Computer error
+        #         #Computer error
             
-                #Simple error
-                #error= Y_hat-Y.T
-                #
-                print("Dii", np.abs(Y_hat-Y))#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1)))
-                error= np.abs(Y_hat-Y)# np.sum(np.abs(Y_hat-Y.T),axis=1)#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1))  #Y_hat-Y.T#np.sum((Y_hat-Y.T).T@(Y_hat-Y.T))
-            
-            
+        #         #Simple error
+        #         #error= Y_hat-Y.T
+        #         #
+        #         print("Dii", np.abs(Y_hat-Y))#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1)))
+        #         error= np.abs(Y_hat-Y)# np.sum(np.abs(Y_hat-Y.T),axis=1)#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1))  #Y_hat-Y.T#np.sum((Y_hat-Y.T).T@(Y_hat-Y.T))
             
             
-                print("Y",Y)
-                print("-----------------------")
-                print("Error avg",np.sum(error)/(2*recipes))
-                print("Error in epoch #"+str(i+1))
             
-                print(error)
-                print()
-                print()
+            
+        #         print("Y",Y)
+        #         print("-----------------------")
+        #         print("Error avg",np.sum(error)/(2*recipes))
+        #         print("Error in epoch #"+str(i+1))
+            
+        #         print(error)
+        #         print()
+        #         print()
         
             
             
-                #Saving in cache error and theta
+        #         #Saving in cache error and theta
                 
-                cacheErrorAvg.append(np.sum(error)/(2*recipes))
-                cacheError.append(error)
-                cacheTheta.append(theta)
-                cacheBias.append(bias)
+        #         cacheErrorAvg.append(np.sum(error)/(2*recipes))
+        #         cacheError.append(error)
+        #         cacheTheta.append(theta)
+        #         cacheBias.append(bias)
                 
                 
-                #Callback
+        #         #Callback
                 
-                #if error keeps increasing we stop and return the previous last parameter
-                #after three epochs 
+        #         #if error keeps increasing we stop and return the previous last parameter
+        #         #after three epochs 
                 
-                if i > 2:
-                    if np.sum(error)/(2*recipes) > np.sum(cacheError[i-2])/(2*recipes) + 5:
-                        breakEpoch= i
-                        print("n",i)
-                        print("Error avg",np.sum(cacheError[i-2])/(2*recipes))
-                        print("Last param",np.sum(cacheTheta[i-2])/(2*recipes))
-                        print("Last param",np.sum(cacheBias[i-2])/(2*recipes))
-                        cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-                        cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
-                        break
-                    else:
-                        pass
-                if i==N-1:
-                    breakEpoch= i
-                    cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-                    cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
+        #         if i > 2:
+        #             if np.sum(error)/(2*recipes) > np.sum(cacheError[i-2])/(2*recipes) + 5:
+        #                 breakEpoch= i
+        #                 print("n",i)
+        #                 print("Error avg",np.sum(cacheError[i-2])/(2*recipes))
+        #                 print("Last param",np.sum(cacheTheta[i-2])/(2*recipes))
+        #                 print("Last param",np.sum(cacheBias[i-2])/(2*recipes))
+        #                 cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
+        #                 cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
+        #                 break
+        #             else:
+        #                 pass
+        #         if i==N-1:
+        #             breakEpoch= i
+        #             cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
+        #             cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
                 
-            return {"receipt":X, "cacheErrorAvg":cacheErrorAvg, "cacheTheta":cacheTheta,"cacheBias":cacheBias, "break_epoch":breakEpoch+1, "ParamsToUse":cacheParamsToUse}       
-        #time.sleep(40)
-        #time.sleep(10)
+        #     return {"receipt":X, "cacheErrorAvg":cacheErrorAvg, "cacheTheta":cacheTheta,"cacheBias":cacheBias, "break_epoch":breakEpoch+1, "ParamsToUse":cacheParamsToUse}       
+        # #time.sleep(40)
+        # #time.sleep(10)
         print("X and Y")
         print(X,y) 
         print("--------")
         print('<<ML>> training')
 
-        #ml_model_trained = mainModel(self,10,3,0.05,X,y)
+        # ml_model_trained = MainModel(self,10,3,0.05,X,y)
 
         print('<<ML>> done training')
 
-        return mainModel(self, 10,3,0.05,X,y)
+        return 0 #MainModel(self, X,y)
 
 
         # with self.model_lock:

@@ -2207,6 +2207,36 @@ class AutoContr(Controller):
                 
             waveL= obs.index(np.max(obs))+300
             return waveL
+
+        
+        def MaxWaveLength(scan):
+    
+    
+            now = datetime.now().time() # time object
+
+            X_new=[]
+            for i in range(len(scan)): #701
+                X_new.append(300+i)
+            #to numpy
+            X_axis= np.array(X_new)
+            our_Y= np.array(scan)
+            
+            #restricting wavelengths 
+            X_axis= X_axis[50:-100]
+            our_Y= our_Y[50:-100]
+            
+            #ploting for checking
+            fig = plt.figure(figsize=(10,10)) 
+            plt.plot(X_axis,our_Y)
+            plt.show() 
+            fig.savefig("waves-"+str(now)+".png",dpi=fig.dpi)
+            
+            #max 
+            max_ob= np.argmax(our_Y)
+            
+            #max_wave
+            return X_axis[max_ob]
+            
         
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
@@ -2249,7 +2279,7 @@ class AutoContr(Controller):
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
                 print("len",len(scan_Y),len(scan_Y[0]))
-                Y= maxWaveLe(scan_Y[0])
+                Y= MaxWaveLength(scan_Y[0])
                 #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
@@ -2258,62 +2288,166 @@ class AutoContr(Controller):
             Y= np.array([wavelengths])
             print("recipes----")
             print(recipes)
-            model_trained = model._train(recipes, Y)
-            #time.sleep(1)
-            print("Model Trained",model_trained)
 
-            print("Predicting---")
+            #passing to list
+            X_df = [recipes[0][r] for r in range(len(recipes[0]))]
+            Y_df = [Y[0][m] for m in range(len(Y[0]))]
+            #Checking that they are list Y_df
+            print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+
+            ##creadting the dataframe
+            df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+            #sorting by Concentration
+            df = df.sort_values(by=['Concentration'])
+
+            input_user= input("Please eneter the desire Wavelength: ")
+            input_user= float(input_user)
+
+            W_list=[]
+            b_list=[]
+            ##Training 
+            #Receive data from robot
+            for r in range(10):
+                print("Epoch", r+1)
+                user_concentration, train_prediction, W, b = model._train(self, df,input_user,r)
+                W_list.append(W)
+                b_list.append(b)
+                ##pas to the robot THE USER_CONCENTRATION
+                # Robot_answer= 465
+                ##Testing
+
+                testing_recipes = [user_concentration]
+                wavelengths_prediction_test=[]
+                #for r in range(len(testing_recipes[0])):
+                recipe_unit_test = np.array([user_concentration])
+                #do the first one
+                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                print('<<controller>> executing batch {} for testing'.format(1))
+                #don't have data to train, so, not training
+                #generate new wellnames for next batch
+                wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                #plan and execute a reaction
+                self._create_samples(wellnames_testing, recipe_unit_test)
+                #pull in the scan data
+                filenames_testing = self.rxn_df[
+                            (self.rxn_df['op'] == 'scan') |
+                            (self.rxn_df['op'] == 'scan_until_complete')
+                            ].reset_index()
+                #TODO filenames is empty. dunno why
+                last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                #scan_data = observance
+                #We process scan_data to get lambda
+                scan_Y_testing= scan_data_testing.T.to_numpy()
+                print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+                Y_testing= MaxWaveLength(scan_Y_testing[0])
+                #print("len",len(Y),len(Y[0]))
+                wavelengths_prediction_test.append(Y_testing)
+
+                # print("For prediction/test error:")
+                # print("We gave the wavelength:")
+                # print(predictor_for_test, " type:", type(predictor_for_test))
+                # print("Model returned the predicted concentration")
+                # # Y= np.array([wavelengths])
+                # print("The robot use the predicted concentration and get the following wavelenght")
+                # # print("recipe pass----")
+                # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
+
+                # print("The error for test in one epoch and one batch is")
+
+                Robot_answer=wavelengths_prediction_test[0]
+
+
+                print("Robot send back a wavelenght of", Robot_answer)
+                print("User input was ", input_user)
+                test_error= Robot_answer- input_user
+                print("Our test error is ", test_error)
+                
+                ##Plot
+                fig = plt.figure(figsize=(5,8)) 
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+                plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+                plt.xlabel("Concentration")
+                plt.ylabel("Wavelength")
+                plt.legend()
+                plt.show()
+                fig.savefig("predictions-"+str(r)+"png",dpi=fig.dpi)
+                
+                if test_error < 10 and test_error>-10:
+                    print("The model is trained----")
+                    break
+                else:
+                    print("Model would try to reduce the error")
+                    if r == 9:
+                        print("---->Done training<----")
+                    else:
+                        print("-----")
+                    new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
+                    df = df.append(new_data, ignore_index = True)
+                r += 1
+
+
+
+
+
+
+            #model_trained = model._train(recipes, Y)
+            #time.sleep(1)
+            #print("Model Trained",model_trained)
+
+            #print("Predicting---")
             #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
             #print("params pr",model_params_trained)
-            ml_predict= model.prediction(model_trained)
-            prediction = ml_predict["prediction"]
-            predictor_for_test= ml_predict["inputPredictor"]
+            # ml_predict= model.prediction(model_trained)
+            # prediction = ml_predict["prediction"]
+            # predictor_for_test= ml_predict["inputPredictor"]
            
-            print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
+            # print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
 
-            print("Testing our prediction----")
-            print("Running the predicted recipe on the robot")
+            # print("Testing our prediction----")
+            # print("Running the predicted recipe on the robot")
 
-            ##Testing
+            # ##Testing
 
-            testing_recipes = [prediction[0]]
-            wavelengths_prediction_test=[]
-            #for r in range(len(testing_recipes[0])):
-            recipe_unit_test = np.array([testing_recipes[0]])
-            #do the first one
-            #print('<<controller>> executing batch {}'.format(self.batch_num))
-            print('<<controller>> executing batch {} for testing'.format(1))
-            #don't have data to train, so, not training
-            #generate new wellnames for next batch
-            wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-            #plan and execute a reaction
-            self._create_samples(wellnames_testing, recipe_unit_test)
-            #pull in the scan data
-            filenames_testing = self.rxn_df[
-                        (self.rxn_df['op'] == 'scan') |
-                        (self.rxn_df['op'] == 'scan_until_complete')
-                        ].reset_index()
-            #TODO filenames is empty. dunno why
-            last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-            scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-            #scan_data = observance
-            #We process scan_data to get lambda
-            scan_Y_testing= scan_data_testing.T.to_numpy()
-            print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
-            Y_testing= maxWaveLe(scan_Y_testing[0])
-            #print("len",len(Y),len(Y[0]))
-            wavelengths_prediction_test.append(Y_testing)
+            # testing_recipes = [prediction[0]]
+            # wavelengths_prediction_test=[]
+            # #for r in range(len(testing_recipes[0])):
+            # recipe_unit_test = np.array([testing_recipes[0]])
+            # #do the first one
+            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+            # print('<<controller>> executing batch {} for testing'.format(1))
+            # #don't have data to train, so, not training
+            # #generate new wellnames for next batch
+            # wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+            # #plan and execute a reaction
+            # self._create_samples(wellnames_testing, recipe_unit_test)
+            # #pull in the scan data
+            # filenames_testing = self.rxn_df[
+            #             (self.rxn_df['op'] == 'scan') |
+            #             (self.rxn_df['op'] == 'scan_until_complete')
+            #             ].reset_index()
+            # #TODO filenames is empty. dunno why
+            # last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+            # scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+            # #scan_data = observance
+            # #We process scan_data to get lambda
+            # scan_Y_testing= scan_data_testing.T.to_numpy()
+            # print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+            # Y_testing= MaxWaveLength(scan_Y_testing[0])
+            # #print("len",len(Y),len(Y[0]))
+            # wavelengths_prediction_test.append(Y_testing)
 
-            print("For prediction/test error:")
-            print("We gave the wavelength:")
-            print(predictor_for_test, " type:", type(predictor_for_test))
-            print("Model returned the predicted concentration")
-            # Y= np.array([wavelengths])
-            print("The robot use the predicted concentration and get the following wavelenght")
-            # print("recipe pass----")
-            print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
+            # print("For prediction/test error:")
+            # print("We gave the wavelength:")
+            # print(predictor_for_test, " type:", type(predictor_for_test))
+            # print("Model returned the predicted concentration")
+            # # Y= np.array([wavelengths])
+            # print("The robot use the predicted concentration and get the following wavelenght")
+            # # print("recipe pass----")
+            # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
 
-            print("The error for test in one epoch and one batch is")
+            # print("The error for test in one epoch and one batch is")
             # print()
             ##if 
 
@@ -2364,7 +2498,7 @@ class AutoContr(Controller):
             #     self.batch_num += 1
             self.close_connection()
             self.pr.shutdown()
-            return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+            return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
         else:
 
@@ -2423,6 +2557,116 @@ class AutoContr(Controller):
             #     self.pr.shutdown()
             #     return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
             
+            # recipes = model.generate_seed_rxns(3) #number of recipes
+            # print("Our initital recipes:",recipes)
+            # #we would get observance for each recipe:
+            # wavelengths=[]
+            # for r in range(len(recipes[0])):
+            #     recipe_unit = np.array([recipes[0][r]])
+            
+            #     #do the first one
+            #     #print('<<controller>> executing batch {}'.format(self.batch_num))
+            #     print('<<controller>> executing batch {}'.format(str(r+1)))
+            #     #don't have data to train, so, not training
+            #     #generate new wellnames for next batch
+            #     wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+            #     #plan and execute a reaction
+            #     self._create_samples(wellnames, recipe_unit)
+            #     #pull in the scan data
+            #     filenames = self.rxn_df[
+            #             (self.rxn_df['op'] == 'scan') |
+            #             (self.rxn_df['op'] == 'scan_until_complete')
+            #             ].reset_index()
+            #     #TODO filenames is empty. dunno why
+            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+            #     scan_data = self._get_sample_data(wellnames, last_filename)
+                
+            #     #scan_data = observance
+            #     #We process scan_data to get lambda
+            #     scan_Y= scan_data.T.to_numpy()
+            #     print("len",len(scan_Y),len(scan_Y[0]))
+            #     Y= MaxWaveLength(scan_Y[0])
+            #     #print("len",len(Y),len(Y[0]))
+            #     wavelengths.append(Y)
+
+            # print("Checking our input: wavelengths")
+            # print(wavelengths)
+            # Y= np.array([wavelengths])
+            # print("recipes----")
+            # print(recipes)
+            # model_trained = model._train(recipes, Y)
+            # #time.sleep(1)
+            # print("Model Trained",model_trained)
+
+            # print("Predicting---")
+            # #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
+            # #print("params pr",model_params_trained)
+            # ml_predict= model.prediction(model_trained)
+            # prediction = ml_predict["prediction"]
+            # predictor_for_test= ml_predict["inputPredictor"]
+           
+            # print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
+
+            # print("Testing our prediction----")
+            # print("Running the predicted recipe on the robot")
+
+            # ##Testing
+
+            # testing_recipes = [prediction[0]]
+            # wavelengths_prediction_test=[]
+            # #for r in range(len(testing_recipes[0])):
+            # recipe_unit_test = np.array([testing_recipes[0]])
+            # #do the first one
+            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+            # print('<<controller>> executing batch {} for testing'.format(1))
+            # #don't have data to train, so, not training
+            # #generate new wellnames for next batch
+            # wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+            # #plan and execute a reaction
+            # self._create_samples(wellnames_testing, recipe_unit_test)
+            # #pull in the scan data
+            # filenames_testing = self.rxn_df[
+            #             (self.rxn_df['op'] == 'scan') |
+            #             (self.rxn_df['op'] == 'scan_until_complete')
+            #             ].reset_index()
+            # #TODO filenames is empty. dunno why
+            # last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+            # scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+            # #scan_data = observance
+            # #We process scan_data to get lambda
+            # scan_Y_testing= scan_data_testing.T.to_numpy()
+            # print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+            # Y_testing= MaxWaveLength(scan_Y_testing[0])
+            # #print("len",len(Y),len(Y[0]))
+            # wavelengths_prediction_test.append(Y_testing)
+
+            # print("For prediction/test error:")
+            # print("We gave the wavelength:")
+            # print(predictor_for_test, " type:", type(predictor_for_test))
+            # print("Model returned the predicted concentration")
+            # # Y= np.array([wavelengths])
+            # print("The robot use the predicted concentration and get the following wavelenght")
+            # # print("recipe pass----")
+            # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
+
+            # print("The error for test in one epoch and one batch is")
+            # # print()
+            # ##if 
+
+            # ##
+            # # model_trained = model._train(recipes, Y)
+            # # #time.sleep(1)
+            # # print("Model Trained",model_trained)
+
+
+            # ##Possible for Online ln.  
+            # #this is different because we don't want to use untrained model to generate predictions
+            # #recipes = model.generate_seed_rxns(1)
+
+
+            # # self.batch_num += 1
+
+            # print("Before entering to the while loop: scan_data",scan_data) 
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
             #we would get observance for each recipe:
@@ -2451,7 +2695,7 @@ class AutoContr(Controller):
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
                 print("len",len(scan_Y),len(scan_Y[0]))
-                Y= maxWaveLe(scan_Y[0])
+                Y= MaxWaveLength(scan_Y[0])
                 #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
@@ -2460,79 +2704,106 @@ class AutoContr(Controller):
             Y= np.array([wavelengths])
             print("recipes----")
             print(recipes)
-            model_trained = model._train(recipes, Y)
-            #time.sleep(1)
-            print("Model Trained",model_trained)
 
-            print("Predicting---")
-            #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
-            #print("params pr",model_params_trained)
-            ml_predict= model.prediction(model_trained)
-            prediction = ml_predict["prediction"]
-            predictor_for_test= ml_predict["inputPredictor"]
-           
-            print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
+            #passing to list
+            X_df = [recipes[0][r] for r in range(len(recipes[0]))]
+            Y_df = [Y[0][m] for m in range(len(Y[0]))]
+            #Checking that they are list Y_df
+            print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
 
-            print("Testing our prediction----")
-            print("Running the predicted recipe on the robot")
+            ##creadting the dataframe
+            df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+            #sorting by Concentration
+            df = df.sort_values(by=['Concentration'])
 
-            ##Testing
+            input_user= input("Please eneter the desire Wavelength: ")
+            input_user= float(input_user)
 
-            testing_recipes = [prediction[0]]
-            wavelengths_prediction_test=[]
-            #for r in range(len(testing_recipes[0])):
-            recipe_unit_test = np.array([testing_recipes[0]])
-            #do the first one
-            #print('<<controller>> executing batch {}'.format(self.batch_num))
-            print('<<controller>> executing batch {} for testing'.format(1))
-            #don't have data to train, so, not training
-            #generate new wellnames for next batch
-            wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-            #plan and execute a reaction
-            self._create_samples(wellnames_testing, recipe_unit_test)
-            #pull in the scan data
-            filenames_testing = self.rxn_df[
-                        (self.rxn_df['op'] == 'scan') |
-                        (self.rxn_df['op'] == 'scan_until_complete')
-                        ].reset_index()
-            #TODO filenames is empty. dunno why
-            last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-            scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-            #scan_data = observance
-            #We process scan_data to get lambda
-            scan_Y_testing= scan_data_testing.T.to_numpy()
-            print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
-            Y_testing= maxWaveLe(scan_Y_testing[0])
-            #print("len",len(Y),len(Y[0]))
-            wavelengths_prediction_test.append(Y_testing)
+            W_list=[]
+            b_list=[]
+            ##Training 
+            #Receive data from robot
+            for r in range(10):
+                print("Epoch", r+1)
+                user_concentration, train_prediction, W, b = model._train(self, df,input_user,r)
+                W_list.append(W)
+                b_list.append(b)
+                ##pas to the robot THE USER_CONCENTRATION
+                # Robot_answer= 465
+                ##Testing
 
-            print("For prediction/test error:")
-            print("We gave the wavelength:")
-            print(predictor_for_test, " type:", type(predictor_for_test))
-            print("Model returned the predicted concentration")
-            # Y= np.array([wavelengths])
-            print("The robot use the predicted concentration and get the following wavelenght")
-            # print("recipe pass----")
-            print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
+                testing_recipes = [user_concentration]
+                wavelengths_prediction_test=[]
+                #for r in range(len(testing_recipes[0])):
+                recipe_unit_test = np.array([user_concentration])
+                #do the first one
+                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                print('<<controller>> executing batch {} for testing'.format(1))
+                #don't have data to train, so, not training
+                #generate new wellnames for next batch
+                wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                #plan and execute a reaction
+                self._create_samples(wellnames_testing, recipe_unit_test)
+                #pull in the scan data
+                filenames_testing = self.rxn_df[
+                            (self.rxn_df['op'] == 'scan') |
+                            (self.rxn_df['op'] == 'scan_until_complete')
+                            ].reset_index()
+                #TODO filenames is empty. dunno why
+                last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                #scan_data = observance
+                #We process scan_data to get lambda
+                scan_Y_testing= scan_data_testing.T.to_numpy()
+                print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+                Y_testing= MaxWaveLength(scan_Y_testing[0])
+                #print("len",len(Y),len(Y[0]))
+                wavelengths_prediction_test.append(Y_testing)
 
-            print("The error for test in one epoch and one batch is")
-            # print()
-            ##if 
+                # print("For prediction/test error:")
+                # print("We gave the wavelength:")
+                # print(predictor_for_test, " type:", type(predictor_for_test))
+                # print("Model returned the predicted concentration")
+                # # Y= np.array([wavelengths])
+                # print("The robot use the predicted concentration and get the following wavelenght")
+                # # print("recipe pass----")
+                # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
 
-            ##
-            # model_trained = model._train(recipes, Y)
-            # #time.sleep(1)
-            # print("Model Trained",model_trained)
+                # print("The error for test in one epoch and one batch is")
+
+                Robot_answer=wavelengths_prediction_test[0]
 
 
-            ##Possible for Online ln.  
-            #this is different because we don't want to use untrained model to generate predictions
-            #recipes = model.generate_seed_rxns(1)
+                print("Robot send back a wavelenght of", Robot_answer)
+                print("User input was ", input_user)
+                test_error= Robot_answer- input_user
+                print("Our test error is ", test_error)
+                
+                ##Plot
+                fig = plt.figure(figsize=(5,8)) 
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+                plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+                plt.xlabel("Concentration")
+                plt.ylabel("Wavelength")
+                plt.legend()
+                plt.show()
+                fig.savefig("predictions-"+str(r)+"png",dpi=fig.dpi)
+                
+                if test_error < 10 and test_error>-10:
+                    print("The model is trained----")
+                    break
+                else:
+                    print("Model would try to reduce the error")
+                    if r == 9:
+                        print("---->Done training<----")
+                    else:
+                        print("-----")
+                    new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
+                    df = df.append(new_data, ignore_index = True)
+                r += 1
 
-
-            # self.batch_num += 1
-
-            print("Before entering to the while loop: scan_data",scan_data)        
+       
             #enter iterative while loop now that we have data
             # while not model.quit:
             #     model_trained= model.train(scan_data.T.to_numpy(),recipes)
@@ -2566,7 +2837,7 @@ class AutoContr(Controller):
             #     self.batch_num += 1
             self.close_connection()
             self.pr.shutdown()
-            return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+            return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
 
             # return Y_hat 
