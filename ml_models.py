@@ -476,12 +476,17 @@ class LinearRegress(MLModel):
 
 
             #conputing the inverse --> from Wavelength to Concentration
-            
+            input_user= input_user
             while True:
                 user_concentration = (input_user- b) / W
                 print("Model predictied concentration given the wavelength: ",user_concentration)
                 if user_concentration < 0.00025 or user_concentration >0.003:
                     print("Sorry, the wanted wavelength is not reached given the current concentration of KBr allowed to process")
+                    input_user= input("Please eneter the desire Wavelength: ")
+                    input_user= float(input_user)
+                    
+                    #user_concentration = (input_user- b) / W
+
                 else:
 
                     break
@@ -490,7 +495,7 @@ class LinearRegress(MLModel):
             print("------------")
             print("Making prediction")
             print("passing ", user_concentration, " to robot")
-            return user_concentration, train_prediction , W, b
+            return input_user, user_concentration, train_prediction , W, b
     
     def _train(self, X, y):
         '''

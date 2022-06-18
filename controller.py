@@ -148,11 +148,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     #try 1 
     if not no_sim:
         ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None)
-        ml_par_theta= ml_model_trained["par_theta"]
-        ml_par_bias = ml_model_trained["par_bias"]
-        ml_par_recipes = ml_model_trained["par_recipes"]
-        parameters_trained= {"trained_theta":ml_par_theta,"trained_bias":ml_par_bias}
-        print("Params afte TRY 1",ml_par_theta,ml_par_bias)
+        ml_simulation_W= ml_model_trained["W"]
+        ml_simulation_b = ml_model_trained["b"]
+        #ml_par_recipes = ml_model_trained["par_recipes"]
+        #parameters_trained= {"trained_theta":ml_par_theta,"trained_bias":ml_par_bias}
+        print("Params afte TRY 1",ml_simulation_W,ml_simulation_b)
     print("It is passing to TRY 2")
     #try 2
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2081,12 +2081,11 @@ class AutoContr(Controller):
         time.sleep(20)
         #collect the eve thread
         eve_thread.join()
-
         #restore changed vars
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
         print('<<controller>> EXITING SIMULATION')
-        return {"True": True, "par_theta":returned_ml["par_theta"], "par_bias":returned_ml["par_bias"],"par_recipes":returned_ml["par_recipes"]}
+        return {"W":returned_ml["W"], "b":returned_ml["b"]}
 
     def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False, params=None, initial_recipes= None):
         '''
@@ -2307,9 +2306,9 @@ class AutoContr(Controller):
             b_list=[]
             ##Training 
             #Receive data from robot
-            for r in range(10):
+            for r in range(5):
                 print("Epoch", r+1)
-                user_concentration, train_prediction, W, b = model._train(self, df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
@@ -2367,7 +2366,8 @@ class AutoContr(Controller):
                 fig = plt.figure(figsize=(5,8)) 
                 plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+                plt.scatter(user_concentration,Robot_answer,label="Predicted Value by Model")
+                plt.scatter(user_concentration,input_user,label="Our Value")
                 plt.xlabel("Concentration")
                 plt.ylabel("Wavelength")
                 plt.legend()
@@ -2383,7 +2383,7 @@ class AutoContr(Controller):
                         print("---->Done training<----")
                     else:
                         print("-----")
-                    new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
+                    new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
                 r += 1
 
@@ -2723,9 +2723,9 @@ class AutoContr(Controller):
             b_list=[]
             ##Training 
             #Receive data from robot
-            for r in range(10):
+            for r in range(5):
                 print("Epoch", r+1)
-                user_concentration, train_prediction, W, b = model._train(self, df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
@@ -2783,7 +2783,8 @@ class AutoContr(Controller):
                 fig = plt.figure(figsize=(5,8)) 
                 plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
+                plt.scatter(user_concentration,Robot_answer,label="Predicted Value by Model")
+                plt.scatter(user_concentration,input_user,label="Our Value")
                 plt.xlabel("Concentration")
                 plt.ylabel("Wavelength")
                 plt.legend()
@@ -2799,7 +2800,7 @@ class AutoContr(Controller):
                         print("---->Done training<----")
                     else:
                         print("-----")
-                    new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
+                    new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
                 r += 1
 
