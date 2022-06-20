@@ -2277,8 +2277,10 @@ class AutoContr(Controller):
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
+                print("scan", scan_Y)
                 print("len",len(scan_Y),len(scan_Y[0]))
                 Y= MaxWaveLength(scan_Y[0])
+                print("wavel max ", Y)
                 #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
@@ -2338,9 +2340,10 @@ class AutoContr(Controller):
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
-                print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+                print("Test scan ",scan_Y_testing)
+                print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
                 Y_testing= MaxWaveLength(scan_Y_testing[0])
-                #print("len",len(Y),len(Y[0]))
+                print("Y_testing",Y_testing)
                 wavelengths_prediction_test.append(Y_testing)
 
                 # print("For prediction/test error:")
@@ -2354,8 +2357,8 @@ class AutoContr(Controller):
 
                 # print("The error for test in one epoch and one batch is")
 
-                Robot_answer=wavelengths_prediction_test[0]
-
+                #Robot_answer=wavelengths_prediction_test[0]
+                Robot_answer=Y_testing
 
                 print("Robot send back a wavelenght of", Robot_answer)
                 print("User input was ", input_user)
@@ -2694,8 +2697,10 @@ class AutoContr(Controller):
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
+                print("scan", scan_Y)
                 print("len",len(scan_Y),len(scan_Y[0]))
                 Y= MaxWaveLength(scan_Y[0])
+                print("wavel max ", Y)
                 #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
 
@@ -2755,9 +2760,10 @@ class AutoContr(Controller):
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
-                print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
+                print("Test scan ",scan_Y_testing)
+                print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
                 Y_testing= MaxWaveLength(scan_Y_testing[0])
-                #print("len",len(Y),len(Y[0]))
+                print("Y_testing",Y_testing)
                 wavelengths_prediction_test.append(Y_testing)
 
                 # print("For prediction/test error:")
@@ -2771,8 +2777,8 @@ class AutoContr(Controller):
 
                 # print("The error for test in one epoch and one batch is")
 
-                Robot_answer=wavelengths_prediction_test[0]
-
+                #Robot_answer=wavelengths_prediction_test[0]
+                Robot_answer=Y_testing
 
                 print("Robot send back a wavelenght of", Robot_answer)
                 print("User input was ", input_user)
