@@ -482,7 +482,7 @@ class LinearRegress(MLModel):
                 print("Model predictied concentration given the wavelength: ",user_concentration)
                 if user_concentration < 0.00025 or user_concentration >0.003:
                     print("Sorry, the wanted wavelength is not reached given the current concentration of KBr allowed to process")
-                    input_user= input("Please eneter the desire Wavelength: ")
+                    input_user= input("Please ENTER the desire Wavelength: ")
                     input_user= float(input_user)
                     
                     #user_concentration = (input_user- b) / W
