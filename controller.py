@@ -1916,7 +1916,7 @@ class Controller(ABC):
         count = 1
         
         #Eps represents the difference variable that we want in order to check if the scans are similar enough
-        eps = 3/700 
+        eps = 1/700 
             
         scan_product_index = row[self._products].ne(0)
         
