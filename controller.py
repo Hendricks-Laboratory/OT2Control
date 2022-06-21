@@ -2367,10 +2367,10 @@ class AutoContr(Controller):
                 
                 ##Plot
                 fig = plt.figure(figsize=(5,8)) 
-                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                plt.scatter(user_concentration,Robot_answer,label="Predicted Value by Model")
-                plt.scatter(user_concentration,input_user,label="Our Value")
+                plt.scatter(user_concentration,Robot_answer,label="Robot True Return Value")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("Concentration")
                 plt.ylabel("Wavelength")
                 plt.legend()
@@ -2787,10 +2787,10 @@ class AutoContr(Controller):
                 
                 ##Plot
                 fig = plt.figure(figsize=(5,8)) 
-                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                plt.scatter(user_concentration,Robot_answer,label="Predicted Value by Model")
-                plt.scatter(user_concentration,input_user,label="Our Value")
+                plt.scatter(user_concentration,Robot_answer,label="Robot True Return Value")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("Concentration")
                 plt.ylabel("Wavelength")
                 plt.legend()

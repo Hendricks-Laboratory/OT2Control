@@ -465,7 +465,7 @@ class LinearRegress(MLModel):
             print("Error", training_error)
             #ploting
             train_fig = plt.figure(figsize=(5,7)) 
-            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
+            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
             plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
             plt.xlabel("Concentration")
             plt.ylabel("Wavelength")
