@@ -2283,6 +2283,44 @@ class AutoContr(Controller):
                 print("wavel max ", Y)
                 #print("len",len(Y),len(Y[0]))
                 wavelengths.append(Y)
+                if r == 1 or r==3 or r==5:
+                    if wavelengths[r-1] - wavelengths[r] < 0.03:
+                        print("The two recipes"+str(recipe_unit)+ "are similar")
+                    else:
+                        print("The two recipes"+str(recipe_unit)+ "are NOT similar")
+                        print("Doing again")
+                        recipe_unit = np.array([recipes[0][r]])
+                        #do the first one
+                        #print('<<controller>> executing batch {}'.format(self.batch_num))
+                        #print('<<controller>> executing batch {}'.format(str(r+1)))
+                        #don't have data to train, so, not training
+                        #generate new wellnames for next batch
+                        wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+                        #plan and execute a reaction
+                        self._create_samples(wellnames, recipe_unit)
+                        #pull in the scan data
+                        filenames = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                        #TODO filenames is empty. dunno why
+                        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                        scan_data = self._get_sample_data(wellnames, last_filename)
+                        
+                        #scan_data = observance
+                        #We process scan_data to get lambda
+                        scan_Y= scan_data.T.to_numpy()
+                        print("scan", scan_Y)
+                        print("len",len(scan_Y),len(scan_Y[0]))
+                        Y= MaxWaveLength(scan_Y[0])
+                        print("wavel max ", Y)
+                        #print("len",len(Y),len(Y[0]))
+                        wavelengths.append(Y)
+                
+                else:
+                    print("Checking the other same recipe")
+
+
 
             print("Checking our input: wavelengths")
             print(wavelengths)
@@ -2319,32 +2357,78 @@ class AutoContr(Controller):
 
                 testing_recipes = [user_concentration]
                 wavelengths_prediction_test=[]
-                #for r in range(len(testing_recipes[0])):
-                recipe_unit_test = np.array([user_concentration])
-                #do the first one
-                #print('<<controller>> executing batch {}'.format(self.batch_num))
-                print('<<controller>> executing batch {} for testing'.format(1))
-                #don't have data to train, so, not training
-                #generate new wellnames for next batch
-                wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-                #plan and execute a reaction
-                self._create_samples(wellnames_testing, recipe_unit_test)
-                #pull in the scan data
-                filenames_testing = self.rxn_df[
-                            (self.rxn_df['op'] == 'scan') |
-                            (self.rxn_df['op'] == 'scan_until_complete')
-                            ].reset_index()
-                #TODO filenames is empty. dunno why
-                last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-                scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                #scan_data = observance
-                #We process scan_data to get lambda
-                scan_Y_testing= scan_data_testing.T.to_numpy()
-                print("Test scan ",scan_Y_testing)
-                print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
-                Y_testing= MaxWaveLength(scan_Y_testing[0])
-                print("Y_testing",Y_testing)
-                wavelengths_prediction_test.append(Y_testing)
+                for r in range(2):
+                    #for r in range(len(testing_recipes[0])):
+                    recipe_unit_test = np.array([user_concentration])
+                    recipe_unit_test = np.repeat(recipes, 2, axis=0)
+                    print("Recipes Test",recipe_unit_test)
+                    #do the first one
+                    #print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {} for testing'.format(1))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                    #plan and execute a reaction
+                    self._create_samples(wellnames_testing, recipe_unit_test)
+                    #pull in the scan data
+                    filenames_testing = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y_testing= scan_data_testing.T.to_numpy()
+                    print("Test scan ",scan_Y_testing)
+                    print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
+                    Y_testing= MaxWaveLength(scan_Y_testing[0])
+                    print("Y_testing",Y_testing)
+                    wavelengths_prediction_test.append(Y_testing)
+                    
+                if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 0.03:
+                    print("The two recipes"+str(recipe_unit)+ "are similar")
+                else:
+                    print("The two recipes"+str(recipe_unit)+ "are NOT similar")
+                    print("Cechking for 5 times")
+                    for a in range(5):
+
+                        for r in range(2):
+                            #for r in range(len(testing_recipes[0])):
+                            recipe_unit_test = np.array([user_concentration])
+                            recipe_unit_test = np.repeat(recipes, 2, axis=0)
+                            print("Recipes Test",recipe_unit_test)
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            print('<<controller>> executing batch {} for testing'.format(1))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames_testing, recipe_unit_test)
+                            #pull in the scan data
+                            filenames_testing = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                            scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                            #scan_data = observance
+                            #We process scan_data to get lambda
+                            scan_Y_testing= scan_data_testing.T.to_numpy()
+                            print("Test scan ",scan_Y_testing)
+                            print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
+                            Y_testing= MaxWaveLength(scan_Y_testing[0])
+                            print("Y_testing",Y_testing)
+                            wavelengths_prediction_test.append(Y_testing)
+                        if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 0.03:
+                            print("The two recipes"+str(recipe_unit)+ "are similar")
+                            break
+                        
+                        if a == 4:
+                            print("There was no improvment in similarity")
 
                 # print("For prediction/test error:")
                 # print("We gave the wavelength:")
