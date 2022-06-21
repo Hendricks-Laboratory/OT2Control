@@ -2809,7 +2809,7 @@ class AutoContr(Controller):
                     new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
                 r += 1
-
+            #s
        
             #enter iterative while loop now that we have data
             # while not model.quit:
