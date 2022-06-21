@@ -222,10 +222,12 @@ class LinearRegress(MLModel):
         #         * (upper_bound - lower_bound) + lower_bound
 	    # print("seed,", recipes)
         #recipes = np.repeat(recipes, self.duplication, axis=0)
-        recipes =  np.random.rand(1,number_recipes) * (upper_bound - lower_bound) + lower_bound 
+        recipes =  np.random.rand(number_recipes,1) * (upper_bound - lower_bound) + lower_bound 
         recipes = np.repeat(recipes, 2, axis=0)
         #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+        recipes= recipes.T
         print("our recipes", recipes)
+        #recipes.shape
         #recipes =  np.random.rand(1,3) * (2.5 - 0.2) + 0.2 
 
         return recipes
