@@ -2283,7 +2283,7 @@ class AutoContr(Controller):
                         print("The max difference is "+center_2_difference+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
                         maxDifference = center_2_difference 
                     elif list_of_distances.index(max(list_of_distances)) == 2:
-                        print("The max difference is "+center_3_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[3]))
+                        print("The max difference is ",center_3_difference,"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[3]))
                         maxDifference = center_3_difference
 
                     print("Checking MaxDiffer",maxDifference)
