@@ -2208,8 +2208,8 @@ class AutoContr(Controller):
             for r in range(3):
                 number_rep_recip= 0
                 #generating 4 points in total
-                recipe_block = np.array([recipes[0][number_rep_recip:number_rep_recip+3]])
-                
+                recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                print('recipe block',recipe_block)
                 #do the first one
                 print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -2277,10 +2277,10 @@ class AutoContr(Controller):
                     list_of_distances= [center_1_difference,center_2_difference,center_3_difference]
                     maxDifference =0
                     if list_of_distances.index(max(list_of_distances)) == 0:
-                        print("The max difference is "+center_1_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[0]))
+                        print("The max difference is ",center_1_difference,"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[0]))
                         maxDifference = center_1_difference
                     elif list_of_distances.index(max(list_of_distances)) == 1:
-                        print("The max difference is "+center_2_difference+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
+                        print("The max difference is ",center_2_difference,"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
                         maxDifference = center_2_difference 
                     elif list_of_distances.index(max(list_of_distances)) == 2:
                         print("The max difference is ",center_3_difference,"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[3]))
