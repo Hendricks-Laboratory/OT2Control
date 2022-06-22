@@ -25,6 +25,9 @@ class MLModel():
         self.max_iters = max_iters
         self.quit = False
         self.model = model
+        self.df = None
+        self.r= None
+        self.input_user=None
         self.N = 3
         self.recipes = 3
         self.learning_rate = 0.05
@@ -85,12 +88,11 @@ class MLModel():
         This call should wait on the training thread to complete if it is has not been collected
         yet.  
         '''
-        pass
-        # train_thread = [thread for thread in threading.enumerate() \
-        #                     if thread.name == 'train thread']
-        # if train_thread:
-        #     train_thread = train_thread[0]
-        #     train_thread.join() #wait till you're done training
+        # pass
+        train_thread = [thread for thread in threading.enumerate() if thread.name == 'train thread']
+        if train_thread:
+            train_thread = train_thread[0]
+            train_thread.join() #wait till you're done training
 
     def update_quit(self):
         '''
@@ -114,10 +116,35 @@ class MLModel():
         '''
         This method is for predict
         '''
-        pass
+        train_thread = [thread for thread in threading.enumerate() if thread.name == 'train thread']
+        if train_thread:
+            train_thread = train_thread[0]
+            train_thread.join() #wait till you're done training
+
+
+
+    # @abstractmethod
+    # def training(self):
+    def Train(self,df, input_user,r):
+        
+        '''
+        This is function is used to train the ML model.  
+        Internally, launches a private thread
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        params:
+            np.array X: shape (num_pts, num_features) the recieved data for each new well
+            np.array y: shape(num_pts, n_classes) the labels to predict
+        '''
+        train_thread = threading.Thread(target=self.training, name='train thread', args=(df,input_user,r))
+        train_thread.start()
+        self.curr_iter += 1
+        self.update_quit()
+
     @abstractmethod
-    def training(self):
+    def training(self, df,input_user,r):
         pass
+        
         
 class DummyMLModel(MLModel):
     '''
@@ -218,79 +245,41 @@ class LinearRegress(MLModel):
         '''
         upper_bound = 0.003/2
         lower_bound = 0.00025/2
-        # recipes = np.random.rand(self.batch_size, self.y_shape) \
-        #         * (upper_bound - lower_bound) + lower_bound
-	    # print("seed,", recipes)
-        #recipes = np.repeat(recipes, self.duplication, axis=0)
         recipes =  np.random.rand(number_recipes,1) * (upper_bound - lower_bound) + lower_bound 
-        recipes = np.repeat(recipes, 2, axis=0)
-        #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+        recipes = np.repeat(recipes, self.duplication, axis=0)
         recipes= recipes.T
-        print("our recipes", recipes)
-        #recipes.shape
-        #recipes =  np.random.rand(1,3) * (2.5 - 0.2) + 0.2 
-
+        #print("our recipes", recipes)
         return recipes
-    # def plots_error_avg(model):
-    #     print(len(model["cacheErrorAvg"]))
-    #     min_index=np.min(model["cacheErrorAvg"])
-    #     max_index=np.max(model["cacheErrorAvg"])
-    #     print("NNNNNNNNN",model["cacheErrorAvg"])
-    #     print(min_index)
-    #     errorsSca=[]
-    #     for i in range(len(model["cacheErrorAvg"])):
-    #         errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
-    #     print("AAAAAAAAA",errorsSca)
-    #     plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
-    #     plt.savefig('pic.png')
-
-    # def predict(self):
-    #     '''
-    #     This call should wait on the training thread to complete if it is has not been collected
-    #     yet.  
-    #     params:  
-    #         int n_predictions: the number of instances to predict  
-    #     returns:  
-    #         np.array: shape is n_predictions, y.shape. Features are pi e-2  
-    #     '''
-    #     super().predict()
-    #     with self.model_lock:
-    #         y_pred = self.model.predict(self.FINAL_SPECTRA)
-    #     print("predicted", y_pred)
-    #     breakpoint()
-    #     return np.repeat(y_pred, self.duplication, axis=0);
-
-    # def predict(N,recipes,learning_rate,X=None):
-    # def predictLinearModel(self, X, W, b):
-    # #Overcome Overflow dtype=np.uint32
-    #     X= np.array([X],dtype=float)
-    #     W= np.array([W],dtype=float)
-    #     b= np.array([b],dtype=float)
-    #     print(X)
-    #     print(W)
-    #     print(b)
-        
-    #     Y_hat = X * W + b
-    #     return Y_hat
+    
+    
+    #NEW PREDICTION
     def prediction(self, modelCall):
-        #modelCall= LinearModel(N,recipes,learning_rate,X)
-        #super().predict()
-        # with self.model_lock:
-        #     y_pred = self.model.predict(self.FINAL_SPECTRA)
-        # print("predicted", y_pred)
-        # breakpoint()
-        #return np.repeat(y_pred, self.duplication, axis=0);
-        def predictLinearModel(X, W, b):
-            #Overcome Overflow dtype=np.uint32
-            X= np.array([[X]],dtype=float)
-            W= np.array([W],dtype=float)
-            b= np.array([b],dtype=float)
-            print("predicting",X)
-            print("predictor W",W)
-            print("predictor W",b)
+
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        '''
+        super().prediction()
+        with self.model_lock:
+            y_pred = self.FINAL_SPECTRA
+        print("predicted NH", y_pred)
+        
+  
+        # def predictLinearModel(X, W, b):
+        #     #Overcome Overflow dtype=np.uint32
+        #     X= np.array([[X]],dtype=float)
+        #     W= np.array([W],dtype=float)
+        #     b= np.array([b],dtype=float)
+        #     print("predicting",X)
+        #     print("predictor W",W)
+        #     print("predictor W",b)
             
-            Y_hat = X * W + b
-            return Y_hat
+        #     Y_hat = X * W + b
+        #     return Y_hat
 
         def predictLinearModelInverse(Y_wt, W, b):
             #Overcome Overflow dtype=np.uint32
@@ -333,115 +322,22 @@ class LinearRegress(MLModel):
             #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             print("Predicted concentration [] given a wavelenght", prediction)
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+
             return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+        
         else:
+            
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+            
             return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
- 
-    # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
+        
+        #return np.repeat(y_pred, self.duplication, axis=0);
     
-    #     cacheError=[]
-    #     cacheErrorAvg=[]
-    #     cacheTheta=[]
-    #     cacheBias =[]
-    #     cacheParamsToUse={}
-    #     breakEpoch=0
-    #     Y_values=[]
-        
-        
-    #     for i in range(N):
-            
-    #         ##
-            
-    #         if i !=0:
-    #             theta = cacheTheta[i-1]-learning_rate*cacheError[i-1]/(recipes)
-    #             bias = cacheBias[i-1]-learning_rate*cacheBias[i-1]/(recipes)
-    #             print(theta.shape,"NNN")
-    #             print(bias.shape,"NNN")
-                
-    #         else:
-    #             #Generating random parameters at the beginning
-    #             #theta = np.random.rand(recipes,1)
-    #             #bias  = np.random.rand(recipes,1)
-    #             #bias  = random.uniform(0,1)
-    #             X_mean=np.mean(X)
-    #             theta= Y*(X-X_mean) / (X-X_mean)**2
-    #             bias= np.mean(Y) - theta*np.mean(X)
-
-            
-            
-    #         ##
-    #         #Linear Model
-            
-    #         #X_mean=np.mean(X)
-    #         #theta= Y*(X-X_mean) / (X-X_mean)**2
-    #         print("Bias", bias)
-    #         print("Theta.shape", theta.shape)
-    #         print("Bias.shape", bias.shape)
-    #         print("X Shape", X.shape)
-
-
-    #         Y_hat= theta@X.T + bias
-    #         print("Y_hat",Y_hat)
-            
-    #         ##SEND X
-    #         ##back y
-            
-    #         #Computer error
-            
-    #         #Simple error
-    #         #error= Y_hat-Y.T
-    #         #
-    #         print("Dii", np.abs(Y_hat-Y))#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1)))
-    #         error= np.abs(Y_hat-Y)# np.sum(np.abs(Y_hat-Y.T),axis=1)#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1))  #Y_hat-Y.T#np.sum((Y_hat-Y.T).T@(Y_hat-Y.T))
-            
-            
-            
-            
-    #         print("Y",Y)
-    #         print("-----------------------")
-    #         print("Error avg",np.sum(error)/np.sqrt(recipes))
-    #         print("Error in epoch #"+str(i+1))
-            
-    #         print(error)
-    #         print()
-    #         print()
-        
-            
-            
-    #         #Saving in cache error and theta
-            
-    #         cacheErrorAvg.append(np.sum(error)/(2*recipes))
-    #         cacheError.append(error)
-    #         cacheTheta.append(theta)
-    #         cacheBias.append(bias)
-            
-            
-    #         #Callback
-            
-    #         #if error keeps increasing we stop and return the previous last parameter
-    #         #after three epochs 
-            
-    #         if i > 2:
-    #             if np.sum(error)/(2*recipes) < np.sum(cacheError[i-2])/(2*recipes) + 5:
-    #                 breakEpoch= i
-    #                 print("n",i)
-    #                 print("Last param",np.sum(cacheTheta[i-2])/(2*recipes))
-    #                 print("Last param",np.sum(cacheBias[i-2])/(2*recipes))
-    #                 cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-    #                 cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
-    #                 break
-    #             else:
-    #                 pass
-    #         if i==N-1:
-    #             breakEpoch= i
-    #             cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-    #             cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
-            
-    #     return {"receipt":X, "cacheErrorAvg":cacheErrorAvg, "cacheTheta":cacheTheta,"cacheBias":cacheBias, "break_epoch":breakEpoch+1, "ParamsToUse":cacheParamsToUse}
-
-
     
-
+    #NEW TRAIN
     def training(self, df,input_user,r):
 
             def getting_params(self, concentration,wavelength):
@@ -500,6 +396,8 @@ class LinearRegress(MLModel):
             print("passing ", user_concentration, " to robot")
             return input_user, user_concentration, train_prediction , W, b
     
+
+    ##OLD TRAIN
     def _train(self, X, y):
         '''
         This call should wait on any current training threads to complete  
@@ -511,211 +409,38 @@ class LinearRegress(MLModel):
         Postconditions:  
             The model has been trained on the new data
         '''
-        # #NOTE we may get fancier in the future here and do more preprocessing
+
+        #NOTE we may get fancier in the future here and do more preprocessing
         # if self.scan_bounds:
         #     #if you only want to pay attention in bounds, train on those vals
         #     processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
         # else:
         #     processedX = X
-
-
-
-        
-            
-            #plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
-            #plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-            #plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
-            #plt.xlabel("Concentration")
-            #plt.ylabel("Wavelength")
-            #plt.legend()
-
-        # def MainModel(X,Y):
-        #     #passing to list
-        #     X_df = [X[0][r] for r in range(len(X[0]))]
-        #     Y_df = [Y[0][m] for m in range(len(Y[0]))]
-        #     #Checking that they are list Y_df
-        #     print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
-
-        #     ##creadting the dataframe
-        #     df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
-        #     #sorting by Concentration
-        #     df = df.sort_values(by=['Concentration'])
-
-        #     input_user= input("Please eneter the desire Wavelength: ")
-        #     input_user= float(input_user)
-
-        #     W_list=[]
-        #     b_list=[]
-        #     ##Training 
-        #     #Receive data from robot
-        #     for r in range(10):
-        #         print("Epoch", r+1)
-        #         user_concentration, train_prediction, W, b = training(self, df,input_user,r)
-        #         W_list.append(W)
-        #         b_list.append(b)
-        #         ##pas to the robot THE USER_CONCEN
-        #         Robot_answer= 465
-        #         print("Robot send back a wavelenght of", Robot_answer)
-        #         print("User input was ", input_user)
-        #         test_error= Robot_answer- input_user
-        #         print("Our test error is ", test_error)
-                
-        #         ##Plot
-        #         fig = plt.figure(figsize=(5,8)) 
-        #         plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength")
-        #         plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-        #         plt.scatter(user_concentration,input_user,label="Predicted Value by Model")
-        #         plt.xlabel("Concentration")
-        #         plt.ylabel("Wavelength")
-        #         plt.legend()
-        #         plt.show()
-        #         fig.savefig("predictions-"+str(r)+"png",dpi=fig.dpi)
-                
-                # if test_error < 10 and test_error>-10:
-                #     print("The model is trained----")
-                #     break
-                # else:
-                #     print("Model would try to reduce the error")
-                #     if r == 9:
-                #         print("---->Done training<----")
-                #     else:
-                #         print("-----")
-                #     new_data = {'Concentration': user_concentration, 'Wavelength': input_user}
-                #     df = df.append(new_data, ignore_index = True)
-                # r += 1
-                
-
-
-
-
-
         #update the data with the new scans
-        # def mainModel(self,N,recipes,learning_rate,X=None,Y=None):
-        #     cacheError=[]
-        #     cacheErrorAvg=[]
-        #     cacheTheta=[]
-        #     cacheBias =[]
-        #     cacheParamsToUse={}
-        #     breakEpoch=0
-        #     Y_values=[]
-        
-        
-        #     for i in range(N):
-            
-        #         ##
-            
-        #         if i !=0:
-        #             theta = cacheTheta[i-1]-learning_rate*cacheError[i-1]/(recipes)
-        #             bias = cacheBias[i-1]-learning_rate*cacheBias[i-1]/(recipes)
-        #             print(theta.shape,"NNN")
-        #             print(bias.shape,"NNN")
-                 
-        #         else:
-        #             #Generating random parameters at the beginning
-        #             #theta = np.random.rand(recipes,1)
-        #             #bias  = np.random.rand(recipes,1)
-        #             #bias  = random.uniform(0,1)
-        #             X_mean=np.mean(X)
-        #             theta= Y*(X-X_mean) / (X-X_mean)**2
-        #             bias= np.mean(Y) - theta*np.mean(X)
+        time.sleep(40)
+        # print('<<ML>> training')
+        with self.model_lock:
+        #     if isinstance(self.X,np.ndarray):
+        #         self.X = np.concatenate((self.X, processedX))
+        #         self.y = np.concatenate((self.y, y))
+        #     else:
+        #         self.X = processedX
+        #         self.y = y
+        #     print("model fitting on X", self.X)
+        #     print("model fitting on y", self.y)
+        #     self.model.fit(self.X, self.y)
+        # print('<<ML>> done training'
+            print("X and Y")
+            print(X,y) 
+            print("--------")
+            print('<<ML>> training')
 
-            
-            
-        #         ##
-        #         #Linear Model
-            
-        #         #X_mean=np.mean(X)
-        #         #theta= Y*(X-X_mean) / (X-X_mean)**2
-        #         print("Bias", bias)
-        #         print("Theta.shape", theta.shape)
-        #         print("Bias.shape", bias.shape)
-        #         print("X Shape", X.shape)
+            # ml_model_trained = MainModel(self,10,3,0.05,X,y)
 
+            print('<<ML>> done training')
 
-        #         Y_hat= theta@X.T + bias
-        #         print("Y_hat",Y_hat)
-            
-        #         ##SEND X
-        #         ##back y
-            
-        #         #Computer error
-            
-        #         #Simple error
-        #         #error= Y_hat-Y.T
-        #         #
-        #         print("Dii", np.abs(Y_hat-Y))#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1)))
-        #         error= np.abs(Y_hat-Y)# np.sum(np.abs(Y_hat-Y.T),axis=1)#np.sqrt(np.sum((Y_hat-Y.T)**2,axis=1))  #Y_hat-Y.T#np.sum((Y_hat-Y.T).T@(Y_hat-Y.T))
-            
-            
-            
-            
-        #         print("Y",Y)
-        #         print("-----------------------")
-        #         print("Error avg",np.sum(error)/(2*recipes))
-        #         print("Error in epoch #"+str(i+1))
-            
-        #         print(error)
-        #         print()
-        #         print()
-        
-            
-            
-        #         #Saving in cache error and theta
-                
-        #         cacheErrorAvg.append(np.sum(error)/(2*recipes))
-        #         cacheError.append(error)
-        #         cacheTheta.append(theta)
-        #         cacheBias.append(bias)
-                
-                
-        #         #Callback
-                
-        #         #if error keeps increasing we stop and return the previous last parameter
-        #         #after three epochs 
-                
-        #         if i > 2:
-        #             if np.sum(error)/(2*recipes) > np.sum(cacheError[i-2])/(2*recipes) + 5:
-        #                 breakEpoch= i
-        #                 print("n",i)
-        #                 print("Error avg",np.sum(cacheError[i-2])/(2*recipes))
-        #                 print("Last param",np.sum(cacheTheta[i-2])/(2*recipes))
-        #                 print("Last param",np.sum(cacheBias[i-2])/(2*recipes))
-        #                 cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-        #                 cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
-        #                 break
-        #             else:
-        #                 pass
-        #         if i==N-1:
-        #             breakEpoch= i
-        #             cacheParamsToUse["Theta"]= np.sum(cacheTheta[i-2]/(2*recipes))
-        #             cacheParamsToUse["Bias"] = np.sum(cacheBias[i-2]/(2*recipes))
-                
-        #     return {"receipt":X, "cacheErrorAvg":cacheErrorAvg, "cacheTheta":cacheTheta,"cacheBias":cacheBias, "break_epoch":breakEpoch+1, "ParamsToUse":cacheParamsToUse}       
-        # #time.sleep(40)
-        # #time.sleep(10)
-        print("X and Y")
-        print(X,y) 
-        print("--------")
-        print('<<ML>> training')
+            return 0 #MainModel(self, X,y)
 
-        # ml_model_trained = MainModel(self,10,3,0.05,X,y)
-
-        print('<<ML>> done training')
-
-        return 0 #MainModel(self, X,y)
-
-
-        # with self.model_lock:
-            # if isinstance(self.X,np.ndarray):
-            #     self.X = np.concatenate((self.X, processedX))
-            #     self.y = np.concatenate((self.y, y))
-            # else:
-            #     self.X = processedX
-            #     self.y = y
-            # print("model fitting on X", self.X)
-            # print("model fitting on y", self.y)
-            # self.model.fit(self.X, self.y)
-        # print('<<ML>> done training')
 
 
 ##########################################################################

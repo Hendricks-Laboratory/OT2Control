@@ -2358,7 +2358,7 @@ class AutoContr(Controller):
             #Receive data from robot
             for r in range(5):
                 print("Epoch", r+1)
-                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.Train(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
