@@ -2124,65 +2124,6 @@ class AutoContr(Controller):
         pass
 
     @error_exit
-    # def _run(self, port, simulate, model, no_pr):
-    #     '''
-    #     private function to run
-    #     '''
-    #     self.batch_num = 0 #used internally for unique filenames
-    #     self.well_count = 0 #used internally for unique wellnames
-    #     self._init_pr(simulate, no_pr)
-    #     #create a connection
-    #     sock = socket.socket(socket.AF_INET)
-    #     sock.connect((self.server_ip, port))
-    #     buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
-    #     print("<<controller>> connected")
-    #     self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
-    #     self.init_robot(simulate)
-    #     recipes = model.generate_seed_rxns()
-
-    #     #do the first one
-    #     print('<<controller>> executing batch {}'.format(self.batch_num))
-    #     #don't have data to train, so, not training
-    #     #generate new wellnames for next batch
-    #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-    #     #plan and execute a reaction
-    #     self._create_samples(wellnames, recipes)
-    #     #pull in the scan data
-    #     filenames = self.rxn_df[
-    #             (self.rxn_df['op'] == 'scan') |
-    #             (self.rxn_df['op'] == 'scan_until_complete')
-    #             ].reset_index()
-    #     #TODO filenames is empty. dunno why
-    #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-    #     scan_data = self._get_sample_data(wellnames, last_filename)
-    #     model.train(scan_data.T.to_numpy(),recipes)
-    #     #this is different because we don't want to use untrained model to generate predictions
-    #     recipes = model.generate_seed_rxns()
-    #     self.batch_num += 1
-
-    #     #enter iterative while loop now that we have data
-    #     while not model.quit:
-    #         model.train(scan_data.T.to_numpy(),recipes)
-    #         print('<<controller>> executing batch {}'.format(self.batch_num))
-    #         #generate new wellnames for next batch
-    #         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-    #         #plan and execute a reaction
-    #         self._create_samples(wellnames, recipes)
-    #         #pull in the scan data
-    #         filenames = self.rxn_df[
-    #                 (self.rxn_df['op'] == 'scan') |
-    #                 (self.rxn_df['op'] == 'scan_until_complete')
-    #                 ].reset_index()
-    #         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-    #         scan_data = self._get_sample_data(wellnames, last_filename)
-    #         #generate the predictions for the next round
-    #         recipes = model.predict()
-    #         #threaded train on scans. Will run while the robot is generating new materials
-    #         self.batch_num += 1
-    #     self.close_connection()
-    #     self.pr.shutdown()
-    #     return
-    
     def _run(self, port, simulate, model, no_pr, params, initial_recipes):
         '''
         private function to run
@@ -2248,94 +2189,1170 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
-
+        
         if params == None:
 
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
+            print("----Breaking our initial recipes----")
+            recipe1 = recipes[0][0:3]
+            recipe2 = recipes[0][3:6]
+            recipe3 = recipes[0][6:9]
             #we would get observance for each recipe:
             wavelengths=[]
-            for r in range(len(recipes[0])):
-                recipe_unit = np.array([recipes[0][r]])
-            
+            wavelengths_for_recipe_1 = []
+            wavelengths_for_recipe_2 = []
+            wavelengths_for_recipe_3 = []
+            #passing FIRST recipe
+            # for r in range(len(recipes[0])):
+            for r in range(3):
+                number_rep_recip= 0
+                #generating 4 points in total
+                recipe_block = np.array([recipes[0][number_rep_recip:number_rep_recip+3]])
+                
                 #do the first one
-                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {}'.format(str(r+1)))
                 #don't have data to train, so, not training
                 #generate new wellnames for next batch
-                wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+                wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                print("Wellnames",wellnames)
                 #plan and execute a reaction
-                self._create_samples(wellnames, recipe_unit)
+                self._create_samples(wellnames, recipe_block)
                 #pull in the scan data
                 filenames = self.rxn_df[
-                        (self.rxn_df['op'] == 'scan') |
-                        (self.rxn_df['op'] == 'scan_until_complete')
-                        ].reset_index()
+                            (self.rxn_df['op'] == 'scan') |
+                            (self.rxn_df['op'] == 'scan_until_complete')
+                            ].reset_index()
                 #TODO filenames is empty. dunno why
                 last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
                 scan_data = self._get_sample_data(wellnames, last_filename)
-                
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
-                print("scan", scan_Y)
-                print("len",len(scan_Y),len(scan_Y[0]))
-                Y= MaxWaveLength(scan_Y[0])
-                print("wavel max ", Y)
-                #print("len",len(Y),len(Y[0]))
-                wavelengths.append(Y)
-                if r == 1 or r==3 or r==5:
-                    while True:
+                print("Scan", scan_Y)
 
-                        if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
-                            print("The two recipes"+str(recipe_unit)+ "are similar")
-                            break
-                        else:
-                            print("The two recipes"+str(recipe_unit)+ "are NOT similar")
-                            print("Doing again")
-                            z=r-1
-                            print("ZZ",z)
-                            for m in range(2):
-                                recipe_unit = np.array([recipes[0][z]])
-                                #do the first one
-                                #print('<<controller>> executing batch {}'.format(self.batch_num))
-                                #print('<<controller>> executing batch {}'.format(str(r+1)))
-                                #don't have data to train, so, not training
-                                #generate new wellnames for next batch
-                                wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
-                                #plan and execute a reaction
-                                self._create_samples(wellnames, recipe_unit)
-                                #pull in the scan data
-                                filenames = self.rxn_df[
+                scan_Y_1 = scan_Y[0]
+                scan_Y_2 = scan_Y[1]
+                scan_Y_3 = scan_Y[2]
+
+                print("len rp1",len(scan_Y_1),scan_Y_1)
+                print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                maxWave_scan_1 = MaxWaveLength(scan_Y_1)
+                maxWave_scan_2 = MaxWaveLength(scan_Y_2)
+                maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                print("WaveL max 1"+". ", maxWave_scan_1)
+                print("WaveL max 2"+". ", maxWave_scan_2)
+                print("WaveL max 3"+". ", maxWave_scan_3)
+                    
+                #Add to the list of wavelengths
+                if r== 0:
+                        
+                    wavelengths_for_recipe_1.append(maxWave_scan_1)
+                    wavelengths_for_recipe_1.append(maxWave_scan_2)
+                    wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_1)
+
+                    #Choosing the first point as a center
+                    center_1_difference = np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1])
+                    center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[2])
+                    # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                    print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_1[0]),center_1_difference)
+                    
+                    
+                    center_2_difference = np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[0])
+                    center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2])
+                    print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_1[1]),center_2_difference)
+
+
+                    center_3_difference = np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[0])
+                    center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[1])
+                    print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_1[2]),center_3_difference)
+
+                    #get the maximun distance
+                    list_of_distances= [center_1_difference,center_2_difference,center_3_difference]
+                    maxDifference =0
+                    if list_of_distances.index(max(list_of_distances)) == 0:
+                        print("The max difference is "+center_1_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[0]))
+                        maxDifference = center_1_difference
+                    elif list_of_distances.index(max(list_of_distances)) == 1:
+                        print("The max difference is "+center_2_difference+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
+                        maxDifference = center_2_difference 
+                    elif list_of_distances.index(max(list_of_distances)) == 2:
+                        print("The max difference is "+center_3_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[3]))
+                        maxDifference = center_3_difference
+
+                    print("Checking MaxDiffer",maxDifference)
+                    if maxDifference < 10:
+                        print("The Maxdifference is LESS than 10 ")
+                        question_for_user=input("Would you like to create 2 more samples?: [y/Y]")
+                        if question_for_user == "y" or question_for_user == "Y":
+                            print("The Maxdifference is MORE than 10 ")
+                            print("We generate 2 more recipes ")
+                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_block_2)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
                                         (self.rxn_df['op'] == 'scan') |
                                         (self.rxn_df['op'] == 'scan_until_complete')
                                         ].reset_index()
-                                #TODO filenames is empty. dunno why
-                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-                                scan_data = self._get_sample_data(wellnames, last_filename)
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y= scan_data.T.to_numpy()
+                            print("Scan When Distance is > 10", scan_Y)
+
+                            scan_Y_1_second = scan_Y[0]
+                            scan_Y_2_second = scan_Y[1]
+                            # scan_Y_3 = scan_Y[2]
+
+                            print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            print("len rp2 sec",len(scan_Y_2_second),len(scan_Y_2_second))
+                            # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                            maxWave_scan_1_sec = MaxWaveLength(scan_Y_1_second)
+                            maxWave_scan_2_sec = MaxWaveLength(scan_Y_2_second)
+                            # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                            print("WaveL max 1"+". ", maxWave_scan_1_sec)
+                            print("WaveL max 2"+". ", maxWave_scan_2_sec)
+                            # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                            wavelengths_for_recipe_1.append(maxWave_scan_1_sec)
+                            wavelengths_for_recipe_1.append(maxWave_scan_2_sec)
+                            
+                            #Choosing the first point as a center
+                            print("Computing the Distance for the five recipes")
+                            center_1_difference = np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1])
+                            center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[2])
+                            center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[3])
+                            center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[4])
+
+                            # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                            print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_1[0]),center_1_difference)
+                            
+                            
+                            center_2_difference = np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[0])
+                            center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2])
+                            center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[3])
+                            center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[4])
+
+                            print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_1[1]),center_2_difference)
+
+
+                            center_3_difference = np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[0])
+                            center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[1])
+                            center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3])
+                            center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[4])
+
+                            print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_1[2]),center_3_difference)
+
+
+                            center_4_difference = np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[0])
+                            center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[1])
+                            center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[2])
+                            center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4])
+
+                            print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_1[3]),center_4_difference)
+
+                            center_5_difference = np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[0])
+                            center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[1])
+                            center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[2])
+                            center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[3])
+
+                            print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_1[4]),center_5_difference)
+
+
+
+                            #get the maximun distance
+
+                            list_of_distances= [center_1_difference,center_2_difference,center_3_difference,center_4_difference,center_5_difference]
+                            maxDifference =0
+
+                            if list_of_distances.index(max(list_of_distances)) == 0:
+                                print("The max difference is "+center_1_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[0]))
+                                maxDifference = center_1_difference
+                            elif list_of_distances.index(max(list_of_distances)) == 1:
+                                print("The max difference is "+center_2_difference+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
+                                maxDifference = center_2_difference 
+                            elif list_of_distances.index(max(list_of_distances)) == 2:
+                                print("The max difference is "+center_3_difference+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_1[3]))
+                                maxDifference = center_3_difference
+                            if list_of_distances.index(max(list_of_distances)) == 3:
+                                print("The max difference is "+center_4_difference+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_1[4]))
+                                maxDifference = center_4_difference
+                            elif list_of_distances.index(max(list_of_distances)) == 4:
+                                print("The max difference is "+center_5_difference+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_1[5]))
+                                maxDifference = center_5_difference 
+                        
+                            if maxDifference < 10:
+                                print("The wavesL are",wavelengths_for_recipe_1)
+                                print("Since the Difference is less than 10")
+                                print("We pass to the other recipes")
+
+                            else:
+                                print("Difference is GREATER than 10")
+                                print("These is the list of our wavelengths",wavelengths_for_recipe_1)
+                                print("you can elimate MAX 2 elements")
+                                elimate_question= input("Would you like to eliminate: [y/Y]")
+                                if elimate_question== "y" or elimate_question=="Y":
+                                    elimate_question_2= input("Input the position of the element you want to eliminate")
+                                    wavelengths_for_recipe_1.pop(elimate_question_2-1)
+                                    print("You have the following wavelengths",wavelengths_for_recipe_1)
+                                    if len(wavelengths_for_recipe_1) == 3:
+                                        print("You cannot eliminate more")
+                                        break
+                                    else:
+                                        elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                        if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                            elimate_question_2= input("Input the position of the element you want to eliminate")
+                                            wavelengths_for_recipe_1.pop(elimate_question_2-1) 
+                                            print("You have the following wavelengths",wavelengths_for_recipe_1)
+                                            if len(wavelengths_for_recipe_1) == 3:
+                                                print("You cannot eliminate more")
+                                                break
+                                            else:
+                                                print("You have",wavelengths_for_recipe_1)
+                                        else:
+                                            print("You HAVE",wavelengths_for_recipe_1)
+                                else:
+                                    print("The Wavelengths are",wavelengths_for_recipe_1)
+
+
+                        else:
+                            print("The Wavelengths are",wavelengths_for_recipe_1)
+
+
+                    else:
+                        print("The Maxdifference is MORE than 10 ")
+                        print("We generate 2 more recipes ")
+                        recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                        #do the first one
+                        #print('<<controller>> executing batch {}'.format(self.batch_num))
+                        #print('<<controller>> executing batch {}'.format(str(r+1)))
+                        #don't have data to train, so, not training
+                        #generate new wellnames for next batch
+                        wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                        #plan and execute a reaction
+                        self._create_samples(wellnames, recipe_block_2)
+                        #pull in the scan data
+                        filenames = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                        #TODO filenames is empty. dunno why
+                        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                        scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                        scan_Y= scan_data.T.to_numpy()
+                        print("Scan When Distance is > 10", scan_Y)
+
+                        scan_Y_1_second = scan_Y[0]
+                        scan_Y_2_second = scan_Y[1]
+                        # scan_Y_3 = scan_Y[2]
+
+                        print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                        print("len rp2 sec",len(scan_Y_2_second),len(scan_Y_2_second))
+                        # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                        maxWave_scan_1_sec = MaxWaveLength(scan_Y_1_second)
+                        maxWave_scan_2_sec = MaxWaveLength(scan_Y_2_second)
+                        # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                        print("WaveL max 1"+". ", maxWave_scan_1_sec)
+                        print("WaveL max 2"+". ", maxWave_scan_2_sec)
+                        # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                        wavelengths_for_recipe_1.append(maxWave_scan_1_sec)
+                        wavelengths_for_recipe_1.append(maxWave_scan_2_sec)
+                        
+                        #Choosing the first point as a center
+                        print("Computing the Distance for the five recipes")
+                        center_1_difference = np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1])
+                        center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[2])
+                        center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[3])
+                        center_1_difference = center_1_difference + np.abs(wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[4])
+
+                        # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                        print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_1[0]),center_1_difference)
+                        
+                        
+                        center_2_difference = np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[0])
+                        center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2])
+                        center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[3])
+                        center_2_difference = center_2_difference + np.abs(wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[4])
+
+                        print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_1[1]),center_2_difference)
+
+
+                        center_3_difference = np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[0])
+                        center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[1])
+                        center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3])
+                        center_3_difference = center_3_difference + np.abs(wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[4])
+
+                        print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_1[2]),center_3_difference)
+
+
+                        center_4_difference = np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[0])
+                        center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[1])
+                        center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[2])
+                        center_4_difference = center_4_difference + np.abs(wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4])
+
+                        print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_1[3]),center_4_difference)
+
+                        center_5_difference = np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[0])
+                        center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[1])
+                        center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[2])
+                        center_5_difference = center_5_difference + np.abs(wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[3])
+
+                        print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_1[4]),center_5_difference)
+
+
+
+                        #get the maximun distance
+
+                        list_of_distances= [center_1_difference,center_2_difference,center_3_difference,center_4_difference,center_5_difference]
+                        maxDifference =0
+
+                        if list_of_distances.index(max(list_of_distances)) == 0:
+                            print("The max difference is "+center_1_difference+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_1[0]))
+                            maxDifference = center_1_difference
+                        elif list_of_distances.index(max(list_of_distances)) == 1:
+                            print("The max difference is "+center_2_difference+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_1[1]))
+                            maxDifference = center_2_difference 
+                        elif list_of_distances.index(max(list_of_distances)) == 2:
+                            print("The max difference is "+center_3_difference+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_1[3]))
+                            maxDifference = center_3_difference
+                        if list_of_distances.index(max(list_of_distances)) == 3:
+                            print("The max difference is "+center_4_difference+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_1[4]))
+                            maxDifference = center_4_difference
+                        elif list_of_distances.index(max(list_of_distances)) == 4:
+                            print("The max difference is "+center_5_difference+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_1[5]))
+                            maxDifference = center_5_difference 
+                        
+                        if maxDifference < 10:
+                            print("The wavesL are",wavelengths_for_recipe_1)
+                            print("Since the Difference is less than 10")
+                            print("We pass to the other recipes")
+
+                        else:
+                            print("Difference is GREATER than 10")
+                            print("These is the list of our wavelengths",wavelengths_for_recipe_1)
+                            print("you can elimate MAX 2 elements")
+                            elimate_question= input("Would you like to eliminate: [y/Y]")
+                            if elimate_question== "y" or elimate_question=="Y":
+                                elimate_question_2= input("Input the position of the element you want to eliminate")
+                                wavelengths_for_recipe_1.pop(elimate_question_2-1)
+                                print("You have the following wavelengths",wavelengths_for_recipe_1)
+                                if len(wavelengths_for_recipe_1) == 3:
+                                    print("You cannot eliminate more")
+                                    break
+                                else:
+                                    elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                    if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                        elimate_question_2= input("Input the position of the element you want to eliminate")
+                                        wavelengths_for_recipe_1.pop(elimate_question_2-1) 
+                                        print("You have the following wavelengths",wavelengths_for_recipe_1)
+                                        if len(wavelengths_for_recipe_1) == 3:
+                                            print("You cannot eliminate more")
+                                            break
+                                        else:
+                                            print("You have",wavelengths_for_recipe_1)
+                                    else:
+                                        print("You HAVE",wavelengths_for_recipe_1)
+                            else:
+                                print("The Wavelengths are",wavelengths_for_recipe_1)
+
+
+                
+                elif r ==1:
+
+                    wavelengths_for_recipe_2.append(maxWave_scan_1)
+                    wavelengths_for_recipe_2.append(maxWave_scan_2)
+                    wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_2)
+
+                    #Choosing the first point as a center
+                    center_1_difference_2 = np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1])
+                    center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[2])
+                    # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                    print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_2[0]),center_1_difference_2)
+                    
+                    
+                    center_2_difference_2 = np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[0])
+                    center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2])
+                    print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_2[1]),center_2_difference_2)
+
+
+                    center_3_difference_2 = np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[0])
+                    center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[1])
+                    print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_2[2]),center_3_difference_2)
+
+                    #get the maximun distance
+                    list_of_distances_2= [center_1_difference_2,center_2_difference_2,center_3_difference_2]
+                    maxDifference_2 =0
+                    if list_of_distances_2.index(max(list_of_distances_2)) == 0:
+                        print("The max difference is "+center_1_difference_2+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_2[0]))
+                        maxDifference_2 = center_1_difference_2
+                    elif list_of_distances_2.index(max(list_of_distances_2)) == 1:
+                        print("The max difference is "+center_2_difference_2+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_2[1]))
+                        maxDifference_2 = center_2_difference_2 
+                    elif list_of_distances_2.index(max(list_of_distances_2)) == 2:
+                        print("The max difference is "+center_3_difference_2+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_2[3]))
+                        maxDifference_2 = center_3_difference_2
+
+                    print("Checking MaxDiffer",maxDifference_2)
+                    if maxDifference_2 < 10:
+                        print("The Maxdifference is LESS than 10 ")
+                        question_for_user=input("Would you like to create 2 more samples?: [y/Y]")
+                        if question_for_user == "y" or question_for_user == "Y":
+                            print("The Maxdifference is MORE than 10 ")
+                            print("We generate 2 more recipes ")
+                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_block_2)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y= scan_data.T.to_numpy()
+                            print("Scan When Distance is > 10", scan_Y)
+
+                            scan_Y_1_second_2 = scan_Y[0]
+                            scan_Y_2_second_2 = scan_Y[1]
+                            # scan_Y_3 = scan_Y[2]
+
+                            print("len rp1 sec",len(scan_Y_1_second_2),scan_Y_1_second_2)
+                            print("len rp2 sec",len(scan_Y_2_second_2),len(scan_Y_2_second_2))
+                            # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                            maxWave_scan_1_sec_2 = MaxWaveLength(scan_Y_1_second_2)
+                            maxWave_scan_2_sec_2 = MaxWaveLength(scan_Y_2_second_2)
+                            # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                            print("WaveL max 1"+". ", maxWave_scan_1_sec_2)
+                            print("WaveL max 2"+". ", maxWave_scan_2_sec_2)
+                            # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                            wavelengths_for_recipe_2.append(maxWave_scan_1_sec_2)
+                            wavelengths_for_recipe_2.append(maxWave_scan_2_sec_2)
+                            
+                            #Choosing the first point as a center
+                            print("Computing the Distance for the five recipes")
+                            center_1_difference_2 = np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1])
+                            center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[2])
+                            center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[3])
+                            center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[4])
+
+                            # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                            print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_2[0]),center_1_difference_2)
+                            
+                            
+                            center_2_difference_2 = np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[0])
+                            center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2])
+                            center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[3])
+                            center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[4])
+
+                            print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_2[1]),center_2_difference_2)
+
+
+                            center_3_difference_2 = np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[0])
+                            center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[1])
+                            center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3])
+                            center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[4])
+
+                            print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_2[2]),center_3_difference_2)
+
+
+                            center_4_difference_2 = np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[0])
+                            center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[1])
+                            center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[2])
+                            center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4])
+
+                            print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_2[3]),center_4_difference_2)
+
+                            center_5_difference_2 = np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[0])
+                            center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[1])
+                            center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[2])
+                            center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[3])
+
+                            print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_2[4]),center_5_difference_2)
+
+
+
+                            #get the maximun distance
+
+                            list_of_distances_2= [center_1_difference_2,center_2_difference_2,center_3_difference_2,center_4_difference_2,center_5_difference_2]
+                            maxDifference_2 =0
+
+                            if list_of_distances_2.index(max(list_of_distances_2)) == 0:
+                                print("The max difference is "+center_1_difference_2+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_2[0]))
+                                maxDifference_2 = center_1_difference_2
+                            elif list_of_distances_2.index(max(list_of_distances_2)) == 1:
+                                print("The max difference is "+center_2_difference_2+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_2[1]))
+                                maxDifference_2 = center_2_difference_2 
+                            elif list_of_distances_2.index(max(list_of_distances_2)) == 2:
+                                print("The max difference is "+center_3_difference_2+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_2[3]))
+                                maxDifference_2 = center_3_difference_2
+                            if list_of_distances_2.index(max(list_of_distances_2)) == 3:
+                                print("The max difference is "+center_4_difference_2+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_2[4]))
+                                maxDifference_2 = center_4_difference_2
+                            elif list_of_distances_2.index(max(list_of_distances_2)) == 4:
+                                print("The max difference is "+center_5_difference_2+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_2[5]))
+                                maxDifference_2 = center_5_difference_2 
+                        
+                            if maxDifference_2 < 10:
+                                print("The wavesL are",wavelengths_for_recipe_2)
+                                print("Since the Difference is less than 10")
+                                print("We pass to the other recipes")
+
+                            else:
+                                print("Difference is GREATER than 10")
+                                print("These is the list of our wavelengths",wavelengths_for_recipe_2)
+                                print("you can elimate MAX 2 elements")
+                                elimate_question= input("Would you like to eliminate: [y/Y]")
+                                if elimate_question== "y" or elimate_question=="Y":
+                                    elimate_question_2= input("Input the position of the element you want to eliminate")
+                                    wavelengths_for_recipe_2.pop(elimate_question_2-1)
+                                    print("You have the following wavelengths",wavelengths_for_recipe_2)
+                                    if len(wavelengths_for_recipe_2) == 3:
+                                        print("You cannot eliminate more")
+                                        break
+                                    else:
+                                        elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                        if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                            elimate_question_2= input("Input the position of the element you want to eliminate")
+                                            wavelengths_for_recipe_2.pop(elimate_question_2-1) 
+                                            print("You have the following wavelengths",wavelengths_for_recipe_2)
+                                            if len(wavelengths_for_recipe_2) == 3:
+                                                print("You cannot eliminate more")
+                                                break
+                                            else:
+                                                print("You have",wavelengths_for_recipe_2)
+                                        else:
+                                            print("You HAVE",wavelengths_for_recipe_2)
+                                else:
+                                    print("The Wavelengths are",wavelengths_for_recipe_2)
+
+
+                        else:
+                            print("The Wavelengths are",wavelengths_for_recipe_2)
+
+
+                    else:
+                        print("The Maxdifference is MORE than 10 ")
+                        print("We generate 2 more recipes ")
+                        recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                        #do the first one
+                        #print('<<controller>> executing batch {}'.format(self.batch_num))
+                        #print('<<controller>> executing batch {}'.format(str(r+1)))
+                        #don't have data to train, so, not training
+                        #generate new wellnames for next batch
+                        wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                        #plan and execute a reaction
+                        self._create_samples(wellnames, recipe_block_2)
+                        #pull in the scan data
+                        filenames = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                        #TODO filenames is empty. dunno why
+                        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                        scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                        scan_Y= scan_data.T.to_numpy()
+                        print("Scan When Distance is > 10", scan_Y)
+
+                        scan_Y_1_second = scan_Y[0]
+                        scan_Y_2_second = scan_Y[1]
+                        # scan_Y_3 = scan_Y[2]
+
+                        print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                        print("len rp2 sec",len(scan_Y_2_second),len(scan_Y_2_second))
+                        # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                        maxWave_scan_1_sec = MaxWaveLength(scan_Y_1_second)
+                        maxWave_scan_2_sec = MaxWaveLength(scan_Y_2_second)
+                        # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                        print("WaveL max 1"+". ", maxWave_scan_1_sec)
+                        print("WaveL max 2"+". ", maxWave_scan_2_sec)
+                        # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                        wavelengths_for_recipe_2.append(maxWave_scan_1_sec)
+                        wavelengths_for_recipe_2.append(maxWave_scan_2_sec)
+                        
+                        #Choosing the first point as a center
+                        print("Computing the Distance for the five recipes")
+                        center_1_difference_2 = np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1])
+                        center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[2])
+                        center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[3])
+                        center_1_difference_2 = center_1_difference_2 + np.abs(wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[4])
+
+                        # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                        print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_2[0]),center_1_difference_2)
+                        
+                        
+                        center_2_difference_2 = np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[0])
+                        center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2])
+                        center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[3])
+                        center_2_difference_2 = center_2_difference_2 + np.abs(wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[4])
+
+                        print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_2[1]),center_2_difference_2)
+
+
+                        center_3_difference_2 = np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[0])
+                        center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[1])
+                        center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3])
+                        center_3_difference_2 = center_3_difference_2 + np.abs(wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[4])
+
+                        print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_2[2]),center_3_difference_2)
+
+
+                        center_4_difference_2 = np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[0])
+                        center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[1])
+                        center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[2])
+                        center_4_difference_2 = center_4_difference_2 + np.abs(wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4])
+
+                        print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_2[3]),center_4_difference_2)
+
+                        center_5_difference_2 = np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[0])
+                        center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[1])
+                        center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[2])
+                        center_5_difference_2 = center_5_difference_2 + np.abs(wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[3])
+
+                        print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_2[4]),center_5_difference_2)
+
+
+
+                        #get the maximun distance
+
+                        list_of_distances_2= [center_1_difference_2,center_2_difference_2,center_3_difference_2,center_4_difference_2,center_5_difference_2]
+                        maxDifference_2 =0
+
+                        if list_of_distances_2.index(max(list_of_distances_2)) == 0:
+                            print("The max difference is "+center_1_difference_2+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_2[0]))
+                            maxDifference_2 = center_1_difference_2
+                        elif list_of_distances_2.index(max(list_of_distances_2)) == 1:
+                            print("The max difference is "+center_2_difference_2+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_2[1]))
+                            maxDifference_2 = center_2_difference_2 
+                        elif list_of_distances_2.index(max(list_of_distances_2)) == 2:
+                            print("The max difference is "+center_3_difference_2+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_2[3]))
+                            maxDifference_2 = center_3_difference_2
+                        if list_of_distances_2.index(max(list_of_distances_2)) == 3:
+                            print("The max difference is "+center_4_difference_2+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_2[4]))
+                            maxDifference_2 = center_4_difference_2
+                        elif list_of_distances_2.index(max(list_of_distances_2)) == 4:
+                            print("The max difference is "+center_5_difference_2+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_2[5]))
+                            maxDifference_2 = center_5_difference_2 
+                        
+                        if maxDifference_2 < 10:
+                            print("The wavesL are",wavelengths_for_recipe_2)
+                            print("Since the Difference is less than 10")
+                            print("We pass to the other recipes")
+
+                        else:
+                            print("Difference is GREATER than 10")
+                            print("These is the list of our wavelengths",wavelengths_for_recipe_2)
+                            print("you can elimate MAX 2 elements")
+                            elimate_question= input("Would you like to eliminate: [y/Y]")
+                            if elimate_question== "y" or elimate_question=="Y":
+                                elimate_question_2= input("Input the position of the element you want to eliminate")
+                                wavelengths_for_recipe_2.pop(elimate_question_2-1)
+                                print("You have the following wavelengths",wavelengths_for_recipe_2)
+                                if len(wavelengths_for_recipe_2) == 3:
+                                    print("You cannot eliminate more")
+                                    break
+                                else:
+                                    elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                    if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                        elimate_question_2= input("Input the position of the element you want to eliminate")
+                                        wavelengths_for_recipe_2.pop(elimate_question_2-1) 
+                                        print("You have the following wavelengths",wavelengths_for_recipe_2)
+                                        if len(wavelengths_for_recipe_2) == 3:
+                                            print("You cannot eliminate more")
+                                            break
+                                        else:
+                                            print("You have",wavelengths_for_recipe_2)
+                                    else:
+                                        print("You HAVE",wavelengths_for_recipe_2)
+                            else:
+                                print("The Wavelengths are",wavelengths_for_recipe_2)
+
+
+
+
+
+
+
+
+
+
+
+
+                
+                elif r ==2:
+
+                    wavelengths_for_recipe_3.append(maxWave_scan_1)
+                    wavelengths_for_recipe_3.append(maxWave_scan_2)
+                    wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_3)
+
+                    #Choosing the first point as a center
+                    center_1_difference_3 = np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1])
+                    center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2])
+                    # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                    print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_3[0]),center_1_difference_3)
+                    
+                    
+                    center_2_difference_3 = np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[0])
+                    center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2])
+                    print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_3[1]),center_2_difference_3)
+
+
+                    center_3_difference_3 = np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[0])
+                    center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[1])
+                    print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_3[2]),center_3_difference_3)
+
+                    #get the maximun distance
+                    list_of_distances_3= [center_1_difference_3,center_2_difference_3,center_3_difference_3]
+                    maxDifference_3 =0
+                    if list_of_distances_3.index(max(list_of_distances_3)) == 0:
+                        print("The max difference is "+center_1_difference_3+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_3[0]))
+                        maxDifference_3 = center_1_difference_3
+                    elif list_of_distances_3.index(max(list_of_distances_3)) == 1:
+                        print("The max difference is "+center_2_difference_3+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_3[1]))
+                        maxDifference_3 = center_2_difference_3
+                    elif list_of_distances_3.index(max(list_of_distances_3)) == 2:
+                        print("The max difference is "+center_3_difference_3+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_3[3]))
+                        maxDifference_3 = center_3_difference_3
+
+                    print("Checking MaxDiffer",maxDifference_3)
+                    if maxDifference_2 < 10:
+                        print("The Maxdifference is LESS than 10 ")
+                        question_for_user=input("Would you like to create 2 more samples?: [y/Y]")
+                        if question_for_user == "y" or question_for_user == "Y":
+                            print("The Maxdifference is MORE than 10 ")
+                            print("We generate 2 more recipes ")
+                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_block_2)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y= scan_data.T.to_numpy()
+                            print("Scan When Distance is > 10", scan_Y)
+
+                            scan_Y_1_second_3 = scan_Y[0]
+                            scan_Y_2_second_3 = scan_Y[1]
+                            # scan_Y_3 = scan_Y[2]
+
+                            print("len rp1 sec",len(scan_Y_1_second_3),scan_Y_1_second_3)
+                            print("len rp2 sec",len(scan_Y_2_second_3),len(scan_Y_2_second_3))
+                            # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                            maxWave_scan_1_sec_3 = MaxWaveLength(scan_Y_1_second_3)
+                            maxWave_scan_2_sec_3 = MaxWaveLength(scan_Y_2_second_3)
+                            # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                            print("WaveL max 1"+". ", maxWave_scan_1_sec_3)
+                            print("WaveL max 2"+". ", maxWave_scan_2_sec_3)
+                            # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                            wavelengths_for_recipe_3.append(maxWave_scan_1_sec_3)
+                            wavelengths_for_recipe_3.append(maxWave_scan_2_sec_3)
+                            
+                            #Choosing the first point as a center
+                            print("Computing the Distance for the five recipes")
+                            center_1_difference_3 = np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1])
+                            center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2])
+                            center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[3])
+                            center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[4])
+
+                            # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                            print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_3[0]),center_1_difference_3)
+                            
+                            
+                            center_2_difference_3 = np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[0])
+                            center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2])
+                            center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[3])
+                            center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[4])
+
+                            print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_3[1]),center_2_difference_3)
+
+
+                            center_3_difference_3 = np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[0])
+                            center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[1])
+                            center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3])
+                            center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[4])
+
+                            print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_3[2]),center_3_difference_3)
+
+
+                            center_4_difference_3 = np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[0])
+                            center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[1])
+                            center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[2])
+                            center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4])
+
+                            print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_3[3]),center_4_difference_3)
+
+                            center_5_difference_3 = np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[0])
+                            center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[1])
+                            center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[2])
+                            center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[3])
+
+                            print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_3[4]),center_5_difference_3)
+
+
+
+                            #get the maximun distance
+
+                            list_of_distances_3= [center_1_difference_3,center_2_difference_3,center_3_difference_3,center_4_difference_3,center_5_difference_3]
+                            maxDifference_3 =0
+
+                            if list_of_distances_3.index(max(list_of_distances_3)) == 0:
+                                print("The max difference is "+center_1_difference_3+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_3[0]))
+                                maxDifference_3 = center_1_difference_3
+                            elif list_of_distances_3.index(max(list_of_distances_3)) == 1:
+                                print("The max difference is "+center_2_difference_3+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_3[1]))
+                                maxDifference_3 = center_2_difference_3
+                            elif list_of_distances_3.index(max(list_of_distances_3)) == 2:
+                                print("The max difference is "+center_3_difference_3+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_3[3]))
+                                maxDifference_3 = center_3_difference_3
+                            if list_of_distances_3.index(max(list_of_distances_3)) == 3:
+                                print("The max difference is "+center_4_difference_3+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_3[4]))
+                                maxDifference_3 = center_4_difference_3
+                            elif list_of_distances_3.index(max(list_of_distances_3)) == 4:
+                                print("The max difference is "+center_5_difference_3+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_3[5]))
+                                maxDifference_3 = center_5_difference_3 
+                        
+                            if maxDifference_3 < 10:
+                                print("The wavesL are",wavelengths_for_recipe_3)
+                                print("Since the Difference is less than 10")
+                                print("We pass to the other recipes")
+
+                            else:
+                                print("Difference is GREATER than 10")
+                                print("These is the list of our wavelengths",wavelengths_for_recipe_3)
+                                print("you can elimate MAX 2 elements")
+                                elimate_question= input("Would you like to eliminate: [y/Y]")
+                                if elimate_question== "y" or elimate_question=="Y":
+                                    elimate_question_2= input("Input the position of the element you want to eliminate")
+                                    wavelengths_for_recipe_3.pop(elimate_question_2-1)
+                                    print("You have the following wavelengths",wavelengths_for_recipe_3)
+                                    if len(wavelengths_for_recipe_3) == 3:
+                                        print("You cannot eliminate more")
+                                        break
+                                    else:
+                                        elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                        if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                            elimate_question_2= input("Input the position of the element you want to eliminate")
+                                            wavelengths_for_recipe_3.pop(elimate_question_2-1) 
+                                            print("You have the following wavelengths",wavelengths_for_recipe_3)
+                                            if len(wavelengths_for_recipe_3) == 3:
+                                                print("You cannot eliminate more")
+                                                break
+                                            else:
+                                                print("You have",wavelengths_for_recipe_3)
+                                        else:
+                                            print("You HAVE",wavelengths_for_recipe_3)
+                                else:
+                                    print("The Wavelengths are",wavelengths_for_recipe_3)
+
+
+                        else:
+                            print("The Wavelengths are",wavelengths_for_recipe_3)
+
+
+                    else:
+                        print("The Maxdifference is MORE than 10 ")
+                        print("We generate 2 more recipes ")
+                        recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+2]])
+                        #do the first one
+                        #print('<<controller>> executing batch {}'.format(self.batch_num))
+                        #print('<<controller>> executing batch {}'.format(str(r+1)))
+                        #don't have data to train, so, not training
+                        #generate new wellnames for next batch
+                        wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                        #plan and execute a reaction
+                        self._create_samples(wellnames, recipe_block_2)
+                        #pull in the scan data
+                        filenames = self.rxn_df[
+                                        (self.rxn_df['op'] == 'scan') |
+                                        (self.rxn_df['op'] == 'scan_until_complete')
+                                        ].reset_index()
+                        #TODO filenames is empty. dunno why
+                        last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                        scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                        scan_Y= scan_data.T.to_numpy()
+                        print("Scan When Distance is > 10", scan_Y)
+
+                        scan_Y_1_second_3 = scan_Y[0]
+                        scan_Y_2_second_3 = scan_Y[1]
+                        # scan_Y_3 = scan_Y[2]
+
+                        print("len rp1 sec",len(scan_Y_1_second_3),scan_Y_1_second_3)
+                        print("len rp2 sec",len(scan_Y_2_second_3),len(scan_Y_2_second_3))
+                        # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                        maxWave_scan_1_sec_3 = MaxWaveLength(scan_Y_1_second_3)
+                        maxWave_scan_2_sec_3 = MaxWaveLength(scan_Y_2_second_3)
+                        # maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                        print("WaveL max 1"+". ", maxWave_scan_1_sec_3)
+                        print("WaveL max 2"+". ", maxWave_scan_2_sec_3)
+                        # print("WaveL max 2"+". ", maxWave_scan_3)
+
+                        wavelengths_for_recipe_3.append(maxWave_scan_1_sec_3)
+                        wavelengths_for_recipe_3.append(maxWave_scan_2_sec_3)
+                        
+                        #Choosing the first point as a center
+                        print("Computing the Distance for the five recipes")
+                        center_1_difference_3 = np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1])
+                        center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2])
+                        center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[3])
+                        center_1_difference_3 = center_1_difference_3 + np.abs(wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[4])
+
+                        # np.abs(wavelengths_for_recipe_1[e]-wavelengths_for_recipe_1[1])
+                        print("Total diference when taking as a center first wavelenght"+str(wavelengths_for_recipe_3[0]),center_1_difference_3)
+                        
+                        
+                        center_2_difference_3 = np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[0])
+                        center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2])
+                        center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[3])
+                        center_2_difference_3 = center_2_difference_3 + np.abs(wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[4])
+
+                        print("Total diference when taking as a center second wavelenght"+str(wavelengths_for_recipe_3[1]),center_2_difference_3)
+
+
+                        center_3_difference_3 = np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[0])
+                        center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[1])
+                        center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3])
+                        center_3_difference_3 = center_3_difference_3 + np.abs(wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[4])
+
+                        print("Total diference when taking as a center third wavelenght"+str(wavelengths_for_recipe_3[2]),center_3_difference_3)
+
+
+                        center_4_difference_3 = np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[0])
+                        center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[1])
+                        center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[2])
+                        center_4_difference_3 = center_4_difference_3 + np.abs(wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4])
+
+                        print("Total diference when taking as a center fourth wavelenght"+str(wavelengths_for_recipe_3[3]),center_4_difference_3)
+
+                        center_5_difference_3 = np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[0])
+                        center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[1])
+                        center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[2])
+                        center_5_difference_3 = center_5_difference_3 + np.abs(wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[3])
+
+                        print("Total diference when taking as a center fifth wavelenght"+str(wavelengths_for_recipe_3[4]),center_5_difference_3)
+
+
+
+                        #get the maximun distance
+
+                        list_of_distances_3= [center_1_difference_3,center_2_difference_3,center_3_difference_3,center_4_difference_3,center_5_difference_3]
+                        maxDifference_3 =0
+
+                        if list_of_distances_3.index(max(list_of_distances_3)) == 0:
+                            print("The max difference is "+center_1_difference_3+"when the center is the wavelength N-1: "+str(wavelengths_for_recipe_3[0]))
+                            maxDifference_3 = center_1_difference_3
+                        elif list_of_distances_3.index(max(list_of_distances_3)) == 1:
+                            print("The max difference is "+center_2_difference_3+"when the center is the wavelength N-2: "+str(wavelengths_for_recipe_3[1]))
+                            maxDifference_3 = center_2_difference_3
+                        elif list_of_distances_3.index(max(list_of_distances_3)) == 2:
+                            print("The max difference is "+center_3_difference_3+"when the center is the wavelength N-3: "+str(wavelengths_for_recipe_3[3]))
+                            maxDifference_3 = center_3_difference_3
+                        if list_of_distances_3.index(max(list_of_distances_3)) == 3:
+                            print("The max difference is "+center_4_difference_3+"when the center is the wavelength N-4: "+str(wavelengths_for_recipe_3[4]))
+                            maxDifference_3 = center_4_difference_3
+                        elif list_of_distances_3.index(max(list_of_distances_3)) == 4:
+                            print("The max difference is "+center_5_difference_3+"when the center is the wavelength N-5: "+str(wavelengths_for_recipe_3[5]))
+                            maxDifference_3 = center_5_difference_3
+                        
+                        if maxDifference_3 < 10:
+                            print("The wavesL are",wavelengths_for_recipe_3)
+                            print("Since the Difference is less than 10")
+                            print("We pass to the other recipes")
+
+                        else:
+                            print("Difference is GREATER than 10")
+                            print("These is the list of our wavelengths",wavelengths_for_recipe_3)
+                            print("you can elimate MAX 2 elements")
+                            elimate_question= input("Would you like to eliminate: [y/Y]")
+                            if elimate_question== "y" or elimate_question=="Y":
+                                elimate_question_2= input("Input the position of the element you want to eliminate")
+                                wavelengths_for_recipe_3.pop(elimate_question_2-1)
+                                print("You have the following wavelengths",wavelengths_for_recipe_3)
+                                if len(wavelengths_for_recipe_3) == 3:
+                                    print("You cannot eliminate more")
+                                    break
+                                else:
+                                    elimate_question_3 = input("Would you like to eliminate more? [y/Y]")
+                                    if elimate_question_3 == "y" or elimate_question_3 =="Y":
+                                        elimate_question_2= input("Input the position of the element you want to eliminate")
+                                        wavelengths_for_recipe_3.pop(elimate_question_2-1) 
+                                        print("You have the following wavelengths",wavelengths_for_recipe_3)
+                                        if len(wavelengths_for_recipe_3) == 3:
+                                            print("You cannot eliminate more")
+                                            break
+                                        else:
+                                            print("You have",wavelengths_for_recipe_3)
+                                    else:
+                                        print("You HAVE",wavelengths_for_recipe_3)
+                            else:
+                                print("The Wavelengths are",wavelengths_for_recipe_3)
+
+
+
+
+                #comparing the wavelen
+                
+                # if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
+                #             print("The two recipes"+str(recipe_unit)+ "are similar")
+                #             break
+                #         else:
+                #             print("The two recipes"+str(recipe_unit)+ "are NOT similar")
+                #             print("Doing again")
+                #             z=r-1
+                #             print("ZZ",z)
+                #             for m in range(2):
+                #                 recipe_unit = np.array([recipes[0][z]])
+                #                 #do the first one
+                #                 #print('<<controller>> executing batch {}'.format(self.batch_num))
+                #                 #print('<<controller>> executing batch {}'.format(str(r+1)))
+                #                 #don't have data to train, so, not training
+                #                 #generate new wellnames for next batch
+                #                 wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+                #                 #plan and execute a reaction
+                #                 self._create_samples(wellnames, recipe_unit)
+                #                 #pull in the scan data
+                #                 filenames = self.rxn_df[
+                #                         (self.rxn_df['op'] == 'scan') |
+                #                         (self.rxn_df['op'] == 'scan_until_complete')
+                #                         ].reset_index()
+                #                 #TODO filenames is empty. dunno why
+                #                 last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                #                 scan_data = self._get_sample_data(wellnames, last_filename)
                                 
-                                #scan_data = observance
-                                #We process scan_data to get lambda
-                                scan_Y= scan_data.T.to_numpy()
-                                print("scan", scan_Y)
-                                print("len",len(scan_Y),len(scan_Y[0]))
-                                Y= MaxWaveLength(scan_Y[0])
-                                print("wavel max ", Y)
-                                #print("len",len(Y),len(Y[0]))
-                                wavelengths[z]= Y
-                            if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
-                                print("The two recipes"+str(recipe_unit)+ "are similar")
-                                break
+                #                 #scan_data = observance
+                #                 #We process scan_data to get lambda
+                #                 scan_Y= scan_data.T.to_numpy()
+                #                 print("scan", scan_Y)
+                #                 print("len",len(scan_Y),len(scan_Y[0]))
+                #                 Y= MaxWaveLength(scan_Y[0])
+                #                 print("wavel max ", Y)
+                #                 #print("len",len(Y),len(Y[0]))
+                #                 wavelengths[z]= Y
+                #             if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
+                #                 print("The two recipes"+str(recipe_unit)+ "are similar")
+                #                 break
+
+
+
+
+
+
+                # Y= MaxWaveLength(scan_Y[0])
+                # # print("wavel max ", Y)
+                # #print("len",len(Y),len(Y[0]))
+                # wavelengths.append(Y)
+                # if r == 1 or r==3 or r==5:
+                #     while True:
+
+                #         if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
+                #             print("The two recipes"+str(recipe_unit)+ "are similar")
+                #             break
+                #         else:
+                #             print("The two recipes"+str(recipe_unit)+ "are NOT similar")
+                #             print("Doing again")
+                #             z=r-1
+                #             print("ZZ",z)
+                #             for m in range(2):
+                #                 recipe_unit = np.array([recipes[0][z]])
+                #                 #do the first one
+                #                 #print('<<controller>> executing batch {}'.format(self.batch_num))
+                #                 #print('<<controller>> executing batch {}'.format(str(r+1)))
+                #                 #don't have data to train, so, not training
+                #                 #generate new wellnames for next batch
+                #                 wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+                #                 #plan and execute a reaction
+                #                 self._create_samples(wellnames, recipe_unit)
+                #                 #pull in the scan data
+                #                 filenames = self.rxn_df[
+                #                         (self.rxn_df['op'] == 'scan') |
+                #                         (self.rxn_df['op'] == 'scan_until_complete')
+                #                         ].reset_index()
+                #                 #TODO filenames is empty. dunno why
+                #                 last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                #                 scan_data = self._get_sample_data(wellnames, last_filename)
+                                
+                #                 #scan_data = observance
+                #                 #We process scan_data to get lambda
+                #                 scan_Y= scan_data.T.to_numpy()
+                #                 print("scan", scan_Y)
+                #                 print("len",len(scan_Y),len(scan_Y[0]))
+                #                 Y= MaxWaveLength(scan_Y[0])
+                #                 print("wavel max ", Y)
+                #                 #print("len",len(Y),len(Y[0]))
+                #                 wavelengths[z]= Y
+                #             if wavelengths[r-1] - wavelengths[r] < 10 and wavelengths[r-1] - wavelengths[r] > -10:
+                #                 print("The two recipes"+str(recipe_unit)+ "are similar")
+                #                 break
                                 
                         
-                else:
-                    print("Checking the other same recipe")
-
+                # else:
+                #     print("Checking the other same recipe")
 
 
             print("Checking our input: wavelengths")
-            print(wavelengths)
-            Y= np.array([wavelengths])
+            print("wavelength 1",wavelengths_for_recipe_1)
+            print("wavelength 3",wavelengths_for_recipe_2)
+            print("wavelength 3",wavelengths_for_recipe_3)
+            total_waves=wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+            # Y= np.array([wavelengths])
+            Y= np.array([total_waves])
             print("recipes----")
             print(recipes)
 
@@ -2825,7 +3842,7 @@ class AutoContr(Controller):
             #Receive data from robot
             for r in range(5):
                 print("Epoch", r+1)
-                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.Train(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION

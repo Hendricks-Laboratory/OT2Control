@@ -247,7 +247,7 @@ class LinearRegress(MLModel):
         lower_bound = 0.00025/2
         recipes =  np.random.rand(number_recipes,1) * (upper_bound - lower_bound) + lower_bound 
         recipes = np.repeat(recipes, self.duplication, axis=0)
-        recipes= recipes.T
+        # recipes= recipes.T
         #print("our recipes", recipes)
         return recipes
     
