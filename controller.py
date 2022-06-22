@@ -143,7 +143,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
     print("Launch_auto FUNCTION;  Initialize the Linear Model 3 recipes")
 
-    ml_model = LinearRegress(model, final_spectra, 1,1)
+    ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 2)
+    
 
     #try 1 
     if not no_sim:
