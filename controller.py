@@ -2089,7 +2089,7 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
-
+        print("recipes generated",recipes)
         #do the first one
         print('<<controller>> executing batch {}'.format(self.batch_num))
         #don't have data to train, so, not training
@@ -2105,9 +2105,14 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
+        print("scan",scan_data)
+        print("scan typ",type(scan_data))
+        YY=scan_data.T.to_numpy()
+        print("sss",YY[0])
         model.train(scan_data.T.to_numpy(),recipes)
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
+        print("recipes generated 2",recipes)
         self.batch_num += 1
 
         #enter iterative while loop now that we have data
@@ -2117,6 +2122,7 @@ class AutoContr(Controller):
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
+            print("Wellnames",wellnames)
             self._create_samples(wellnames, recipes)
             #pull in the scan data
             filenames = self.rxn_df[
