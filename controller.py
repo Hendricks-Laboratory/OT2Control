@@ -2196,9 +2196,10 @@ class AutoContr(Controller):
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
             print("----Breaking our initial recipes----")
-            recipe1 = recipes[0][0:1]
-            recipe2 = recipes[0][3:4]
-            recipe3 = recipes[0][6:7]
+            recipe1 = recipes[0][0:2]
+            recipe2 = recipes[0][3:5]
+            recipe3 = recipes[0][6:8]
+            print("RRRR",REC)
             #we would get observance for each recipe:
             wavelengths=[]
             wavelengths_to_train =[]
