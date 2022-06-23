@@ -4232,7 +4232,7 @@ class AutoContr(Controller):
                     new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
             
-
+            print("B",df)
             print("LAST M",user_concentrations,wavelengths_progress_test,wavelengths_progress_test)
 
             fig_changhe_model= plt.figure(figsize=(8,8))
@@ -4246,7 +4246,7 @@ class AutoContr(Controller):
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
-            plt.scatter(user_concentrations,wavelengths_progress_test, color= "pink", label= "Model ",s=100)
+            plt.scatter(user_concentrations,wavelengths_progress_test, color= "green", label= "Model ",s=100)
             plt.axhline(y=input_user-5,color='r', linestyle=':')
             plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
@@ -4470,7 +4470,7 @@ class AutoContr(Controller):
                                         
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            print("Passing to the other recipe")
+                                            print("Passing to the other recipe 22")
                                             wavelengths_to_train.append(wavelengths_for_recipe_1[0])
                                             wavelengths_to_train.append( wavelengths_for_recipe_1[1])
                                             recipes_to_train.append(recipe1)
@@ -5948,6 +5948,7 @@ class AutoContr(Controller):
             total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
             total_waves=  clean_list_1+clean_list_2+clean_list_3
             recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+
             print("Plot change",type(recipes_plot),recipes_plot)
             waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
             print(type(waves_evol_plot),waves_evol_plot)
@@ -5959,9 +5960,11 @@ class AutoContr(Controller):
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
             for t in range(len(recipes_plot)):
-                for u in range(len(waves_evol_plot[t])):
-                        print(recipes_plot[t]*len(waves_evol_plot[u]))
-                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                        #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        #print(u)
+                        print(recipes_plot[t])
+                        #print(waves_evol_plot[u])
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
@@ -6102,10 +6105,10 @@ class AutoContr(Controller):
                 difference_test_1_3 = wavelengths_prediction_test[0]-wavelengths_prediction_test[2]
                 difference_test_2_3 = wavelengths_prediction_test[1]-wavelengths_prediction_test[2]
 
-                if np.abs(difference_test_1_3) <= 20:
+                if np.abs(difference_test_1_3) <= 600:
 
 
-                        if np.abs(difference_test_1_2) <= 10:
+                        if np.abs(difference_test_1_2) <= 600:
                             print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
                             print("Passing to the other recipe")
                             wavelengths_to_test.append(wavelengths_prediction_test[0])
@@ -6114,7 +6117,7 @@ class AutoContr(Controller):
                             # # recipes_to_train.append(recipe1)
                             
                         
-                        if np.abs(difference_test_2_3) <= 10:
+                        if np.abs(difference_test_2_3) <= 100:
 
                             print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
                             print("Passing to the other recipe")
@@ -6133,7 +6136,7 @@ class AutoContr(Controller):
                 
                 else:
 
-                        while len(wavelengths_for_recipe_1) < 6:
+                        while len(wavelengths_for_recipe_1)<6:
                             # print("Which", index_for_l, len(wavelengths_for_recipe_1))
                             if len(wavelengths_for_recipe_1) == 5:
                                 sys.exit()
@@ -6200,10 +6203,10 @@ class AutoContr(Controller):
                                 difference_test_1_5 = wavelengths_prediction_test[0]-wavelengths_prediction_test[4]
 
 
-                                if np.abs(difference_test_1_5) <= 20:
+                                if np.abs(difference_test_1_5) <= 600:
 
 
-                                        if np.abs(difference_test_1_2) <= 10:
+                                        if np.abs(difference_test_1_2) <= 600:
                                             print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
                                             print("Passing to the other recipe")
                                             wavelengths_to_test.append(wavelengths_prediction_test[0])
@@ -6212,7 +6215,7 @@ class AutoContr(Controller):
                                             # # recipes_to_train.append(recipe1)
                                             
                                         
-                                        if np.abs(difference_test_2_3) <= 10:
+                                        if np.abs(difference_test_2_3) <= 100:
 
                                             print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
                                             print("Passing to the other recipe")
@@ -6221,7 +6224,7 @@ class AutoContr(Controller):
                                             # recipes_to_train.append(recipe1)
                                             # recipes_to_train.append(recipe1)
                                         
-                                        if np.abs(difference_test_3_4) <= 10:
+                                        if np.abs(difference_test_3_4) <= 100:
 
                                             print("There is no difference greater than 10 ", wavelengths_prediction_test[2], wavelengths_prediction_test[3])
                                             print("Passing to the other recipe")
@@ -6230,7 +6233,7 @@ class AutoContr(Controller):
                                             # recipes_to_train.append(recipe1)
                                             # recipes_to_train.append(recipe1)
                                         
-                                        if np.abs(difference_test_4_5) <= 10:
+                                        if np.abs(difference_test_4_5) <= 100:
 
                                             print("There is no difference greater than 10 ", wavelengths_prediction_test[3], wavelengths_prediction_test[4])
                                             print("Passing to the other recipe")
@@ -6278,7 +6281,9 @@ class AutoContr(Controller):
                 ##Plot
                 fig = plt.figure(figsize=(5,8)) 
                 # plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
-                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")                
+                plt.plot(df['Concentration'], df['Wavelength'], color='pink',label="Predicted Wavelength Linear Pattern")                
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
+
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
                 plt.scatter(user_concentration,Robot_answer,label="Robot True Return Value")
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
@@ -6300,23 +6305,23 @@ class AutoContr(Controller):
                     new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
             
-
-            print("LAST M",user_concentrations,wavelengths_progress_test)
+            print("B",df)
+            print("LAST M",user_concentrations,wavelengths_progress_test,wavelengths_progress_test)
 
             fig_changhe_model= plt.figure(figsize=(8,8))
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
-            for t in range(len(recipes_plot)):
-                for u in range(len(waves_evol_plot[t])):
-                        #print(recipes_plot[t]*len(waves_evol_plot[u]))
-                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+            # for t in range(len(recipes_plot)):
+            #     for u in range(len(waves_evol_plot[t])):
+            #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
+            #             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
-            plt.scatter(user_concentrations,wavelengths_progress_test, color= "pink", label= "Model ",s=100)
+            plt.scatter(user_concentrations,wavelengths_progress_test, color= "green", label= "Model ",s=100)
             plt.axhline(y=input_user-5,color='r', linestyle=':')
-            plt.axhline(y=input_user,color='r', linestyle='-', label= "Target" )
+            plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
 
 
@@ -6325,6 +6330,7 @@ class AutoContr(Controller):
             fig_changhe_model.savefig('changeInWavesModel.png')
 
             print("Done")        
+            
             
 
 
