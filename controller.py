@@ -2241,8 +2241,8 @@ class AutoContr(Controller):
                 scan_data = self._get_sample_data(wellnames, last_filename)
                 #scan_data = observance
                 #We process scan_data to get lambda
-                scan_Y= scan_data.T.to_numpy()
-                print("Scan", scan_Y)
+                #scan_Y= scan_data.T.to_numpy()
+                
 
                 scan_Y_1 = scan_Y[0]
                 scan_Y_2 = scan_Y[1]
@@ -2308,8 +2308,8 @@ class AutoContr(Controller):
                     else:
 
                         while len(wavelengths_for_recipe_1)<9:
-                            print("Which", index_for_l, len(wavelengths_for_recipe_1))
-                            if index_for_l == 8:
+                            # print("Which", index_for_l, len(wavelengths_for_recipe_1))
+                            if len(wavelengths_for_recipe_1) == 8:
                                 break
                                 quit()
 
