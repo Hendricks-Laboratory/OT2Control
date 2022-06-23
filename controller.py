@@ -4208,7 +4208,8 @@ class AutoContr(Controller):
                 print("Our test error is ", test_error)
                 
                 ##Plot
-                fig = plt.figure(figsize=(5,8)) 
+                fig = plt.figure(figsize=(5,8))
+                #CHHHHH
                 # plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
                 plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Predicted Wavelength Linear Pattern")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
