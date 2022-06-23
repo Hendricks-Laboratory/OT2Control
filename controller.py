@@ -3889,9 +3889,11 @@ class AutoContr(Controller):
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
             for t in range(len(recipes_plot)):
-                for u in range(len(total_waves[t])):
-                        print(recipes_plot[t]*len(total_waves[u]))
-                        plt.scatter([recipes_plot[t]]*len(total_waves[u]), total_waves[u], color= color_names[t], label= label_names[t],s=100)
+                        #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        #print(u)
+                        print(recipes_plot[t])
+                        #print(waves_evol_plot[u])
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
@@ -4208,7 +4210,7 @@ class AutoContr(Controller):
                 ##Plot
                 fig = plt.figure(figsize=(5,8)) 
                 # plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
-                plt.plot(df['Concentration'], df['Concentration']*10+20, color='red',label="Predicted Wavelength Linear Pattern")                
+                plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Predicted Wavelength Linear Pattern")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
                 plt.scatter(user_concentration,Robot_answer,label="Robot True Return Value")
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
@@ -4231,15 +4233,15 @@ class AutoContr(Controller):
                     df = df.append(new_data, ignore_index = True)
             
 
-            print("LAST M",user_concentrations,wavelengths_progress_test)
+            print("LAST M",user_concentrations,wavelengths_progress_test,wavelengths_progress_test)
 
             fig_changhe_model= plt.figure(figsize=(8,8))
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
-            for t in range(len(recipes_plot)):
-                for u in range(len(waves_evol_plot[t])):
-                        #print(recipes_plot[t]*len(waves_evol_plot[u]))
-                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+            # for t in range(len(recipes_plot)):
+            #     for u in range(len(waves_evol_plot[t])):
+            #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
+            #             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
