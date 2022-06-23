@@ -2299,10 +2299,10 @@ class AutoContr(Controller):
 
                     print(np.abs(difference_1_3) <= 400)
                     print(np.abs(difference_1_3))
-                    if np.abs(difference_1_3) <= 600:
+                    if np.abs(difference_1_3) <= 20:
 
 
-                        if np.abs(difference_1_2) <= 600:
+                        if np.abs(difference_1_2) <= 10:
                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                             print("Passing to the other recipe")
                             wavelengths_to_train.append(wavelengths_for_recipe_1[0])
@@ -2311,7 +2311,7 @@ class AutoContr(Controller):
                             recipes_to_train.append(recipe1)
                             
                         
-                        if np.abs(difference_2_3) <= 100:
+                        if np.abs(difference_2_3) <= 10:
 
                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                             print("Passing to the other recipe")
@@ -2323,7 +2323,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_1 = []
-                        for i in wavelengths_for_recipe_1:
+                        for i in wavelengths_to_train:
                             if i not in clean_list_1:
                                 clean_list_1.append(i)
                     
@@ -2394,12 +2394,12 @@ class AutoContr(Controller):
                                         ,difference_1_4,difference_2_4,difference_3_4)
 
                                     
-                                    if np.abs(difference_1_4) <= 20:
+                                    if np.abs(difference_1_4) <= 600:
 
                                         
-                                        if np.abs(difference_1_2) <= 10:
+                                        if np.abs(difference_1_2) <= 600:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            print("Passing to the other recipe")
+                                            print("Passing to the other recipe 22")
                                             wavelengths_to_train.append(wavelengths_for_recipe_1[0])
                                             wavelengths_to_train.append( wavelengths_for_recipe_1[1])
                                             recipes_to_train.append(recipe1)
@@ -2447,7 +2447,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -2523,7 +2523,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -2605,7 +2605,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -2695,7 +2695,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -2794,7 +2794,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -2862,7 +2862,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_2 = []
-                        for i in wavelengths_for_recipe_2:
+                        for i in wavelengths_to_train_2:
                             if i not in clean_list_1:
                                 clean_list_2.append(i)
                     
@@ -2962,7 +2962,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -3037,7 +3037,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -3123,7 +3123,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -3218,7 +3218,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -3321,7 +3321,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -3390,7 +3390,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_3 = []
-                        for i in wavelengths_for_recipe_3:
+                        for i in wavelengths_to_train_3:
                             if i not in clean_list_1:
                                 clean_list_3.append(i)
                     
@@ -3489,7 +3489,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -3560,7 +3560,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -3647,7 +3647,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -3745,7 +3745,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -3850,7 +3850,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -4055,7 +4055,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_test = []
-                        for i in wavelengths_prediction_test:
+                        for i in wavelengths_to_test:
                             if i not in clean_list_test:
                                 clean_list_test.append(i)
                     
@@ -4172,7 +4172,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_test = []
-                                        for i in wavelengths_prediction_test:
+                                        for i in wavelengths_to_test:
                                             if i not in clean_list_test:
                                                 clean_list_test.append(i)
                                     
@@ -4391,7 +4391,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_1 = []
-                        for i in wavelengths_for_recipe_1:
+                        for i in wavelengths_to_train:
                             if i not in clean_list_1:
                                 clean_list_1.append(i)
                     
@@ -4515,7 +4515,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -4591,7 +4591,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -4673,7 +4673,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -4763,7 +4763,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -4862,7 +4862,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_1 = []
-                                        for i in wavelengths_for_recipe_1:
+                                        for i in wavelengths_to_train:
                                             if i not in clean_list_1:
                                                 clean_list_1.append(i)
 
@@ -4930,7 +4930,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_2 = []
-                        for i in wavelengths_for_recipe_2:
+                        for i in wavelengths_to_train_2:
                             if i not in clean_list_1:
                                 clean_list_2.append(i)
                     
@@ -5030,7 +5030,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -5105,7 +5105,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -5191,7 +5191,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -5286,7 +5286,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -5389,7 +5389,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_2 = []
-                                        for i in wavelengths_for_recipe_2:
+                                        for i in wavelengths_to_train_2:
                                             if i not in clean_list_2:
                                                 clean_list_2.append(i)
 
@@ -5458,7 +5458,7 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_3 = []
-                        for i in wavelengths_for_recipe_3:
+                        for i in wavelengths_to_train_3:
                             if i not in clean_list_1:
                                 clean_list_3.append(i)
                     
@@ -5557,7 +5557,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -5628,7 +5628,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -5715,7 +5715,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -5813,7 +5813,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -5918,7 +5918,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_3 = []
-                                        for i in wavelengths_for_recipe_3:
+                                        for i in wavelengths_to_train_3:
                                             if i not in clean_list_3:
                                                 clean_list_3.append(i)
 
@@ -6013,7 +6013,7 @@ class AutoContr(Controller):
             user_concentrations=[]
             
             
-            for r in range(8):
+            for r in range(5):
                 print("Epoch", r+1)
                 input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
@@ -6027,7 +6027,7 @@ class AutoContr(Controller):
                 
                 # for r in range(len(testing_recipes[0])):
                 recipe_unit_test = np.array([[user_concentration]])
-                recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=1)
+                recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -6087,7 +6087,8 @@ class AutoContr(Controller):
                 user_concentrations.append(user_concentration)
                 user_concentrations.append(user_concentration)
                 user_concentrations.append(user_concentration)
-
+                print("User con", user_concentration
+                )
                 ###
 
                 wavelengths_prediction_test.sort()
@@ -6122,14 +6123,14 @@ class AutoContr(Controller):
                         #CLEANING REPEATED DATA
 
                         clean_list_test = []
-                        for i in wavelengths_prediction_test:
+                        for i in wavelengths_to_test:
                             if i not in clean_list_test:
                                 clean_list_test.append(i)
                     
                 
                 else:
 
-                        while len(wavelengths_for_recipe_1)<6:
+                        while len(wavelengths_for_recipe_1) < 6:
                             # print("Which", index_for_l, len(wavelengths_for_recipe_1))
                             if len(wavelengths_for_recipe_1) == 5:
                                 sys.exit()
@@ -6239,7 +6240,7 @@ class AutoContr(Controller):
                                         #CLEANING REPEATED DATA
 
                                         clean_list_test = []
-                                        for i in wavelengths_prediction_test:
+                                        for i in wavelengths_to_test:
                                             if i not in clean_list_test:
                                                 clean_list_test.append(i)
                                     
@@ -6273,7 +6274,8 @@ class AutoContr(Controller):
                 
                 ##Plot
                 fig = plt.figure(figsize=(5,8)) 
-                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
+                # plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
+                plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
                 plt.scatter(user_concentration,Robot_answer,label="Robot True Return Value")
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
@@ -6296,14 +6298,14 @@ class AutoContr(Controller):
                     df = df.append(new_data, ignore_index = True)
             
 
-
             print("LAST M",user_concentrations,wavelengths_progress_test)
+
             fig_changhe_model= plt.figure(figsize=(8,8))
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
             for t in range(len(recipes_plot)):
                 for u in range(len(waves_evol_plot[t])):
-                        # print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        #print(recipes_plot[t]*len(waves_evol_plot[u]))
                         plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
@@ -6311,7 +6313,7 @@ class AutoContr(Controller):
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
             plt.scatter(user_concentrations,wavelengths_progress_test, color= "pink", label= "Model ",s=100)
             plt.axhline(y=input_user-5,color='r', linestyle=':')
-            plt.axhline(y=input_user,color='r', linestyle='-')
+            plt.axhline(y=input_user,color='r', linestyle='-', label= "Target" )
             plt.axhline(y=input_user+5,color='r', linestyle=':')
 
 
@@ -6319,11 +6321,10 @@ class AutoContr(Controller):
             plt.legend(loc="upper right")
             fig_changhe_model.savefig('changeInWavesModel.png')
 
-
-
-
-
+            print("Done")        
             
+
+
             self.close_connection()
             self.pr.shutdown()
             return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
