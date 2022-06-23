@@ -2308,7 +2308,9 @@ class AutoContr(Controller):
                     else:
 
                         while len(wavelengths_for_recipe_1) <9:
+                            print("Which", index_for_l, len(wavelengths_for_recipe_1))
                             if index_for_l == 8:
+                                break
                                 quit()
 
                             else:
@@ -2333,12 +2335,13 @@ class AutoContr(Controller):
 
 
                                 scan_Y= scan_data.T.to_numpy()
-                                print("Scan When Distance is > 10", scan_Y)
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
 
                                 scan_Y_1_second = scan_Y[0]
                                 
 
-                                print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                                 
 
                                 maxWave_scan_1_sec = MaxWaveLength(scan_Y_1_second)
@@ -2348,10 +2351,12 @@ class AutoContr(Controller):
 
                                 wavelengths_for_recipe_1.append(maxWave_scan_1_sec)
 
-                                #Sort
+                                print("Waves",wavelengths_for_recipe_1)
 
                                 print("Comparing difference after 3 the 3 recipes")
                                 if len(wavelengths_for_recipe_1) == 4:
+
+                                    print("Difference in 4 recipes", len(wavelengths_for_recipe_1),index_for_l)
 
                                     wavelengths_for_recipe_1.sort()
                                     difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
@@ -2367,7 +2372,7 @@ class AutoContr(Controller):
                                     
                                     if np.abs(difference_1_4) <= 20:
 
-
+                                        
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
