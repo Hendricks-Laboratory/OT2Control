@@ -2196,10 +2196,12 @@ class AutoContr(Controller):
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
             print("----Breaking our initial recipes----")
-            recipe1 = recipes[0][0:2]
-            recipe2 = recipes[0][3:5]
-            recipe3 = recipes[0][6:9]
+            recipe1 = recipes[:][0:1][0]
+            recipe2 = recipes[:][3:4][0]
+            recipe3 = recipes[:][6:7][0]
             print("RRR",recipe1)
+            print("RRR",recipe2)
+            print("RRR",recipe3)
 
             #we would get observance for each recipe:
             wavelengths=[]
@@ -2251,7 +2253,7 @@ class AutoContr(Controller):
                 scan_Y_2 = scan_Y[1]
                 scan_Y_3 = scan_Y[2]
 
-                print("len rp1",len(scan_Y_1),scan_Y_1)
+                #print("len rp1",len(scan_Y_1),scan_Y_1)
                 print("len rp2",len(scan_Y_2),len(scan_Y_2))
                 print("len rp3",len(scan_Y_3),len(scan_Y_3))
 
@@ -2266,7 +2268,7 @@ class AutoContr(Controller):
                 #Add to the list of wavelengths
                 if r== 0:
                     print("----Third initial recipes----")
-                    print(recipe3)
+                    print(recipe1)
                     
                     wavelengths_for_recipe_1.append(maxWave_scan_1)
                     wavelengths_for_recipe_1.append(maxWave_scan_2)
@@ -3868,6 +3870,7 @@ class AutoContr(Controller):
             final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
             #passing to list
             print("Final recipes", final_recipes)
+            print("Final Y",Y)
             X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
             Y_df = [Y[0][m] for m in range(len(Y[0]))]
             #Checking that they are list Y_df
@@ -3887,7 +3890,7 @@ class AutoContr(Controller):
             #Receive data from robot
             for r in range(5):
                 print("Epoch", r+1)
-                input_user, user_concentration, train_prediction, W, b = model.Train(df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
@@ -4309,7 +4312,7 @@ class AutoContr(Controller):
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
-                print("scan", scan_Y)
+                # print("scan", scan_Y)
                 print("len",len(scan_Y),len(scan_Y[0]))
                 Y= MaxWaveLength(scan_Y[0])
                 print("wavel max ", Y)
@@ -4342,7 +4345,7 @@ class AutoContr(Controller):
             #Receive data from robot
             for r in range(5):
                 print("Epoch", r+1)
-                input_user, user_concentration, train_prediction, W, b = model.Train(df,input_user,r)
+                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
