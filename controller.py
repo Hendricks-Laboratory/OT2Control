@@ -2307,7 +2307,7 @@ class AutoContr(Controller):
                 
                     else:
 
-                        while len(wavelengths_for_recipe_1) <9:
+                        while len(wavelengths_for_recipe_1)<9:
                             print("Which", index_for_l, len(wavelengths_for_recipe_1))
                             if index_for_l == 8:
                                 break
@@ -2356,7 +2356,7 @@ class AutoContr(Controller):
                                 print("Comparing difference after 3 the 3 recipes")
                                 if len(wavelengths_for_recipe_1) == 4:
 
-                                    print("Difference in 4 recipes", len(wavelengths_for_recipe_1),index_for_l)
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
 
                                     wavelengths_for_recipe_1.sort()
                                     difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
@@ -2439,7 +2439,8 @@ class AutoContr(Controller):
                                     difference_4_5 = wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4]
                                     difference_1_5 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[4]
 
-                                    print("Difference in 5 recipes")
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
+
 
                                     
                                     if np.abs(difference_1_5) <= 20:
@@ -2499,6 +2500,7 @@ class AutoContr(Controller):
 
                                 
                                 if len(wavelengths_for_recipe_1) == 6:
+
                                     wavelengths_for_recipe_1.sort()
                                     difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
                                     difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
@@ -2508,7 +2510,8 @@ class AutoContr(Controller):
 
                                     difference_1_6 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[5]
 
-                                    print("Difference in 6 recipes")
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
+
 
                                     
                                     if np.abs(difference_1_6) <= 20:
@@ -2578,7 +2581,8 @@ class AutoContr(Controller):
 
                                     difference_1_7 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[6]
 
-                                    print("Difference in 7 recipes")
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes",)
+
 
                                     
                                     if np.abs(difference_1_7) <= 20:
@@ -2657,7 +2661,8 @@ class AutoContr(Controller):
 
                                     difference_1_8 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[7]
 
-                                    print("Difference in 5 recipes")
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes",)
+
 
                                     
                                     if np.abs(difference_1_8) <= 20:
