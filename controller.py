@@ -2261,7 +2261,8 @@ class AutoContr(Controller):
                 print("WaveL max 1"+". ", maxWave_scan_1)
                 print("WaveL max 2"+". ", maxWave_scan_2)
                 print("WaveL max 3"+". ", maxWave_scan_3)
-                    
+                
+                #
                 #Add to the list of wavelengths
                 if r== 0:
                     print("----Third initial recipes----")
