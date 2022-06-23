@@ -2289,15 +2289,19 @@ class AutoContr(Controller):
                         if np.abs(difference_1_2) <= 600:
                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                             print("Passing to the other recipe")
-                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                            recipes_to_train.append(recipe1, recipe1)
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                            recipes_to_train.append(recipe1)
+                            recipes_to_train.append(recipe1)
                         
                         if np.abs(difference_2_3) <= 100:
 
                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                             print("Passing to the other recipe")
-                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                            recipes_to_train.append(recipe1, recipe1)
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                            recipes_to_train.append(recipe1)
+                            recipes_to_train.append(recipe1)
                         
                         #CLEANING REPEATED DATA
 
@@ -2378,8 +2382,10 @@ class AutoContr(Controller):
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append( wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         # if np.abs(difference_1_3) <= 10:
 
@@ -2399,8 +2405,10 @@ class AutoContr(Controller):
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         # if np.abs(difference_2_4) <= 10:
 
@@ -2413,8 +2421,10 @@ class AutoContr(Controller):
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         #CLEANING REPEATED DATA
 
@@ -2451,29 +2461,37 @@ class AutoContr(Controller):
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_2_3) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                         if np.abs(difference_3_4) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                             
                                         if np.abs(difference_4_5) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         # if np.abs(difference_2_4) <= 10:
 
@@ -2522,36 +2540,47 @@ class AutoContr(Controller):
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_2_3) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                         if np.abs(difference_3_4) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                             
                                         if np.abs(difference_4_5) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
                                         
                                         if np.abs(difference_5_6) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                     
                                         
@@ -2593,43 +2622,55 @@ class AutoContr(Controller):
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_2_3) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                         if np.abs(difference_3_4) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                             
                                         if np.abs(difference_4_5) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_5_6) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_6_7) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
         
                                     
                                         
@@ -2673,50 +2714,64 @@ class AutoContr(Controller):
                                         if np.abs(difference_1_2) <= 10:
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_2_3) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                         if np.abs(difference_3_4) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                             
                                         if np.abs(difference_4_5) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_5_6) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         if np.abs(difference_6_7) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
 
                                         if np.abs(difference_7_8) <= 10:
 
                                             print("There is no difference greater than 10 ", wavelengths_for_recipe_1[6], wavelengths_for_recipe_1[7])
                                             print("Passing to the other recipe")
-                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6], wavelengths_for_recipe_1[7])
-                                            recipes_to_train.append(recipe1, recipe1)
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[7])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
                                         
                                         #CLEANING REPEATED DATA
 
