@@ -2272,7 +2272,7 @@ class AutoContr(Controller):
                 #
                 #Add to the list of wavelengths
                 if r== 0:
-                    print("----Third initial recipes----")
+                    print("----First initial recipes----")
                     print(recipe1)
                     
                     wavelengths_for_recipe_1.append(maxWave_scan_1)
@@ -3876,10 +3876,34 @@ class AutoContr(Controller):
             print("Waves pass ", clean_list_3)
             total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
             total_waves=  clean_list_1+clean_list_2+clean_list_3
-            recipes_plot=[recipe1,recipe2,recipe3]
+            recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
             print("Plot change",type(recipes_plot),recipes_plot)
-            waves_evol_plot = [[waves_evol_1],[waves_evol_2],[waves_evol_3]]
+            waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
             print(type(waves_evol_plot),waves_evol_plot)
+            print(waves_evol_plot[0])
+            print(recipes_to_train_3)
+            #Ploting change
+
+            fig_changhe=plt.figure(figsize=(8,8))
+            label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
+            color_names = ["red","green","blue"]
+            for t in range(len(recipes_plot)):
+                for u in range(len(waves_evol_plot[t])):
+                        print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                    
+            # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+            # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+            # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+            plt.xlim(0.00001, 0.003)
+            plt.legend(loc="upper right")
+            fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
             print("Wav ori", total_waves_2)
             # print("Waves evol", )
             print("Wav nw Final",total_waves)
@@ -3927,34 +3951,75 @@ class AutoContr(Controller):
                 testing_recipes = [user_concentration]
                 wavelengths_prediction_test=[]
                 
-                for r in range(len(testing_recipes[0])):
-                    recipe_unit_test = np.array([[user_concentration]])
-                    recipe_unit_test = np.repeat(recipe_unit_test, 2, axis=1)
-                    print("Recipes Test",recipe_unit_test)
-                    #do the first one
-                    #print('<<controller>> executing batch {}'.format(self.batch_num))
-                    print('<<controller>> executing batch {} for testing'.format(1))
-                    #don't have data to train, so, not training
-                    #generate new wellnames for next batch
-                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-                    #plan and execute a reaction
-                    self._create_samples(wellnames_testing, recipe_unit_test)
-                    #pull in the scan data
-                    filenames_testing = self.rxn_df[
+                # for r in range(len(testing_recipes[0])):
+                recipe_unit_test = np.array([[user_concentration]])
+                recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=1)
+                print("Recipes Test",recipe_unit_test)
+                #do the first one
+                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                print('<<controller>> executing batch {} for testing'.format(1))
+                #don't have data to train, so, not training
+                #generate new wellnames for next batch
+                wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                #plan and execute a reaction
+                self._create_samples(wellnames_testing, recipe_unit_test)
+                #pull in the scan data
+                filenames_testing = self.rxn_df[
                                 (self.rxn_df['op'] == 'scan') |
                                 (self.rxn_df['op'] == 'scan_until_complete')
                                 ].reset_index()
-                    #TODO filenames is empty. dunno why
-                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                    #scan_data = observance
-                    #We process scan_data to get lambda
-                    scan_Y_testing= scan_data_testing.T.to_numpy()
-                    print("Test scan ",scan_Y_testing)
-                    print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
-                    Y_testing= MaxWaveLength(scan_Y_testing[0])
-                    print("Y_testing",Y_testing)
-                    wavelengths_prediction_test.append(Y_testing)
+                #TODO filenames is empty. dunno why
+                last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                #scan_data = observance
+                #We process scan_data to get lambda
+                scan_Y_testing= scan_data_testing.T.to_numpy()
+
+
+
+                # print("Test scan ",scan_Y_testing)
+                # print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
+                # Y_testing= MaxWaveLength(scan_Y_testing[0])
+                # print("Y_testing",Y_testing)
+                # wavelengths_prediction_test.append(Y_testing)
+
+
+                scan_Y_testing= scan_data.T.to_numpy()
+                
+
+                scan_Y_1_test = scan_Y_testing[0]
+                scan_Y_2_test = scan_Y_testing[1]
+                scan_Y_3_test = scan_Y_testing[2]
+
+                #print("len rp1",len(scan_Y_1),scan_Y_1)
+                # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                maxWave_scan_1_test = MaxWaveLength(scan_Y_1_test)
+                maxWave_scan_2_test = MaxWaveLength(scan_Y_2_test)
+                maxWave_scan_3_test = MaxWaveLength(scan_Y_3_test)
+                print("WaveL max 1 Test"+". ", maxWave_scan_1_test)
+                print("WaveL max 2 Test"+". ", maxWave_scan_2_test)
+                print("WaveL max 3 Test"+". ", maxWave_scan_3_test)
+
+                wavelengths_prediction_test.append(maxWave_scan_1_test)
+                wavelengths_prediction_test.append(maxWave_scan_2_test)
+                wavelengths_prediction_test.append(maxWave_scan_3_test)
+
+
+                wavelengths_for_recipe_3.sort()
+                #Agr
+                
+
+                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                    difference_1_3_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2]
+                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+
+
+
+                if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
+                        print("The two recipes"+str(recipe_unit)+ "are similar")
+                        break
 
                 while True:    
                     if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
@@ -3962,39 +4027,39 @@ class AutoContr(Controller):
                         break
                     else:
                         print("The two recipes"+str(recipe_unit)+ "are NOT similar")
-                        print("keep creating")
-                        for n in range(2):
-                        #for r in range(len(testing_recipes[0])):
-                            recipe_unit_test = np.array([[user_concentration]])
-                            recipe_unit_test = np.repeat(recipe_unit_test, 2, axis=1)
-                            print("Recipes Test",recipe_unit_test)
-                            #do the first one
-                            #print('<<controller>> executing batch {}'.format(self.batch_num))
-                            print('<<controller>> executing batch {} for testing'.format(1))
-                            #don't have data to train, so, not training
-                            #generate new wellnames for next batch
-                            wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-                            #plan and execute a reaction
-                            self._create_samples(wellnames_testing, recipe_unit_test)
-                            #pull in the scan data
-                            filenames_testing = self.rxn_df[
-                                        (self.rxn_df['op'] == 'scan') |
-                                        (self.rxn_df['op'] == 'scan_until_complete')
-                                        ].reset_index()
-                            #TODO filenames is empty. dunno why
-                            last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-                            scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                            #scan_data = observance
-                            #We process scan_data to get lambda
-                            scan_Y_testing= scan_data_testing.T.to_numpy()
-                            print("Test scan ",scan_Y_testing)
-                            print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
-                            Y_testing= MaxWaveLength(scan_Y_testing[0])
-                            print("Y_testing",Y_testing)
-                            wavelengths_prediction_test.append(Y_testing)
-                        if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
-                            print("The two recipes"+str(recipe_unit)+ "are similar")
-                            break
+                        # print("keep creating")
+                        # for n in range(2):
+                        # #for r in range(len(testing_recipes[0])):
+                        #     recipe_unit_test = np.array([[user_concentration]])
+                        #     recipe_unit_test = np.repeat(recipe_unit_test, 2, axis=1)
+                        #     print("Recipes Test",recipe_unit_test)
+                        #     #do the first one
+                        #     #print('<<controller>> executing batch {}'.format(self.batch_num))
+                        #     print('<<controller>> executing batch {} for testing'.format(1))
+                        #     #don't have data to train, so, not training
+                        #     #generate new wellnames for next batch
+                        #     wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                        #     #plan and execute a reaction
+                        #     self._create_samples(wellnames_testing, recipe_unit_test)
+                        #     #pull in the scan data
+                        #     filenames_testing = self.rxn_df[
+                        #                 (self.rxn_df['op'] == 'scan') |
+                        #                 (self.rxn_df['op'] == 'scan_until_complete')
+                        #                 ].reset_index()
+                        #     #TODO filenames is empty. dunno why
+                        #     last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                        #     scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                        #     #scan_data = observance
+                        #     #We process scan_data to get lambda
+                        #     scan_Y_testing= scan_data_testing.T.to_numpy()
+                        #     print("Test scan ",scan_Y_testing)
+                        #     print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
+                        #     Y_testing= MaxWaveLength(scan_Y_testing[0])
+                        #     print("Y_testing",Y_testing)
+                        #     wavelengths_prediction_test.append(Y_testing)
+                        # if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
+                        #     print("The two recipes"+str(recipe_unit)+ "are similar")
+                        #     break
                     
 
                 #Robot_answer=wavelengths_prediction_test[0]
