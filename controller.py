@@ -38,6 +38,7 @@ import argparse
 import re
 import functools
 from datetime import datetime
+import sys
 
 from bidict import bidict
 import gspread
@@ -2223,7 +2224,7 @@ class AutoContr(Controller):
                 recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
                 print('recipe block',recipe_block)
                 #do the first one
-                print('<<controller>> executing batch {}'.format(self.batch_num))
+                # print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {}'.format(str(r+1)))
                 #don't have data to train, so, not training
                 #generate new wellnames for next batch
@@ -2310,8 +2311,8 @@ class AutoContr(Controller):
                         while len(wavelengths_for_recipe_1)<9:
                             # print("Which", index_for_l, len(wavelengths_for_recipe_1))
                             if len(wavelengths_for_recipe_1) == 8:
-                                break
-                                quit()
+                                sys.exit()
+
 
                             else:
                             
@@ -2738,7 +2739,8 @@ class AutoContr(Controller):
                 
                 elif r ==1:
 
-                    
+                    print("----Second initial recipes----")
+                    print(recipe2)
                     
                     wavelengths_for_recipe_2.append(maxWave_scan_1)
                     wavelengths_for_recipe_2.append(maxWave_scan_2)
@@ -2786,8 +2788,8 @@ class AutoContr(Controller):
                     else:
 
                         while len(wavelengths_for_recipe_2) <9:
-                            if index_for_l_2 == 8:
-                                quit()
+                            if len(wavelengths_for_recipe_2) == 8:
+                                sys.exit()
 
                             else:
                             
@@ -2811,12 +2813,13 @@ class AutoContr(Controller):
 
 
                                 scan_Y= scan_data.T.to_numpy()
-                                print("Scan When Distance is > 10", scan_Y)
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
 
                                 scan_Y_2_second = scan_Y[0]
                                 
 
-                                print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
                                 
 
                                 maxWave_scan_2_sec = MaxWaveLength(scan_Y_2_second)
@@ -2829,6 +2832,7 @@ class AutoContr(Controller):
                                 #Sort
 
                                 print("Comparing difference after 3 the 3 recipes")
+
                                 if len(wavelengths_for_recipe_2) == 4:
 
                                     wavelengths_for_recipe_2.sort()
@@ -2839,7 +2843,7 @@ class AutoContr(Controller):
                                     difference_1_4_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[3]
 
 
-                                    print("Difference 4 ")
+                                    print("Difference 4")
 
                                     
                                     if np.abs(difference_1_4_2) <= 20:
@@ -2895,7 +2899,7 @@ class AutoContr(Controller):
                                     difference_1_5_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[4]
 
 
-                                    print("Difference 5 ")
+                                    print("Difference 5")
 
                                     
                                     if np.abs(difference_1_5_2) <= 20:
@@ -2965,7 +2969,7 @@ class AutoContr(Controller):
                                     difference_1_6_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[5]
 
 
-                                    print("Difference 5 ")
+                                    print("Difference 6")
 
                                     
                                     if np.abs(difference_1_6_2) <= 20:
@@ -3042,7 +3046,7 @@ class AutoContr(Controller):
                                     difference_1_7_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[6]
 
 
-                                    print("Difference 5 ")
+                                    print("Difference 7")
 
                                     
                                     if np.abs(difference_1_7_2) <= 20:
@@ -3123,7 +3127,7 @@ class AutoContr(Controller):
                                     difference_1_8_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[7]
 
 
-                                    print("Difference 5 ")
+                                    print("Difference 8")
 
                                     
                                     if np.abs(difference_1_8_2) <= 20:
@@ -3203,12 +3207,15 @@ class AutoContr(Controller):
 
                 elif r ==2:
 
+                    print("----Third initial recipes----")
+                    print(recipe3)
+
                     wavelengths_for_recipe_3.append(maxWave_scan_1)
                     wavelengths_for_recipe_3.append(maxWave_scan_2)
                     wavelengths_for_recipe_3.append(maxWave_scan_3)
 
                     print("Making comparison")
-                    print("You have the following numbers:",wavelengths_for_recipe_2)
+                    print("You have the following numbers:",wavelengths_for_recipe_3)
 
                     #sort reduces complexity
 
@@ -3249,8 +3256,8 @@ class AutoContr(Controller):
                     else:
 
                         while len(wavelengths_for_recipe_3) <9:
-                            if index_for_l_3 == 8:
-                                quit()
+                            if len(wavelengths_for_recipe_3) == 8:
+                                sys.exit()
 
                             else:
                             
@@ -3274,12 +3281,12 @@ class AutoContr(Controller):
 
 
                                 scan_Y= scan_data.T.to_numpy()
-                                print("Scan When Distance is > 10", scan_Y)
-
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
                                 scan_Y_3_second = scan_Y[0]
                                 
 
-                                print("len rp1 sec",len(scan_Y_3_second),scan_Y_3_second)
+                                # print("len rp1 sec",len(scan_Y_3_second),scan_Y_3_second)
                                 
 
                                 maxWave_scan_3_sec = MaxWaveLength(scan_Y_3_second)
@@ -3358,7 +3365,7 @@ class AutoContr(Controller):
                                     difference_1_5_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[4]
 
 
-                                    print("Difference 4 ")
+                                    print("Difference 5")
 
                                     
                                     if np.abs(difference_1_5_3) <= 20:
@@ -3426,7 +3433,7 @@ class AutoContr(Controller):
                                     difference_1_6_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[5]
 
 
-                                    print("Difference 4 ")
+                                    print("Difference 6")
 
                                     
                                     if np.abs(difference_1_6_3) <= 20:
@@ -3505,7 +3512,7 @@ class AutoContr(Controller):
                                     difference_1_7_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[6]
 
 
-                                    print("Difference 7 ")
+                                    print("Difference 7")
 
                                     
                                     if np.abs(difference_1_7_3) <= 20:
