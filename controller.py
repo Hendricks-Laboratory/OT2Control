@@ -2198,8 +2198,14 @@ class AutoContr(Controller):
             print("----Breaking our initial recipes----")
             recipe1 = recipes[0][0:2]
             recipe2 = recipes[0][3:5]
+<<<<<<< HEAD
             recipe3 = recipes[0][6:8]
             print("RRRR",REC)
+=======
+            recipe3 = recipes[0][6:9]
+            print("RRR",recipe1)
+
+>>>>>>> 3e1e27e107688166eeb98c154442ac28d7341c06
             #we would get observance for each recipe:
             wavelengths=[]
             wavelengths_to_train =[]
@@ -2263,7 +2269,9 @@ class AutoContr(Controller):
                     
                 #Add to the list of wavelengths
                 if r== 0:
-                        
+                    print("----Third initial recipes----")
+                    print(recipe3)
+                    
                     wavelengths_for_recipe_1.append(maxWave_scan_1)
                     wavelengths_for_recipe_1.append(maxWave_scan_2)
                     wavelengths_for_recipe_1.append(maxWave_scan_3)
