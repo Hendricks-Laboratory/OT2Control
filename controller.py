@@ -166,7 +166,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         #if not no_sim:
         #    auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=parameters_trained,initial_recipes=ml_par_recipes)
         #else:
-        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=None,initial_recipes=None)
+        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=1,initial_recipes=None)
 
 
 class Controller(ABC):
@@ -2192,7 +2192,7 @@ class AutoContr(Controller):
         self.init_robot(simulate)
         
         if params == None:
-
+            print("Simulation----")
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
             print("----Breaking our initial recipes----")
@@ -3939,7 +3939,13 @@ class AutoContr(Controller):
             b_list=[]
             ##Training 
             #Receive data from robot
-            for r in range(5):
+            wavelengths_prediction_test=[]
+            wavelengths_progress_test=[]
+            wavelengths_to_test=[]
+            user_concentrations=[]
+            
+            
+            for r in range(8):
                 print("Epoch", r+1)
                 input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
@@ -3949,7 +3955,7 @@ class AutoContr(Controller):
                 ##Testing
 
                 testing_recipes = [user_concentration]
-                wavelengths_prediction_test=[]
+                
                 
                 # for r in range(len(testing_recipes[0])):
                 recipe_unit_test = np.array([[user_concentration]])
@@ -4005,67 +4011,189 @@ class AutoContr(Controller):
                 wavelengths_prediction_test.append(maxWave_scan_1_test)
                 wavelengths_prediction_test.append(maxWave_scan_2_test)
                 wavelengths_prediction_test.append(maxWave_scan_3_test)
+                ###     
+                wavelengths_progress_test.append(maxWave_scan_1_test)
+                wavelengths_progress_test.append(maxWave_scan_2_test)
+                wavelengths_progress_test.append(maxWave_scan_3_test)
 
+                user_concentrations.append(user_concentration)
 
-                wavelengths_for_recipe_3.sort()
-                #Agr
+                ###
+
+                wavelengths_prediction_test.sort()
+                
                 
 
-                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
-                    difference_1_3_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2]
-                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                difference_test_1_2 = wavelengths_prediction_test[0]-wavelengths_prediction_test[1]
+                difference_test_1_3 = wavelengths_prediction_test[0]-wavelengths_prediction_test[2]
+                difference_test_2_3 = wavelengths_prediction_test[1]-wavelengths_prediction_test[2]
+
+                if np.abs(difference_test_1_3) <= 600:
+
+
+                        if np.abs(difference_test_1_2) <= 600:
+                            print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_test.append(wavelengths_prediction_test[0])
+                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                            # # recipes_to_train.append(recipe1)
+                            # # recipes_to_train.append(recipe1)
+                            
+                        
+                        if np.abs(difference_test_2_3) <= 100:
+
+                            print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
+                            print("Passing to the other recipe")
+                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                            # recipes_to_train.append(recipe1)
+                            # recipes_to_train.append(recipe1)
+                        
+                        #CLEANING REPEATED DATA
+
+                        clean_list_test = []
+                        for i in wavelengths_prediction_test:
+                            if i not in clean_list_test:
+                                clean_list_test.append(i)
+                    
+                
+                else:
+
+                        while len(wavelengths_for_recipe_1)<6:
+                            # print("Which", index_for_l, len(wavelengths_for_recipe_1))
+                            if len(wavelengths_for_recipe_1) == 5:
+                                sys.exit()
+
+                            else:
+                                
+                                recipe_unit_test_rep = np.array([[user_concentration]])
+                                recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 2, axis=1)
+                                print("Recipes Test again",recipe_unit_test_rep)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_unit_test_rep)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y_test_rep= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_rep_1 = scan_Y_test_rep[0]
+                                scan_Y_rep_2 = scan_Y_test_rep[1]
+
+                                
+                                
+
+                                maxWave_scan_1_test_sec = MaxWaveLength(scan_Y_rep_1)
+                                maxWave_scan_2_test_sec = MaxWaveLength(scan_Y_rep_2)
+                                print("WaveL max 1"+". ", maxWave_scan_1_test_sec)
+                            
+
+                                wavelengths_prediction_test.append(maxWave_scan_1_test_sec)
+                                wavelengths_prediction_test.append(maxWave_scan_2_test_sec)
+
+                                wavelengths_progress_test.append(maxWave_scan_1_test_sec)
+                                wavelengths_progress_test.append(maxWave_scan_2_test_sec)
+
+                                user_concentrations.append(user_concentration)
+
+                                print("Waves",wavelengths_prediction_test)
+
+                                print("Comparing difference after 3 the 3 recipes")
+                                wavelengths_prediction_test.sort()
+                
+                
+
+                                difference_test_1_2 = wavelengths_prediction_test[0]-wavelengths_prediction_test[1]
+                                difference_test_2_3 = wavelengths_prediction_test[1]-wavelengths_prediction_test[2]
+                                difference_test_3_4 = wavelengths_prediction_test[2]-wavelengths_prediction_test[3]
+                                difference_test_4_5 = wavelengths_prediction_test[3]-wavelengths_prediction_test[4]
+                                difference_test_1_5 = wavelengths_prediction_test[0]-wavelengths_prediction_test[4]
+
+
+                                if np.abs(difference_test_1_5) <= 600:
+
+
+                                        if np.abs(difference_test_1_2) <= 600:
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[0])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                                            # # recipes_to_train.append(recipe1)
+                                            # # recipes_to_train.append(recipe1)
+                                            
+                                        
+                                        if np.abs(difference_test_2_3) <= 100:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_test_3_4) <= 100:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[2], wavelengths_prediction_test[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[3])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_test_4_5) <= 100:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[3], wavelengths_prediction_test[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[3])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[4])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_test = []
+                                        for i in wavelengths_prediction_test:
+                                            if i not in clean_list_test:
+                                                clean_list_test.append(i)
+                                    
+                                
+                                else:
+
+                                    print("No stable wavel")
+                                    
+ 
 
 
 
-                if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
-                        print("The two recipes"+str(recipe_unit)+ "are similar")
-                        break
+                
 
-                while True:    
-                    if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
-                        print("The two recipes"+str(recipe_unit)+ "are similar")
-                        break
-                    else:
-                        print("The two recipes"+str(recipe_unit)+ "are NOT similar")
-                        # print("keep creating")
-                        # for n in range(2):
-                        # #for r in range(len(testing_recipes[0])):
-                        #     recipe_unit_test = np.array([[user_concentration]])
-                        #     recipe_unit_test = np.repeat(recipe_unit_test, 2, axis=1)
-                        #     print("Recipes Test",recipe_unit_test)
-                        #     #do the first one
-                        #     #print('<<controller>> executing batch {}'.format(self.batch_num))
-                        #     print('<<controller>> executing batch {} for testing'.format(1))
-                        #     #don't have data to train, so, not training
-                        #     #generate new wellnames for next batch
-                        #     wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-                        #     #plan and execute a reaction
-                        #     self._create_samples(wellnames_testing, recipe_unit_test)
-                        #     #pull in the scan data
-                        #     filenames_testing = self.rxn_df[
-                        #                 (self.rxn_df['op'] == 'scan') |
-                        #                 (self.rxn_df['op'] == 'scan_until_complete')
-                        #                 ].reset_index()
-                        #     #TODO filenames is empty. dunno why
-                        #     last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-                        #     scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                        #     #scan_data = observance
-                        #     #We process scan_data to get lambda
-                        #     scan_Y_testing= scan_data_testing.T.to_numpy()
-                        #     print("Test scan ",scan_Y_testing)
-                        #     print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
-                        #     Y_testing= MaxWaveLength(scan_Y_testing[0])
-                        #     print("Y_testing",Y_testing)
-                        #     wavelengths_prediction_test.append(Y_testing)
-                        # if wavelengths_prediction_test[0] - wavelengths_prediction_test[1] < 10 and wavelengths_prediction_test[0] - wavelengths_prediction_test[1]>-10:
-                        #     print("The two recipes"+str(recipe_unit)+ "are similar")
-                        #     break
+                print("We get the following wavelengths",clean_list_test)
+                average_of_wave_test = sum(clean_list_test)/len(clean_list_test)
+                print("The average is ", average_of_wave_test)
+                
+                  
                     
 
                 #Robot_answer=wavelengths_prediction_test[0]
-                print("Y_TEST_ROBOT", Y_testing)
-                print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-                Robot_answer=Y_testing
+                #print("Y_TEST_ROBOT", Y_testing)
+                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+                Robot_answer=average_of_wave_test
 
                 print("Robot send back a wavelenght of", Robot_answer)
                 print("User input was ", input_user)
@@ -4089,336 +4217,1772 @@ class AutoContr(Controller):
                     break
                 else:
                     print("Model would try to reduce the error")
-                    if r == 9:
+                    if r == 8:
                         print("---->Done training<----")
                     else:
                         print("-----")
                     new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
-                r += 1
+                
+            fig_changhe_model= plt.figure(figsize=(8,8))
+            label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
+            color_names = ["red","green","blue"]
+            for t in range(len(recipes_plot)):
+                for u in range(len(waves_evol_plot[t])):
+                        print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                    
+            # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+            # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+            # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+            plt.scatter(user_concentrations,wavelengths_progress_test, color= "pink", label= "Model ",s=100)
+            plt.axhline(y=input_user-5,color='r', linestyle=':')
+            plt.axhline(y=input_user,color='r', linestyle='-')
+            plt.axhline(y=input_user+5,color='r', linestyle=':')
 
 
-
-
-
-
-            #model_trained = model._train(recipes, Y)
-            #time.sleep(1)
-            #print("Model Trained",model_trained)
-
-            #print("Predicting---")
-            #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
-            #print("params pr",model_params_trained)
-            # ml_predict= model.prediction(model_trained)
-            # prediction = ml_predict["prediction"]
-            # predictor_for_test= ml_predict["inputPredictor"]
-           
-            # print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
-
-            # print("Testing our prediction----")
-            # print("Running the predicted recipe on the robot")
-
-            # ##Testing
-
-            # testing_recipes = [prediction[0]]
-            # wavelengths_prediction_test=[]
-            # #for r in range(len(testing_recipes[0])):
-            # recipe_unit_test = np.array([testing_recipes[0]])
-            # #do the first one
-            # #print('<<controller>> executing batch {}'.format(self.batch_num))
-            # print('<<controller>> executing batch {} for testing'.format(1))
-            # #don't have data to train, so, not training
-            # #generate new wellnames for next batch
-            # wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-            # #plan and execute a reaction
-            # self._create_samples(wellnames_testing, recipe_unit_test)
-            # #pull in the scan data
-            # filenames_testing = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            # #TODO filenames is empty. dunno why
-            # last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-            # scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-            # #scan_data = observance
-            # #We process scan_data to get lambda
-            # scan_Y_testing= scan_data_testing.T.to_numpy()
-            # print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
-            # Y_testing= MaxWaveLength(scan_Y_testing[0])
-            # #print("len",len(Y),len(Y[0]))
-            # wavelengths_prediction_test.append(Y_testing)
-
-            # print("For prediction/test error:")
-            # print("We gave the wavelength:")
-            # print(predictor_for_test, " type:", type(predictor_for_test))
-            # print("Model returned the predicted concentration")
-            # # Y= np.array([wavelengths])
-            # print("The robot use the predicted concentration and get the following wavelenght")
-            # # print("recipe pass----")
-            # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
-
-            # print("The error for test in one epoch and one batch is")
-            # print()
-            ##if 
-
-            ##
-            # model_trained = model._train(recipes, Y)
-            # #time.sleep(1)
-            # print("Model Trained",model_trained)
-
-
-            ##Possible for Online ln.  
-            #this is different because we don't want to use untrained model to generate predictions
-            #recipes = model.generate_seed_rxns(1)
-
-
-            # self.batch_num += 1
+            plt.xlim(0.00001, 0.003)
+            plt.legend(loc="upper right")
+            fig_changhe_model.savefig('changeInWavesModel.png')
 
             print("Before entering to the while loop: scan_data",scan_data)        
-            #enter iterative while loop now that we have data
-            # while not model.quit:
-            #     model_trained= model.train(scan_data.T.to_numpy(),recipes)
-            #     print('<<controller>> executing batch {}'.format(self.batch_num))
-            #     #generate new wellnames for next batch
-            #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #     #plan and execute a reaction
-            #     self._create_samples(wellnames, recipes)
-            #     #pull in the scan data
-            #     filenames = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            #     scan_data = self._get_sample_data(wellnames, last_filename)
-            #     #generate the predictions for the next round
-            #     #recipes = model.predict()
-            #     ##
-
-            #     prediction = model.predict(model_trained)
-                
-            #     print(prediction)
-
-            #     print()
-            #     print("---")
-            #     print("Closing")
-            #     model.quit=True
-            #     ##test_error = 
-            #     ##
-            #     #threaded train on scans. Will run while the robot is generating new materials
-            #     self.batch_num += 1
+            
             self.close_connection()
             self.pr.shutdown()
             return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
         else:
-
-            # recipes = initial_recipes #number of recipes
-            # print("Our recipes generated on the simulation phase:",recipes)
-            # #we would get observance for each recipe:
-            # wavelengths=[]
-            # for r in range(len(recipes[0])):
-            #     recipe_unit = np.array([recipes[0][r]])
-            
-            #     #do the first one
-            #     #print('<<controller>> executing batch {}'.format(self.batch_num))
-            #     print('<<controller>> executing batch {}'.format(str(r+1)))
-            #     #don't have data to train, so, not training
-            #     #generate new wellnames for next batch
-            #     wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
-            #     #plan and execute a reaction
-            #     self._create_samples(wellnames, recipe_unit)
-            #     #pull in the scan data
-            #     filenames = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            #     #TODO filenames is empty. dunno why
-            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            #     scan_data = self._get_sample_data(wellnames, last_filename)
-                
-            #     #scan_data = observance
-            #     #We process scan_data to get lambda
-            #     scan_Y= scan_data.T.to_numpy()
-            #     print("len",len(scan_Y),len(scan_Y[0]))
-            #     Y= maxWaveLe(scan_Y[0])
-            #     #print("len",len(Y),len(Y[0]))
-            #     wavelengths.append(Y)
-
-            # print("Checking our input: wavelengths")
-            # print(wavelengths)
-            # true_wave= np.array([wavelengths])
-            # print("Our recipes generated on the simulation phase---")
-            # print(recipes)
-            # print("Simple prediction")
-            
-            # predicted_wave= simplePrediction(recipes,params["trained_theta"],params["trained_bias"])
-            # Error = predicted_wave - true_wave
-            # print("The error of the prediction and true label is", Error)
-            
-            # if np.abs(Error) < 0.5 :
-            #     print("We have an acc model")
-            #     self.close_connection()
-            #     self.pr.shutdown()
-            #     return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
-            
-            # else: 
-            #     print("Train again using penalizer")
-            #     self.close_connection()
-            #     self.pr.shutdown()
-            #     return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
-            
-            # recipes = model.generate_seed_rxns(3) #number of recipes
-            # print("Our initital recipes:",recipes)
-            # #we would get observance for each recipe:
-            # wavelengths=[]
-            # for r in range(len(recipes[0])):
-            #     recipe_unit = np.array([recipes[0][r]])
-            
-            #     #do the first one
-            #     #print('<<controller>> executing batch {}'.format(self.batch_num))
-            #     print('<<controller>> executing batch {}'.format(str(r+1)))
-            #     #don't have data to train, so, not training
-            #     #generate new wellnames for next batch
-            #     wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
-            #     #plan and execute a reaction
-            #     self._create_samples(wellnames, recipe_unit)
-            #     #pull in the scan data
-            #     filenames = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            #     #TODO filenames is empty. dunno why
-            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            #     scan_data = self._get_sample_data(wellnames, last_filename)
-                
-            #     #scan_data = observance
-            #     #We process scan_data to get lambda
-            #     scan_Y= scan_data.T.to_numpy()
-            #     print("len",len(scan_Y),len(scan_Y[0]))
-            #     Y= MaxWaveLength(scan_Y[0])
-            #     #print("len",len(Y),len(Y[0]))
-            #     wavelengths.append(Y)
-
-            # print("Checking our input: wavelengths")
-            # print(wavelengths)
-            # Y= np.array([wavelengths])
-            # print("recipes----")
-            # print(recipes)
-            # model_trained = model._train(recipes, Y)
-            # #time.sleep(1)
-            # print("Model Trained",model_trained)
-
-            # print("Predicting---")
-            # #model_params_trained= model._train(recipes, Y)["ParamsToUse"]
-            # #print("params pr",model_params_trained)
-            # ml_predict= model.prediction(model_trained)
-            # prediction = ml_predict["prediction"]
-            # predictor_for_test= ml_predict["inputPredictor"]
-           
-            # print("Controler/prediction of [concentration]| wavelenght /used ml", prediction)
-
-            # print("Testing our prediction----")
-            # print("Running the predicted recipe on the robot")
-
-            # ##Testing
-
-            # testing_recipes = [prediction[0]]
-            # wavelengths_prediction_test=[]
-            # #for r in range(len(testing_recipes[0])):
-            # recipe_unit_test = np.array([testing_recipes[0]])
-            # #do the first one
-            # #print('<<controller>> executing batch {}'.format(self.batch_num))
-            # print('<<controller>> executing batch {} for testing'.format(1))
-            # #don't have data to train, so, not training
-            # #generate new wellnames for next batch
-            # wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
-            # #plan and execute a reaction
-            # self._create_samples(wellnames_testing, recipe_unit_test)
-            # #pull in the scan data
-            # filenames_testing = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            # #TODO filenames is empty. dunno why
-            # last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
-            # scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-            # #scan_data = observance
-            # #We process scan_data to get lambda
-            # scan_Y_testing= scan_data_testing.T.to_numpy()
-            # print("len",len(scan_Y_testing),len(scan_Y_testing[0]))
-            # Y_testing= MaxWaveLength(scan_Y_testing[0])
-            # #print("len",len(Y),len(Y[0]))
-            # wavelengths_prediction_test.append(Y_testing)
-
-            # print("For prediction/test error:")
-            # print("We gave the wavelength:")
-            # print(predictor_for_test, " type:", type(predictor_for_test))
-            # print("Model returned the predicted concentration")
-            # # Y= np.array([wavelengths])
-            # print("The robot use the predicted concentration and get the following wavelenght")
-            # # print("recipe pass----")
-            # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
-
-            # print("The error for test in one epoch and one batch is")
-            # # print()
-            # ##if 
-
-            # ##
-            # # model_trained = model._train(recipes, Y)
-            # # #time.sleep(1)
-            # # print("Model Trained",model_trained)
-
-
-            # ##Possible for Online ln.  
-            # #this is different because we don't want to use untrained model to generate predictions
-            # #recipes = model.generate_seed_rxns(1)
-
-
-            # # self.batch_num += 1
-
-            # print("Before entering to the while loop: scan_data",scan_data) 
+            print("Robot----")
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
+            print("----Breaking our initial recipes----")
+            recipe1 = recipes[:][0:1][0]
+            recipe2 = recipes[:][3:4][0]
+            recipe3 = recipes[:][6:7][0]
+            # print("RRR",recipe1)
+            # print("RRR",recipe2)
+            # print("RRR",recipe3)
+
             #we would get observance for each recipe:
             wavelengths=[]
-            for r in range(len(recipes[0])):
-                recipe_unit = np.array([recipes[0][r]])
-            
+            wavelengths_to_train =[]
+            recipes_to_train = []
+
+            wavelengths_to_train_2 =[]
+            recipes_to_train_2 = []
+
+            wavelengths_to_train_3 =[]
+            recipes_to_train_3 = []
+
+            wavelengths_for_recipe_1 = []
+            wavelengths_for_recipe_2 = []
+            wavelengths_for_recipe_3 = []
+
+            waves_evol_1=[]
+            waves_evol_2=[]
+            waves_evol_3=[]
+
+            index_for_l=0
+            index_for_l_2=0
+            index_for_l_3=0
+            #passing FIRST recipe
+            # for r in range(len(recipes[0])):
+            for r in range(3):
+                number_rep_recip= 0
+                #generating 4 points in total
+                recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                print('recipe block',recipe_block)
                 #do the first one
-                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                # print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {}'.format(str(r+1)))
                 #don't have data to train, so, not training
                 #generate new wellnames for next batch
-                wellnames = [self._generate_wellname() for i in range(recipe_unit.shape[0])]
+                wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                print("Wellnames",wellnames)
                 #plan and execute a reaction
-                self._create_samples(wellnames, recipe_unit)
+                self._create_samples(wellnames, recipe_block)
                 #pull in the scan data
                 filenames = self.rxn_df[
-                        (self.rxn_df['op'] == 'scan') |
-                        (self.rxn_df['op'] == 'scan_until_complete')
-                        ].reset_index()
+                            (self.rxn_df['op'] == 'scan') |
+                            (self.rxn_df['op'] == 'scan_until_complete')
+                            ].reset_index()
                 #TODO filenames is empty. dunno why
                 last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
                 scan_data = self._get_sample_data(wellnames, last_filename)
-                
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y= scan_data.T.to_numpy()
-                # print("scan", scan_Y)
-                print("len",len(scan_Y),len(scan_Y[0]))
-                Y= MaxWaveLength(scan_Y[0])
-                print("wavel max ", Y)
-                #print("len",len(Y),len(Y[0]))
-                wavelengths.append(Y)
+                
+
+                scan_Y_1 = scan_Y[0]
+                scan_Y_2 = scan_Y[1]
+                scan_Y_3 = scan_Y[2]
+
+                #print("len rp1",len(scan_Y_1),scan_Y_1)
+                print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                maxWave_scan_1 = MaxWaveLength(scan_Y_1)
+                maxWave_scan_2 = MaxWaveLength(scan_Y_2)
+                maxWave_scan_3 = MaxWaveLength(scan_Y_3)
+                print("WaveL max 1"+". ", maxWave_scan_1)
+                print("WaveL max 2"+". ", maxWave_scan_2)
+                print("WaveL max 3"+". ", maxWave_scan_3)
+                
+                #
+                #Add to the list of wavelengths
+                if r== 0:
+                    print("----First initial recipes----")
+                    print(recipe1)
+                    
+                    wavelengths_for_recipe_1.append(maxWave_scan_1)
+                    wavelengths_for_recipe_1.append(maxWave_scan_2)
+                    wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                    waves_evol_1.append(maxWave_scan_1)
+                    waves_evol_1.append(maxWave_scan_2)
+                    waves_evol_1.append(maxWave_scan_3)
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_1)
+
+                    #sort reduces complexity
+
+                    wavelengths_for_recipe_1.sort()
+
+
+                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                    difference_1_3 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[2]
+                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+
+                    print("Difference (1,2), (1,3),(2,3) first wavelenght",difference_1_2,difference_1_3,difference_2_3)
+
+                    print(np.abs(difference_1_3) <= 400)
+                    print(np.abs(difference_1_3))
+                    if np.abs(difference_1_3) <= 20:
+
+
+                        if np.abs(difference_1_2) <= 10:
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                            recipes_to_train.append(recipe1)
+                            recipes_to_train.append(recipe1)
+                            
+                        
+                        if np.abs(difference_2_3) <= 10:
+
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                            recipes_to_train.append(recipe1)
+                            recipes_to_train.append(recipe1)
+                        
+                        #CLEANING REPEATED DATA
+
+                        clean_list_1 = []
+                        for i in wavelengths_for_recipe_1:
+                            if i not in clean_list_1:
+                                clean_list_1.append(i)
+                    
+                
+                    else:
+
+                        while len(wavelengths_for_recipe_1)<9:
+                            # print("Which", index_for_l, len(wavelengths_for_recipe_1))
+                            if len(wavelengths_for_recipe_1) == 8:
+                                sys.exit()
+
+
+                            else:
+                            
+                                recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_1_second = scan_Y[0]
+                                
+
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                
+
+                                maxWave_scan_1_sec = MaxWaveLength(scan_Y_1_second)
+                                
+                                print("WaveL max 1"+". ", maxWave_scan_1_sec)
+                            
+
+                                wavelengths_for_recipe_1.append(maxWave_scan_1_sec)
+                                waves_evol_1.append(maxWave_scan_1_sec)
+
+                                print("Waves",wavelengths_for_recipe_1)
+
+                                print("Comparing difference after 3 the 3 recipes")
+                                if len(wavelengths_for_recipe_1) == 4:
+
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
+
+                                    wavelengths_for_recipe_1.sort()
+                                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                                    difference_1_3 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[2]
+                                    difference_1_4 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[3]
+                                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+                                    difference_2_4 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[3]
+                                    difference_3_4 = wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3]
+
+                                    print("Difference (1,2), (1,3), (2,3), (1,4), (2,4), (3,4) first wavelenght ",difference_1_2,difference_1_3,difference_2_3 \
+                                        ,difference_1_4,difference_2_4,difference_3_4)
+
+                                    
+                                    if np.abs(difference_1_4) <= 20:
+
+                                        
+                                        if np.abs(difference_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append( wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        # if np.abs(difference_1_3) <= 10:
+
+                                        #     print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[2])
+                                        #     print("Passing to the other recipe")
+                                        #     wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[2])
+                                        #     recipes_to_train.append(recipe1, recipe1)
+
+                                        # if np.abs(difference_1_4) <= 10:
+
+                                        #     print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[3])
+                                        #     print("Passing to the other recipe")
+                                        #     wavelengths_to_train.append(wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[3])
+                                        #     recipes_to_train.append(recipe1, recipe1)
+                                            
+                                        if np.abs(difference_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        # if np.abs(difference_2_4) <= 10:
+
+                                        #     print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[3])
+                                        #     print("Passing to the other recipe")
+                                        #     wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[3])
+                                        #     recipes_to_train.append(recipe1, recipe1)
+
+                                        if np.abs(difference_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_1 = []
+                                        for i in wavelengths_for_recipe_1:
+                                            if i not in clean_list_1:
+                                                clean_list_1.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+
+
+                                if len(wavelengths_for_recipe_1) == 5:
+
+                                    wavelengths_for_recipe_1.sort()
+                                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+                                    difference_3_4 = wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3]
+                                    difference_4_5 = wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4]
+                                    difference_1_5 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[4]
+
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
+
+
+                                    
+                                    if np.abs(difference_1_5) <= 20:
+
+
+                                        if np.abs(difference_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        if np.abs(difference_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                            
+                                        if np.abs(difference_4_5) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        # if np.abs(difference_2_4) <= 10:
+
+                                        #     print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[3])
+                                        #     print("Passing to the other recipe")
+                                        #     wavelengths_to_train.append(wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[3])
+                                        #     recipes_to_train.append(recipe1, recipe1)
+
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_1 = []
+                                        for i in wavelengths_for_recipe_1:
+                                            if i not in clean_list_1:
+                                                clean_list_1.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l+=1
+
+                                
+                                if len(wavelengths_for_recipe_1) == 6:
+
+                                    wavelengths_for_recipe_1.sort()
+                                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+                                    difference_3_4 = wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3]
+                                    difference_4_5 = wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4]
+                                    difference_5_6 = wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[5]
+
+                                    difference_1_6 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[5]
+
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes")
+
+
+                                    
+                                    if np.abs(difference_1_6) <= 20:
+
+
+                                        if np.abs(difference_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        if np.abs(difference_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                            
+                                        if np.abs(difference_4_5) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        
+                                        if np.abs(difference_5_6) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_1 = []
+                                        for i in wavelengths_for_recipe_1:
+                                            if i not in clean_list_1:
+                                                clean_list_1.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l+=1
+
+                                if len(wavelengths_for_recipe_1) == 7:
+
+                                    wavelengths_for_recipe_1.sort()
+                                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+                                    difference_3_4 = wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3]
+                                    difference_4_5 = wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4]
+                                    difference_5_6 = wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[5]
+                                    difference_6_7 = wavelengths_for_recipe_1[5]-wavelengths_for_recipe_1[6]
+
+                                    difference_1_7 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[6]
+
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes",)
+
+
+                                    
+                                    if np.abs(difference_1_7) <= 20:
+
+
+                                        if np.abs(difference_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        if np.abs(difference_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                            
+                                        if np.abs(difference_4_5) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_5_6) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_6_7) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+        
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_1 = []
+                                        for i in wavelengths_for_recipe_1:
+                                            if i not in clean_list_1:
+                                                clean_list_1.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l+=1
+
+                                    
+                                if len(wavelengths_for_recipe_1) == 8:
+
+                                    wavelengths_for_recipe_1.sort()
+                                    difference_1_2 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[1]
+                                    difference_2_3 = wavelengths_for_recipe_1[1]-wavelengths_for_recipe_1[2]
+                                    difference_3_4 = wavelengths_for_recipe_1[2]-wavelengths_for_recipe_1[3]
+                                    difference_4_5 = wavelengths_for_recipe_1[3]-wavelengths_for_recipe_1[4]
+                                    difference_5_6 = wavelengths_for_recipe_1[4]-wavelengths_for_recipe_1[5]
+                                    difference_6_7 = wavelengths_for_recipe_1[5]-wavelengths_for_recipe_1[6]
+                                    difference_7_8 = wavelengths_for_recipe_1[6]-wavelengths_for_recipe_1[7]
+
+                                    difference_1_8 = wavelengths_for_recipe_1[0]-wavelengths_for_recipe_1[7]
+
+                                    print("Difference in ", len(wavelengths_for_recipe_1)," recipes",)
+
+
+                                    
+                                    if np.abs(difference_1_8) <= 20:
+
+
+                                        if np.abs(difference_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[0], wavelengths_for_recipe_1[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[0])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[1], wavelengths_for_recipe_1[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[1])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        if np.abs(difference_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[2], wavelengths_for_recipe_1[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[2])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                            
+                                        if np.abs(difference_4_5) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[3], wavelengths_for_recipe_1[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[3])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_5_6) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[4], wavelengths_for_recipe_1[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[4])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_6_7) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[5], wavelengths_for_recipe_1[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[5])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+
+                                        if np.abs(difference_7_8) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_1[6], wavelengths_for_recipe_1[7])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[6])
+                                            wavelengths_to_train.append(wavelengths_for_recipe_1[7])
+                                            recipes_to_train.append(recipe1)
+                                            recipes_to_train.append(recipe1)
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_1 = []
+                                        for i in wavelengths_for_recipe_1:
+                                            if i not in clean_list_1:
+                                                clean_list_1.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("This is the last creation of recipes")
+                                        print("The program would stop")
+                                        #print("Creating another instance of the same recipe")
+                                        index_for_l+=1
+
+
+                
+                elif r ==1:
+
+                    print("----Second initial recipes----")
+                    print(recipe2)
+                    
+                    wavelengths_for_recipe_2.append(maxWave_scan_1)
+                    wavelengths_for_recipe_2.append(maxWave_scan_2)
+                    wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                    waves_evol_2.append(maxWave_scan_2)
+                    waves_evol_2.append(maxWave_scan_2)
+                    waves_evol_2.append(maxWave_scan_3)
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_2)
+
+                    #sort reduces complexity
+
+                    wavelengths_for_recipe_2.sort()
+
+
+                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                    difference_1_3_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[2]
+                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+
+                    print("Difference (1,2), (1,3),(2,3) first wavelenght",difference_1_2_2,difference_1_3_2,difference_2_3_2)
+
+
+                    if np.abs(difference_1_3_2) <= 20:
+
+
+                        if np.abs(difference_1_2_2) <= 10:
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0])
+                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                            recipes_to_train_2.append(recipe2)
+                            recipes_to_train_2.append(recipe2)
+                        
+                        if np.abs(difference_2_3_2) <= 10:
+
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                            recipes_to_train_2.append(recipe2)
+                            recipes_to_train_2.append(recipe2)
+                        
+                        #CLEANING REPEATED DATA
+
+                        clean_list_2 = []
+                        for i in wavelengths_for_recipe_2:
+                            if i not in clean_list_1:
+                                clean_list_2.append(i)
+                    
+                
+                    else:
+
+                        while len(wavelengths_for_recipe_2) <9:
+                            if len(wavelengths_for_recipe_2) == 8:
+                                sys.exit()
+
+                            else:
+                            
+                                recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_2_second = scan_Y[0]
+                                
+
+                                # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                
+
+                                maxWave_scan_2_sec = MaxWaveLength(scan_Y_2_second)
+                                
+                                print("WaveL max 1"+". ", maxWave_scan_2_sec)
+                            
+
+                                wavelengths_for_recipe_2.append(maxWave_scan_2_sec)
+                                waves_evol_2.append(maxWave_scan_2_sec)
+
+                                #Sort
+
+                                print("Comparing difference after 3 the 3 recipes")
+
+                                if len(wavelengths_for_recipe_2) == 4:
+
+                                    wavelengths_for_recipe_2.sort()
+                                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+                                    difference_3_4_2 = wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3]
+
+                                    difference_1_4_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[3]
+
+
+                                    print("Difference 4")
+
+                                    
+                                    if np.abs(difference_1_4_2) <= 20:
+
+
+                                        if np.abs(difference_1_2_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                            
+                                        if np.abs(difference_2_3_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[1], wavelengths_for_recipe_2[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+                                        if np.abs(difference_3_4_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[2], wavelengths_for_recipe_2[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_2 = []
+                                        for i in wavelengths_for_recipe_2:
+                                            if i not in clean_list_2:
+                                                clean_list_2.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_2 += 1
+
+
+                                if len(wavelengths_for_recipe_2) == 5:
+
+                                    wavelengths_for_recipe_2.sort()
+                                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+                                    difference_3_4_2 = wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3]
+                                    difference_4_5_2 = wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4]
+
+                                    difference_1_5_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[4]
+
+
+                                    print("Difference 5")
+
+                                    
+                                    if np.abs(difference_1_5_2) <= 20:
+
+
+                                        if np.abs(difference_1_2_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                            
+                                        if np.abs(difference_2_3_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[1], wavelengths_for_recipe_2[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+                                        if np.abs(difference_3_4_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[2], wavelengths_for_recipe_2[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_4_5_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[3], wavelengths_for_recipe_2[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+
+
+
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_2 = []
+                                        for i in wavelengths_for_recipe_2:
+                                            if i not in clean_list_2:
+                                                clean_list_2.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_2 += 1
+
+
+                                
+                                if len(wavelengths_for_recipe_2) == 6:
+
+
+                                    wavelengths_for_recipe_2.sort()
+                                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+                                    difference_3_4_2 = wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3]
+                                    difference_4_5_2 = wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4]
+                                    difference_5_6_2 = wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[5]
+
+                                    difference_1_6_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[5]
+
+
+                                    print("Difference 6")
+
+                                    
+                                    if np.abs(difference_1_6_2) <= 20:
+
+
+                                        if np.abs(difference_1_2_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                            
+                                        if np.abs(difference_2_3_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[1], wavelengths_for_recipe_2[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+                                        if np.abs(difference_3_4_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[2], wavelengths_for_recipe_2[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_4_5_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[3], wavelengths_for_recipe_2[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+                                        if np.abs(difference_5_6_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[4], wavelengths_for_recipe_2[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[5])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+
+
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_2 = []
+                                        for i in wavelengths_for_recipe_2:
+                                            if i not in clean_list_2:
+                                                clean_list_2.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_2 += 1
+
+
+
+                                if len(wavelengths_for_recipe_2) == 7:
+
+
+                                    wavelengths_for_recipe_2.sort()
+                                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+                                    difference_3_4_2 = wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3]
+                                    difference_4_5_2 = wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4]
+                                    difference_5_6_2 = wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[5]
+                                    difference_6_7_2 = wavelengths_for_recipe_2[5]-wavelengths_for_recipe_2[6]
+
+                                    difference_1_7_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[6]
+
+
+                                    print("Difference 7")
+
+                                    
+                                    if np.abs(difference_1_7_2) <= 20:
+
+
+                                        if np.abs(difference_1_2_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                            
+                                        if np.abs(difference_2_3_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[1], wavelengths_for_recipe_2[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+                                        if np.abs(difference_3_4_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[2], wavelengths_for_recipe_2[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_4_5_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[3], wavelengths_for_recipe_2[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+                                        if np.abs(difference_5_6_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[4], wavelengths_for_recipe_2[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[5])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_6_7_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[5], wavelengths_for_recipe_2[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[5])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[6])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+
+
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_2 = []
+                                        for i in wavelengths_for_recipe_2:
+                                            if i not in clean_list_2:
+                                                clean_list_2.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_2 += 1
+                                    
+                                if len(wavelengths_for_recipe_2) == 8:
+
+                                    wavelengths_for_recipe_2.sort()
+                                    difference_1_2_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[1]
+                                    difference_2_3_2 = wavelengths_for_recipe_2[1]-wavelengths_for_recipe_2[2]
+                                    difference_3_4_2 = wavelengths_for_recipe_2[2]-wavelengths_for_recipe_2[3]
+                                    difference_4_5_2 = wavelengths_for_recipe_2[3]-wavelengths_for_recipe_2[4]
+                                    difference_5_6_2 = wavelengths_for_recipe_2[4]-wavelengths_for_recipe_2[5]
+                                    difference_6_7_2 = wavelengths_for_recipe_2[5]-wavelengths_for_recipe_2[6]
+                                    difference_7_8_2 = wavelengths_for_recipe_2[6]-wavelengths_for_recipe_2[7]
+
+                                    difference_1_8_2 = wavelengths_for_recipe_2[0]-wavelengths_for_recipe_2[7]
+
+
+                                    print("Difference 8")
+
+                                    
+                                    if np.abs(difference_1_8_2) <= 20:
+
+
+                                        if np.abs(difference_1_2_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[0], wavelengths_for_recipe_2[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[0])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                            
+                                        if np.abs(difference_2_3_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[1], wavelengths_for_recipe_2[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[1])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+
+                                        if np.abs(difference_3_4_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[2], wavelengths_for_recipe_2[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[2])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_4_5_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[3], wavelengths_for_recipe_2[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[3])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+                                        if np.abs(difference_5_6_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[4], wavelengths_for_recipe_2[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[4])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[5])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+                                        
+                                        if np.abs(difference_6_7_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[5], wavelengths_for_recipe_2[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[5])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[6])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+                                        if np.abs(difference_7_8_2) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_2[6], wavelengths_for_recipe_2[7])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[6])
+                                            wavelengths_to_train_2.append(wavelengths_for_recipe_2[7])
+                                            recipes_to_train_2.append(recipe2)
+                                            recipes_to_train_2.append(recipe2)
+
+
+
+
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_2 = []
+                                        for i in wavelengths_for_recipe_2:
+                                            if i not in clean_list_2:
+                                                clean_list_2.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("This is the last creation of recipes")
+                                        print("The program would stop")
+                                        index_for_l_2 += 1
+
+
+
+                elif r ==2:
+
+                    print("----Third initial recipes----")
+                    print(recipe3)
+
+                    wavelengths_for_recipe_3.append(maxWave_scan_1)
+                    wavelengths_for_recipe_3.append(maxWave_scan_2)
+                    wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+                    waves_evol_3.append(maxWave_scan_1)
+                    waves_evol_3.append(maxWave_scan_2)
+                    waves_evol_3.append(maxWave_scan_3)
+
+                    print("Making comparison")
+                    print("You have the following numbers:",wavelengths_for_recipe_3)
+
+                    #sort reduces complexity
+
+                    wavelengths_for_recipe_3.sort()
+
+
+                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                    difference_1_3_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[2]
+                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+
+                    print("Difference (1,2), (1,3),(2,3) first wavelenght",difference_1_2_3,difference_1_3_3,difference_2_3_3)
+
+
+                    if np.abs(difference_1_3_3) <= 20:
+
+
+                        if np.abs(difference_1_2_3) <= 10:
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                            recipes_to_train_3.append(recipe3)
+                            recipes_to_train_3.append(recipe3)
+
+                        
+                        if np.abs(difference_2_3_3) <= 10:
+
+                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                            recipes_to_train_3.append(recipe3)
+                            recipes_to_train_3.append(recipe3)
+                        
+                        #CLEANING REPEATED DATA
+
+                        clean_list_3 = []
+                        for i in wavelengths_for_recipe_3:
+                            if i not in clean_list_1:
+                                clean_list_3.append(i)
+                    
+                
+                    else:
+
+                        while len(wavelengths_for_recipe_3) <9:
+                            if len(wavelengths_for_recipe_3) == 8:
+                                sys.exit()
+
+                            else:
+                            
+                                recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+                                scan_Y_3_second = scan_Y[0]
+                                
+
+                                # print("len rp1 sec",len(scan_Y_3_second),scan_Y_3_second)
+                                
+
+                                maxWave_scan_3_sec = MaxWaveLength(scan_Y_3_second)
+                                
+                                print("WaveL max 1"+". ", maxWave_scan_3_sec)
+                            
+
+                                wavelengths_for_recipe_3.append(maxWave_scan_3_sec)
+                                waves_evol_3.append(maxWave_scan_3_sec)
+
+                                #Sort
+
+                                print("Comparing difference after 3 the 3 recipes")
+                                if len(wavelengths_for_recipe_3) == 4:
+
+                                    wavelengths_for_recipe_3.sort()
+                                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                                    difference_3_4_3 = wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3]
+
+                                    difference_1_4_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[3]
+
+
+                                    print("Difference 4 ")
+
+                                    
+                                    if np.abs(difference_1_4_3) <= 20:
+
+
+                                        if np.abs(difference_1_2_3) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                            
+                                        if np.abs(difference_2_3_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[1], wavelengths_for_recipe_3[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+
+                                        if np.abs(difference_3_4_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[2], wavelengths_for_recipe_3[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_3 = []
+                                        for i in wavelengths_for_recipe_3:
+                                            if i not in clean_list_3:
+                                                clean_list_3.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_3 += 1
+
+
+                                if len(wavelengths_for_recipe_3) == 5:
+
+                                    wavelengths_for_recipe_3.sort()
+                                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                                    difference_3_4_3 = wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3]
+                                    difference_4_5_3 = wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4]
+
+                                    difference_1_5_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[4]
+
+
+                                    print("Difference 5")
+
+                                    
+                                    if np.abs(difference_1_5_3) <= 20:
+
+
+                                        if np.abs(difference_1_2_3) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                            
+                                        if np.abs(difference_2_3_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[1], wavelengths_for_recipe_3[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+
+                                        if np.abs(difference_3_4_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[2], wavelengths_for_recipe_3[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_4_5_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[3], wavelengths_for_recipe_3[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_3 = []
+                                        for i in wavelengths_for_recipe_3:
+                                            if i not in clean_list_3:
+                                                clean_list_3.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_3 += 1
+                                        
+                                        
+
+
+                                
+                                if len(wavelengths_for_recipe_3) == 6:
+
+
+                                    wavelengths_for_recipe_3.sort()
+                                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                                    difference_3_4_3 = wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3]
+                                    difference_4_5_3 = wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4]
+                                    difference_5_6_3 = wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[5]
+
+                                    difference_1_6_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[5]
+
+
+                                    print("Difference 6")
+
+                                    
+                                    if np.abs(difference_1_6_3) <= 20:
+
+
+                                        if np.abs(difference_1_2_3) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                            
+                                        if np.abs(difference_2_3_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[1], wavelengths_for_recipe_3[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+
+                                        if np.abs(difference_3_4_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[2], wavelengths_for_recipe_3[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_4_5_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[3], wavelengths_for_recipe_3[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+
+                                        if np.abs(difference_5_6_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[4], wavelengths_for_recipe_3[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[5])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_3 = []
+                                        for i in wavelengths_for_recipe_3:
+                                            if i not in clean_list_3:
+                                                clean_list_3.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_3 += 1
+                                        
+
+
+
+                                if len(wavelengths_for_recipe_3) == 7:
+
+
+                                    
+
+                                    wavelengths_for_recipe_3.sort()
+                                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                                    difference_3_4_3 = wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3]
+                                    difference_4_5_3 = wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4]
+                                    difference_5_6_3 = wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[5]
+                                    difference_6_7_3 = wavelengths_for_recipe_3[5]-wavelengths_for_recipe_3[6]
+
+                                    difference_1_7_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[6]
+
+
+                                    print("Difference 7")
+
+                                    
+                                    if np.abs(difference_1_7_3) <= 20:
+
+
+                                        if np.abs(difference_1_2_3) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                            
+                                        if np.abs(difference_2_3_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[1], wavelengths_for_recipe_3[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+
+                                        if np.abs(difference_3_4_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[2], wavelengths_for_recipe_3[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_4_5_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[3], wavelengths_for_recipe_3[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+
+                                        if np.abs(difference_5_6_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[4], wavelengths_for_recipe_3[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[5])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_6_7_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[5], wavelengths_for_recipe_3[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[5])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[6])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_3 = []
+                                        for i in wavelengths_for_recipe_3:
+                                            if i not in clean_list_3:
+                                                clean_list_3.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("Creating another instance of the same recipe")
+                                        index_for_l_3 += 1
+
+                                    
+                                if len(wavelengths_for_recipe_3) == 8:
+
+
+                            
+                                    wavelengths_for_recipe_3.sort()
+                                    difference_1_2_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[1]
+                                    difference_2_3_3 = wavelengths_for_recipe_3[1]-wavelengths_for_recipe_3[2]
+                                    difference_3_4_3 = wavelengths_for_recipe_3[2]-wavelengths_for_recipe_3[3]
+                                    difference_4_5_3 = wavelengths_for_recipe_3[3]-wavelengths_for_recipe_3[4]
+                                    difference_5_6_3 = wavelengths_for_recipe_3[4]-wavelengths_for_recipe_3[5]
+                                    difference_6_7_3 = wavelengths_for_recipe_3[5]-wavelengths_for_recipe_3[6]
+                                    difference_7_8_3 = wavelengths_for_recipe_3[6]-wavelengths_for_recipe_3[7]
+
+                                    difference_1_8_3 = wavelengths_for_recipe_3[0]-wavelengths_for_recipe_3[7]
+
+
+                                    print("Difference 8")
+
+                                    
+                                    if np.abs(difference_1_8_3) <= 20:
+
+
+                                        if np.abs(difference_1_2_3) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[0], wavelengths_for_recipe_3[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[0])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                            
+                                        if np.abs(difference_2_3_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[1], wavelengths_for_recipe_3[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[1])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+
+                                        if np.abs(difference_3_4_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[2], wavelengths_for_recipe_3[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[2])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_4_5_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[3], wavelengths_for_recipe_3[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[3])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+
+                                        if np.abs(difference_5_6_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[4], wavelengths_for_recipe_3[5])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[4])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[5])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_6_7_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[5], wavelengths_for_recipe_3[6])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[5])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[6])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                        if np.abs(difference_7_8_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_for_recipe_3[6], wavelengths_for_recipe_3[7])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[6])
+                                            wavelengths_to_train_3.append(wavelengths_for_recipe_3[7])
+                                            recipes_to_train_3.append(recipe3)
+                                            recipes_to_train_3.append(recipe3)
+                                        
+                                    
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_3 = []
+                                        for i in wavelengths_for_recipe_3:
+                                            if i not in clean_list_3:
+                                                clean_list_3.append(i)
+
+                                        print("There is no difference greater than 10")
+                                        print("Passing to the other recipe")
+                                        break
+
+                                    else:
+                                        print("The differences are greater than 10")
+                                        print("This is the last creation of recipes")
+                                        print("The program would stop")
+                                        index_for_l_3 += 1
+
+
+
 
             print("Checking our input: wavelengths")
-            print(wavelengths)
-            Y= np.array([wavelengths])
+            print("wavelength 1",wavelengths_for_recipe_1)
+            print("wavelength 3",wavelengths_for_recipe_2)
+            print("wavelength 3",wavelengths_for_recipe_3)
+            print("Waves pass 1", clean_list_1)
+            print("Waves pass 2", clean_list_2)
+            print("Waves pass ", clean_list_3)
+            total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+            total_waves=  clean_list_1+clean_list_2+clean_list_3
+            recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+            print("Plot change",type(recipes_plot),recipes_plot)
+            waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
+            print(type(waves_evol_plot),waves_evol_plot)
+            print(waves_evol_plot[0])
+            print(recipes_to_train_3)
+            #Ploting change
+
+            fig_changhe=plt.figure(figsize=(8,8))
+            label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
+            color_names = ["red","green","blue"]
+            for t in range(len(recipes_plot)):
+                for u in range(len(waves_evol_plot[t])):
+                        print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                    
+            # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+            # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+            # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+            plt.xlim(0.00001, 0.003)
+            plt.legend(loc="upper right")
+            fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
+            print("Wav ori", total_waves_2)
+            # print("Waves evol", )
+            print("Wav nw Final",total_waves)
+            # Y= np.array([wavelengths])
+            Y= np.array([total_waves])
             print("recipes----")
             print(recipes)
 
+            recipes_1_out = np.repeat(np.array([recipe1]), len(clean_list_1), axis=0)
+            recipes_2_out = np.repeat(np.array([recipe2]), len(clean_list_2), axis=0)
+            recipes_3_out = np.repeat(np.array([recipe3]), len(clean_list_3), axis=0)
+
+            #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+            # print("our recipes", recipes)
+            final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
             #passing to list
-            X_df = [recipes[0][r] for r in range(len(recipes[0]))]
+            print("Final recipes", final_recipes)
+            print("Final Y",Y)
+            X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
             Y_df = [Y[0][m] for m in range(len(Y[0]))]
             #Checking that they are list Y_df
             print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
@@ -4435,7 +5999,13 @@ class AutoContr(Controller):
             b_list=[]
             ##Training 
             #Receive data from robot
-            for r in range(5):
+            wavelengths_prediction_test=[]
+            wavelengths_progress_test=[]
+            wavelengths_to_test=[]
+            user_concentrations=[]
+            
+            
+            for r in range(8):
                 print("Epoch", r+1)
                 input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)
                 W_list.append(W)
@@ -4445,9 +6015,12 @@ class AutoContr(Controller):
                 ##Testing
 
                 testing_recipes = [user_concentration]
-                wavelengths_prediction_test=[]
-                #for r in range(len(testing_recipes[0])):
-                recipe_unit_test = np.array([user_concentration])
+                
+                
+                # for r in range(len(testing_recipes[0])):
+                recipe_unit_test = np.array([[user_concentration]])
+                recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=1)
+                print("Recipes Test",recipe_unit_test)
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -4458,34 +6031,229 @@ class AutoContr(Controller):
                 self._create_samples(wellnames_testing, recipe_unit_test)
                 #pull in the scan data
                 filenames_testing = self.rxn_df[
-                            (self.rxn_df['op'] == 'scan') |
-                            (self.rxn_df['op'] == 'scan_until_complete')
-                            ].reset_index()
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
                 #TODO filenames is empty. dunno why
                 last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
                 scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
                 #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
-                print("Test scan ",scan_Y_testing)
-                print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
-                Y_testing= MaxWaveLength(scan_Y_testing[0])
-                print("Y_testing",Y_testing)
-                wavelengths_prediction_test.append(Y_testing)
 
-                # print("For prediction/test error:")
-                # print("We gave the wavelength:")
-                # print(predictor_for_test, " type:", type(predictor_for_test))
-                # print("Model returned the predicted concentration")
-                # # Y= np.array([wavelengths])
-                # print("The robot use the predicted concentration and get the following wavelenght")
-                # # print("recipe pass----")
-                # print(wavelengths_prediction_test, "type:", type(wavelengths_prediction_test))
 
-                # print("The error for test in one epoch and one batch is")
+
+                # print("Test scan ",scan_Y_testing)
+                # print("len test scan",len(scan_Y_testing),len(scan_Y_testing[0]))
+                # Y_testing= MaxWaveLength(scan_Y_testing[0])
+                # print("Y_testing",Y_testing)
+                # wavelengths_prediction_test.append(Y_testing)
+
+
+                scan_Y_testing= scan_data.T.to_numpy()
+                
+
+                scan_Y_1_test = scan_Y_testing[0]
+                scan_Y_2_test = scan_Y_testing[1]
+                scan_Y_3_test = scan_Y_testing[2]
+
+                #print("len rp1",len(scan_Y_1),scan_Y_1)
+                # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                maxWave_scan_1_test = MaxWaveLength(scan_Y_1_test)
+                maxWave_scan_2_test = MaxWaveLength(scan_Y_2_test)
+                maxWave_scan_3_test = MaxWaveLength(scan_Y_3_test)
+                print("WaveL max 1 Test"+". ", maxWave_scan_1_test)
+                print("WaveL max 2 Test"+". ", maxWave_scan_2_test)
+                print("WaveL max 3 Test"+". ", maxWave_scan_3_test)
+
+                wavelengths_prediction_test.append(maxWave_scan_1_test)
+                wavelengths_prediction_test.append(maxWave_scan_2_test)
+                wavelengths_prediction_test.append(maxWave_scan_3_test)
+                ###     
+                wavelengths_progress_test.append(maxWave_scan_1_test)
+                wavelengths_progress_test.append(maxWave_scan_2_test)
+                wavelengths_progress_test.append(maxWave_scan_3_test)
+
+                user_concentrations.append(user_concentration)
+
+                ###
+
+                wavelengths_prediction_test.sort()
+                
+                
+
+                difference_test_1_2 = wavelengths_prediction_test[0]-wavelengths_prediction_test[1]
+                difference_test_1_3 = wavelengths_prediction_test[0]-wavelengths_prediction_test[2]
+                difference_test_2_3 = wavelengths_prediction_test[1]-wavelengths_prediction_test[2]
+
+                if np.abs(difference_test_1_3) <= 20:
+
+
+                        if np.abs(difference_test_1_2) <= 10:
+                            print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
+                            print("Passing to the other recipe")
+                            wavelengths_to_test.append(wavelengths_prediction_test[0])
+                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                            # # recipes_to_train.append(recipe1)
+                            # # recipes_to_train.append(recipe1)
+                            
+                        
+                        if np.abs(difference_test_2_3) <= 10:
+
+                            print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
+                            print("Passing to the other recipe")
+                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                            # recipes_to_train.append(recipe1)
+                            # recipes_to_train.append(recipe1)
+                        
+                        #CLEANING REPEATED DATA
+
+                        clean_list_test = []
+                        for i in wavelengths_prediction_test:
+                            if i not in clean_list_test:
+                                clean_list_test.append(i)
+                    
+                
+                else:
+
+                        while len(wavelengths_for_recipe_1)<6:
+                            # print("Which", index_for_l, len(wavelengths_for_recipe_1))
+                            if len(wavelengths_for_recipe_1) == 5:
+                                sys.exit()
+
+                            else:
+                                
+                                recipe_unit_test_rep = np.array([[user_concentration]])
+                                recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 2, axis=1)
+                                print("Recipes Test again",recipe_unit_test_rep)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_unit_test_rep)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y_test_rep= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_rep_1 = scan_Y_test_rep[0]
+                                scan_Y_rep_2 = scan_Y_test_rep[1]
+
+                                
+                                
+
+                                maxWave_scan_1_test_sec = MaxWaveLength(scan_Y_rep_1)
+                                maxWave_scan_2_test_sec = MaxWaveLength(scan_Y_rep_2)
+                                print("WaveL max 1"+". ", maxWave_scan_1_test_sec)
+                            
+
+                                wavelengths_prediction_test.append(maxWave_scan_1_test_sec)
+                                wavelengths_prediction_test.append(maxWave_scan_2_test_sec)
+
+                                wavelengths_progress_test.append(maxWave_scan_1_test_sec)
+                                wavelengths_progress_test.append(maxWave_scan_2_test_sec)
+
+                                user_concentrations.append(user_concentration)
+
+                                print("Waves",wavelengths_prediction_test)
+
+                                print("Comparing difference after 3 the 3 recipes")
+                                wavelengths_prediction_test.sort()
+                
+                
+
+                                difference_test_1_2 = wavelengths_prediction_test[0]-wavelengths_prediction_test[1]
+                                difference_test_2_3 = wavelengths_prediction_test[1]-wavelengths_prediction_test[2]
+                                difference_test_3_4 = wavelengths_prediction_test[2]-wavelengths_prediction_test[3]
+                                difference_test_4_5 = wavelengths_prediction_test[3]-wavelengths_prediction_test[4]
+                                difference_test_1_5 = wavelengths_prediction_test[0]-wavelengths_prediction_test[4]
+
+
+                                if np.abs(difference_test_1_5) <= 20:
+
+
+                                        if np.abs(difference_test_1_2) <= 10:
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[0], wavelengths_prediction_test[1])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[0])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                                            # # recipes_to_train.append(recipe1)
+                                            # # recipes_to_train.append(recipe1)
+                                            
+                                        
+                                        if np.abs(difference_test_2_3) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[1], wavelengths_prediction_test[2])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[1])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_test_3_4) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[2], wavelengths_prediction_test[3])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[2])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[3])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        if np.abs(difference_test_4_5) <= 10:
+
+                                            print("There is no difference greater than 10 ", wavelengths_prediction_test[3], wavelengths_prediction_test[4])
+                                            print("Passing to the other recipe")
+                                            wavelengths_to_test.append(wavelengths_prediction_test[3])
+                                            wavelengths_to_test.append(wavelengths_prediction_test[4])
+                                            # recipes_to_train.append(recipe1)
+                                            # recipes_to_train.append(recipe1)
+                                        
+                                        
+                                        #CLEANING REPEATED DATA
+
+                                        clean_list_test = []
+                                        for i in wavelengths_prediction_test:
+                                            if i not in clean_list_test:
+                                                clean_list_test.append(i)
+                                    
+                                
+                                else:
+
+                                    print("No stable wavel")
+                                    
+ 
+
+
+
+                
+
+                print("We get the following wavelengths",clean_list_test)
+                average_of_wave_test = sum(clean_list_test)/len(clean_list_test)
+                print("The average is ", average_of_wave_test)
+                
+                  
+                    
 
                 #Robot_answer=wavelengths_prediction_test[0]
-                Robot_answer=Y_testing
+                #print("Y_TEST_ROBOT", Y_testing)
+                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+                Robot_answer=average_of_wave_test
 
                 print("Robot send back a wavelenght of", Robot_answer)
                 print("User input was ", input_user)
@@ -4509,104 +6277,45 @@ class AutoContr(Controller):
                     break
                 else:
                     print("Model would try to reduce the error")
-                    if r == 9:
+                    if r == 8:
                         print("---->Done training<----")
                     else:
                         print("-----")
                     new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
                     df = df.append(new_data, ignore_index = True)
-                r += 1
-            #s
-       
-            #enter iterative while loop now that we have data
-            # while not model.quit:
-            #     model_trained= model.train(scan_data.T.to_numpy(),recipes)
-            #     print('<<controller>> executing batch {}'.format(self.batch_num))
-            #     #generate new wellnames for next batch
-            #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #     #plan and execute a reaction
-            #     self._create_samples(wellnames, recipes)
-            #     #pull in the scan data
-            #     filenames = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            #     scan_data = self._get_sample_data(wellnames, last_filename)
-            #     #generate the predictions for the next round
-            #     #recipes = model.predict()
-            #     ##
-
-            #     prediction = model.predict(model_trained)
                 
-            #     print(prediction)
+            fig_changhe_model= plt.figure(figsize=(8,8))
+            label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
+            color_names = ["red","green","blue"]
+            for t in range(len(recipes_plot)):
+                for u in range(len(waves_evol_plot[t])):
+                        print(recipes_plot[t]*len(waves_evol_plot[u]))
+                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                    
+            # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+            # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+            # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+            plt.scatter(user_concentrations,wavelengths_progress_test, color= "pink", label= "Model ",s=100)
+            plt.axhline(y=input_user-5,color='r', linestyle=':')
+            plt.axhline(y=input_user,color='r', linestyle='-')
+            plt.axhline(y=input_user+5,color='r', linestyle=':')
 
-            #     print()
-            #     print("---")
-            #     print("Closing")
-            #     model.quit=True
-            #     ##test_error = 
-            #     ##
-            #     #threaded train on scans. Will run while the robot is generating new materials
-            #     self.batch_num += 1
+
+            plt.xlim(0.00001, 0.003)
+            plt.legend(loc="upper right")
+            fig_changhe_model.savefig('changeInWavesModel.png')
+
+
+
+
+
+            
             self.close_connection()
             self.pr.shutdown()
             return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
 
-            # return Y_hat 
-            # model_trained = model.train(recipes, Y)
-            # print("Model Trained",model_trained)
-
-            # print("Predicting---")
-
-            # ml_predict= model.predict(model_trained)
-            # prediction = ml_predict["prediction"]
-            
-            # print("Controler/prediction/used ml",prediction)
-            ##Possible for Online ln.  
-            #this is different because we don't want to use untrained model to generate predictions
-            #recipes = model.generate_seed_rxns(1)
-
-
-            # self.batch_num += 1
-
-            # print("Before entering to the while loop: scan_data",scan_data)        
-            #enter iterative while loop now that we have data
-            # while not model.quit:
-            #     model_trained= model.train(scan_data.T.to_numpy(),recipes)
-            #     print('<<controller>> executing batch {}'.format(self.batch_num))
-            #     #generate new wellnames for next batch
-            #     wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #     #plan and execute a reaction
-            #     self._create_samples(wellnames, recipes)
-            #     #pull in the scan data
-            #     filenames = self.rxn_df[
-            #             (self.rxn_df['op'] == 'scan') |
-            #             (self.rxn_df['op'] == 'scan_until_complete')
-            #             ].reset_index()
-            #     last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            #     scan_data = self._get_sample_data(wellnames, last_filename)
-            #     #generate the predictions for the next round
-            #     #recipes = model.predict()
-            #     ##
-
-            #     prediction = model.predict(model_trained)
-                
-            #     print(prediction)
-
-            #     print()
-            #     print("---")
-            #     print("Closing")
-            #     model.quit=True
-            #     ##test_error = 
-            #     ##
-            #     #threaded train on scans. Will run while the robot is generating new materials
-            #     self.batch_num += 1
-            # self.close_connection()
-            # self.pr.shutdown()
-            # return {"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
-
+           
 
     def _get_sample_data(self,wellnames, filename):
         '''
