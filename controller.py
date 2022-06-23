@@ -3950,7 +3950,7 @@ class AutoContr(Controller):
             
             for r in range(5):
                 print("Epoch", r+1)
-                input_user, user_concentration, train_prediction, W, b = 550, 0.0002, 480 , 10000, 20
+                input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
                 W_list.append(W)
                 b_list.append(b)
                 ##pas to the robot THE USER_CONCENTRATION
