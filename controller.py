@@ -2242,7 +2242,7 @@ class AutoContr(Controller):
                 scan_data = self._get_sample_data(wellnames, last_filename)
                 #scan_data = observance
                 #We process scan_data to get lambda
-                #scan_Y= scan_data.T.to_numpy()
+                scan_Y= scan_data.T.to_numpy()
                 
 
                 scan_Y_1 = scan_Y[0]
