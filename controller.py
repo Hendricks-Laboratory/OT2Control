@@ -2199,9 +2199,9 @@ class AutoContr(Controller):
             recipe1 = recipes[:][0:1][0]
             recipe2 = recipes[:][3:4][0]
             recipe3 = recipes[:][6:7][0]
-            print("RRR",recipe1)
-            print("RRR",recipe2)
-            print("RRR",recipe3)
+            # print("RRR",recipe1)
+            # print("RRR",recipe2)
+            # print("RRR",recipe3)
 
             #we would get observance for each recipe:
             wavelengths=[]
@@ -2217,6 +2217,11 @@ class AutoContr(Controller):
             wavelengths_for_recipe_1 = []
             wavelengths_for_recipe_2 = []
             wavelengths_for_recipe_3 = []
+
+            waves_evol_1=[]
+            waves_evol_2=[]
+            waves_evol_3=[]
+
             index_for_l=0
             index_for_l_2=0
             index_for_l_3=0
@@ -2274,6 +2279,10 @@ class AutoContr(Controller):
                     wavelengths_for_recipe_1.append(maxWave_scan_2)
                     wavelengths_for_recipe_1.append(maxWave_scan_3)
 
+                    waves_evol_1.append(maxWave_scan_1)
+                    waves_evol_1.append(maxWave_scan_2)
+                    waves_evol_1.append(maxWave_scan_3)
+
                     print("Making comparison")
                     print("You have the following numbers:",wavelengths_for_recipe_1)
 
@@ -2300,6 +2309,7 @@ class AutoContr(Controller):
                             wavelengths_to_train.append(wavelengths_for_recipe_1[1])
                             recipes_to_train.append(recipe1)
                             recipes_to_train.append(recipe1)
+                            
                         
                         if np.abs(difference_2_3) <= 100:
 
@@ -2363,6 +2373,7 @@ class AutoContr(Controller):
                             
 
                                 wavelengths_for_recipe_1.append(maxWave_scan_1_sec)
+                                waves_evol_1.append(maxWave_scan_1_sec)
 
                                 print("Waves",wavelengths_for_recipe_1)
 
@@ -2809,6 +2820,10 @@ class AutoContr(Controller):
                     wavelengths_for_recipe_2.append(maxWave_scan_2)
                     wavelengths_for_recipe_2.append(maxWave_scan_3)
 
+                    waves_evol_2.append(maxWave_scan_2)
+                    waves_evol_2.append(maxWave_scan_2)
+                    waves_evol_2.append(maxWave_scan_3)
+
                     print("Making comparison")
                     print("You have the following numbers:",wavelengths_for_recipe_2)
 
@@ -2895,6 +2910,7 @@ class AutoContr(Controller):
                             
 
                                 wavelengths_for_recipe_2.append(maxWave_scan_2_sec)
+                                waves_evol_2.append(maxWave_scan_2_sec)
 
                                 #Sort
 
@@ -3330,6 +3346,11 @@ class AutoContr(Controller):
                     wavelengths_for_recipe_3.append(maxWave_scan_2)
                     wavelengths_for_recipe_3.append(maxWave_scan_3)
 
+
+                    waves_evol_3.append(maxWave_scan_1)
+                    waves_evol_3.append(maxWave_scan_2)
+                    waves_evol_3.append(maxWave_scan_3)
+
                     print("Making comparison")
                     print("You have the following numbers:",wavelengths_for_recipe_3)
 
@@ -3416,6 +3437,7 @@ class AutoContr(Controller):
                             
 
                                 wavelengths_for_recipe_3.append(maxWave_scan_3_sec)
+                                waves_evol_3.append(maxWave_scan_3_sec)
 
                                 #Sort
 
@@ -3852,9 +3874,14 @@ class AutoContr(Controller):
             print("Waves pass 1", clean_list_1)
             print("Waves pass 2", clean_list_2)
             print("Waves pass ", clean_list_3)
-            total_waves_2=wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+            total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
             total_waves=  clean_list_1+clean_list_2+clean_list_3
+            recipes_plot=[recipe1,recipe2,recipe3]
+            print("Plot change",type(recipes_plot),recipes_plot)
+            waves_evol_plot = [[waves_evol_1],[waves_evol_2],[waves_evol_3]]
+            print(type(waves_evol_plot),waves_evol_plot)
             print("Wav ori", total_waves_2)
+            # print("Waves evol", )
             print("Wav nw Final",total_waves)
             # Y= np.array([wavelengths])
             Y= np.array([total_waves])
