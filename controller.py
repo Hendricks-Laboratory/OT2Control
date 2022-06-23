@@ -3877,6 +3877,7 @@ class AutoContr(Controller):
             total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
             total_waves=  clean_list_1+clean_list_2+clean_list_3
             recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+
             print("Plot change",type(recipes_plot),recipes_plot)
             waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
             print(type(waves_evol_plot),waves_evol_plot)
@@ -3888,9 +3889,9 @@ class AutoContr(Controller):
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
             for t in range(len(recipes_plot)):
-                for u in range(len(waves_evol_plot[t])):
-                        print(recipes_plot[t]*len(waves_evol_plot[u]))
-                        plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                for u in range(len(total_waves[t])):
+                        print(recipes_plot[t]*len(total_waves[u]))
+                        plt.scatter([recipes_plot[t]]*len(total_waves[u]), total_waves[u], color= color_names[t], label= label_names[t],s=100)
                     
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
