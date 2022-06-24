@@ -2347,7 +2347,7 @@ class AutoContr(Controller):
                         store_indices=[]
                         for i in range(len(distances)):
                             if i!= len(distances):
-                                if distances[i] <= 10:
+                                if distances[i] <= 100:
                                     store_indices.append(i)
                                 print("stored indices",store_indices)
                                     
@@ -2470,7 +2470,7 @@ class AutoContr(Controller):
                         store_indices_2=[]
                         for i in range(len(distances_2)):
                             if i!= len(distances_2):
-                                if distances_2[i] <= 10:
+                                if distances_2[i] <= 100:
                                     store_indices_2.append(i)
                                 print("stored indices",store_indices_2)
                                     
@@ -2596,7 +2596,7 @@ class AutoContr(Controller):
                         store_indices_3=[]
                         for i in range(len(distances_3)):
                             if i!= len(distances_3):
-                                if distances_3[i] <= 10:
+                                if distances_3[i] <= 100:
                                     store_indices_3.append(i)
                                 print("stored indices",store_indices_3)
                                     
@@ -2849,7 +2849,7 @@ class AutoContr(Controller):
                     store_indices_test=[]
                     for i in range(len(distances_test)):
                         if i!= len(distances_test):
-                            if distances_test[i] <= 10:
+                            if distances_test[i] <= 100:
                                 store_indices_test.append(i)
                             print("stored indices test",store_indices_test)
                                     
