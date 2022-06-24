@@ -2224,7 +2224,6 @@ class AutoContr(Controller):
         if params == None:
 
 
-
             print("Simulation----")
             recipes = model.generate_seed_rxns(3) #number of recipes
             print("Our initital recipes:",recipes)
@@ -2259,9 +2258,11 @@ class AutoContr(Controller):
             index_for_l_2=0
             index_for_l_3=0
             
+            number_rep_recip= 0
             for r in range(3):
 
-                number_rep_recip= 0
+                
+                # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
                 recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
                 print('recipe block',recipe_block)
                 #do the first one
@@ -2318,6 +2319,8 @@ class AutoContr(Controller):
                 if r== 0:
                     print("----First initial recipes----")
                     print(recipe1)
+                    print(type(recipe1), np.array([recipe1]))
+                    print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                     
 
                     new_plots_x =[]
@@ -2347,7 +2350,7 @@ class AutoContr(Controller):
                         store_indices=[]
                         for i in range(len(distances)):
                             if i!= len(distances):
-                                if distances[i] <= 100:
+                                if distances[i] <= 10:
                                     store_indices.append(i)
                                 print("stored indices",store_indices)
                                     
@@ -2364,12 +2367,15 @@ class AutoContr(Controller):
                             #waves_recipe1.append(random.randint(500, 600))
                             #
 
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe1])
+
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
                             #don't have data to train, so, not training
                             #generate new wellnames for next batch
+                            print("Creating one more sample",recipe_block_2)
                             wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
                             #plan and execute a reaction
                             self._create_samples(wellnames, recipe_block_2)
@@ -2491,8 +2497,9 @@ class AutoContr(Controller):
                             #insert robot
                             #waves_recipe1.append(random.randint(500, 600))
                             #
-
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_block_2)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -2623,7 +2630,9 @@ class AutoContr(Controller):
                             #waves_recipe1.append(random.randint(500, 600))
                             #
 
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe3])
+                            print("Creating one more sample",recipe_block_2)
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -2697,6 +2706,8 @@ class AutoContr(Controller):
                                 plt.show() 
                                 fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
                             break
+
+                number_rep_recip += 3
 
             print("Checking our input (Wavelengths)")
             print("wavelength 1",clean_wave)
@@ -2888,6 +2899,8 @@ class AutoContr(Controller):
                         # #don't have data to train, so, not training
                         # #generate new wellnames for next batch
                         recipe_unit_test_rep = np.array([[user_concentration]])
+                        # recipe_block_2 = np.array([recipe2])
+                        print("Creating one more sample",recipe_unit_test_rep)
                         recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 1, axis=1)
                         print("Recipes Test again",recipe_unit_test_rep)
                         #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
@@ -3109,9 +3122,11 @@ class AutoContr(Controller):
             index_for_l_2=0
             index_for_l_3=0
             
+            number_rep_recip= 0
             for r in range(3):
 
-                number_rep_recip= 0
+                
+                # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
                 recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
                 print('recipe block',recipe_block)
                 #do the first one
@@ -3168,6 +3183,8 @@ class AutoContr(Controller):
                 if r== 0:
                     print("----First initial recipes----")
                     print(recipe1)
+                    print(type(recipe1), np.array([recipe1]))
+                    print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                     
 
                     new_plots_x =[]
@@ -3214,12 +3231,15 @@ class AutoContr(Controller):
                             #waves_recipe1.append(random.randint(500, 600))
                             #
 
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe1])
+
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
                             #don't have data to train, so, not training
                             #generate new wellnames for next batch
+                            print("Creating one more sample",recipe_block_2)
                             wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
                             #plan and execute a reaction
                             self._create_samples(wellnames, recipe_block_2)
@@ -3341,8 +3361,9 @@ class AutoContr(Controller):
                             #insert robot
                             #waves_recipe1.append(random.randint(500, 600))
                             #
-
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_block_2)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -3473,7 +3494,9 @@ class AutoContr(Controller):
                             #waves_recipe1.append(random.randint(500, 600))
                             #
 
-                            recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            recipe_block_2 = np.array([recipe3])
+                            print("Creating one more sample",recipe_block_2)
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -3547,6 +3570,8 @@ class AutoContr(Controller):
                                 plt.show() 
                                 fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
                             break
+
+                number_rep_recip += 3
 
             print("Checking our input (Wavelengths)")
             print("wavelength 1",clean_wave)
@@ -3738,6 +3763,8 @@ class AutoContr(Controller):
                         # #don't have data to train, so, not training
                         # #generate new wellnames for next batch
                         recipe_unit_test_rep = np.array([[user_concentration]])
+                        # recipe_block_2 = np.array([recipe2])
+                        print("Creating one more sample",recipe_unit_test_rep)
                         recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 1, axis=1)
                         print("Recipes Test again",recipe_unit_test_rep)
                         #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
@@ -3915,7 +3942,6 @@ class AutoContr(Controller):
             plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
             fig_last.savefig('Input-Recipes.png')
-            
 
 
 
