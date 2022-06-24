@@ -3003,7 +3003,7 @@ class AutoContr(Controller):
                     df = df.append(new_data, ignore_index = True)
             
             print("Dt",df)
-            print("LAST M",user_concentrations,wavelengths_progress_test)
+            print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test)
 
             fig_changhe_model= plt.figure(figsize=(8,8))
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
@@ -3016,7 +3016,9 @@ class AutoContr(Controller):
             # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
-            plt.scatter(user_concentrations,wave_min_diff_fin_test, color= "green", label= "Model ",s=100)
+            
+            ##CCCCCC
+            plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
             plt.axhline(y=input_user-5,color='r', linestyle=':')
             plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
