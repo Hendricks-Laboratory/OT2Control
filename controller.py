@@ -2356,6 +2356,9 @@ class AutoContr(Controller):
                         if len(store_indices)==0 :
                             print("We do NOT find a distance less than 10")
                             print("Current list sorted",waves_recipe1_sorted)
+                            if len(waves_recipe1_sorted) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
                             print("...Creating one more sample of the recipe")
                             #insert robot
                             #waves_recipe1.append(random.randint(500, 600))
@@ -2394,9 +2397,9 @@ class AutoContr(Controller):
                             waves_recipe1.append(maxWave_scan_1_sec)
                             waves_recipe1_sorted= sorted(waves_recipe1)
                             print("")
-                            if len(waves_recipe1_sorted) == 9:
-                                print("No stable waves were found, stopping the program")
-                                sys.exit()
+                            # if len(waves_recipe1_sorted) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
                             
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -2479,6 +2482,9 @@ class AutoContr(Controller):
                         if len(store_indices_2)==0 :
                             print("We do NOT find a distance less than 10")
                             print("Current list sorted",waves_recipe2_sorted)
+                            if len(waves_recipe2_sorted) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
                             print("...Creating one more sample of the recipe")
                             #insert robot
                             #waves_recipe1.append(random.randint(500, 600))
@@ -2522,9 +2528,9 @@ class AutoContr(Controller):
                             waves_recipe2.append(maxWave_scan_2_sec)
                             waves_recipe2_sorted= sorted(waves_recipe2)
                             print("")
-                            if len(waves_recipe2_sorted) == 9:
-                                print("No stable waves were found, stopping the program")
-                                sys.exit()
+                            # if len(waves_recipe2_sorted) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
                             
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -2605,6 +2611,9 @@ class AutoContr(Controller):
                         if len(store_indices_3)==0 :
                             print("We do NOT find a distance less than 10")
                             print("Current list sorted",waves_recipe3_sorted)
+                            if len(waves_recipe3_sorted) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
                             print("...Creating one more sample of the recipe")
                             #insert robot
                             #waves_recipe1.append(random.randint(500, 600))
@@ -2645,9 +2654,9 @@ class AutoContr(Controller):
                             waves_recipe3.append(maxWave_scan_3_sec)
                             waves_recipe3_sorted= sorted(waves_recipe3)
                             print("")
-                            if len(waves_recipe3_sorted) == 9:
-                                print("No stable waves were found, stopping the program")
-                                sys.exit()
+                            # if len(waves_recipe3_sorted) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
                         
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -2906,8 +2915,8 @@ class AutoContr(Controller):
                         maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength(scan_Y_rep_1)
                         new_plots_x.append(X_scan_1_new_test)
                         new_plots_y.append(Y_scan_1_new_test)
-                        waves_recipe1.append(maxWave_scan_1_sec_test)
-                        waves_recipe1_sorted_test= sorted(waves_recipe1)
+                        waves_recipe1_test.append(maxWave_scan_1_sec_test)
+                        waves_recipe1_sorted_test= sorted(waves_recipe1_test)
                         print("")
                         # if len(waves_recipe1_sorted_test) == 9:
                         #     print("No stable waves were found, stopping the program")
@@ -3021,7 +3030,8 @@ class AutoContr(Controller):
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
             
             ##CCCCCC
-            plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+            # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+            plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ",s=100)            
             plt.axhline(y=input_user-5,color='r', linestyle=':')
             plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
