@@ -3808,7 +3808,7 @@ class AutoContr(Controller):
                     else:
                         #getting the wavelengths which difference is less than 10
                         wave_min_diff_test=[]
-                        for w in range(len(store_indices)):
+                        for w in range(len(store_indices_test)): #updated v
                             wave_min_diff_test.append((waves_recipe1_sorted_test[store_indices_test[w]],waves_recipe1_sorted_test[store_indices_test[w]+1]))
 
 
