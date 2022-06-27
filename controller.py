@@ -3073,7 +3073,7 @@ class AutoContr(Controller):
             for ke in range(len(label_names)):
                 #print(label_names_2[r], waves[r])
                 for nnm in range(len(waves_1[ke])):
-                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label = 'axvline - full height')
+                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke])# label = 'axvline - full height')
 
             # for t in range(len(recipes_plot)):
             #     for u in range(len(waves_evol_plot[t])):
@@ -3251,7 +3251,7 @@ class AutoContr(Controller):
                         store_indices=[]
                         for i in range(len(distances)):
                             if i!= len(distances):
-                                if distances[i] <= 100:
+                                if distances[i] <= 10:
                                     store_indices.append(i)
                                 print("stored indices",store_indices)
                                     
@@ -3386,7 +3386,7 @@ class AutoContr(Controller):
                         store_indices_2=[]
                         for i in range(len(distances_2)):
                             if i!= len(distances_2):
-                                if distances_2[i] <= 100:
+                                if distances_2[i] <= 10:
                                     store_indices_2.append(i)
                                 print("stored indices",store_indices_2)
                                     
@@ -3521,7 +3521,7 @@ class AutoContr(Controller):
                         store_indices_3=[]
                         for i in range(len(distances_3)):
                             if i!= len(distances_3):
-                                if distances_3[i] <= 100:
+                                if distances_3[i] <= 10:
                                     store_indices_3.append(i)
                                 print("stored indices",store_indices_3)
                                     
@@ -3795,7 +3795,7 @@ class AutoContr(Controller):
                     store_indices_test=[]
                     for i in range(len(distances_test)):
                         if i!= len(distances_test):
-                            if distances_test[i] <= 100:
+                            if distances_test[i] <= 10:
                                 store_indices_test.append(i)
                             print("stored indices test",store_indices_test)
                                     
@@ -3973,7 +3973,7 @@ class AutoContr(Controller):
             for ke in range(len(label_names)):
                 #print(label_names_2[r], waves[r])
                 for nnm in range(len(waves_1[ke])):
-                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label = 'axvline - full height')
+                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke])#, label = 'axvline - full height')
 
             # for t in range(len(recipes_plot)):
             #     for u in range(len(waves_evol_plot[t])):
