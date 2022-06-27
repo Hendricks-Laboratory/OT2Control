@@ -2571,7 +2571,7 @@ class AutoContr(Controller):
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
-                                fig_wave_new_2= plt.title(str("j"), fontsize = 16, pad = 20)
+                                fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
                                 plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
 
                                 plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
@@ -3029,7 +3029,7 @@ class AutoContr(Controller):
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("[KBr] Concentration (mM)")
                 plt.ylabel("Wavelength (nm)")
-                plt.legend()
+                plt.legend(prop={"size":7})
                 plt.show()
                 figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
@@ -3042,7 +3042,7 @@ class AutoContr(Controller):
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("[KBr] Concentration (mM)")
                 plt.ylabel("Wavelength (nm)")
-                plt.legend()
+                plt.legend(prop={"size":7})
                 plt.show()
                 figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
@@ -3471,7 +3471,8 @@ class AutoContr(Controller):
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
-                                fig_wave_new_2= plt.title(str("j"), fontsize = 16, pad = 20)
+                                fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+
                                 plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
 
                                 plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
@@ -3929,20 +3930,21 @@ class AutoContr(Controller):
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("[KBr] Concentration (mM)")
                 plt.ylabel("Wavelength (nm)")
-                plt.legend()
+                plt.legend(prop={"size":7})
                 plt.show()
                 figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                #Plot2
+                #Plot2##IMPRR
                 figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
                 #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")
+                ##             
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
                 plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
                 plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
                 plt.xlabel("[KBr] Concentration (mM)")
                 plt.ylabel("Wavelength (nm)")
-                plt.legend()
+                plt.legend(prop={"size":7})
                 plt.show()
                 figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 

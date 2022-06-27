@@ -363,12 +363,12 @@ class LinearRegress(MLModel):
             print("----")
             print("Error", training_error)
             #ploting
-            train_fig = plt.figure(figsize=(5,7)) 
-            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
+            train_fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength by Linear Model")
             plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-            plt.xlabel("Concentration")
-            plt.ylabel("Wavelength")
-            plt.legend()
+            plt.xlabel("[KBr] Concentration (mM)")
+            plt.ylabel("Wavelength (nm)")
+            plt.legend(prop={"size":7})
             plt.show()
             train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
             #User input for Wavelength wanted
