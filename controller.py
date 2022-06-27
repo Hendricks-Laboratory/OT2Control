@@ -2988,6 +2988,9 @@ class AutoContr(Controller):
                 #Robot_answer=wavelengths_prediction_test[0]
                 #print("Y_TEST_ROBOT", Y_testing)
                 #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
+                #Here we change 
+                print("sending len",len(clean_wave_test))
                 Robot_answer= average_of_wave_test
 
                 print("Robot send back a wavelenght of", Robot_answer)
@@ -3030,8 +3033,11 @@ class AutoContr(Controller):
                         print("---->Done training<----")
                     else:
                         print("-----")
-                    new_data = {'Concentration': user_concentration, 'Wavelength': Robot_answer}
-                    df = df.append(new_data, ignore_index = True)
+                    for sert in range(len(clean_wave_test)):
+                        print("Ln", len(clean_wave_test))
+                        print("Insert in", sert)
+                        new_data = {'Concentration': user_concentration, 'Wavelength': clean_wave_test[sert]}
+                        df = df.append(new_data, ignore_index = True)
             
             print("Dt",df)
             print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test)
