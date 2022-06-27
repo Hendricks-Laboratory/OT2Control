@@ -2198,7 +2198,7 @@ class AutoContr(Controller):
             our_Y= our_Y[50:-100]
             
             #ploting for checking
-            fig = plt.figure(figsize=(10,10)) 
+            fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             plt.plot(X_axis,our_Y)
             plt.show() 
             fig.savefig("waves-"+str(now)+".png",dpi=fig.dpi)
@@ -2302,12 +2302,12 @@ class AutoContr(Controller):
                 # print()
                 # Plot the wave obs of the three samples
 
-                fig_wave_obs= fig = plt.figure(figsize=(10,10)) 
+                fig_wave_obs= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
                 plt.plot(X_scan_1,Y_scan_1)
                 plt.plot(X_scan_2,Y_scan_2)
                 plt.plot(X_scan_3,Y_scan_3)
                 plt.show() 
-                fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig.dpi)
+                fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
 
 
                 # print("WaveL max 1"+". ", maxWave_scan_1)
@@ -2350,7 +2350,7 @@ class AutoContr(Controller):
                         store_indices=[]
                         for i in range(len(distances)):
                             if i!= len(distances):
-                                if distances[i] <= 10:
+                                if distances[i] <= 100:
                                     store_indices.append(i)
                                 print("stored indices",store_indices)
                                     
@@ -2426,14 +2426,18 @@ class AutoContr(Controller):
                                 if z not in clean_wave:
                                     clean_wave.append(z)
                             #For ploting
-                            wavelengths_for_recipe_1 = clean_wave
+                            #wavelengths_for_recipe_1 = clean_wave
+                            wavelengths_for_recipe_1 = wave_min_diff_fin 
                             print("Current list sorted",waves_recipe1_sorted)
-                            print("--->Waves to use",clean_wave)
+                            #print("--->Waves to use",clean_wave)
+                            print("--->Waves to use",wave_min_diff_fin)
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
-                                fig_wave_new= plt.figure(figsize=(10,10)) 
-                                plt.plot(X_scan_1,Y_scan_1)
+                                fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.rc('axes', linewidth = 2)
+                                plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
+                                plt.plot(X_scan_1,Y_scan_1) #COLOR?
                                 plt.plot(X_scan_2,Y_scan_2)
                                 plt.plot(X_scan_3,Y_scan_3)
                                 for ww in range(len(new_plots_x)):
@@ -2560,13 +2564,15 @@ class AutoContr(Controller):
                                 if z not in clean_wave_2:
                                     clean_wave_2.append(z)
                             print("Current list sorted",waves_recipe2_sorted)
-                            print("--->Waves to use",clean_wave_2)
+                            print("--->Waves to use",wave_min_diff_fin_2)
                             #for ploting
-                            wavelengths_for_recipe_2 =clean_wave_2
+                            wavelengths_for_recipe_2 =wave_min_diff_fin_2
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
-                                fig_wave_new_2= plt.figure(figsize=(10,10)) 
+                                fig_wave_new_2= plt.title(str("j"), fontsize = 16, pad = 20)
+                                plt.rc('axes', linewidth = 2)
+                                plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
                                 plt.plot(X_scan_1,Y_scan_1)
                                 plt.plot(X_scan_2,Y_scan_2)
                                 plt.plot(X_scan_3,Y_scan_3)
@@ -2690,14 +2696,22 @@ class AutoContr(Controller):
                                 if z not in clean_wave_3:
                                     clean_wave_3.append(z)
 
+                            # print("Current list sorted",waves_recipe3_sorted)
+                            # print("--->Waves to use",clean_wave_3)
+                            # #for ploting
+                            # wavelengths_for_recipe_3 = clean_wave_3
                             print("Current list sorted",waves_recipe3_sorted)
-                            print("--->Waves to use",clean_wave_3)
+                            print("--->Waves to use",wave_min_diff_fin_3)
                             #for ploting
-                            wavelengths_for_recipe_3 = clean_wave_3
+                            wavelengths_for_recipe_3 = wave_min_diff_fin_3
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
-                                fig_wave_new_3= plt.figure(figsize=(10,10)) 
+                                fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.rc('axes', linewidth = 2)
+                                plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
+
+                                plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
                                 plt.plot(X_scan_1,Y_scan_1)
                                 plt.plot(X_scan_2,Y_scan_2)
                                 plt.plot(X_scan_3,Y_scan_3)
@@ -2721,7 +2735,10 @@ class AutoContr(Controller):
             # print("Waves pass 2", clean_list_2)
             # print("Waves pass ", clean_list_3)
             total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
-            total_waves=  clean_wave+clean_wave_2+clean_wave_3
+            #Consider duplocates or not
+            #total_waves=  clean_wave+clean_wave_2+clean_wave_3
+            total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+            
             recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
             print("Plot change",type(recipes_plot),recipes_plot)
             # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
@@ -2731,9 +2748,12 @@ class AutoContr(Controller):
             print(recipes_to_train_3)
             #Ploting change
 
-            fig_changhe=plt.figure(figsize=(8,8))
-            label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
+            fig_changhe= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+            label_names = ["Generation 1", "Generation 2", "Generation 3"]
             color_names = ["red","green","blue"]
+            plt.rc('axes', linewidth = 2)
+            plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
+            plt.title(str("Generations"), fontsize = 16, pad = 20)
             for t in range(len(recipes_plot)):
                         #print(recipes_plot[t]*len(waves_evol_plot[u]))
                         #print(u)
@@ -2746,7 +2766,6 @@ class AutoContr(Controller):
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
 
             plt.xlim(0.00001, 0.003)
-            plt.legend(loc="upper right")
             fig_changhe.savefig('changeInWaves.png')
 
 
@@ -2966,7 +2985,7 @@ class AutoContr(Controller):
                         if l !=0:
                             #Plot after training
                             print("Plotting---")
-                            fig_wave_test= plt.figure(figsize=(10,10)) 
+                            fig_wave_test= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
                             plt.plot(X_scan_test_1,Y_scan_test_1)
                             plt.plot(X_scan_test_2,Y_scan_test_2)
                             plt.plot(X_scan_test_3,Y_scan_test_3)
@@ -2999,7 +3018,7 @@ class AutoContr(Controller):
                 print("Our test error is ", test_error)
                 
                 ##Plot
-                figtest = plt.figure(figsize=(5,8)) 
+                figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
                 plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
                 # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Predicted Wavelength Linear Pattern")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
@@ -3012,7 +3031,7 @@ class AutoContr(Controller):
                 figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
                 #Plot2
-                figtest_2 = plt.figure(figsize=(5,8)) 
+                figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
                 #plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength Linear Pattern")
                 plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
@@ -3038,11 +3057,12 @@ class AutoContr(Controller):
                         print("Insert in", sert)
                         new_data = {'Concentration': user_concentration, 'Wavelength': clean_wave_test[sert]}
                         df = df.append(new_data, ignore_index = True)
+                        print("Actual df",df)
             
             print("Dt",df)
             print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test)
 
-            fig_changhe_model= plt.figure(figsize=(8,8))
+            fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             label_names = ["Recipe 1", "Recipe 2", "Recipe 3"]
             color_names = ["red","green","blue"]
             # for t in range(len(recipes_plot)):
@@ -3071,7 +3091,7 @@ class AutoContr(Controller):
             waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
             print("Ltp",waves)
             # input_user=50
-            fig_last= plt.figure(figsize=(8,8))
+            fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             colors_2= ["red","green","blue"]
             label_names_2 = ["Recipe 1", "Recipe 2", "Recipe 3"]
 
@@ -3935,7 +3955,8 @@ class AutoContr(Controller):
             waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
             print("Ltp",waves)
             # input_user=50
-            fig_last= plt.figure(figsize=(8,8))
+            fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+            plt.rc('axes', linewidth = 2)
             colors_2= ["red","green","blue"]
             label_names_2 = ["Recipe 1", "Recipe 2", "Recipe 3"]
 
