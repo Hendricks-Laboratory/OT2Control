@@ -2740,7 +2740,8 @@ class AutoContr(Controller):
                             # #for ploting
                             # wavelengths_for_recipe_3 = clean_wave_3
                             print("Current list sorted",waves_recipe3_sorted)
-                            print("--->Waves to use",wave_min_diff_fin_3)
+                            # print("--->Waves to use",wave_min_diff_fin_3)
+                            print("--->Waves to use",new_added_list_3)
                             #for ploting
                             wavelengths_for_recipe_3 = wave_min_diff_fin_3
                             if l !=0:
@@ -2762,9 +2763,12 @@ class AutoContr(Controller):
                 number_rep_recip += 3
 
             print("Checking our input (Wavelengths)")
-            print("wavelength 1",clean_wave)
-            print("wavelength 3",clean_wave_2)
-            print("wavelength 3",clean_wave_3)
+            # print("wavelength 1",clean_wave)
+            # print("wavelength 3",clean_wave_2)
+            # print("wavelength 3",clean_wave_3)
+            print("wavelength 1",new_added_list)
+            print("wavelength 3",new_added_list_2)
+            print("wavelength 3",new_added_list_3)
             # print("Checking our input: wavelengths")
             # print("wavelength 1",wavelengths_for_recipe_1)
             # print("wavelength 3",wavelengths_for_recipe_2)
@@ -2777,10 +2781,13 @@ class AutoContr(Controller):
             #total_waves=  clean_wave+clean_wave_2+clean_wave_3
             #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
             total_waves= new_added_list+ new_added_list_2+ new_added_list_3
+            print("Total Waves", total_waves)
             recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
             print("Plot change",type(recipes_plot),recipes_plot)
             # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
-            waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+            # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+            
+            waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
             print(type(waves_evol_plot),waves_evol_plot)
             print(waves_evol_plot[0])
             print(recipes_to_train_3)
@@ -3117,8 +3124,8 @@ class AutoContr(Controller):
             fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             label_names = ["Generation 1", "Generation 2", "Generation 3"]
             color_names = ["red","green","blue"]
-            waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
-
+            #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+            waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
             for ke in range(len(label_names)):
                 #print(label_names_2[r], waves[r])
                 for nnm in range(len(waves_1[ke])):
