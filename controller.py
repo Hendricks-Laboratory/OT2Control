@@ -2769,6 +2769,14 @@ class AutoContr(Controller):
             print("wavelength 1",new_added_list)
             print("wavelength 3",new_added_list_2)
             print("wavelength 3",new_added_list_3)
+            
+            ##
+            # avg for plots
+            Avg_1= sum(new_added_list)/len(new_added_list)
+            Avg_2= sum(new_added_list_2)/len(new_added_list_2)
+            Avg_3= sum(new_added_list_3)/len(new_added_list_3)
+
+            ##
             # print("Checking our input: wavelengths")
             # print("wavelength 1",wavelengths_for_recipe_1)
             # print("wavelength 3",wavelengths_for_recipe_2)
@@ -2858,7 +2866,7 @@ class AutoContr(Controller):
             wavelengths_progress_test=[]
             wavelengths_to_test=[]
             user_concentrations=[]
-            
+            Avg_test=[]
             
             for r in range(5):
                 print("Epoch", r+1)
@@ -3092,8 +3100,12 @@ class AutoContr(Controller):
                 figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
                 #Plot2
+             
+
+
                 figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
                 #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
                 plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
                 plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
                 plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
@@ -3118,6 +3130,7 @@ class AutoContr(Controller):
                         print("Insert in", sert)
                         new_data = {'Concentration': user_concentration, 'Wavelength': new_added_list_test[sert]}
                         df = df.append(new_data, ignore_index = True)
+                        Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
                         # print("Actual df",df)
             
             print("Dt",df)
@@ -3128,14 +3141,15 @@ class AutoContr(Controller):
             color_names = ["red","orange","blue"]
             #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
             waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+            print("Printtttttttt",waves_1)
+            for ke in range(len(label_names)):
+                 #print(label_names_2[r], waves[r])
+                 for nnm in range(len(waves_1[ke])):
+                     plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+            
             # for ke in range(len(label_names)):
             #     #print(label_names_2[r], waves[r])
-            #     for nnm in range(len(waves_1[ke])):
-            #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
-            
-            for ke in range(len(label_names)):
-                #print(label_names_2[r], waves[r])
-                    plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+            #         plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
             
             # for t in range(len(recipes_plot)):
             #     for u in range(len(waves_evol_plot[t])):
@@ -3178,6 +3192,24 @@ class AutoContr(Controller):
             plt.axhline(y=input_user,color='r', linestyle='-')
             plt.axhline(y=input_user+5,color='r', linestyle=':')
             fig_last.savefig('Input-Recipes.png')
+
+
+
+            patternFoll= [Avg_1,Avg_2,Avg_3]+Avg_test
+            recipesTaken= df.team.unique()
+            recipesTaken = recipesTaken.ravel().tolist()
+            fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+            #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+            #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+            plt.plot(recipesTaken, patternFoll, color='red',label="Followed Pattern by Data Points")                
+            plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+            plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+            plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+            plt.xlabel("[KBr] Concentration (mM)")
+            plt.ylabel("Wavelength (nm)")
+            plt.legend(prop={"size":7})
+            plt.show()
+            fig_tt.savefig("predictionsPattern-"+str(r)+"png",dpi=fig_tt.dpi)
 
             print("Before entering to the while loop: scan_data",scan_data)        
             
