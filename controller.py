@@ -2833,6 +2833,7 @@ class AutoContr(Controller):
             # print("our recipes", recipes)
             final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
             #passing to list
+            print("----------------------------")
             print("Final recipes", final_recipes)
             print("Final Y",Y)
             X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
@@ -3129,7 +3130,7 @@ class AutoContr(Controller):
             for ke in range(len(label_names)):
                 #print(label_names_2[r], waves[r])
                 for nnm in range(len(waves_1[ke])):
-                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke])# label = 'axvline - full height')
+                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
 
             # for t in range(len(recipes_plot)):
             #     for u in range(len(waves_evol_plot[t])):
@@ -3149,8 +3150,9 @@ class AutoContr(Controller):
 
 
             #plt.xlim(0.00001, 0.003)
-            plt.xlim(["Generation 1","Generation 2","Generation 3"])
-            plt.legend(loc="upper right")
+            #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+            plt.legend(loc="upper right",  prop={"size":7})
+            plt.show()
             fig_changhe_model.savefig('changeInWavesModel.png')
 
             #Plot recipes and the input
