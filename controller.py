@@ -2426,12 +2426,26 @@ class AutoContr(Controller):
                             for z in wave_min_diff_fin:
                                 if z not in clean_wave:
                                     clean_wave.append(z)
+
+                            #Clean with repetitions and without weight
+
+                            new_added_list=[]
+                            new_added_list.append(wave_min_diff[0][0])
+                            new_added_list.append(wave_min_diff[0][1])
+                            for ri in range(len(wave_min_diff)-1):
+                                print("S",wave_min_diff)
+                                if wave_min_diff[ri][1] == wave_min_diff[ri+1][0]:
+                                    print("s",wave_min_diff)
+                                    new_added_list.append(wave_min_diff[ri+1][1])
+
                             #For ploting
                             #wavelengths_for_recipe_1 = clean_wave
                             wavelengths_for_recipe_1 = wave_min_diff_fin 
                             print("Current list sorted",waves_recipe1_sorted)
                             #print("--->Waves to use",clean_wave)
-                            print("--->Waves to use",wave_min_diff_fin)
+                            #print("--->Waves to use",wave_min_diff_fin)
+                            print("--->Waves to use",new_added_list)
+
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
@@ -2564,8 +2578,20 @@ class AutoContr(Controller):
                             for z in wave_min_diff_fin_2:
                                 if z not in clean_wave_2:
                                     clean_wave_2.append(z)
+
+                            new_added_list_2=[]
+                            new_added_list_2.append(wave_min_diff_2[0][0])
+                            new_added_list_2.append(wave_min_diff_2[0][1])
+                            for ri in range(len(wave_min_diff_2)-1):
+                                print("S",wave_min_diff_2)
+                                if wave_min_diff_2[ri][1] == wave_min_diff_2[ri+1][0]:
+                                    print("s",wave_min_diff_2)
+                                    new_added_list_2.append(wave_min_diff_2[ri+1][1])
+
+
                             print("Current list sorted",waves_recipe2_sorted)
-                            print("--->Waves to use",wave_min_diff_fin_2)
+                            #print("--->Waves to use",wave_min_diff_fin_2)
+                            print("--->Waves to use",new_added_list_2)
                             #for ploting
                             wavelengths_for_recipe_2 =wave_min_diff_fin_2
                             if l !=0:
@@ -2698,6 +2724,17 @@ class AutoContr(Controller):
                                 if z not in clean_wave_3:
                                     clean_wave_3.append(z)
 
+
+
+                            new_added_list_3=[]
+                            new_added_list_3.append(wave_min_diff_3[0][0])
+                            new_added_list_3.append(wave_min_diff_3[0][1])
+                            for ri in range(len(wave_min_diff_3)-1):
+                                print("S",wave_min_diff_3)
+                                if wave_min_diff_3[ri][1] == wave_min_diff_3[ri+1][0]:
+                                    print("s",wave_min_diff_3)
+                                    new_added_list_3.append(wave_min_diff_3[ri+1][1])
+
                             # print("Current list sorted",waves_recipe3_sorted)
                             # print("--->Waves to use",clean_wave_3)
                             # #for ploting
@@ -2738,8 +2775,8 @@ class AutoContr(Controller):
             total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
             #Consider duplocates or not
             #total_waves=  clean_wave+clean_wave_2+clean_wave_3
-            total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
-            
+            #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+            total_waves= new_added_list+ new_added_list_2+ new_added_list_3
             recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
             print("Plot change",type(recipes_plot),recipes_plot)
             # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
@@ -2781,9 +2818,9 @@ class AutoContr(Controller):
             print("recipes----")
             print(recipes)
 
-            recipes_1_out = np.repeat(np.array([recipe1]), len(clean_wave), axis=0)
-            recipes_2_out = np.repeat(np.array([recipe2]), len(clean_wave_2), axis=0)
-            recipes_3_out = np.repeat(np.array([recipe3]), len(clean_wave_3), axis=0)
+            recipes_1_out = np.repeat(np.array([recipe1]), len(new_added_list), axis=0)
+            recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
+            recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
 
             #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
             # print("our recipes", recipes)
@@ -2979,10 +3016,21 @@ class AutoContr(Controller):
                         for z in wave_min_diff_fin_test:
                             if z not in clean_wave_test:
                                 clean_wave_test.append(z)
+
+
+                        new_added_list_test=[]
+                        new_added_list_test.append(wave_min_diff_test[0][0])
+                        new_added_list_test.append(wave_min_diff_test[0][1])
+                        for ri in range(len(wave_min_diff_test)-1):
+                            print("S",wave_min_diff_test)
+                            if wave_min_diff_test[ri][1] == wave_min_diff_test[ri+1][0]:
+                                    print("s",wave_min_diff_test)
+                                    new_added_list_test.append(wave_min_diff_test[ri+1][1])
                         
                         
                         print("Current list sorted",waves_recipe1_sorted_test)
-                        print("--->Waves to use",clean_wave_test)
+                        #print("--->Waves to use",clean_wave_test)
+                        print("--->Waves to use",new_added_list_test)
                         if l !=0:
                             #Plot after training
                             print("Plotting---")
@@ -3000,8 +3048,9 @@ class AutoContr(Controller):
 
                 
 
-                print("We get the following wavelengths",clean_wave_test)
-                average_of_wave_test = sum(clean_wave_test)/len(clean_wave_test)
+                #print("We get the following wavelengths",clean_wave_test)
+                print("We get the following wavelengths",new_added_list_test)
+                average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
                 print("The average is ", average_of_wave_test)
                 
                   
@@ -3012,7 +3061,7 @@ class AutoContr(Controller):
                 #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
-                print("sending len",len(clean_wave_test))
+                print("sending len",len(new_added_list_test))
                 Robot_answer= average_of_wave_test
 
                 print("Robot send back a wavelenght of", Robot_answer)
@@ -3055,15 +3104,15 @@ class AutoContr(Controller):
                         print("---->Done training<----")
                     else:
                         print("-----")
-                    for sert in range(len(clean_wave_test)):
+                    for sert in range(len(new_added_list_test)):
                         # print("Ln", len(clean_wave_test))
                         print("Insert in", sert)
-                        new_data = {'Concentration': user_concentration, 'Wavelength': clean_wave_test[sert]}
+                        new_data = {'Concentration': user_concentration, 'Wavelength': new_added_list_test[sert]}
                         df = df.append(new_data, ignore_index = True)
                         # print("Actual df",df)
             
             print("Dt",df)
-            print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test)
+            print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
 
             fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             label_names = ["Generation 1", "Generation 2", "Generation 3"]
@@ -3092,7 +3141,8 @@ class AutoContr(Controller):
             plt.axhline(y=input_user+5,color='r', linestyle=':')
 
 
-            plt.xlim(0.00001, 0.003)
+            #plt.xlim(0.00001, 0.003)
+            plt.xlim(["Generation 1","Generation 2","Generation 3"])
             plt.legend(loc="upper right")
             fig_changhe_model.savefig('changeInWavesModel.png')
 
