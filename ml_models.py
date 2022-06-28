@@ -368,7 +368,7 @@ class LinearRegress(MLModel):
             plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
             plt.xlabel("[KBr] Concentration (mM)")
             plt.ylabel("Wavelength (nm)")
-            plt.legend(prop={"size":7})
+            plt.legend(prop={"size":6})
             plt.show()
             train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
             #User input for Wavelength wanted
