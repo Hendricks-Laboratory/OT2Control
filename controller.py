@@ -3202,6 +3202,8 @@ class AutoContr(Controller):
 
             recipesTaken= df.Concentration.unique()
             recipesTaken = recipesTaken.ravel().tolist()
+            patternFoll = patternFoll.ravel().tolist()
+            print("RRRR",patternFoll,recipesTaken)
             fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
             #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
             #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
