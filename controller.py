@@ -3216,7 +3216,7 @@ class AutoContr(Controller):
             plt.ylabel("Wavelength (nm)")
             plt.legend(prop={"size":7})
             plt.show()
-            fig_tt.savefig("predictionsPattern-"+str(r)+"png",dpi=fig_tt.dpi)
+            fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
 
             print("Before entering to the while loop: scan_data",scan_data)        
             
