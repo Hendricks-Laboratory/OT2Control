@@ -3196,7 +3196,7 @@ class AutoContr(Controller):
 
 
             patternFoll= [Avg_1,Avg_2,Avg_3]+Avg_test
-            recipesTaken= df.team.unique()
+            recipesTaken= df.Concentration.unique()
             recipesTaken = recipesTaken.ravel().tolist()
             fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
             #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
