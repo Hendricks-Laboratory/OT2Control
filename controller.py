@@ -2810,7 +2810,8 @@ class AutoContr(Controller):
             # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
             # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
 
-            plt.xlim(0.00001, 0.003)
+            #plt.xlim(0.00001, 0.003)
+            plt.legend(loc="upper right",  prop={"size":3})
             fig_changhe.savefig('changeInWaves.png')
 
 
@@ -3124,14 +3125,18 @@ class AutoContr(Controller):
 
             fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
             label_names = ["Generation 1", "Generation 2", "Generation 3"]
-            color_names = ["red","green","blue"]
+            color_names = ["red","orange","blue"]
             #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
             waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+            # for ke in range(len(label_names)):
+            #     #print(label_names_2[r], waves[r])
+            #     for nnm in range(len(waves_1[ke])):
+            #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+            
             for ke in range(len(label_names)):
                 #print(label_names_2[r], waves[r])
-                for nnm in range(len(waves_1[ke])):
-                    plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
-
+                    plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+            
             # for t in range(len(recipes_plot)):
             #     for u in range(len(waves_evol_plot[t])):
             #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
@@ -3151,7 +3156,7 @@ class AutoContr(Controller):
 
             #plt.xlim(0.00001, 0.003)
             #plt.xlim(["Generation 1","Generation 2","Generation 3"])
-            plt.legend(loc="upper right",  prop={"size":7})
+            plt.legend(loc="upper right",  prop={"size":3})
             plt.show()
             fig_changhe_model.savefig('changeInWavesModel.png')
 
