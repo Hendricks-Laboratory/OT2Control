@@ -18,6 +18,7 @@ based on command line args. (run this script with -h)
 '''
 from abc import ABC
 from abc import abstractmethod
+from ast import While
 from collections import defaultdict
 from collections import namedtuple
 from ctypes.wintypes import PINT
@@ -142,23 +143,24 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
-    
-    
-    #print("Launch_auto FUNCTION;  Initialize the Linear Model 3 recipes")
-    
+    print("Launch_auto FUNCTION;  Initialize the Linear Model 3 recipes")
+
+    ##DEFAULT?
     ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
+    
     print("Welcome .....")
     print("Which model would you like to use? [ Linear Model (linear) ] [ Neural Network (neural) ]")
     input_model_user = input()
     input_model_user = input_model_user.lower()
     print("You selected", input_model_user)
+
     while True:
 
         if input_model_user == "linear":
-            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=15,duplication = 3)
+            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 5)
             break
         elif input_model_user == "neural":
-            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=25,duplication = 3)
+            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 10)
             break
         else :
             print("Try to choose again")
@@ -166,12 +168,13 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             input_model_user = input()
             input_model_user = input_model_user.lower()
             print("You selected", input_model_user)
-
+            
     print("ollllllll",input_model_user)
     print(ml_model)
+
     #try 1 
     if not no_sim:
-        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None, kind= input_model_user)
+        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None, kind=input_model_user )
         ml_simulation_W= ml_model_trained["W"]
         ml_simulation_b = ml_model_trained["b"]
         #ml_par_recipes = ml_model_trained["par_recipes"]
@@ -2111,7 +2114,7 @@ class AutoContr(Controller):
         print('<<controller>> EXITING SIMULATION')
         return {"W":returned_ml["W"], "b":returned_ml["b"]}
 
-    def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False, params=None, initial_recipes= None):
+    def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False, params=None, kind= None,initial_recipes= None):
         '''
         The real deal. Input a server addr and port if you choose and protocol will be run  
         params:  
@@ -2133,11 +2136,11 @@ class AutoContr(Controller):
         else:
             if params == None:
                 print("Training in the robot: No trained params")
-                self._run(port, simulate, model, no_pr, params,initial_recipes)
+                self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
                 print('<<controller>> EXITING 1')
             else:
                 print("Online: With Trained params")
-                self._run(port, simulate, model, no_pr, params,initial_recipes)
+                self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
                 print('<<controller>> EXITING 2')
 
     def _rename_products(self, rxn_df):
@@ -2171,7 +2174,7 @@ class AutoContr(Controller):
                 
             waveL= obs.index(np.max(obs))+300
             return waveL
-                
+
         def MaxWaveLength(scan):
     
     
@@ -2199,7 +2202,7 @@ class AutoContr(Controller):
             
             #max_wave
             return X_axis[max_ob], X_axis, our_Y
-        
+            
         ##Rest for Water
         
         self.batch_num = 0 #used internally for unique filenames
@@ -2213,7 +2216,8 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         
-        if kind == "Linear":
+        if kind == "linear":
+
             if params == None:
 
 
@@ -4218,7 +4222,7 @@ class AutoContr(Controller):
                 self.close_connection()
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
-
+        
         elif kind == "neural":
 
             print("Neural")
@@ -4227,11 +4231,11 @@ class AutoContr(Controller):
             return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
         else:
-            print("None") 
+            print("None")
             self.close_connection()
             self.pr.shutdown()
             return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
-
+        
            
 
     def _get_sample_data(self,wellnames, filename):
