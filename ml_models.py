@@ -535,7 +535,7 @@ class NeuralNet(MLModel):
         print("")
         print("")
         
-        recipes = np.concatenate((con_Cit, con_Ag,con_KBr), axis=1)
+        recipes = np.concatenate((con_Cit.T, con_Ag.T,con_KBr.T), axis=1)
         recipes = np.repeat(recipes, self.duplication, axis=0)
         print(recipes)
         return recipes
