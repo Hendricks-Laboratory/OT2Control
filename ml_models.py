@@ -506,25 +506,25 @@ class NeuralNet(MLModel):
         
         #Generating random 
         
-        con_KBr = np.random.random_sample(size= (number_recipes,1)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
-        con_Cit = np.random.random_sample(size= (number_recipes,1)) * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
-        con_Ag  = np.random.random_sample(size= (number_recipes,1))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
+        con_KBr = np.random.random_sample(size= (1,3)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
+        con_Cit = np.random.random_sample(size= (1,3)) * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
+        con_Ag  = np.random.random_sample(size= (1,3))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
         
         
         print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
 
-        for r in range(3):
-            if con_KBr[r] == upper_bound_KBr:
-                con_Cit[r] = 0
-                con_Ag[r]  = 0
+        for r in range(1):
+            if con_KBr[0][r] == upper_bound_KBr:
+                con_Cit[0][r] = 0
+                con_Ag[0][r]  = 0
 
-            elif con_Cit[r] == upper_bound_Cit:
-                con_KBr[r] = 0
-                con_Ag[r]  = 0
+            elif con_Cit[0][r] == upper_bound_Cit:
+                con_KBr[0][r] = 0
+                con_Ag[0][r]  = 0
 
-            elif con_Ag[r] == upper_bound_Ag:
-                con_KBr[r] = 0
-                con_Cit[r]  = 0
+            elif con_Ag[0][r] == upper_bound_Ag:
+                con_KBr[0][r] = 0
+                con_Cit[0][r]  = 0
             
         print("Concen after checking (T)",con_Cit.T,con_Ag.T,con_KBr.T)
         print("")
@@ -535,10 +535,10 @@ class NeuralNet(MLModel):
         print("")
         print("")
         
-        recipes = np.concatenate((con_Cit.T, con_Ag.T,con_KBr.T), axis=1)
-        recipes = np.repeat(recipes, self.duplication, axis=0)
-        print(recipes)
-        return recipes
+        recipes = np.concatenate((con_Cit, con_Ag,con_KBr), axis=1)
+        recipes = np.repeat(recipes, 3, axis=0)
+        print("rrecipes",recipes)
+        return recipes.T
     
     
     #NEW PREDICTION
