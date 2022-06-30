@@ -203,6 +203,8 @@ class DummyMLModel(MLModel):
         else:
             return np.ones((self.batch_size,self.y_shape)) * 2 * 3.1415e-2
     generate_seed_rxns.n_calls = 0
+
+
 #################################################################
 
 
@@ -440,6 +442,333 @@ class LinearRegress(MLModel):
             print('<<ML>> done training')
 
             return 0 #MainModel(self, X,y)
+
+
+
+###########################
+
+
+
+class NeuralNet(MLModel):
+    '''
+    params:
+        tuple<int> scan_bounds: size 2. If you wish to ignore aspects of the
+          scan, and only focus
+          on a single peak for learning, you may specify manually the start
+          and stop index of the data you are interested in. Only this data
+          will be used for training.
+        int duplication: This is used to copy the reactions you're running if
+          you are worried about redundancy. the number is the number of times
+          you duplicate each reaction.
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:  
+      only runs for batch size of 1  
+    '''
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
+            scan_bounds=None, duplication=1):
+        super().__init__(model, max_iters) #don't have a model
+        self.scan_bounds = scan_bounds
+        if scan_bounds:
+            #if you only want to pay attention in bounds, predict on those vals
+            self.FINAL_SPECTRA = final_spectra[:, scan_bounds[0]:scan_bounds[1]]
+        else:
+            self.FINAL_SPECTRA = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+        self.duplication = duplication
+
+    def generate_seed_rxns(self,number_recipes):
+        '''
+        This method is called before the model is trained to generate a batch of training
+        points  
+        returns:  
+            np.array: (batch_size,n_features) 
+        '''
+
+        #Boundary for Cit
+        
+        upper_bound_Cit = 8.125
+        lower_bound_Cit = 0.3125
+        
+        #Boundary for Ag
+        
+        upper_bound_Ag = 0.24375
+        lower_bound_Ag = 0.0094
+        
+        #Boundary for KBr
+        upper_bound_KBr = 0.0005
+        lower_bound_KBr = 0.00025
+        
+        
+        Upper = upper_bound_Ag + upper_bound_Cit + upper_bound_KBr
+        Lower = lower_bound_Ag + lower_bound_Cit + lower_bound_KBr
+        
+        #Generating random 
+        
+        con_KBr = np.random.random_sample(size= (number_recipes,1)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
+        con_Cit = np.random.random_sample(size= (number_recipes,1)) * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
+        con_Ag  = np.random.random_sample(size= (number_recipes,1))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
+        
+        
+        print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
+
+        for r in range(3):
+            if con_KBr[r] == upper_bound_KBr:
+                con_Cit[r] = 0
+                con_Ag[r]  = 0
+
+            elif con_Cit[r] == upper_bound_Cit:
+                con_KBr[r] = 0
+                con_Ag[r]  = 0
+
+            elif con_Ag[r] == upper_bound_Ag:
+                con_KBr[r] = 0
+                con_Cit[r]  = 0
+            
+        print("Concen after checking (T)",con_Cit.T,con_Ag.T,con_KBr.T)
+        print("")
+
+
+        print("Creating recipes.....")
+        
+        print("")
+        print("")
+        
+        recipes = np.concatenate((con_Cit, con_Ag,con_KBr), axis=1)
+        recipes = np.repeat(recipes, self.duplication, axis=0)
+        print(recipes)
+        return recipes
+    
+    
+    #NEW PREDICTION
+    def prediction(self, modelCall):
+
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        '''
+        super().prediction()
+        with self.model_lock:
+            y_pred = self.FINAL_SPECTRA
+        print("predicted NH", y_pred)
+        
+
+        def predictLinearModelInverse(Y_wt, W, b):
+            #Overcome Overflow dtype=np.uint32
+            Y_wt= np.array([[Y_wt]],dtype=float)
+            W= np.array([W],dtype=float)
+            b= np.array([b],dtype=float)
+            print("predicting",Y_wt)
+            print("predictor W",W)
+            print("predictor W",b)
+            
+            X_predicted = (Y_wt -b) /W
+            return X_predicted
+
+
+
+
+        def plots_error_avg(model):
+            print(len(model["cacheErrorAvg"]))
+            min_index=np.min(model["cacheErrorAvg"])
+            max_index=np.max(model["cacheErrorAvg"])
+            print("NNNNNNNNN",model["cacheErrorAvg"])
+            print(min_index)
+            errorsSca=[]
+            for i in range(len(model["cacheErrorAvg"])):
+                errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
+            print("AAAAAAAAA",errorsSca)
+            plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
+            plt.show()
+            
+            return plt.show()# for saving
+            #plt.savefig('pic.png')
+
+        
+        print("b predict",modelCall)
+        #print(",",modelCall["cacheErrorAvg"])
+        plots_error_avg(modelCall)
+        predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
+        if predictQuestion == "Yes" or predictQuestion=="y":
+            predict = input("Please enter recipe:")
+            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            print("Predicted concentration [] given a wavelenght", prediction)
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+
+            return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+        
+        else:
+            
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+            
+            return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+        
+        #return np.repeat(y_pred, self.duplication, axis=0);
+    
+    
+    #NEW TRAIN
+    def training(self, df,input_user,r):
+
+            def getting_params(self, concentration,wavelength):
+                print("Parasn", concentration)
+                W = sum(wavelength*(concentration-np.mean(concentration))) / sum((concentration-np.mean(concentration))**2)
+                b = np.mean(wavelength) - W*np.mean(concentration)
+                print("--->", W,b)
+                return W, b
+            
+            #Training //Computing the parameters
+            print("---->Model training")
+            print("Computing W and b")
+
+            W, b = getting_params(self,df['Concentration'],df['Wavelength']) 
+
+            #making predictions based on our current data to see plot and the error
+            print("making predictions based on our current data to see plot and the error")
+            train_prediction= df['Concentration'] * W + b
+            #our error 
+            training_error= df['Wavelength']-train_prediction
+            print("----")
+            print("Train_prediction:",train_prediction)
+            print("----")
+            print("Error", training_error)
+            #ploting
+            train_fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength by Linear Model")
+            plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+            plt.xlabel("[KBr] Concentration (mM)")
+            plt.ylabel("Wavelength (nm)")
+            plt.legend(prop={"size":6})
+            plt.show()
+            train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
+            #User input for Wavelength wanted
+
+
+            #conputing the inverse --> from Wavelength to Concentration
+            input_user= input_user
+            while True:
+                user_concentration = (input_user- b) / W
+                print("Model predictied concentration given the wavelength: ",user_concentration)
+                if user_concentration < 0.00025 or user_concentration >0.003:
+                    print("Sorry, the wanted wavelength is not reached given the current concentration of KBr allowed to process")
+                    input_user= input("Please ENTER the desire Wavelength: ")
+                    input_user= float(input_user)
+                    
+                    #user_concentration = (input_user- b) / W
+
+                else:
+
+                    break
+
+
+            print("------------")
+            print("Making prediction")
+            print("passing ", user_concentration, " to robot")
+            return input_user, user_concentration, train_prediction , W, b
+    
+
+    ##OLD TRAIN
+    def _train(self, X, y):
+        '''
+        This call should wait on any current training threads to complete  
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated  
+        params:  
+            np.array X: shape (num_pts, num_features) the recieved data for each new well  
+            np.array y: shape(num_pts, n_classes) the labels to predict  
+        Postconditions:  
+            The model has been trained on the new data
+        '''
+
+        #NOTE we may get fancier in the future here and do more preprocessing
+        # if self.scan_bounds:
+        #     #if you only want to pay attention in bounds, train on those vals
+        #     processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
+        # else:
+        #     processedX = X
+        #update the data with the new scans
+        time.sleep(40)
+        # print('<<ML>> training')
+        with self.model_lock:
+        #     if isinstance(self.X,np.ndarray):
+        #         self.X = np.concatenate((self.X, processedX))
+        #         self.y = np.concatenate((self.y, y))
+        #     else:
+        #         self.X = processedX
+        #         self.y = y
+        #     print("model fitting on X", self.X)
+        #     print("model fitting on y", self.y)
+        #     self.model.fit(self.X, self.y)
+        # print('<<ML>> done training'
+            print("X and Y")
+            print(X,y) 
+            print("--------")
+            print('<<ML>> training')
+
+            # ml_model_trained = MainModel(self,10,3,0.05,X,y)
+
+            print('<<ML>> done training')
+
+            return 0 #MainModel(self, X,y)
+
+
+
+#####################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
