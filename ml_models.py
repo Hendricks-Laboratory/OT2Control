@@ -7,6 +7,7 @@ from sklearn.linear_model import Lasso
 import matplotlib.pyplot as plt
 import  pandas as pd
 import numpy as np
+import random
 #i
 class MLModel():
     '''
@@ -512,21 +513,43 @@ class NeuralNet(MLModel):
         con_Ag  = np.random.random_sample(size= (3,))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
         
         
-        print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
+        ##print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
+        print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T)
 
-        for r in range(3):
-            if con_KBr[r] == upper_bound_KBr:
-                con_Cit[r] = 0
-                con_Ag[r]  = 0
+        Nextt= False
+        Ngen=0
+        while True:
+            for r in range(3):
+                print("rr",r)
+                print("Checking creations",(con_KBr[r]*(200)/0.005 + con_Cit[r]*(200)/ 12.5+ con_Ag[r]*(200)/0.375))
+                if (con_KBr[r]*(200)/0.005 + con_Cit[r]*(200)/ 12.5+ con_Ag[r]*(200)/0.375) > 130:
 
-            elif con_Cit[r] == upper_bound_Cit:
-                con_KBr[r] = 0
-                con_Ag[r]  = 0
+                    con_KBr[r] = random.random() * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
+                    con_Cit[r] = random.random() * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
+                    con_Ag[r]  = random.random()  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
+                    Nextt = True
+                    Ngen +=1
+                    break
+                else:
 
-            elif con_Ag[r] == upper_bound_Ag:
-                con_KBr[r] = 0
-                con_Cit[r]  = 0
-            
+                    if con_KBr[r] == upper_bound_KBr:
+                        con_Cit[r] = 0
+                        con_Ag[r]  = 0
+
+                    if con_Cit[r] == upper_bound_Cit:
+                        con_KBr[r] = 0
+                        con_Ag[r]  = 0
+
+                    if con_Ag[r] == upper_bound_Ag:
+                        con_KBr[r] = 0
+                        con_Cit[r]  = 0
+                    Nextt= False
+            if Nextt== True:
+                0
+            elif Nextt == False:
+                break
+                
+        print("N",Ngen)
         print("Concen after checking (T)",con_Cit.T,con_Ag.T,con_KBr.T)
         print("")
 
