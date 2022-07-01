@@ -4927,7 +4927,11 @@ class AutoContr(Controller):
                 # print("Waves evol", )
                 print("Wav nw Final",total_waves)
                 # Y= np.array([wavelengths])
-                Y= np.array([total_waves])
+                # Y= np.array([total_waves])
+                J = last_obs_1+last_obs_2+last_obs_3
+                Y = np.array([J])
+
+
                 print("recipes----")
                 print(recipes)
 
@@ -4944,13 +4948,37 @@ class AutoContr(Controller):
                 print("Final Y",Y)
                 X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
                 Y_df = [Y[0][m] for m in range(len(Y[0]))]
+
+                X_df_Cit = [final_recipes[:][z][0] for z in range(len(final_recipes[:][:]))]
+                X_df_Ag = [final_recipes[:][z][1] for z in range(len(final_recipes[:][:]))]
+                X_df_KBr = [final_recipes[:][z][2] for z in range(len(final_recipes[:][:]))]
+
+
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+                WaveLength_df= [Y_df[m][0] for m in range(len(Y_df))]
+                Obs_df= [Y_df[m][1] for m in range(len(Y_df))]
+                #print(X_df_Cit)
+                #print(X_df_Ag)
+                #print(X_df_KBr)
+                #print(WaveLength_df)
+                #print(Obs_df)  
+
+
                 #Checking that they are list Y_df
-                print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+                # print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+                print("Checking if X and Y are list now: ", type(X_df_Cit),type(Y_df))
+
+
 
                 ##creadting the dataframe
-                df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                # #sorting by Concentration
+                # df = df.sort_values(by=['Concentration'])
+                df = pd.DataFrame(list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
                 #sorting by Concentration
-                df = df.sort_values(by=['Concentration'])
+                #df = df.sort_values(by=['Concentration'])
+                print("DFrame",df)
+
 
                 input_user= input("Please eneter the desire Wavelength: ")
                 input_user= float(input_user)
