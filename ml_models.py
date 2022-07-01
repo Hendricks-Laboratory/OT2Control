@@ -487,7 +487,7 @@ class NeuralNet(MLModel):
         '''
 
        
-        #Boundary for Cit
+                #Boundary for Cit
         
         upper_bound_Cit = 8.125
         lower_bound_Cit = 0.3125
@@ -534,6 +534,9 @@ class NeuralNet(MLModel):
         print("Creating recipes.....")
         
         print("")
+        
+        recipes2 = np.concatenate((con_Cit, con_Ag,con_KBr), axis=None)
+        print(recipes2)
         print("")
         #for re in range(len(con_Cit)):
         res1=[con_Cit[0],con_Ag[0],con_KBr[0]]
@@ -550,17 +553,24 @@ class NeuralNet(MLModel):
         
         res_1 = recipes[0]
         res_1 = np.expand_dims(res_1, axis=1)
+        res_1 = res_1.T
         res_1 = np.concatenate((res_1, res_1, res_1), axis=0)
+
+
         
         res_2 = recipes[1]
         res_2 = np.expand_dims(res_2, axis=1)
+        res_2 = res_2.T
         res_2 = np.concatenate((res_2, res_2, res_2), axis=0)
+
         
         res_3 = recipes[2]
         res_3 = np.expand_dims(res_3, axis=1)
+        res_3 = res_3.T
         res_3 = np.concatenate((res_3, res_3, res_3), axis=0)
-        
-        print("llllll",res_1,res_2,res_3)
+
+
+        #print("llllll",res_1,res_2,res_3)
         recipe_l= np.concatenate((res_1, res_2,res_3), axis=0)
         print(recipe_l)
         return recipe_l
