@@ -4458,7 +4458,7 @@ class AutoContr(Controller):
                                 # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                                     
 
-                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new,Obs_scan_1_new = MaxWaveLength(scan_Y_1_second)
+                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new,Obs_scan_1_new = MaxWaveLength_Obs(scan_Y_1_second)
                                 print("W-O",maxWave_scan_1_sec,Obs_scan_1_new)
                                
                                 new_plots_x.append(X_scan_1_new)
@@ -5008,9 +5008,9 @@ class AutoContr(Controller):
 
     
 
-                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1 = MaxWaveLength(scan_Y_1_test)
-                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2 = MaxWaveLength(scan_Y_2_test)
-                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3 = MaxWaveLength(scan_Y_3_test)
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1 = MaxWaveLength_Obs(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2 = MaxWaveLength_Obs(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3 = MaxWaveLength_Obs(scan_Y_3_test)
 
                     wavelengths_prediction_test.append(maxWave_scan_1_test)
                     wavelengths_prediction_test.append(maxWave_scan_2_test)
@@ -5102,7 +5102,7 @@ class AutoContr(Controller):
                                     
 
                             # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
-                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength(scan_Y_rep_1)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength_Obs(scan_Y_rep_1)
                             new_plots_x.append(X_scan_1_new_test)
                             new_plots_y.append(Y_scan_1_new_test)
                             waves_recipe1_test.append(maxWave_scan_1_sec_test)
