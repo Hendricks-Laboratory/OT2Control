@@ -486,6 +486,7 @@ class NeuralNet(MLModel):
             np.array: (batch_size,n_features) 
         '''
 
+       
         #Boundary for Cit
         
         upper_bound_Cit = 8.125
@@ -506,25 +507,25 @@ class NeuralNet(MLModel):
         
         #Generating random 
         
-        con_KBr = np.random.random_sample(size= (1,3)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
-        con_Cit = np.random.random_sample(size= (1,3)) * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
-        con_Ag  = np.random.random_sample(size= (1,3))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
+        con_KBr = np.random.random_sample(size= (3,)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
+        con_Cit = np.random.random_sample(size= (3,)) * (upper_bound_Cit- lower_bound_Cit) + (lower_bound_Cit)
+        con_Ag  = np.random.random_sample(size= (3,))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
         
         
         print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
 
-        for r in range(1):
-            if con_KBr[0][r] == upper_bound_KBr:
-                con_Cit[0][r] = 0
-                con_Ag[0][r]  = 0
+        for r in range(3):
+            if con_KBr[r] == upper_bound_KBr:
+                con_Cit[r] = 0
+                con_Ag[r]  = 0
 
-            elif con_Cit[0][r] == upper_bound_Cit:
-                con_KBr[0][r] = 0
-                con_Ag[0][r]  = 0
+            elif con_Cit[r] == upper_bound_Cit:
+                con_KBr[r] = 0
+                con_Ag[r]  = 0
 
-            elif con_Ag[0][r] == upper_bound_Ag:
-                con_KBr[0][r] = 0
-                con_Cit[0][r]  = 0
+            elif con_Ag[r] == upper_bound_Ag:
+                con_KBr[r] = 0
+                con_Cit[r]  = 0
             
         print("Concen after checking (T)",con_Cit.T,con_Ag.T,con_KBr.T)
         print("")
@@ -534,11 +535,35 @@ class NeuralNet(MLModel):
         
         print("")
         print("")
+        #for re in range(len(con_Cit)):
+        res1=[con_Cit[0],con_Ag[0],con_KBr[0]]
+        res2=[con_Cit[1],con_Ag[1],con_KBr[1]]
+        res3=[con_Cit[2],con_Ag[2],con_KBr[2]]
+        print("SSS",res1)
         
-        recipes = np.concatenate((con_Cit, con_Ag,con_KBr), axis=1)
-        recipes = np.repeat(recipes, 3, axis=0)
+        
+        
+        
+        recipes = np.concatenate((np.array([res1]), np.array([res2]),np.array([res3])), axis=0)
+        recipes = np.repeat(recipes, 1, axis=0)
         print("rrecipes",recipes)
-        return recipes.T
+        
+        res_1 = recipes[0]
+        res_1 = np.expand_dims(res_1, axis=1)
+        res_1 = np.concatenate((res_1, res_1, res_1), axis=0)
+        
+        res_2 = recipes[1]
+        res_2 = np.expand_dims(res_2, axis=1)
+        res_2 = np.concatenate((res_2, res_2, res_2), axis=0)
+        
+        res_3 = recipes[2]
+        res_3 = np.expand_dims(res_3, axis=1)
+        res_3 = np.concatenate((res_3, res_3, res_3), axis=0)
+        
+        print("llllll",res_1,res_2,res_3)
+        recipe_l= np.concatenate((res_1, res_2,res_3), axis=0)
+        print(recipe_l)
+        return recipe_l
     
     
     #NEW PREDICTION

@@ -158,10 +158,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     while True:
 
         if input_model_user == "linear":
-            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
+            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 5)
             break
         elif input_model_user == "neural":
-            ml_model = NeuralNet(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
+            ml_model = NeuralNet(model, final_spectra, y_shape=1, max_iters=5,duplication = 10)
             break
         else :
             print("Try to choose again")
@@ -2077,7 +2077,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
  
-    def run_simulation(self,model=None,no_pr=False,params=None,initial_recipes=None, kind=None):
+    def run_simulation(self,model=None,no_pr=False,params=None,initial_recipes=None, kind = None):
         '''
         runs a full simulation of the protocol on local machine
         Temporarilly overwrites the self.server_ip with loopback, but will restore it at
@@ -2104,7 +2104,7 @@ class AutoContr(Controller):
         eve_thread.start()
         #do create a connection
         b.wait()
-        returned_ml= self._run(port, True, model, no_pr,params,initial_recipes,kind)
+        returned_ml= self._run(port, True, model, no_pr,params,initial_recipes, kind)
 
         time.sleep(20)
         #collect the eve thread
