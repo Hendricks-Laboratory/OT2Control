@@ -2887,7 +2887,7 @@ class AutoContr(Controller):
                 #sorting by Concentration
                 df = df.sort_values(by=['Concentration'])
 
-                input_user= input("Please eneter the desire Wavelength: ")
+                input_user= input("Please enter the desire Wavelength: ")
                 input_user= float(input_user)
 
                 W_list=[]
@@ -3892,7 +3892,7 @@ class AutoContr(Controller):
                 #sorting by Concentration
                 df = df.sort_values(by=['Concentration'])
 
-                input_user= input("Please eneter the desire Wavelength: ")
+                input_user= input("Please enter the desire Wavelength: ")
                 input_user= float(input_user)
 
                 W_list=[]
@@ -4977,11 +4977,26 @@ class AutoContr(Controller):
                 df = pd.DataFrame(list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
                 #sorting by Concentration
                 #df = df.sort_values(by=['Concentration'])
-                print("DFrame",df)
+                print("DFrame")
+                print("")
+                print(df)
 
 
-                input_user= input("Please eneter the desire Wavelength: ")
-                input_user= float(input_user)
+                input_user= input("Please enter the desire [Wavelength , Observance] : ")
+                print(input_user, type(input_user))
+                print(input_user.find("-"))
+                format_pos= input_user.find("-")
+                while True:
+
+                    if format_pos == -1:
+                        print("Enter the correct form ")
+                        input_user= input("Please enter the desire Wavelength - Observance : ")
+                    else :
+                        break
+
+                print("FINISH",input_user)
+                input_user_model = (float(input_user[:format_pos]),float(input_user[format_pos+1:]))
+                print(input_user_model)
 
                 W_list=[]
                 b_list=[]
