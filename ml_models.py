@@ -796,7 +796,7 @@ class NeuralNet(MLModel):
 
 
         def launchTensorBoard():
-            os.system('reload_ext tensorboard')
+            #os.system('reload_ext tensorboard')
             os.system('tensorboard --logdir=' + logdir)
             return
 
