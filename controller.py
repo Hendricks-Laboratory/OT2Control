@@ -4264,7 +4264,7 @@ class AutoContr(Controller):
             if params == None:
 
                 print("Neural")
-                print("--- Neu Simulation----")
+                print("--- Neural Simulation----")
                 recipes = model.generate_seed_rxns(3) #number of recipes
                 print("Our initital recipes:",recipes)
                 print("----Breaking our initial recipes----")
@@ -4982,7 +4982,7 @@ class AutoContr(Controller):
                 print(df)
 
 
-                input_user= input("Please enter the desire [Wavelength , Observance] : ")
+                input_user= input("Please enter the desire [Wavelength - Observance] : ")
                 print(input_user, type(input_user))
                 print(input_user.find("-"))
                 format_pos= input_user.find("-")
@@ -4991,6 +4991,7 @@ class AutoContr(Controller):
                     if format_pos == -1:
                         print("Enter the correct form ")
                         input_user= input("Please enter the desire Wavelength - Observance : ")
+                        format_pos= input_user.find("-")
                     else :
                         break
 
