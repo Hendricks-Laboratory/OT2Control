@@ -8,6 +8,21 @@ import matplotlib.pyplot as plt
 import  pandas as pd
 import numpy as np
 import random
+import tensorflow as tf
+from tensorflow.keras.utils import plot_model
+import tensorboard
+
+import keras
+
+from datetime import datetime
+import random
+import os
+
+
+
+
+
+
 #i
 class MLModel():
     '''
@@ -600,7 +615,7 @@ class NeuralNet(MLModel):
     
     
     #NEW PREDICTION
-    def prediction(self, modelCall):
+    def prediction(self, Test_input):
 
         '''
         This call should wait on the training thread to complete if it is has not been collected
@@ -616,44 +631,52 @@ class NeuralNet(MLModel):
         print("predicted NH", y_pred)
         
 
-        def predictLinearModelInverse(Y_wt, W, b):
-            #Overcome Overflow dtype=np.uint32
-            Y_wt= np.array([[Y_wt]],dtype=float)
-            W= np.array([W],dtype=float)
-            b= np.array([b],dtype=float)
-            print("predicting",Y_wt)
-            print("predictor W",W)
-            print("predictor W",b)
+        # # def predictLinearModelInverse(Y_wt, W, b):
+        # #     #Overcome Overflow dtype=np.uint32
+        # #     Y_wt= np.array([[Y_wt]],dtype=float)
+        # #     W= np.array([W],dtype=float)
+        # #     b= np.array([b],dtype=float)
+        # #     print("predicting",Y_wt)
+        # #     print("predictor W",W)
+        # #     print("predictor W",b)
             
-            X_predicted = (Y_wt -b) /W
-            return X_predicted
+        # #     X_predicted = (Y_wt -b) /W
+        # #     return X_predicted
 
 
 
 
-        def plots_error_avg(model):
-            print(len(model["cacheErrorAvg"]))
-            min_index=np.min(model["cacheErrorAvg"])
-            max_index=np.max(model["cacheErrorAvg"])
-            print("NNNNNNNNN",model["cacheErrorAvg"])
-            print(min_index)
-            errorsSca=[]
-            for i in range(len(model["cacheErrorAvg"])):
-                errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
-            print("AAAAAAAAA",errorsSca)
-            plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
-            plt.show()
+        # # def plots_error_avg(model):
+        # #     print(len(model["cacheErrorAvg"]))
+        # #     min_index=np.min(model["cacheErrorAvg"])
+        # #     max_index=np.max(model["cacheErrorAvg"])
+        # #     print("NNNNNNNNN",model["cacheErrorAvg"])
+        # #     print(min_index)
+        # #     errorsSca=[]
+        # #     for i in range(len(model["cacheErrorAvg"])):
+        # #         errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
+        # #     print("AAAAAAAAA",errorsSca)
+        # #     plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
+        # #     plt.show()
             
-            return plt.show()# for saving
-            #plt.savefig('pic.png')
+        # #     return plt.show()# for saving
+        # #     #plt.savefig('pic.png')
 
         
-        print("b predict",modelCall)
+        print("b predict",Test_input)
         #print(",",modelCall["cacheErrorAvg"])
-        plots_error_avg(modelCall)
+        #plots_error_avg(modelCall)
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
+
+            print("Generate predictions for 3 samples")
+            print("Self mo",self.model)
+            y_pred = self.model.predict(np.array(Test_input))#Test_input)
+            print("predictions shape:", y_pred.shape)
+            print("predictions:",y_pred)
+            return y_pred
+    
             #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             print("Predicted concentration [] given a wavelenght", prediction)
@@ -667,13 +690,93 @@ class NeuralNet(MLModel):
             #ADDING DELETE IF NO PROB
             breakpoint()
             
-            return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            return {"prediction":0}
+            # return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
         #return np.repeat(y_pred, self.duplication, axis=0);
-    
+
+
     
     #NEW TRAIN
-    def training(self, df,input_user,r):
+    
+    def training(self, df,input_user,r, n_epochs=30):
+        
+        #Data
+        Train_input = df
+        Train_label = df
+
+        Test_input  = df
+        Test_label  = df
+
+        Val_input   = df
+        Val_label   = df
+        
+        #Model
+        modelN = tf.keras.models.Sequential()
+        modelN.add(tf.keras.Input(shape=(2,)))
+        modelN.add(tf.keras.layers.Dense(32, activation='relu'))
+        modelN.add(tf.keras.layers.Dense(16, activation='relu'))
+        modelN.add(tf.keras.layers.Dense(3, activation='linear'))
+        # Output  output
+        # modelN.output_shape
+        plot_model(
+            modelN,
+            to_file='NModel.png',
+            show_shapes=True,
+            show_dtype=False,
+            show_layer_names=True,
+            rankdir='TB',
+            expand_nested=False,
+            dpi=96,
+            layer_range=None,
+            show_layer_activations=False
+        )
+        modelN.compile(
+            optimizer='adam',
+            loss='mean_squared_error',
+            metrics=['mse','mae']
+        )
+        logdir= "logNModel/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+        tensorboard_callback = keras.callbacks.TensorBoard(log_dir=logdir)
+
+        history= modelN.fit(
+            Train_input,
+            Train_label, 
+            batch_size=2,
+            epochs=n_epochs, 
+            callbacks=[tensorboard_callback],
+            validation_data=(Val_input, Val_label),
+        )
+        
+
+
+        # history.history
+        print("Evaluating on test data")
+        results = modelN.evaluate(Test_input, Test_label, batch_size=5)
+        print("%s: %.2f%%" % (modelN.metrics_names[1], scores[1]*100))
+        print("test loss, test acc:", results)
+
+        # save model and architecture to single file
+        modelN.save("modelN.h5")
+        print("Saved modelN to disk")        
+        
+        #Tensorboard
+
+
+        def launchTensorBoard():
+            os.system('reload_ext tensorboard')
+            os.system('tensorboard --logdir=' + logdir)
+            return
+
+        import threading
+        t = threading.Thread(target=launchTensorBoard, args=([]))
+        t.start()
+
+        return 0, 0, 0 , 0, 0
+    
+    
+    def Oldtraining(self, df,input_user,r):
+
 
             def getting_params(self, concentration,wavelength):
                 print("Parasn", concentration)

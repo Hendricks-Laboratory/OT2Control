@@ -4999,6 +4999,9 @@ class AutoContr(Controller):
                 input_user_model = (float(input_user[:format_pos]),float(input_user[format_pos+1:]))
                 print(input_user_model)
 
+
+                #NN model
+            
                 W_list=[]
                 b_list=[]
                 ##Training 
