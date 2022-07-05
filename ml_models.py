@@ -795,14 +795,24 @@ class NeuralNet(MLModel):
         #Tensorboard
 
 
-        def launchTensorBoard():
-            #os.system('reload_ext tensorboard')
-            os.system('tensorboard --logdir=' + logdir)
-            return
+        # def launchTensorBoard():
+        #     #os.system('reload_ext tensorboard')
+        #     os.system('tensorboard --logdir=' + logdir)
+        #     return
 
-        import threading
-        t = threading.Thread(target=launchTensorBoard, args=([]))
-        t.start()
+        # import threading
+        # t = threading.Thread(target=launchTensorBoard, args=([]))
+        # t.start()
+
+        from tensorboard import program
+
+        tracking_address = logdir # the path of your log file.
+
+        #if __name__ == "__main__":
+        tb = program.TensorBoard()
+        tb.configure(argv=[None, '--logdir', tracking_address])
+        url = tb.launch()
+        print(f"Tensorflow listening on {url}")
 
         return 0, 0, 0 , 0, 0
     
