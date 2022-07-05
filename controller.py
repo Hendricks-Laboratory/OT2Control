@@ -4264,7 +4264,7 @@ class AutoContr(Controller):
             if params == None:
 
                 print("Neural")
-                print("---Simulation----")
+                print("--- Neu Simulation----")
                 recipes = model.generate_seed_rxns(3) #number of recipes
                 print("Our initital recipes:",recipes)
                 print("----Breaking our initial recipes----")
