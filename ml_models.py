@@ -785,7 +785,7 @@ class NeuralNet(MLModel):
         # history.history
         print("Evaluating on test data")
         results = modelN.evaluate(Test_input, Test_label, batch_size=5)
-        print("%s: %.2f%%" % (modelN.metrics_names[1], scores[1]*100))
+        print("%s: %.2f%%" % (modelN.metrics_names[1], results[1]*100))
         print("test loss, test acc:", results)
 
         # save model and architecture to single file
