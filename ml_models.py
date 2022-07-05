@@ -17,7 +17,7 @@ import keras
 from datetime import datetime
 import random
 import os
-
+import math
 
 
 
@@ -702,14 +702,46 @@ class NeuralNet(MLModel):
     def training(self, df,input_user,r, n_epochs=30):
         
         #Data
-        Train_input = df
-        Train_label = df
+        train_size= math.floor(len(df)*(80/100))
+        val_size= int((len(df)-train_size)/2)
+        test_size= int(len(df)-train_size-val_size)
 
-        Test_input  = df
-        Test_label  = df
+        train_pre =[]
+        for rto in range(train_size):
+            train_pre.append((df["Wavelength"][:train_size][rto],df["Observance"][:train_size][rto]))
+    
+        val_pre =[]
+        for ret in range(train_size,train_size+val_size):
+            val_pre.append((df["Wavelength"][train_size:train_size+val_size][ret],df["Observance"][train_size:train_size+val_size][ret]))
+       
+        test_pre =[]
+        for retr in range(train_size+val_size,train_size+val_size+test_size):
+            test_pre.append((df["Wavelength"][train_size+val_size:train_size+val_size+test_size][retr],df["Observance"][train_size+val_size:train_size+val_size+test_size][retr]))
 
-        Val_input   = df
-        Val_label   = df
+        train_label_pre =[]
+        for ee in range(train_size):
+            train_label_pre.append([df["[Cit]"][:train_size][ee],df["[Ag]"][:train_size][ee],df["[KBr]"][:train_size][ee]])
+
+        val_label_pre =[]
+        for eer in range(train_size,train_size+val_size):
+            val_label_pre.append([df["[Cit]"][train_size:train_size+val_size][eer],df["[Ag]"][train_size:train_size+val_size][eer],df["[KBr]"][train_size:train_size+val_size][eer]])
+
+        test_label_pre =[]
+        for eerr in range(train_size+val_size,train_size+val_size+test_size):
+            test_label_pre.append([df["[Cit]"][train_size+val_size:train_size+val_size+test_size][eerr],df["[Ag]"][train_size+val_size:train_size+val_size+test_size][eerr],df["[KBr]"][train_size+val_size:train_size+val_size+test_size][eerr]])
+
+
+
+        Train_input = np.array(train_pre)
+        Train_label = np.array(train_label_pre)
+
+        Val_input   = np.array(val_pre)
+        Val_label   = np.array(val_label_pre)
+        
+        Test_input  = np.array(test_pre)
+        Test_label  = np.array(test_label_pre)
+
+
         
         #Model
         modelN = tf.keras.models.Sequential()
