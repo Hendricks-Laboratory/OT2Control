@@ -23,6 +23,7 @@ import math
 
 
 
+
 #i
 class MLModel():
     '''
@@ -813,6 +814,7 @@ class NeuralNet(MLModel):
         tb.configure(argv=[None, '--logdir', tracking_address])
         url = tb.launch()
         print(f"Tensorflow listening on {url}")
+        time.sleep(10000)
 
         return 0, 0, 0 , 0, 0
     
