@@ -702,6 +702,9 @@ class NeuralNet(MLModel):
     
     def training(self, df,input_user,r, n_epochs=30):
         
+
+
+        print("Which pass?",r)
         #Data
         train_size= math.floor(len(df)*(80/100))
         val_size= int((len(df)-train_size)/2)
@@ -811,12 +814,45 @@ class NeuralNet(MLModel):
 
         #if __name__ == "__main__":
         tb = program.TensorBoard()
-        tb.configure(argv=[None, '--logdir', tracking_address])
+        tb.configure(argv=[None, '--logdir', logdir])
         url = tb.launch()
         print(f"Tensorflow listening on {url}")
-        time.sleep(10000)
+        
+        
+        # print("b predict",Test_input)
 
-        return 0, 0, 0 , 0, 0
+        #print(",",modelCall["cacheErrorAvg"])
+        #plots_error_avg(modelCall)
+        predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
+        
+        if predictQuestion == "Yes" or predictQuestion=="y":
+            prediction_user_input = input("Please enter W-O:")
+
+            print("Generate predictions for 3 samples")
+            # y_pred = modelN.predict(np.array(Test_input))#Test_input)
+            # y_pred = modelN.predict(Test_input)
+            y_pred = modelN.predict(prediction_user_input)
+            print("predictions shape:", y_pred.shape)
+            print("predictions:",y_pred)
+            return prediction_user_input, y_pred, 0 , 0, 0
+
+    
+            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            print("Predicted concentration [] given a wavelenght", prediction)
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+
+            return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+        
+        else:
+            
+            #ADDING DELETE IF NO PROB
+            breakpoint()
+            
+            return 0, 0, 0 , 0, 0
+        
+
     
     
     def Oldtraining(self, df,input_user,r):
