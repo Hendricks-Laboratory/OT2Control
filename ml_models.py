@@ -18,7 +18,7 @@ from datetime import datetime
 import random
 import os
 import math
-
+import sys
 
 
 
@@ -823,7 +823,7 @@ class NeuralNet(MLModel):
 
         #print(",",modelCall["cacheErrorAvg"])
         #plots_error_avg(modelCall)
-        predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
+        predictQuestion = input("Do you want to make a prediction: [Yes-y / No ]")
         
         if predictQuestion == "Yes" or predictQuestion=="y":
             prediction_user_input = input("Please enter W-O:")
@@ -848,6 +848,7 @@ class NeuralNet(MLModel):
         else:
             
             #ADDING DELETE IF NO PROB
+            sys.exit()
             breakpoint()
             
             return 0, 0, 0 , 0, 0
