@@ -5031,8 +5031,9 @@ class AutoContr(Controller):
                     
                     
                     # for r in range(len(testing_recipes[0])):
-                    recipe_unit_test = np.array([[user_concentration]])
-                    recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=0)
+                    # recipe_unit_test = np.array([[user_concentration]])
+                    recipe_unit_test = user_concentration
+                    recipe_unit_test = np.repeat(user_concentration, 3, axis=0)
                     print("Recipes Test",recipe_unit_test)
                     #do the first one
                     #print('<<controller>> executing batch {}'.format(self.batch_num))
