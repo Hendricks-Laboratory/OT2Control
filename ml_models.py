@@ -823,35 +823,37 @@ class NeuralNet(MLModel):
 
         #print(",",modelCall["cacheErrorAvg"])
         #plots_error_avg(modelCall)
-        predictQuestion = input("Do you want to make a prediction: [Yes-y / No ]")
+        # predictQuestion = input("Do you want to make a prediction: [Yes-y / No ]")
         
-        if predictQuestion == "Yes" or predictQuestion=="y":
-            prediction_user_input = input("Please enter W-O:")
+        # if predictQuestion == "Yes" or predictQuestion=="y":
+        #     prediction_user_input = input("Please enter W-O:")
 
-            print("Generate predictions for 3 samples")
-            # y_pred = modelN.predict(np.array(Test_input))#Test_input)
-            # y_pred = modelN.predict(Test_input)
-            y_pred = modelN.predict(prediction_user_input)
-            print("predictions shape:", y_pred.shape)
-            print("predictions:",y_pred)
-            return prediction_user_input, y_pred, 0 , 0, 0
+        print("Generate predictions for 3 samples")
+        # y_pred = modelN.predict(np.array(Test_input))#Test_input)
+        # y_pred = modelN.predict(Test_input)
+        print("Input_us",input_user)
+        y_pred = modelN.predict(input_user)
+        print("predictions shape:", y_pred.shape)
+        print("predictions:",y_pred)
+        return input_user, y_pred, 0 , 0, 0
 
     
-            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            print("Predicted concentration [] given a wavelenght", prediction)
-            #ADDING DELETE IF NO PROB
-            breakpoint()
+            # #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            # prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
+            # print("Predicted concentration [] given a wavelenght", prediction)
+            # #ADDING DELETE IF NO PROB
+            # breakpoint()
 
-            return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
+            # return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
-        else:
+        # else:
             
-            #ADDING DELETE IF NO PROB
-            sys.exit()
-            breakpoint()
+        #     #ADDING DELETE IF NO PROB
+        #     sys.exit()
+        #     breakpoint()
             
-            return 0, 0, 0 , 0, 0
+        #     
+        return 0, 0, 0 , 0, 0
         
 
     
