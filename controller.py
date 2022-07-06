@@ -4997,7 +4997,8 @@ class AutoContr(Controller):
 
                 print("FINISH",input_user)
                 input_user_model = (float(input_user[:format_pos]),float(input_user[format_pos+1:]))
-                print(input_user_model)
+                input_user_model = np.array([input_user_model])
+                print(input_user_model,type(input_user_model))
 
 
                 #NN model
