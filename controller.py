@@ -3336,7 +3336,7 @@ class ScanDataFrame():
 
             for react in df.loc[scan]['Well Name']:
                 transfers_before_scans = []
-                
+                react = str(react)
                 print(react)
                 if 'blank' in react:
                     react = 'control'
