@@ -3165,7 +3165,7 @@ class ScanDataFrame():
 
         well_hist_df['timestamp'] = timess
 
-        df = self.df
+        df = pd.read_csv(os.path.join(self.data_path, reaction+'full_df.csv'))
 
 
 
@@ -3308,7 +3308,7 @@ class ScanDataFrame():
         weird = []
         last_reagent = []
 
-        df = df.reset_index()
+
         scans = list(set(df['Scan ID'].tolist()))
         reactions = list(set((df['Well Name'].tolist())))
 
