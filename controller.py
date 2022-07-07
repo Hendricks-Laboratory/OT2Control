@@ -3165,7 +3165,7 @@ class ScanDataFrame():
 
         well_hist_df['timestamp'] = timess
 
-        df = pd.read_csv(reaction+'full_df.csv')
+        df = pd.read_csv(os.path.join(self.data_path, reaction+'full_df.csv'))
 
 
 
