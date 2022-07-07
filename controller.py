@@ -3337,7 +3337,7 @@ class ScanDataFrame():
             for react in df.loc[scan]['Well Name']:
                 transfers_before_scans = []
                 
-              
+                print(react)
                 if 'blank' in react:
                     react = 'control'
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
