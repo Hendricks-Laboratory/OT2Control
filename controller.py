@@ -3308,7 +3308,7 @@ class ScanDataFrame():
         weird = []
         last_reagent = []
 
-
+        df = df.reset_index()
         scans = list(set(df['Scan ID'].tolist()))
         reactions = list(set((df['Well Name'].tolist())))
 
