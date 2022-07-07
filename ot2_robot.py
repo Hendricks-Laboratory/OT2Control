@@ -1676,6 +1676,7 @@ class OT2Robot():
         #transfer the liquid in as many steps are necessary
         for i in range(n_substeps):
             self._liquid_transfer(src, dst, substep_vol, arm)
+        self.dump_well_histories()
         return
 
     def _get_clean_tips(self):
