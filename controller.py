@@ -5125,10 +5125,11 @@ class AutoContr(Controller):
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
                             # #don't have data to train, so, not training
                             # #generate new wellnames for next batch
-                            recipe_unit_test_rep = np.array([[user_concentration]])
+                            
+                            recipe_unit_test_rep = user_concentration
                             # recipe_block_2 = np.array([recipe2])
                             print("Creating one more sample",recipe_unit_test_rep)
-                            recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 1, axis=1)
+                            recipe_unit_test_rep = np.repeat(user_concentration, 1, axis=1)
                             print("Recipes Test again",recipe_unit_test_rep)
                             #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             #do the first one
