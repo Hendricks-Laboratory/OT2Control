@@ -3345,6 +3345,7 @@ class ScanDataFrame():
           
                 for transfer_time in transfer_times:
                     if transfer_time <= time:
+                        print('heyeyeyyeye', transfer_time)
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
