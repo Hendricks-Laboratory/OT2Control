@@ -1188,50 +1188,53 @@ class NeuralNet(MLModel):
 
             #if __name__ == "__main__":
             tb = program.TensorBoard()
+            tb1= program.TensorBoard()
+            tb2= program.TensorBoard()
+            tb3= program.TensorBoard()
+            tb4= program.TensorBoard()
+            tb5= program.TensorBoard()
+
             tb.configure(argv=[None, '--logdir', logdir0])
+            tb1.configure(argv=[None, '--logdir', logdir2])
+            tb2.configure(argv=[None, '--logdir', logdirNew])
+            tb3.configure(argv=[None, '--logdir', logdirNew_2])
+            tb4.configure(argv=[None, '--logdir', logdir11])
+            tb5.configure(argv=[None, '--logdir', logdir11_2])
+
             url = tb.launch()
+            url1 = tb1.launch()
+            url2 = tb2.launch()
+            url3 = tb3.launch()
+            url4 = tb4.launch()
+            url5 = tb5.launch()
+
             print("ML0")
             print(f"Tensorflow listening on {url}")
             print("")
             print("")
-
+            
             print("-------")
             print("ML2")
-            tb1= program.TensorBoard()
-            tb1.configure(argv=[None, '--logdir', logdir2])
-            url1 = tb1.launch()
             print(f"Tensorflow listening on {url1}")
             print("")
 
             print("-------")
             print("ML_New")
-            tb2= program.TensorBoard()
-            tb2.configure(argv=[None, '--logdir', logdirNew])
-            url2 = tb2.launch()
             print(f"Tensorflow listening on {url2}")
             print("")
 
             print("-------")
             print("ML_New_2")
-            tb3= program.TensorBoard()
-            tb3.configure(argv=[None, '--logdir', logdirNew_2])
-            url3 = tb3.launch()
             print(f"Tensorflow listening on {url3}")
             print("")
 
             print("-------")
             print("ML_11")
-            tb4= program.TensorBoard()
-            tb4.configure(argv=[None, '--logdir', logdir11])
-            url4 = tb4.launch()
             print(f"Tensorflow listening on {url4}")
             print("")
 
             print("-------")
             print("ML_11_2")
-            tb5= program.TensorBoard()
-            tb5.configure(argv=[None, '--logdir', logdir11_2])
-            url5 = tb5.launch()
             print(f"Tensorflow listening on {url5}")
 
 
