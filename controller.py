@@ -4293,7 +4293,7 @@ class AutoContr(Controller):
                 obs_for_recipe_2 = {}
                 obs_for_recipe_3 = {}
 
-
+                obs_for_recipe_1_test={}
 
                 waves_evol_1=[]
                 waves_evol_2=[]
@@ -5059,11 +5059,10 @@ class AutoContr(Controller):
                     scan_Y_2_test = scan_Y_testing[1]
                     scan_Y_3_test = scan_Y_testing[2]
 
-    
 
-                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1 = MaxWaveLength_Obs(scan_Y_1_test)
-                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2 = MaxWaveLength_Obs(scan_Y_2_test)
-                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3 = MaxWaveLength_Obs(scan_Y_3_test)
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1, Obs_scan_test_1 = MaxWaveLength_Obs(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2, Obs_scan_test_2 = MaxWaveLength_Obs(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3, Obs_scan_test_3 = MaxWaveLength_Obs(scan_Y_3_test)
 
                     wavelengths_prediction_test.append(maxWave_scan_1_test)
                     wavelengths_prediction_test.append(maxWave_scan_2_test)
@@ -5084,6 +5083,10 @@ class AutoContr(Controller):
 
                     waves_recipe1_test = [maxWave_scan_1_test,maxWave_scan_2_test,maxWave_scan_3_test]
                     waves_recipe1_sorted_test = sorted(waves_recipe1_test)
+                    
+                    obs_for_recipe_1_test[maxWave_scan_1_test] = Obs_scan_test_1
+                    obs_for_recipe_1_test[maxWave_scan_2_test] = Obs_scan_test_2
+                    obs_for_recipe_1_test[maxWave_scan_3_test] = Obs_scan_test_3
 
                     for l in range(4):
                         
@@ -5155,11 +5158,19 @@ class AutoContr(Controller):
                                     
 
                             # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
-                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength_Obs(scan_Y_rep_1)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
+                            
+                            
+                            print("W-O",maxWave_scan_1_sec_test,Obs_scan_test_1_new)
+                            
                             new_plots_x.append(X_scan_1_new_test)
                             new_plots_y.append(Y_scan_1_new_test)
                             waves_recipe1_test.append(maxWave_scan_1_sec_test)
                             waves_recipe1_sorted_test= sorted(waves_recipe1_test)
+
+
+                            obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
+
                             print("")
                             # if len(waves_recipe1_sorted_test) == 9:
                             #     print("No stable waves were found, stopping the program")
@@ -5194,10 +5205,15 @@ class AutoContr(Controller):
                                         print("s",wave_min_diff_test)
                                         new_added_list_test.append(wave_min_diff_test[ri+1][1])
                             
-                            
+                            last_obs_test=[]
+                            for riit in range(len(new_added_list_test)):
+                                last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
+
                             print("Current list sorted",waves_recipe1_sorted_test)
                             #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
+                            print("--->Data to use",last_obs_test)
+                            
                             if l !=0:
                                 #Plot after training
                                 print("Plotting---")
