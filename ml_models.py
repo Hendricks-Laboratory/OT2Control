@@ -926,7 +926,6 @@ class NeuralNet(MLModel):
             # predictions2
 
             ##NEW MODELS
-            from keras.models import Model
 
             model_partion = ML2  # include here your original model
 
