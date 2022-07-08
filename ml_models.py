@@ -1,3 +1,4 @@
+from re import M
 import time #TODO delete this debugging only
 from abc import ABC
 from abc import abstractmethod
@@ -1047,15 +1048,86 @@ class NeuralNet(MLModel):
             print("ML_TOTAL",predictions2)
 
             print("Errors")
-            print(np.sum(ML_new_tr-Train_label))
-            print(np.sum(ML_new_2_tr-Train_label))
-            print(np.sum(ML11_tr-Train_label))
-            print(np.sum(ML11_2_tr-Train_label))
-            print(np.sum(predictions2-Train_label))
+            ML_new_error = np.sum(ML_new_tr-Train_label)
+            ML_new_2_error = np.sum(ML_new_2_tr-Train_label)
+            ML11_error = np.sum(ML11_tr-Train_label)
+            M11_2_error= np.sum(ML11_2_tr-Train_label)
+            print("ML_new",ML_new_error)
+            print("ML_new_2",ML_new_2_error)
+            print("ML11",ML11_error)
+            print("ML11_2",M11_2_error)
+            print("predictions2",np.sum(predictions2-Train_label))
+
+            ml = {"ML_new", 
+                "ML_new_2",
+                "ML11",
+                "ML11_2"
+                }
+
+            ml_errors = {ML_new_error:"ML_new", 
+                ML_new_2_error:"ML_new_2",
+                ML11_error:"ML11",
+                M11_2_error:"ML11_2"
+                }
+            lest_error = [ML_new_error,ML_new_2_error,ML11_error,M11_2_error]
+            ml_to_use= ml_errors[min(lest_error)]
+            
+            choosg= input("Do you want to choose a model? [Yes-y/No]")
+            if choosg == "Yes" or choosg=="y":
+                while True:
+
+                    choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
+                    if choosg_ml == "ML_new":
+                        predicted_by_model = ML_new.predict(input_user)
+                        break
+                    elif choosg_ml == "ML_new_2":
+                        predicted_by_model = ML_new_2.predict(input_user)
+                        break
+                    elif choosg_ml == "ML11":
+                        predicted_by_model = ML11.predict(input_user)
+                        break
+                    elif choosg_ml == "ML11_2":
+                        predicted_by_model = ML11_2.predict(input_user)
+                        break
+
+                    else:
+                        print("Type again")
+                        # choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
 
 
-            time.sleep(1000)
-            return input_user, ML11_2_tr, 0 , 0, 0
+            elif choosg == "No":
+
+                print("You choose automatic")
+
+                if ml_to_use == "ML_new":
+                        predicted_by_model = ML_new.predict(input_user)
+                        
+                elif ml_to_use == "ML_new_2":
+                        predicted_by_model = ML_new_2.predict(input_user)
+                        
+                elif ml_to_use == "ML11":
+                        predicted_by_model = ML11.predict(input_user)
+                        
+                elif ml_to_use == "ML11_2":
+                        predicted_by_model = ML11_2.predict(input_user)
+                        
+
+            else:
+                print("No input recorded")
+                if ml_to_use == "ML_new":
+                        predicted_by_model = ML_new.predict(input_user)
+                        
+                elif ml_to_use == "ML_new_2":
+                        predicted_by_model = ML_new_2.predict(input_user)
+                        
+                elif ml_to_use == "ML11":
+                        predicted_by_model = ML11.predict(input_user)
+                        
+                elif ml_to_use == "ML11_2":
+                        predicted_by_model = ML11_2.predict(input_user)
+
+            time.sleep(10)
+            return input_user, predicted_by_model, 0 , 0, 0
 
             # logdir= "logNModel/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             # tensorboard_callback = keras.callbacks.TensorBoard(log_dir=logdir)
