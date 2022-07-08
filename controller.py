@@ -65,6 +65,7 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg, LinearRegress, NeuralNet
 from exceptions import ConversionError
 
+from datetime import datetime
 
 def init_parser():
     parser = argparse.ArgumentParser()
