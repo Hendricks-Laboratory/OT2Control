@@ -4708,6 +4708,7 @@ class AutoContr(Controller):
 
         
 
+<<<<<<< HEAD
                         new_plots_x_3 =[]
                         new_plots_y_3 = []
 
@@ -4913,6 +4914,9 @@ class AutoContr(Controller):
                 # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
                 # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
                 # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+=======
+        well_hist_df = pd.read_csv(os.path.join(self.eve_files_path,'well_history.tsv'), sep='\t')
+>>>>>>> ec1d8828309a5b43ec6a2c114e6fe705d972d79c
 
                 #plt.xlim(0.00001, 0.003)
                 plt.legend(loc="upper right",  prop={"size":6})
@@ -4921,6 +4925,10 @@ class AutoContr(Controller):
 
 
 
+<<<<<<< HEAD
+=======
+        df = pd.read_csv(os.path.join(self.data_path, reaction+'full_df.csv'))
+>>>>>>> ec1d8828309a5b43ec6a2c114e6fe705d972d79c
 
                 print("Wav ori", total_waves_2)
                 # print("Waves evol", )
@@ -5888,6 +5896,7 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
+<<<<<<< HEAD
     def edit_layout(self, protocol_name, layout):
         '''
         params:  
@@ -5898,6 +5907,71 @@ class AbstractPlateReader(ABC):
             The protocol has had it's layout updated to include only the wells specified  
         '''
         pass
+=======
+            for react in df.loc[scan]['Well Name']:
+                transfers_before_scans = []
+                react = str(react)
+                print(react)
+                if 'blank' in react:
+                    react = 'control'
+                transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
+                
+          
+                for transfer_time in transfer_times:
+                    if transfer_time <= time:
+                        print('heyeyeyyeye', transfer_time)
+                        transfers_before_scans.append(transfer_time)
+                latest_transfer_time = max(transfers_before_scans)
+                
+                
+                
+                kbr_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['KBR'].tolist()
+                if len(kbr_conc)==0:
+                    kbr_conc_list.append(0)
+                else:
+                    kbr_conc_list.append(kbr_conc[0])
+                    
+                    
+                unsure_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['unsure'].tolist()
+                if len(unsure_conc)==0:
+                    unsure_conc_list.append(0)
+                else:
+                    unsure_conc_list.append(unsure_conc[0])
+                    
+                    
+                agno3_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['AGNO3'].tolist()
+                if len(agno3_conc)==0:
+                    agno3_conc_list.append(0)
+                else:
+                    agno3_conc_list.append(agno3_conc[0])
+                    
+                h202_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['H2O2'].tolist()
+                if len(h202_conc)==0:
+                    h202_conc_list.append(0)
+                else:
+                    h202_conc_list.append(h202_conc[0])
+                    
+                nabh4_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NABH4'].tolist()
+                if len(h202_conc)==0:
+                    nabh4_conc_list.append(0)
+                else:
+                    nabh4_conc_list.append(nabh4_conc[0])
+                
+                
+                    
+                   
+                    
+                   
+                weird.append(latest_transfer_time)
+                last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                print(last_reagent_added)
+                last_reagent.append(last_reagent_added)
+                
+                
+               
+                        
+                    
+>>>>>>> ec1d8828309a5b43ec6a2c114e6fe705d972d79c
 
     def run_protocol(self, protocol_name, filename, layout=None):
         r'''
