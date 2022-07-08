@@ -38,7 +38,8 @@ def main():
     '''
     prompts for input and then calls appropriate launcher
     '''
-    TESTING_FILEPATH = "/Users/grantdidway/Documents/OT2Robot/Personal Testing"
+    TESTING_FILEPATH = "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Personal Testing"
+
     
     data = ScanDataFrame(TESTING_FILEPATH, 'CNH_008',TESTING_FILEPATH)
     
