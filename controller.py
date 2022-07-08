@@ -1,0 +1,7375 @@
+'''
+This module contains everything that the server needs to run. Partly seperate from the OT2 because
+it needs different packages (OT2 uses historic packages) and partly for organizational purposes.
+The core of this module is the ProtocolExecutor class. The ProtocolExecutor is responsible for 
+interfacing with the robot, the platereader, and googlesheets. It's purpose is to load a reaction
+protocol from googlesheets and then execute that protocol line by line by communicating with the
+robot and platereader. Attempts to do as much computation as possible before sending commands 
+to those applications
+The ProtocolExecutor uses a PlateReader.
+PlateReader is a custom class that is built for controlling the platereader. 
+In order to control the platereader, the software should be closed when PlateReader 
+is instantiated, and (obviously) the software should exist on the machine you're running
+This module also contains two launchers.
+launch_protocol_exec runs a protocol from the sheets using a protocol executor
+launch_auto runs in automatic machine learning mode
+A main method is supplied that will run if you run this script. It will call one of the launchers
+based on command line args. (run this script with -h)
+'''
+from abc import ABC
+from abc import abstractmethod
+from ast import While
+from collections import defaultdict
+from collections import namedtuple
+from ctypes.wintypes import PINT
+import socket
+import json
+from tkinter import ON
+import wave
+import dill
+import math
+import os
+import shutil
+import webbrowser
+from tempfile import NamedTemporaryFile
+import logging
+import asyncio
+import threading
+import time
+import argparse
+import re
+import functools
+from datetime import datetime
+import sys
+import random
+from bidict import bidict
+import gspread
+from df2gspread import df2gspread as d2g
+from df2gspread import gspread2df as g2d
+from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+import numpy as np
+import opentrons.execute
+import opentrons.simulate
+from opentrons import protocol_api, types
+from boltons.socketutils import BufferedSocket
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Lasso
+
+from Armchair.armchair import Armchair
+from ot2_robot import launch_eve_server
+from df_utils import make_unique, df_popout, wslpath, error_exit
+from ml_models import DummyMLModel, LinReg, LinearRegress, NeuralNet
+from exceptions import ConversionError
+
+
+def init_parser():
+    parser = argparse.ArgumentParser()
+    mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
+    parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
+    parser.add_argument('-n','--name',help='the name of the google sheet')
+    parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
+    parser.add_argument('-s','--simulate',help='runs robot and pr in simulation mode',action='store_true')
+    parser.add_argument('--no-sim',help='won\'t run simulation at the start.',action='store_true')
+    parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
+    return parser
+
+def main(serveraddr):
+    '''
+    prompts for input and then calls appropriate launcher
+    '''
+    parser = init_parser()
+    args = parser.parse_args()
+    if args.mode == 'protocol':
+        print('launching in protocol mode')
+        launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
+    elif args.mode == 'auto':
+        print('launching in auto mode')
+        launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
+    else:
+        print("invalid argument to mode, '{}'".format(args.mode))
+        parser.print_help()
+
+def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+    '''
+    main function to launch a controller and execute a protocol
+    '''
+    #instantiate a controller
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    my_ip = socket.gethostbyname(socket.gethostname())
+    controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+
+    if not no_sim:
+        controller.run_simulation(no_pr=no_pr)
+    if input('would you like to run the protocol? [yn] ').lower() == 'y':
+        controller.run_protocol(simulate, no_pr)
+
+# def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+#     '''
+#     main function to launch an auto scientist that designs it's own experiments
+#     '''
+#     if not rxn_sheet_name:
+#         rxn_sheet_name = input('<<controller>> please input the sheet name ')
+#     my_ip = socket.gethostbyname(socket.gethostname())
+#     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+#     #note shorter iterations for testing
+#     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
+#     final_spectra = np.loadtxt(
+#             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+#     Y_SHAPE = 1 #number of reagents to learn on
+#     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
+#                 scan_bounds=(540,560), duplication=2)
+#     if not no_sim:
+#         auto.run_simulation(ml_model, no_pr=no_pr)
+#     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+#         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+#         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
+#                 scan_bounds=(540,560),duplication=2)
+#         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
+def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+    '''
+    main function to launch an auto scientist that designs it's own experiments
+    '''
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    my_ip = socket.gethostbyname(socket.gethostname())
+    auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+    #note shorter iterations for testing
+    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
+    final_spectra = np.loadtxt(
+            "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+    Y_SHAPE = 1 #number of reagents to learn on
+    #ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3 scan_bounds=(540,560), duplication=2)
+    print("Launch_auto FUNCTION;  Initialize the Linear Model 3 recipes")
+
+    ##DEFAULT?
+    ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
+    
+    print("Welcome .....")
+    print("Which model would you like to use? [ Linear Model (linear) ] [ Neural Network (neural) ]")
+    input_model_user = input()
+    input_model_user = input_model_user.lower()
+    print("You selected", input_model_user)
+
+    while True:
+
+        if input_model_user == "linear":
+            ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 5)
+            break
+        elif input_model_user == "neural":
+            ml_model = NeuralNet(model, final_spectra, y_shape=1, max_iters=5,duplication = 10)
+            break
+        else :
+            print("Try to choose again")
+            print("Choose: [ Linear Model (linear) ] [ Neural Network (neural) ]")
+            input_model_user = input()
+            input_model_user = input_model_user.lower()
+            print("You selected", input_model_user)
+            
+    print("ollllllll",input_model_user)
+    print(ml_model)
+
+    #try 1 
+    if not no_sim:
+        ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None, kind=input_model_user )
+        ml_simulation_W= ml_model_trained["W"]
+        ml_simulation_b = ml_model_trained["b"]
+        #ml_par_recipes = ml_model_trained["par_recipes"]
+        #parameters_trained= {"trained_theta":ml_par_theta,"trained_bias":ml_par_bias}
+        print("Params afte TRY 1",ml_simulation_W,ml_simulation_b)
+    print("It is passing to TRY 2")
+    #try 2
+    if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+        #We have trained in the simulation the model so we can reuse the parameters unless we pass no_sim 
+        # model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
+        # ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
+        #         scan_bounds=(540,560),duplication=2)
+        # auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
+        #if not no_sim:
+        #    auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=parameters_trained,initial_recipes=ml_par_recipes)
+        #else:
+        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr,params=1,initial_recipes=None, kind= input_model_user)
+
+
+class Controller(ABC):
+    '''
+    This class is a shared interface for the ProtocolExecutor and the ______AI__Executor___  
+
+    ATTRIBUTES:  
+        armchair.Armchair portal: the Armchair object to ship files across  
+        rxn_sheet_name: the name of the reaction sheet  
+        str cache_path: path to a directory for all cache files  
+        bool use_cache: read from cache if possible  
+        str eve_files_path: the path to put files from eve  
+        str debug_path: the path to place debugging information  
+        str my_ip: the ip of this controller  
+        str server_ip: the ip of the server. This is modified for simulation, but returned to 
+          original state at the end of simulation  
+        dict<str:object> robo_params: convenient place for the parameters for the robot  
+            + bool using_temp_ctrl: True if the temperature control is being used  
+            + float temp: the temperature in celcius to keep the temp control at  
+            + df reagent_df: holds information about reagents  
+                + float conc: the concentration  
+                + str loc: location on labware  
+                + int deck_pos: the position on the deck  
+                + float mass: the mass of the tube with reagent and cap  
+            dict<str:str> instruments: maps 'left' and 'right' to the pipette names  
+            df labware_df  
+                + int deck_pos: the position of the labware on the deck  
+                + str name: the name of the labware  
+                + str first_usable: a location of the first usable tip/well on labware  
+                + list<str> empty_list: a list of locations on the labware that have empty tubes  
+            df product_df: This information is used to figure out where to put chemicals  
+                + INDEX  
+                + str chemical_name: the name of the chemical  
+                + COLS  
+                + str labware: the requested labware you want to put it in  
+                + str container: the container you want to put it in  
+                + float max_vol: the maximum volume you will put in the container  
+        bool simulate: whether a simulation is being run or not. False by default. changed true 
+          temporarily when simulating  
+        int buff_size: this is the size of the buffer between Armchair commands. It's size
+          corresponds to the number of commands you want to pile up in the socket buffer.
+          Really more for developers  
+    PRIVATE ATTRS:  
+        dict<str:ChemCacheEntry> _cached_reader_locs: chemical information from the robot
+            ChemCacheEntry is a named tuple with below attributes
+            The tuple has following structure:  
+            str loc: the loc of the well on it's labware (translated to human if on pr)  
+            int deck_pos: the position of the labware it's on  
+            float vol: the volume in the container  
+            float aspiratible_vol: the volume minus dead vol  
+    CONSTANTS:  
+        bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
+        wellplate to locs on the opentrons object. Use a json viewer for more structural info  
+    METHODS:  
+        run_protocol(simulate, port) void: both args have good defaults. simulate can be used to
+          simulate on the plate reader and robot, but generally you want false to actually run
+          the protocol. port can be configured, but 50000 is default  
+        run_simulation() int: runs a simulation on local machine. Tries plate reader, but
+          not necessary. returns an error code  
+        close_connection() void: automatically called by run_protocol. used to terminate a 
+          connection with eve  
+        init_robot(simulate): used to initialize the robot. called automatically in run. simulate
+          is the same as used by the robot protocol  
+        translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
+          that correspond to platereader  
+    '''
+    #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
+    #reader given a regular loc for a 96well plate.
+    #Please do not read this. paste it into a nice json viewer.
+    PLATEREADER_INDEX_TRANSLATOR = bidict({'A1': ('E1', 'platereader4'), 'A2': ('D1', 'platereader4'), 'A3': ('C1', 'platereader4'), 'A4': ('B1', 'platereader4'), 'A5': ('A1', 'platereader4'), 'A12': ('A1', 'platereader7'), 'A11': ('B1', 'platereader7'), 'A10': ('C1', 'platereader7'), 'A9': ('D1', 'platereader7'), 'A8': ('E1', 'platereader7'), 'A7': ('F1', 'platereader7'), 'A6': ('G1', 'platereader7'), 'B1': ('E2', 'platereader4'), 'B2': ('D2', 'platereader4'), 'B3': ('C2', 'platereader4'), 'B4': ('B2', 'platereader4'), 'B5': ('A2', 'platereader4'), 'B6': ('G2', 'platereader7'), 'B7': ('F2', 'platereader7'), 'B8': ('E2', 'platereader7'), 'B9': ('D2', 'platereader7'), 'B10': ('C2', 'platereader7'), 'B11': ('B2', 'platereader7'), 'B12': ('A2', 'platereader7'), 'C1': ('E3', 'platereader4'), 'C2': ('D3', 'platereader4'), 'C3': ('C3', 'platereader4'), 'C4': ('B3', 'platereader4'), 'C5': ('A3', 'platereader4'), 'C6': ('G3', 'platereader7'), 'C7': ('F3', 'platereader7'), 'C8': ('E3', 'platereader7'), 'C9': ('D3', 'platereader7'), 'C10': ('C3', 'platereader7'), 'C11': ('B3', 'platereader7'), 'C12': ('A3', 'platereader7'), 'D1': ('E4', 'platereader4'), 'D2': ('D4', 'platereader4'), 'D3': ('C4', 'platereader4'), 'D4': ('B4', 'platereader4'), 'D5': ('A4', 'platereader4'), 'D6': ('G4', 'platereader7'), 'D7': ('F4', 'platereader7'), 'D8': ('E4', 'platereader7'), 'D9': ('D4', 'platereader7'), 'D10': ('C4', 'platereader7'), 'D11': ('B4', 'platereader7'), 'D12': ('A4', 'platereader7'), 'E1': ('E5', 'platereader4'), 'E2': ('D5', 'platereader4'), 'E3': ('C5', 'platereader4'), 'E4': ('B5', 'platereader4'), 'E5': ('A5', 'platereader4'), 'E6': ('G5', 'platereader7'), 'E7': ('F5', 'platereader7'), 'E8': ('E5', 'platereader7'), 'E9': ('D5', 'platereader7'), 'E10': ('C5', 'platereader7'), 'E11': ('B5', 'platereader7'), 'E12': ('A5', 'platereader7'), 'F1': ('E6', 'platereader4'), 'F2': ('D6', 'platereader4'), 'F3': ('C6', 'platereader4'), 'F4': ('B6', 'platereader4'), 'F5': ('A6', 'platereader4'), 'F6': ('G6', 'platereader7'), 'F7': ('F6', 'platereader7'), 'F8': ('E6', 'platereader7'), 'F9': ('D6', 'platereader7'), 'F10': ('C6', 'platereader7'), 'F11': ('B6', 'platereader7'), 'F12': ('A6', 'platereader7'), 'G1': ('E7', 'platereader4'), 'G2': ('D7', 'platereader4'), 'G3': ('C7', 'platereader4'), 'G4': ('B7', 'platereader4'), 'G5': ('A7', 'platereader4'), 'G6': ('G7', 'platereader7'), 'G7': ('F7', 'platereader7'), 'G8': ('E7', 'platereader7'), 'G9': ('D7', 'platereader7'), 'G10': ('C7', 'platereader7'), 'G11': ('B7', 'platereader7'), 'G12': ('A7', 'platereader7'), 'H1': ('E8', 'platereader4'), 'H2': ('D8', 'platereader4'), 'H3': ('C8', 'platereader4'), 'H4': ('B8', 'platereader4'), 'H5': ('A8', 'platereader4'), 'H6': ('G8', 'platereader7'), 'H7': ('F8', 'platereader7'), 'H8': ('E8', 'platereader7'), 'H9': ('D8', 'platereader7'), 'H10': ('C8', 'platereader7'), 'H11': ('B8', 'platereader7'), 'H12': ('A8', 'platereader7')})
+
+    ChemCacheEntry = namedtuple('ChemCacheEntry',['loc','deck_pos','vol','aspirable_vol'])
+    DilutionParams = namedtuple('DilultionParams', ['cont','vol'])
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
+        '''
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        is instantiated in run
+        '''
+        #set according to input
+        self.cache_path=cache_path
+        self._make_cache()
+        self.use_cache = use_cache
+        self.my_ip = my_ip
+        self.server_ip = server_ip
+        self.buff_size = 4
+        self.simulate = False #by default will be changed if a simulation is run
+        self._cached_reader_locs = {} #maps wellname to loc on platereader
+        #this will be gradually filled
+        self.robo_params = {}
+        #necessary helper params
+        self._check_cache_metadata(rxn_sheet_name)
+        credentials = self._init_credentials(rxn_sheet_name)
+        wks_key = self._get_wks_key(credentials, rxn_sheet_name)
+        rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
+        header_data = self._download_sheet(rxn_spreadsheet,0)
+        input_data = self._download_sheet(rxn_spreadsheet,1)
+        deck_data = self._download_sheet(rxn_spreadsheet, 2)
+        self._init_robo_header_params(header_data)
+        self._make_out_dirs(header_data)
+        self.rxn_df = self._load_rxn_df(input_data) #products init here
+        self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
+        #to the controller. It may make sense to build a class at some point
+        self._query_reagents(wks_key, credentials)
+        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
+        #with a parsed reagent_df. This is exactly as is pulled from gsheets
+        empty_containers = self._get_empty_containers(raw_reagent_df)
+        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
+        products_to_labware = self._get_products_to_labware(input_data)
+        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
+        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
+        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+        self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+
+    def _insert_tot_vol_transfer(self):
+        '''
+        inserts a row into self.rxn_df that transfers volume from WaterC1.0 to fill
+        the necessary products  
+        Postconditions:  
+            has inserted a row into the rxn_df to transfer WaterC1.0  
+            If the reaction has already overflowed the total volume, will add negative volume
+            (which is impossible. The caller of this function must account for this.)  
+            If no total vols were specified, no transfer step will be inserted.  
+        '''
+        #if there are no total vols, don't insert the row, just return
+        if self.tot_vols:
+            end_vols = pd.Series(self.tot_vols)
+            start_vols = pd.Series([self._vol_calc(name) 
+                                    for name in end_vols.index], index=end_vols.index)
+            del_vols = end_vols - start_vols
+            #begin building a dictionary for the row to insert
+            transfer_row_dict = {col:del_vols[col] if col in del_vols else np.nan 
+                                for col in self.rxn_df.columns}
+            #now have dict maps every col to '' except chemicals to add, which are mapped to float to add
+            transfer_row_dict.update(
+                {'op':'transfer',
+                'reagent':'Water',
+                'conc':1.0,
+                'chemical_name':'WaterC1.0',
+                'callbacks':''}
+            )
+            for chem_name in self._products:
+                if pd.isna(transfer_row_dict[chem_name]):
+                    transfer_row_dict[chem_name] = 0.0
+            #convert the row to a dataframe
+            transfer_row_df = pd.DataFrame(transfer_row_dict, index=[-1], columns=self.rxn_df.columns)
+            self.rxn_df = pd.concat((transfer_row_df, self.rxn_df)) #add in column
+            self.rxn_df.index += 1 #update index to go 0-n instead of -1-n-1
+
+    def _get_tot_vols(self, input_data):
+        '''
+        params:  
+            list<obj> input_data: as parsed from the google sheets  
+        returns:  
+            dict<str:float>: maps product names to their appropriate total volumes if specified  
+        Preconditions:  
+            self._products has been initialized  
+        '''
+        product_start_i = input_data[0].index('reagent (must be uniquely named)')+1
+        product_tot_vols = input_data[3][product_start_i:]
+        return {product:float(tot_vol) for product, tot_vol in zip(self._products, product_tot_vols) if tot_vol}
+
+    def _check_cache_metadata(self, rxn_sheet_name):
+        '''
+        Checks a file, .metadata.txt with the cache path.
+        Postconditions:
+            If use_cache is true:
+                reads .metadata.txt
+                asserts that the rxn_sheet_name matches the name in sheet
+                prints the timestamp that the cache was last written
+            If use_cache is false:
+                writes .metadata.txt with the sheet name and a timestamp
+        '''
+        if self.use_cache:
+            assert (os.path.exists(os.path.join(self.cache_path, '.metadata.json'))), \
+                    "tried to read metadata in cache, but file does not exist"
+            with open(os.path.join(self.cache_path, '.metadata.json'), 'r') as file:
+                metadata = json.load(file)
+            assert (metadata['name'] == rxn_sheet_name), "desired sheet was, '{}', but cached data is for '{}'".format(rxn_sheet_name, metadata['name'])
+            print("<<controller>> using cached data for '{}', last updated '{}'".format(
+                    metadata['name'],metadata['timestamp']))
+        else:
+            metadata = {'timestamp':datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
+                        'name':rxn_sheet_name}
+            with open(os.path.join(self.cache_path, '.metadata.json'), 'w') as file:
+                json.dump(metadata, file)
+
+    def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
+        '''
+        open and search a sheet that tells you which sheet is associated with the reaction
+        Or read from cache if cache is enabled  
+        params:  
+            ServiceAccountCredentials credentials: to access the sheets  
+            str rxn_sheet_name: the name of sheet  
+        returns:  
+            list<list<str>> name_key_pairs: the data in the wks_key spreadsheet  
+        Postconditions:  
+            If cached data could not be found, will dump spreadsheet data to name_key_pairs.pkl 
+            in cache path  
+        '''
+        if self.use_cache:
+            #load cache
+            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'rb') as name_key_pairs_cache:
+                name_key_pairs = dill.load(name_key_pairs_cache)
+        else:
+            #pull down data
+            gc = gspread.authorize(credentials)
+            name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
+            name_key_pairs = name_key_wks.get_all_values() #list<list<str name, str key>>
+            #Note the key is a unique identifier that can be used to access the sheet
+            #d2g uses it to access the worksheet
+            #dump to cache
+            with open(os.path.join(self.cache_path, 'name_key_pairs.pkl'), 'wb') as name_key_pairs_cache:
+                dill.dump(name_key_pairs, name_key_pairs_cache)
+        return name_key_pairs
+
+    def _init_pr(self, simulate, no_pr):
+        '''
+        params:  
+            bool simulate: True indicates that the platereader should be launched in simulation
+              mode
+            bool no_pr: True indicates that even if platereader can be run in simulation mode,
+              it should not be. This should be run only for the marginal speedup that can be
+              gained by not using the platereader for certain tests
+        Postconditions:  
+            self.pr is initialized with either a connection to the SPECTROstar if possible and
+              no_pr is false, otherwise, a Dummy with no connection, but the same interface
+              is supplied
+        '''
+        if no_pr:
+            self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+        else:
+            try:
+                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+            except:
+                print('<<controller>> failed to initialize platereader, initializing dummy reader')
+                self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
+
+    def _download_sheet(self, rxn_spreadsheet, index):
+        '''
+        pulls down the sheet at the index  
+        params:  
+            gspread.Spreadsheet rxn_spreadsheet: the sheet with all the reactions  
+            int index: the index of the sheet to pull down  
+        returns:  
+            list<list<str>> data: the input template sheet pulled down into a list  
+        '''
+        if self.use_cache:
+            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)), 'rb') as rxn_wks_data_cache:
+                data = dill.load(rxn_wks_data_cache)
+        else:
+            rxn_wks = rxn_spreadsheet.get_worksheet(index)
+            data = rxn_wks.get_all_values()
+            with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)),'wb') as rxn_wks_data_cache:
+                dill.dump(data, rxn_wks_data_cache)
+        return data
+
+
+    def _make_out_dirs(self, header_data):
+        '''
+        params:  
+            list<list<str>> header_data: data from the header  
+        Postconditions:  
+            All paths used by this class have been initialized if they were not before
+            They are not overwritten if they already exist. paths variables of this class
+            have also been initialized
+        '''
+
+        out_path = 'Ideally this would be a gdrive path, but for now everything is local'
+        if not os.path.exists(out_path):
+            #not on the laptop
+            out_path = './Controller_Out'
+        #get the root folder
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        data_dir = header_dict['data_dir']
+        self.out_path = os.path.join(out_path, data_dir)
+        #if the folder doesn't exist yet, make it
+        self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
+        self.debug_path = os.path.join(self.out_path, 'Debug')
+        self.plot_path = os.path.join(self.out_path, 'Plots')
+        paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
+        for path in paths:
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+    def _make_cache(self):
+        if not os.path.exists(self.cache_path):
+            os.makedirs(self.cache_path)
+
+    def _init_credentials(self, rxn_sheet_name):
+        '''
+        this function reads a local json file to get the credentials needed to access other funcs  
+        params:  
+            str rxn_sheet_name: the name of the reaction sheet to run  
+        returns:  
+            ServiceAccountCredentials: the credentials to access that sheet  
+        '''
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        #get login credentials from local file. Your json file here
+        path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
+        return credentials
+
+    def _get_wks_key(self, credentials, rxn_sheet_name):
+        '''
+        open and search a sheet that tells you which sheet is associated with the reaction  
+        params:  
+            ServiceAccountCredentials credentials: to access the sheets  
+            str rxn_sheet_name: the name of sheet  
+        returns:  
+            if self.use_cache:  
+                str wks_key: the key associated with the sheet. It functions similar to a url  
+            else:  
+                None: this is ok because the wks key will not be used if caching  
+        '''
+        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        try:
+            i=0
+            wks_key = None
+            while not wks_key and i <= len(name_key_pairs):
+                row = name_key_pairs[i]
+                if row[0] == rxn_sheet_name:
+                    wks_key = row[1]
+                i+=1
+        except IndexError:
+            raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
+            and make sure the spreadsheet name is spelled exactly the same as the reaction \
+            spreadsheet.')
+        return wks_key
+
+    def _open_sheet(self, rxn_sheet_name, credentials):
+        '''
+        open the google sheet  
+        params:  
+            str rxn_sheet_name: the title of the sheet to be opened  
+            oauth2client.ServiceAccountCredentials credentials: credentials read from a local json  
+        returns:  
+            if self.use_cache:  
+                gspread.Spreadsheet the spreadsheet (probably of all the reactions)  
+            else:  
+                None: this is fine because the wks should never be used if cache is true  
+        '''
+        gc = gspread.authorize(credentials)
+        try:
+            if self.use_cache:
+                wks = None
+            else:
+                wks = gc.open(rxn_sheet_name)
+        except: 
+            raise Exception('Spreadsheet Not Found: Make sure the spreadsheet name is spelled correctly and that it is shared with the robot ')
+        return wks
+
+    def _init_robo_header_params(self, header_data):
+        '''
+        loads the header data into self.robo_params  
+        params:  
+            list<list<str> header_data: as in gsheets  
+        Postconditions:  
+            simulate, using_temp_ctrl, and temp have been initialized according to values in 
+            excel  
+        '''
+        header_dict = {row[0]:row[1] for row in header_data[1:]}
+        self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
+        self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
+        if self.robo_params['temp'] != None:
+            assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
+        self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
+                float(header_dict['dilution_vol']))
+
+    def _plot_setup_overlay(self,title):
+        '''
+        Sets up a figure for an overlay plot  
+        params:  
+            str title: the title of the reaction  
+        '''
+        #formats the figure nicely
+        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+        plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
+        plt.rc('axes', linewidth = 2)
+        plt.xlabel('Wavelength (nm)',fontsize = 16)
+        plt.ylabel('Absorbance (a.u.)', fontsize = 16)
+        plt.tick_params(axis = "both", width = 2)
+        plt.tick_params(axis = "both", width = 2)
+        plt.xticks([300,400,500,600,700,800,900,1000])
+        plt.yticks([i/10 for i in range(0,11,1)])
+        plt.axis([300, 1000, 0.0 , 1.0])
+        plt.xticks(fontsize = 10)
+        plt.yticks(fontsize = 10)
+        plt.title(str(title), fontsize = 16, pad = 20)
+        
+    def plot_LAM_overlay(self,df,wells,filename=None):
+        '''
+        plots overlayed spectra of wells in the order that they are specified  
+        params:  
+            df df: dataframe with columns = chem_names, and values of each column is a series
+              of scans in 701 intervals.  
+            str filename: the title of the plot, and the file  
+            list<str> wells: an ordered list of all of the chem_names you want to plot.  
+        Postconditions:  
+            plot has been written with name "overlay.png" to the plotting dir. or 
+            {filename}.png if filename was supplied  
+        '''
+        if not filename:
+            filename = "overlay"
+        x_vals = list(range(300,1001))
+        #overlays only things you specify
+        y = []
+        #df = df[df_reorder]
+        #headers = [well_key[k] for k in df.columns]
+        #legend_colors = []
+        for chem_name in wells:
+            y.append(df[chem_name].iloc[-701:].to_list())
+        self._plot_setup_overlay(filename)
+        colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
+        for i in range(len(y)):
+            plt.plot(x_vals,y[i],color = tuple(colors[i]))
+        patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
+        plt.legend(patches, wells, loc='upper right', frameon=False,prop={'size':3})
+        legend = pd.DataFrame({'Color':patches,'Labels': wells})
+        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
+        plt.close()
+       
+    # below until ~end is all not used yet needs to be worked up
+    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
+        '''
+        TODO this function doesn't save properly, but it does show. Don't know issue  
+        plots kinetics for each well in the order given by wells.  
+        params:  
+            df df: the scan data  
+            int n_cycles: the number of cycles for the scan data  
+            list<str> wells: the wells you want to plot in order
+        Postconditions:  
+            plot has been written with name "{filename}_overlay.png" to the plotting dir.  
+            If filename is not supplied, name is kin_subplots
+        '''
+        if not filename:
+            filename=kin_subplots
+        x_vals = list(range(300,1001))
+        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
+        fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
+        for idx, (chem_name, ax) in enumerate(zip(wells, axes.flatten())):
+            ax.set_title(chem_name)
+            self._plot_kin(ax, df, n_cycles, chem_name)
+            plt.subplots_adjust(wspace=0.3, hspace= -0.1)
+        
+            ax.tick_params(
+                which='both',
+                bottom='off',
+                left='off',
+                right='off',
+                top='off'
+            )
+            ax.set_xlim((300,1000))
+            ax.set_ylim((0,1.0))
+            ax.set_xlabel("Wavlength (nm)")
+            ax.set_ylabel("Absorbance (A.U.)")
+            ax.set_xticks(range(301, 1100, 100))
+            #ax.set_aspect(adjustable='box')
+            #ax.set_yticks(range(0,1))
+        else:
+            [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
+        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
+        plt.close()
+
+    def _plot_kin(self, ax, df, n_cycles, chem_name):
+        '''
+        helper method for kinetics plotting methods  
+        params:  
+            plt.axes ax: or anything with a plot func. the place you want ot plot  
+            df df: the scan data  
+            int n_cycles: the number of cycles in per well scanned  
+            str chem_name: the name of the chemical to be plotted  
+        Postconditions:  
+            a kinetics plot of the well has been plotted on ax  
+        '''
+        x_vals = list(range(300,1001))
+        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
+        kin = 0
+        col = df[chem_name]
+        for kin in range(n_cycles):
+            ax.plot(x_vals, df[chem_name].iloc[kin*701:(kin+1)*701],color=tuple(colors[kin]))
+        
+    
+    def plot_single_kin(self, df, n_cycles, chem_name, filename=None):
+        '''
+        plots one kinetics trace. 
+        params:  
+            df df: the scan data  
+            int n_cycles: the number of cycles in per well scanned  
+            str chem_name: the name of the chemical to be plotted  
+            str filename: the name of the file to write  
+        Postconditions:  
+            A kinetics trace of the well has been written to the Plots directory.
+            under the name filename. If filename was None, the filename will be 
+            {chem_name}_kinetics.png
+        '''
+        if not filename:
+            filename = '{}_kinetics'.format(chem_name)
+        self._plot_setup_overlay('Kinetics {}: '.format(chem_name))
+        self._plot_kin(plt,df, n_cycles, chem_name)
+        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
+        plt.close()
+
+    def _get_empty_containers(self, raw_reagent_df):
+        '''
+        only one line, but there's a lot going on. extracts the empty lines from the raw_reagent_df  
+        params:  
+            df raw_reagent_df: as in reagent_info of excel  
+        returns:  
+            df empty_containers:  
+                + INDEX:  
+                + int deck_pos: the position on the deck  
+                + COLS:  
+                + str loc: location on the labware  
+        '''
+        return raw_reagent_df.loc['empty' == raw_reagent_df.index].set_index('deck_pos').drop(columns=['conc', 'mass'])
+
+    def _get_dry_containers(self, raw_reagent_df):
+        '''
+        params:  
+            df raw_reagent_df: the reagent dataframe as recieved from excel  
+        returns:  
+            df dry_containers:  
+                note: cannot be sent over pickle as is because the index has duplicates.
+                  solution is to reset the index for shipping
+                + str index: the chemical name
+                + float conc: the concentration once built
+                + str loc: the location on the labware
+                + int deck_pos: position on the deck
+                + float required_vol: the volume of water needed to turn this into a reagent
+        '''
+        #other rows will be empty str unless dry
+        dry_containers = raw_reagent_df.loc[raw_reagent_df['molar_mass'].astype(bool)].astype(
+                {'deck_pos':int,'mass':float,'molar_mass':float})
+        dry_containers.drop(columns='conc',inplace=True)
+        dry_containers.reset_index(inplace=True)
+        dry_containers['index'] = dry_containers['index'].apply(lambda x: x.replace(' ','_'))
+        return dry_containers
+
+
+    
+    def _parse_raw_reagent_df(self, raw_reagent_df):
+        '''
+        parses the raw_reagent_df into final form for reagent_df  
+        params:  
+            df raw_reagent_df: as in excel  
+        returns:  
+            df reagent_df: empties ignored, columns with correct types  
+        '''
+        # incase not on axis
+        reagent_df = raw_reagent_df.drop(['empty'], errors='ignore')
+        reagent_df = reagent_df.loc[~reagent_df['molar_mass'].astype(bool)] #drop dry
+        reagent_df.drop(columns='molar_mass',inplace=True)
+        try:
+            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        except ValueError as e:
+            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
+        return reagent_df
+
+    def _get_instrument_dict(self, deck_data):
+        '''
+        uses data from deck sheet to return the instrument params  
+        Preconditions:  
+            The second sheet in the worksheet must be initialized with where you've placed reagents 
+            and the first thing not being used  
+        params:  
+            list<list<str>>deck_data: the deck data as in excel  
+        returns:  
+            Dict<str:str>: key is 'left' or 'right' for the slots. val is the name of instrument  
+        '''
+        #the format google fetches this in is funky, so we convert it into a nice df
+        #make instruments
+        instruments = {}
+        instruments['left'] = deck_data[13][0]
+        instruments['right'] = deck_data[13][1]
+        return instruments
+    
+    def _get_labware_df(self, deck_data, empty_containers):
+        '''
+        uses data from deck sheet to get information about labware locations, first tip, etc.  
+        Preconditions:  
+            The second sheet in the worksheet must be initialized with where you've placed reagents 
+            and the first thing not being used  
+        params:  
+            list<list<str>>deck_data: the deck data as in excel  
+            df empty_containers: this is used for tubes. it holds the containers that can be used  
+                + int index: deck_pos  
+                + str position: the position of the empty container on the labware  
+        returns:  
+            df:  
+                + str name: the common name of the labware  
+                + str first_usable: the first tip/well to use  
+                + int deck_pos: the position on the deck of this labware  
+                + str empty_list: the available slots for empty tubes format 'A1,B2,...' No specific
+                  order  
+        '''
+        labware_dict = {'name':[], 'first_usable':[],'deck_pos':[]}
+        for row_i in range(0,10,3):
+            for col_i in range(3):
+                labware_dict['name'].append(deck_data[row_i+1][col_i])
+                labware_dict['first_usable'].append(deck_data[row_i+2][col_i])
+                labware_dict['deck_pos'].append(deck_data[row_i][col_i])
+        labware_df = pd.DataFrame(labware_dict)
+        #platereader positions need to be translated, and they shouldn't be put in both
+        #slots
+        platereader_rows = labware_df.loc[(labware_df['name'] == 'platereader7') | \
+                (labware_df['name'] == 'platereader4')]
+        usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
+        assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
+        assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
+        platereader_input_first_usable = usable_rows.iloc[0]
+        platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
+        platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
+        if platereader_name == 'platereader7':
+            platereader4_first_usable = 'F8' #anything larger than what is on plate
+            platereader7_first_usable = platereader_first_usable
+        else:
+            platereader4_first_usable = platereader_first_usable
+            platereader7_first_usable = 'G1'
+        labware_df.loc[labware_df['name']=='platereader4','first_usable'] = platereader4_first_usable
+        labware_df.loc[labware_df['name']=='platereader7','first_usable'] = platereader7_first_usable
+        labware_df = labware_df.loc[labware_df['name'] != ''] #remove empty slots
+        labware_df.set_index('deck_pos', inplace=True)
+        #add empty containers in list form
+        #there's some fancy formating here that gets you a series with deck as the index and
+        #comma seperated loc strings eg 'A1,A3,B2' as values
+        grouped = empty_containers['loc'].apply(lambda pos: pos+',').groupby('deck_pos')
+        labware_locs = grouped.sum().apply(lambda pos: pos[:len(pos)-1])
+        labware_df = labware_df.join(labware_locs, how='left')
+        labware_df['loc'] = labware_df['loc'].fillna('')
+        labware_df.rename(columns={'loc':'empty_list'},inplace=True)
+        labware_df.reset_index(inplace=True)
+        labware_df['deck_pos'] = pd.to_numeric(labware_df['deck_pos'])
+        return labware_df
+
+    def save(self):
+        self.portal.send_pack('save')
+        #server will initiate file transfer
+        files = self.portal.recv_ftp()
+        for filename, file_bytes in files:
+            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+                write_file.write(file_bytes)
+        self.translate_wellmap()
+        
+
+    def close_connection(self):
+        '''
+        runs through closing procedure with robot    
+        Postconditions:    
+            Log files have been written to self.out_path  
+            Connection has been closed  
+        '''
+        print('<<controller>> initializing breakdown')
+        self.save()
+        #server should now send a close command
+        self.portal.send_pack('close')
+        print('<<controller>> shutting down')
+        self.portal.close()
+    
+    def translate_wellmap(self):
+        '''
+        Preconditions:  
+            there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+            machine labels  
+        Postconditions:  
+            translated_wellmap.tsv has been created. translated is a copy of wellmap with   
+            it's locations translated to human locs, but the labware pos remains the same  
+        '''
+        df = pd.read_csv(os.path.join(self.eve_files_path,'wellmap.tsv'), sep='\t')
+        df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
+        df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
+
+    def init_robot(self, simulate):
+        '''
+        this does the dirty work of sending accumulated params over network to the robot  
+        params:  
+            bool simulate: whether the robot should run a simulation  
+        Postconditions:  
+            robot has been initialized with necessary params  
+        '''
+        #send robot data to initialize itself
+        #note reagent_df can have index with same name so index is reset for transfer
+        cid = self.portal.send_pack('init', simulate, 
+                self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
+                self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
+                self.robo_params['reagent_df'].reset_index().to_dict(), self.my_ip,
+                self.robo_params['dry_containers'].to_dict())
+
+    @abstractmethod
+    def run_simulation(self):
+        pass
+
+    @abstractmethod
+    def run_protocol(self,simulate):
+        pass
+
+
+    def _error_handler(self, e):
+        '''
+        When an error is thrown from a public method, it will be sent here and handled
+        '''
+        #handle the error
+        if self.portal.state == 1:
+            #Armchair recieved an error packet, so eve had a problem
+            try:
+                eve_error = self.portal.error_payload[0]
+                print('''<<controller>>----------------Eve Error----------------
+                Eve threw error '{}'
+                Attempting to save state on exit
+                '''.format(eve_error))
+                self.portal.reset_error()
+                self.close_connection()
+                self.pr.shutdown()
+            finally:
+                raise eve_error
+        else:
+            try:
+                print('''<<controller>> ----------------Controller Error----------------
+                <<controller>> Attempting to save state on exit''')
+                self.close_connection()
+                self.pr.shutdown()
+            finally:
+                time.sleep(.5) #this is just for printing format. Not critical
+                raise e
+
+    def _load_rxn_df(self, input_data):
+        '''
+        reaches out to google sheets and loads the reaction protocol into a df and formats the df
+        adds a chemical name (primary key for lots of things. e.g. robot dictionaries)
+        renames some columns to code friendly as opposed to human friendly names  
+        params:  
+            list<list<str>> input_data: as recieved in excel  
+        returns:  
+            pd.DataFrame: the information in the rxn_spreadsheet w range index. spreadsheet cols  
+        Postconditions:  
+            self._products has been initialized to hold the names of all the products  
+        '''
+        cols = make_unique(pd.Series(input_data[0])) 
+        rxn_df = pd.DataFrame(input_data[4:], columns=cols)
+        #rename some of the clunkier columns 
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
+        rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
+        rxn_df.replace('', np.nan,inplace=True)
+        rxn_df[['pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['pause_time','dilution_conc','conc','max_num_scans']].astype(float)
+        rxn_df['reagent'] = rxn_df['reagent'].apply(lambda s: s if pd.isna(s) else s.replace(' ', '_'))
+        rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
+        self._rename_products(rxn_df)
+        #go back for some non numeric columns
+        rxn_df['callbacks'].fillna('',inplace=True)
+        self._products = rxn_df.loc[:,'reagent':'chemical_name'].drop(columns=['chemical_name', 'reagent']).columns
+        #make the reagent columns floats
+        rxn_df.loc[:,self._products] =  rxn_df[self._products].astype(float)
+        rxn_df.loc[:,self._products] = rxn_df[self._products].fillna(0)
+        return rxn_df
+
+    @abstractmethod
+    def _rename_products(self, rxn_df):
+        '''
+        Different for Protocol Executor vs auto
+        renames dilutions acording to the reagent that created them
+        and renames rxns to have a concentration  
+        Preconditions:  
+            dilution cols are named dilution_1/2 etc  
+            callback is the last column in the dataframe  
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization  
+        params:  
+            df rxn_df: the dataframe with all the reactions  
+        Postconditions:  
+            the df has had it's dilution columns renamed to a chemical name
+        '''
+        pass
+
+    def _get_products_to_labware(self, input_data):
+        '''
+        create a dictionary mapping products to their requested labware/containers  
+        Preconditions:  
+            self.rxn_df must have been initialized already  
+        params:  
+            list<list<str>> input data: the data from the excel sheet  
+        returns:  
+            Dict<str,list<str,str>>: effectively the 2nd and 3rd rows in excel. Gives 
+                    labware and container preferences for products  
+        '''
+        cols = self.rxn_df.columns.to_list()
+        product_start_i = cols.index('reagent')+1
+        requested_containers = input_data[2][product_start_i+1:]
+        requested_labware = input_data[1][product_start_i+1:]#add one to account for the first col (labware)
+        #in df this is an index, so size cols is one less
+        products_to_labware = {product:[labware,container] for product, labware, container in zip(self._products, requested_labware,requested_containers)}
+        return products_to_labware
+
+    def _query_reagents(self, spreadsheet_key, credentials):
+        '''
+        query the user with a reagent sheet asking for more details on locations of reagents, mass
+        etc  
+        Preconditions:  
+            self.rxn_df should be initialized  
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets
+            ServiceAccount Credentials credentials: to access sheets  
+        PostConditions:  
+            reagent_sheet has been constructed  
+        '''
+        #you might make a reaction you don't want to specify at the start
+        reagent_df = self.rxn_df.loc[self.rxn_df['op'] != 'make', ['reagent', 'conc']]
+        reagent_df = reagent_df.groupby(['reagent','conc'], dropna=False).first().reset_index()
+        reagent_df.dropna(how='all',inplace=True)
+        rows_to_drop = []
+        duplicates = reagent_df['reagent'].duplicated(keep=False)
+        for i, reagent, conc in reagent_df.itertuples():
+            if duplicates[i] and pd.isna(conc):
+                rows_to_drop.append(i)
+        reagent_df.drop(index=rows_to_drop, inplace=True)
+        reagent_df.set_index('reagent',inplace=True)
+        reagent_df.fillna('',inplace=True)
+
+        #add water if necessary
+        needs_water = self.rxn_df['op'].apply(lambda x: x in ['make', 'dilution']).any()
+        if needs_water:
+            if 'Water' not in reagent_df.index:
+                reagent_df = reagent_df.append(pd.Series({'conc':1.0}, name='Water'))
+            else:
+                reagent_df.loc['Water','conc'] = 1.0
+        #start dropping products
+        rxn_names = self._products.copy() #going to drop template, hence copy
+        rxn_names = rxn_names.drop('Template', errors='ignore') #Template will throw error
+        #we now need to split the rxn_names into reagent names and concs.
+        #There may be duplicate reagents, so we will make a dictionary with list values of 
+        #concs
+        rxn_name_dict = {}
+        for name in rxn_names:
+            reagent = self._get_reagent(name)
+            conc = self._get_conc(name)
+            if reagent in rxn_name_dict:
+                #already exists, append to list
+                rxn_name_dict[reagent].append(conc)
+            else:
+                #doesn't exist, create list
+                rxn_name_dict[reagent] = [conc]
+        rxn_names = pd.Series(rxn_name_dict, name='conc',dtype=object)
+        #rxn_names is now a series of concentrations with reagents as keys
+        reagent_df = reagent_df.join(rxn_names, how='left', rsuffix='2') 
+        reagent_df = reagent_df.loc[
+                reagent_df.apply(lambda r: (not isinstance(r['conc2'],list)) 
+                or r['conc'] not in r['conc2'], axis=1)
+                ].drop(columns='conc2')
+        reagent_df[['loc', 'deck_pos', 'mass', 'molar_mass (for dry only)', 'comments']] = ''
+        if not self.use_cache:
+            if reagent_df.empty:
+                #d2g has weird upload behavior so must add a blank row
+                blanks = ['' for i in range(reagent_df.shape[1])]
+                reagent_df = reagent_df.append(pd.DataFrame([blanks],
+                        columns=reagent_df.columns,index=pd.Index([''],name='chemical_name')))
+            d2g.upload(reagent_df.reset_index().rename(columns={'index':'chemical_name'}),spreadsheet_key,wks_name = 'reagent_info', row_names=False , credentials = credentials)
+
+    def _get_product_df(self, products_to_labware):
+        '''
+        Creates a df to be used by robot to initialize containers for the products it will make  
+        params:  
+            df products_to_labware: as passed to init_robot  
+        returns:  
+            df products:  
+                + INDEX:  
+                + str chemical_name: the name of this rxn  
+                + COLS:  
+                + str labware: the labware to put this rxn in or None if no preference  
+                + float max_vol: the maximum volume that will ever ocupy this container  
+        '''
+        products = products_to_labware.keys()
+        max_vols = [self._get_rxn_max_vol(product, products) for product in products]
+        product_df = pd.DataFrame(products_to_labware, index=['labware','container']).T
+        product_df['max_vol'] = max_vols
+        return product_df
+
+    @abstractmethod
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        This needs to be implemented to as a helper for _get_product_df.
+        It calculates the maximum volume that a container will hold at a time
+        '''
+        pass
+
+    def execute_protocol_df(self):
+        '''
+        takes a protocol df and sends every step to robot to execute  
+        params:  
+            int buff: the number of commands allowed in flight at a time  
+        Postconditions:  
+            every step in the protocol has been sent to the robot  
+        '''
+        for i, row in self.rxn_df.iterrows():
+            print("<<controller>> executing command {} of the protocol df with operation {}.".format(i, row['op']))
+            if row['op'] == 'transfer':
+                self._send_transfer_command(row,i)
+            elif row['op'] == 'pause':
+                cid = self.portal.send_pack('pause',row['pause_time'])
+            elif row['op'] == 'stop':
+                self._stop(i)
+            elif row['op'] == 'scan':
+                self._execute_scan(row, i)
+            elif row['op'] == 'dilution':
+                self._send_dilution_commands(row, i)
+            elif row['op'] == 'mix':
+                self._mix(row, i)
+            elif row['op'] == 'make':
+                self._send_make(row, i)
+            elif row['op'] == 'save':
+                self.save()
+            elif row['op'] == 'plot':
+                self._create_plot(row, i)
+            elif row['op'] == 'print':
+                self._execute_print(row,i)
+            elif row['op'] == 'scan_until_complete':
+                self._scan_until_complete(row,i)
+            else:
+                raise Exception('invalid operation {}'.format(row['op']))
+
+    def _execute_print(self, row, i):
+        print(row['message'])
+
+    def _create_plot(self, row, i):
+        '''
+        exectues a plot command  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        plot_type = row['plot_protocol']
+        filename = row['plot_filename']
+        #make sure you have mapping for all files
+
+        self._update_cached_locs(wellnames)
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        #it's not safe to plot in simulation because the scan file may not exist yet
+        df, metadata = self.pr.load_reader_data(row['scan_filename'], pr_dict)
+        #execute the plot depending on what was specified
+        if plot_type == 'single_kin':
+            for wellname in wellnames:
+                self.plot_single_kin(df, metadata['n_cycles'], wellname, "{}_{}".format(wellname, filename))
+        elif plot_type == 'overlay':
+            self.plot_LAM_overlay(df, wellnames, filename)
+        elif plot_type == 'multi_kin':
+            self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
+
+    def _download_reagent_data(self, spreadsheet_key, credentials):
+        '''
+        This is almost line for line inherited, but we need to input in the middle. 
+        What can you do?  
+        params:  
+            str spreadsheet_key: this is the a unique id for google sheet used for i/o with sheets  
+            ServiceAccount Credentials credentials: to access sheets  
+        returns:  
+            df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
+        '''
+        
+        if self.use_cache:
+            #if you've already seen this don't pull it
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
+                reagent_info = dill.load(reagent_info_cache)
+        else:
+            input("<<controller>> please press enter when you've completed the reagent sheet")
+            #pull down from the cloud
+            reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
+                row_names = True, credentials=credentials).drop(columns=['comments'])
+            #cache the data
+            with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
+                dill.dump(reagent_info, reagent_info_cache)
+        #need to rename only the chemicals that were specified with their <name>C<conc> name
+        #this is delicate because the indices will not be unique when it is first pulled.
+        reagent_info.index = reagent_info.apply(lambda r: "{}C{}".format(r.name,float(r['conc'])) if r['conc'] else r.name,axis=1)
+        reagent_info.rename(columns={'molar_mass (for dry only)': 'molar_mass'}, inplace=True)
+        return reagent_info
+
+    def _send_make(self, row, i):
+        '''
+        sends a make command to the robot  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        self.portal.send_pack('make', row['reagent'].replace(' ','_'), row['conc'])
+
+    def _execute_scan(self,row,i):
+        '''
+        There are a few things entailed in a scan command  
+        1) send home to robot  
+        2) block until you run out of waits  
+        3) figure out what wells you want to scan  
+        4) query the robot for those wells, or use cache if you have it  
+            a) if you had to query robot, send request of reagents  
+            b) wait on robot response  
+            c) translate robot response to human readable  
+        5) update layout to scanner and scan  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        '''
+        #1)
+        self.portal.send_pack('home')
+        #2)
+        self.portal.burn_pipe()
+        #3)
+        wellnames = row[self._products][row[self._products].astype(bool)].index
+        self._update_cached_locs(wellnames)
+        #4)
+        #update the locs on the well
+        well_locs = []
+        for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
+            assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
+            assert (well not in self.tot_vols or math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+            well_locs.append(entry.loc)
+        #5
+        self.pr.exec_macro('PlateIn')
+        self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
+        self.pr.exec_macro('PlateOut')
+
+    def _update_cached_locs(self, wellnames):
+        '''
+        A query will be
+        made to Eve for the wellnames, and data for those will be stored in the cache  
+        params:  
+            listlike<str> wellnames: the names of the wells you want to lookup  
+        Postconditions:  
+            The wellnames are in the cache  
+        '''
+        if not isinstance(wellnames,str):
+            #can't send pandas objects over socket for package differences on robot vs laptop
+            wellnames = [wellname for wellname in wellnames]
+        #couldn't find in the cache, so we got to make a query
+        self.portal.send_pack('loc_req', wellnames)
+        pack_type, _, payload = self.portal.recv_pack()
+        assert (pack_type == 'loc_resp'), 'was expecting loc_resp but recieved {}'.format(pack_type)
+        returned_well_locs = payload[0]
+        #update the cache
+        for well_entry in returned_well_locs:
+            if well_entry[2] in [4,7]:
+                #is on reader. Need to translate index
+                self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*(self.PLATEREADER_INDEX_TRANSLATOR.inv[(well_entry[1],'platereader{}'.format(well_entry[2]))],)+well_entry[2:])
+            else:
+                #not on reader, just use vanilla index
+                self._cached_reader_locs[well_entry[0]] = self.ChemCacheEntry(*well_entry[1:])
+
+    def _mix(self,row,i):
+        '''
+        this method mixes everything on the platereader with a shake. it mixes other things
+        by pipette
+        params:  
+            pd.Series row: the row with the mix operation
+            index i: index of the row in the dataframe
+        '''
+        wells_to_mix = row[self._products].loc[row[self._products].astype(bool)].astype(int)
+        wells_to_mix.name = 'mix_code'
+        self._update_cached_locs(wells_to_mix.index)
+        deck_poses = pd.Series({wellname:self._cached_reader_locs[wellname].deck_pos for 
+                wellname in wells_to_mix.index}, name='deck_pos', dtype=int)
+        wells_to_mix_df = pd.concat((wells_to_mix, deck_poses),axis=1)
+        #get platereader rows. true if pr
+        wells_to_mix_df['platereader'] = wells_to_mix_df['deck_pos'].apply(lambda x: x in [4,7]) 
+        if wells_to_mix_df['platereader'].sum() > 0:
+            #TODO technically, you could be mixing the other stuff by hand while you're mixing
+            #the stuff in the reader, but if you miscalculated and accidently hand mix on the
+            #platereader because of a bug, Mark will be mad, so apart for now. After testing
+            #you should burn pipe, then send the handmix command, then mix the platereader
+            #to multitask
+
+            #at least one well nees a shake
+            self.portal.send_pack('home')
+            self.portal.burn_pipe() # can't be pulling plate in if you're still mixing
+            self.pr.exec_macro('PlateIn')
+            if (row.loc[self._products] == 2).any():
+                self.pr.shake(60)
+            else:
+                self.pr.shake(30)
+            self.pr.exec_macro('PlateOut')
+        if (~wells_to_mix_df['platereader']).sum() > 0:
+            #at least one needs to be mixed by hand
+            #still df
+            hand_mix_wells = wells_to_mix_df.loc[~wells_to_mix_df['platereader']].reset_index()
+            #convert to list of tuples
+            hand_mix_wells = [tuple(t) for t in hand_mix_wells[['index','mix_code']].itertuples(index=False)]
+            self.portal.send_pack('mix', hand_mix_wells)
+
+    def _send_dilution_commands(self,row,i):
+        '''
+        used to execute a dilution. This is analogous to microcode. This function will send two
+          commands. Water is always added first.
+            transfer: transfer water into the container
+            transfer: transfer reagent into the container  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+            int i: index of this row  
+        Preconditions:  
+            The buffer has room for at least one command  
+        Postconditions:  
+            Two transfer commands have been sent to the robot to: 1) add water. 2) add reagent.  
+            Will block on ready if the buffer is filled  
+        '''
+        water_transfer_row, reagent_transfer_row = self._get_dilution_transfer_rows(row)
+        prod_transfer = reagent_transfer_row.loc[self._products].ne(0)
+        product_val = reagent_transfer_row[self._products][prod_transfer].index
+        mix_row = row.copy()
+        mix_row['op'] = 'mix'
+        mix_row.loc[product_val] = 2 
+        self._send_transfer_command(water_transfer_row, i)
+        self._send_transfer_command(reagent_transfer_row, i)
+        self._mix(mix_row,i)
+    def _get_dilution_transfer_rows(self, row):
+        '''
+        Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
+        This command will communicate with the robot to get the current deck position of the
+        thing being diluted.  
+        This is required because if that thing is on a temperature controller, ColdWater shall
+        be used instead of Water.  
+        params:  
+            pd.Series row: a row of self.rxn_df  
+        returns:  
+            tuple<pd.Series>: rows to be passed to the send transfer command. water first, then
+              reagent
+              see self._construct_dilution_transfer_row for details  
+            Note the second row (the reagent row) will have have whichever callbacks are passed.
+        Preconditions:  
+            robot has been initialized  
+            Water or ColdWater is on the deck (depending on if this is on temperature module
+            or not.  
+        '''
+        reagent = row['chemical_name']
+        #figure out if it is on temperature module
+        self._update_cached_locs([reagent])
+        deck_pos = self._cached_reader_locs[reagent].deck_pos
+        df = self.robo_params['labware_df'] #cause typing hurts
+        #iloc is necessary because will give a series by default, but always has one element
+        is_temp_cont = df.loc[df['deck_pos'] == deck_pos,'name'].iloc[0] == 'temp_mod_24_tube'
+        water_src = 'ColdWaterC1.0' if is_temp_cont else 'WaterC1.0'
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        #TODO investigate if this works
+        #assert (dilution_name_vol.size == 1), "Failure on row {} of the protocol. It seems you tried to dilute into multiple containers"
+        target_name = dilution_name_vol.index[0]
+        vol_water, vol_reagent = self._get_dilution_transfer_vols(row)
+        water_transfer_row = self._construct_dilution_transfer_row(water_src, target_name, vol_water)
+
+        reagent_transfer_row = self._construct_dilution_transfer_row(reagent, target_name, vol_reagent)
+        reagent_transfer_row['callbacks'] = row['callbacks'] #give the second row whatever callbacks you had
+        return water_transfer_row, reagent_transfer_row
+
+    def _get_dilution_transfer_vols(self, row):
+        '''
+        calculates the amount of reagent volume needed for a dilution  
+        params:  
+            float target_conc: the concentration desired at the end  
+            float reagent_conc: the concentration of the reagent  
+            float total_vol: the total volume requested  
+        returns:  
+            tuple<float>: size 2
+                volume of water to transfer
+                volume of reagent to transfer  
+        '''
+        reagent_conc = row['conc']
+        product_cols = row.loc[self._products]
+        dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
+        total_vol = dilution_name_vol.iloc[0]
+        target_conc = row['dilution_conc']
+
+        mols_reagent = total_vol*target_conc #mols (not really mols if not milimolar. whatever)
+        vol_reagent = mols_reagent/reagent_conc
+        vol_water = total_vol - vol_reagent
+        return vol_water, vol_reagent
+
+    def _construct_dilution_transfer_row(self, reagent_name, target_name, vol):
+        '''
+        The transfer command expects a nicely formated row of the rxn_df, so here we create a row
+        with everything in it to ship to the transfer command.  
+        params:  
+            str reagent_name: used as the chemical_name field  
+            str target_name: used as the product_name field  
+            str vol: the volume to transfer  
+        returns:  
+            pd.Series: has all the fields of a regular row, but only [chemical_name, target_name,
+              op] have been initialized. The other fields are empty/NaN  
+        '''
+        template = self.rxn_df.iloc[0].copy()
+        template[:] = np.nan
+        template[self._products] = 0.0
+        template['op'] = 'transfer'
+        template['chemical_name'] = reagent_name
+        template[target_name] = vol
+        template['callbacks'] = ''
+        return template
+
+    def _stop(self, i):
+        '''
+        used to execute a stop operation. reads through buffer and then waits on user input  
+        params:  
+            int i: the index of the row in the protocol you're stopped on  
+        Postconditions:  
+            self._inflight_packs has been cleaned  
+        '''
+        self.portal.send_pack('stop')
+        pack_type, _, _ = self.portal.recv_pack()
+        assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
+        if not self.simulate:
+            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+        self.portal.send_pack('continue')
+
+    def _send_transfer_command(self, row, i):
+        '''
+        params:  
+            pd.Series row: a row of self.rxn_df
+              uses the chemical_name, callbacks (and associated args), product_columns  
+            int i: index of this row  
+        Postconditions:  
+            a transfer command has been sent to the robot  
+        '''
+        src = row['chemical_name']
+        containers = row[self._products].loc[row[self._products] != 0]
+        transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
+        #temporarilly just the raw callbacks
+        callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
+        if callbacks:
+            #if there were callbacks, you must send transfer one at a time, breaking up into
+            #iterate through each transfer_step we're doing.
+            for callback_num, transfer_step in enumerate(transfer_steps):
+                #send just that transfer step
+                self.portal.send_pack('transfer', src, [transfer_step])
+                #then send a callback for each callback you've got 
+                for callback in callbacks:
+                    self._send_callback(callback, transfer_step[0], callback_num, row, i)
+
+            #merge all the scans into a single file if there were any scans
+            #get the names of all the scan files
+            if 'scan' in callbacks:
+                dst = row['scan_filename'] #also the base name for all files to be merged
+                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                self.pr.merge_scans(scan_names, dst)
+        else:
+            self.portal.send_pack('transfer', src, transfer_steps)
+
+    def _send_callback(self, callback, product, callback_num, row, i):
+        '''
+        This method is used to send (or execute) a single callback.  
+        params:  
+            str callback: the string name of the callback  
+            str product: the name of the product. Required to generate things like a 
+              scan row.  
+            int callback_num: the number of the callback. i.e. 0 if this is the first transfer,
+              1 if second, etc. If multiple callbacks, they will all be 0 for a product
+            pd.Series row: the row of this operation. (used to extract metaparameters)  
+            int i: the index of this command in rxn_df. This will be the same for all the
+              callbacks of a single transfer.  
+        Postconditions:  
+            the callback has been executed/sent
+        Preconditions:  
+            callback_num must not be larger than 26 (alpha numeric characters are used. If you
+              go larger than 26, you'll exceed alpha numeric)
+        '''
+        callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        i_ext = 'i-{}'.format(callback_alph) #extended index with callback
+        if callback == 'stop':
+            self._stop(i)
+        if callback == 'pause':
+            self.portal.send_pack('pause',row['pause_time'])
+        if callback == 'scan':
+            template = row.copy()
+            template.loc[self._products] = 0 
+            template.loc[product] = 1
+            template['op'] = 'scan'
+            #rename the scans with the callback_alph appended
+            template['scan_filename'] = '{}-{}'.format(template['scan_filename'], callback_alph)
+            #note that there will be some miscellaneous crap left in the row, but shouldn't affect
+            #the scan
+            self._execute_scan(template, i_ext)
+        if callback == 'mix':
+            template = row.copy()
+            template.loc[self._products] = 0
+            template.loc[product] = 1
+            template['op'] = 'mix'
+            self._mix(template, i_ext)
+    
+    def _get_chemical_name(self,row):
+        '''
+        create a chemical name
+        from a row in a pandas df. (can be just the two columns, ['conc', 'reagent'])  
+        params:  
+            pd.Series row: a row in the rxn_df  
+        returns:  
+            chemical_name: the name for the chemical "{}C{}".format(name, conc) or name if
+              has no concentration, or nan if no name  
+        '''
+        if pd.isnull(row['reagent']) or pd.isnull(row['conc']):
+            #this must not be a transfer. this operation has no chemical name
+            return np.nan
+        else:
+            #this uses a chemical with a conc. Probably a stock solution
+            return "{}C{}".format(row['reagent'], row['conc'])
+        return pd.Series(new_cols)
+
+    def run_all_checks(self):
+        '''
+        runs all checks on a rxn_df converted to volumes.  
+        This code will probably be overridden by children of this class to add more checks.  
+        returns:  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        found_errors = 0
+        found_errors = max(found_errors, self.check_rxn_df())
+        found_errors = max(found_errors, self.check_labware())
+        found_errors = max(found_errors, self.check_reagents())
+        found_errors = max(found_errors, self.check_tot_vol())
+        found_errors = max(found_errors,self.check_conc())
+        return found_errors
+
+    def check_labware(self):
+        '''
+        checks to ensure that the labware has been correctly initialized  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['labware_df'].iterrows():
+            #check that everything has afirst well if it's not a tube
+            if not 'tube' in r['name'] and not r['first_usable']:
+                print('<<controller>> specified labware {} on deck_pos {}, but did not specify first usable tip/well.'.format(r['name'], r['deck_pos']))
+                found_errors = max(found_errors,2)
+            #if you're not a tube and you have an empty_list, that's also bad
+            if not 'tube' in r['name'] and r['empty_list']:
+                print('<<controller>> An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.'.format(r['name'], r['deck_pos'], r['name']))
+                found_errors = max(found_errors,2)
+            #check for no duplicates in the empty list
+            if r['empty_list']:
+                locs = r['empty_list'].replace(' ','').split(',')
+                if len(set(locs)) < len(locs):
+                    print('<<controller>> empty list for {} on deck pos {} had duplicates. List was {}'.format(r['name'],r['deck_pos'], r['empty_list']))
+                    found_errors = max(found_errors,2)
+        return found_errors 
+
+    def check_reagents(self):
+        '''
+        checks to ensure that you've specified reagents correctly, and also checks that
+        you did not double book empty containers onto reagents  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        found_errors = 0
+        #This is a little hefty. We're checking to see if any reagents/empty containers 
+        #were double booked onto the same location on the same deck position
+        labware_w_empties = self.robo_params['labware_df'].loc[self.robo_params['labware_df']['empty_list'].astype(bool)]
+        loc_pos_empty_pairs = [] # will become series
+        for i, row in labware_w_empties.iterrows():
+            for loc in row['empty_list'].replace(' ','').split(','):
+                loc_pos_empty_pairs.append((loc, row['deck_pos']))
+        loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
+        loc_deck_pos_pairs = self.robo_params['reagent_df'].apply(lambda r: (r['loc'], r['deck_pos']),axis=1)
+        loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
+        val_counts = loc_deck_pos_pairs.value_counts()
+        for i in val_counts.loc[val_counts > 2].index:
+            print('<<controller>> location {} on deck position has multiple reagents/empty containers assigned to it')
+            found_errors = max(found_errors,2)
+        return found_errors
+
+    def check_rxn_df(self):
+        '''
+        Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
+        Advised options are printed and if an error code is returned
+        Will run through and check all rows, even if errors are found
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        found_errors = 0
+        if self.rxn_df.loc[self.rxn_df['op']=='scan']['scan_filename'].duplicated().sum() > 0:
+            print("<<controller>> Multiple scans use same filename. It will be overwritten. Do you wish to proceed?")
+            found_errors = max(found_errors, 1)
+        if self.rxn_df.loc[self.rxn_df['op']=='plot']['plot_filename'].duplicated().sum() > 0:
+            print("<<controller>> Multiple plots use same filename. They will be overwritten. Do you wish to proceed?")
+            found_errors = max(found_errors, 1)
+        for i, r in self.rxn_df.iterrows():
+            r_num = i+1
+            #check pauses
+            if (not ('pause' in r['op'] or 'pause' in r['callbacks'] or r['op'] == 'scan_until_complete')) == (not pd.isna(r['pause_time'])):
+                print("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
+                found_errors = max(found_errors, 2)
+            #check that there's always a volume when you transfer
+            if (r['op'] == 'transfer' and math.isclose(r[self._products].sum(), 0,abs_tol=1e-9)):
+                print("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
+                found_errors = max(found_errors, 1)
+            #check that you have a reagent if you're transfering
+            if r['op'] == 'transfer' and pd.isna(r['reagent']):
+                print('<<controller>> transfer specified without reagent in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+            #check that scans have a scan file
+            if (r['op'] == 'scan' or 'scan' in r['callbacks']) and pd.isna(r['scan_filename']):
+                print('<<controller>> scan without scan filename in row {}'.format(r_num))
+                found_errors = max(found_errors,2)
+            #check no multiple scans on one callback
+            callbacks = r['callbacks'].replace(' ', '').split(',')
+            if 'scan' in callbacks:
+                callbacks.remove('scan')
+                if 'scan' in callbacks:
+                    print('<<controller>> multiple scans in a callback on line {}'.format(r_num))
+                    found_errors = max(found_errors,2)
+            #check that plots have scans
+            if r['op'] == 'plot':
+                if pd.isna(r['scan_filename']):
+                    print("<<controller>> please specify a scan filename in row '{}'".format(r_num))
+                    found_errors = max(found_errors,2)
+                if pd.isna(r['plot_filename']):
+                    print("<<controller>> please specify a plot filename in row '{}'".format(r_num))
+                    found_errors = max(found_errors,2)
+                rows_above = self.rxn_df.loc[:i,:]
+                scan_rows = rows_above.loc[(rows_above['scan_filename'] == r['scan_filename']) &\
+                        ((rows_above['op'] == 'scan')| (rows_above['op'] == 'scan_until_complete'))]
+                
+                
+                if scan_rows.empty:
+                        print("<<controller>> row {} plots using nonexistent scan file\
+                                ".format(r_num))
+                        found_errors = max(found_errors, 2)
+                else:
+                    last_scan_row = scan_rows.iloc[-1,:]
+                    last_scan_products = last_scan_row[self._products]
+                    scanned_products=last_scan_products.loc[last_scan_products.astype(bool)].index
+                    scanned_products = set(scanned_products)
+                    plotted_products = r[self._products]
+                    plotted_products = set(plotted_products[plotted_products.astype(bool)])
+                    if plotted_products.issubset(scanned_products):
+                        print("<<controller>> row {} plots products that have not been scanned\
+                        ".format(r_num))
+                        found_errors = max(found_errors, 2)
+        return found_errors
+
+    def check_tot_vol(self):
+        '''
+        This check ensures that the inserted total volume row does not contain negative floats.
+        returns:  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''        
+        found_errors = 0;
+        
+        #checks for negative input in tot_vol rows
+        for key,val in self.tot_vols.items():
+            product_volumes = self.rxn_df[key]
+            if val < 0:
+                print("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
+                found_errors = max(found_errors,2)
+            
+        #checks for scan errors
+        check_scan = self.rxn_df.loc[(self.rxn_df['op'] == 'scan')]
+        #make sure if you're scanning you have a total volume
+        cols_w_scans = check_scan[self._products].astype(int).any() #bool arr if product is scaned
+        cols_w_scans = cols_w_scans.loc[cols_w_scans].index #just the cols that are scanned
+        for col in cols_w_scans:
+            if col not in self.tot_vols:
+                print("<<controller>> {} is scanned, but does not have a specified total volume. Will be scanned at whatever volume it has at the time of scan.".format(col))
+                found_errors = max(found_errors,1)
+        #check more scan issues
+        first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&check_scan.ne(0)].stack()   
+        scan_products = []
+        #Creates list for products that have scans
+        for prod in self.tot_vols.keys():
+            for sc in  first_scans_i.index:
+                if prod == sc[1]:
+                    scan_products.append([prod,sc[0]])  
+        #checks if all transfers happen before scan
+        for products in scan_products:
+            specific_prod = self.rxn_df[products[0]]
+            scan_index = products[1]
+            while (scan_index < len(specific_prod)):
+                if self.rxn_df['op'][scan_index] == 'transfer' and specific_prod[scan_index] != 0:
+                    print("<<controller>> Error in product: " +str(products[0]) +" in index: " +str(scan_index) + ", cannot make transfers after scan when total volume column is specified.")
+                    found_errors = max(found_errors,2)
+                    break
+                else:
+                    scan_index +=1
+                
+        #check for illegal dilutions in total vol
+        check_dilutions = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution')]
+        check_dilutions_name = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution'),'chemical_name']
+        first_dilutions_i = check_dilutions[check_dilutions.eq(check_dilutions.max(1),0)&check_dilutions.ne(0)].stack()
+        for prod in self.tot_vols.keys():
+            for dil in first_dilutions_i.index:
+                if prod == dil[1]:
+                    print("<<controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
+                    found_errors = max(found_errors,2)
+                    break
+        #checks for dilutions in reagent slot--illegal!
+        for idx,dil_prod in enumerate(check_dilutions_name):
+            if dil_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(dil_prod) + ": cannot have dilutions out of product with total volume specified.")
+                found_errors = max(found_errors,2)
+                
+        #Checks reagents to see if there is a transfer that transfers a product with tot_vol
+        check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer'),'chemical_name']
+        for idx,trans_prod in enumerate(check_transfer):
+            if trans_prod in self.tot_vols.keys():
+                print("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(trans_prod) + ": cannot have transfer out of product with total volume specified.")
+                found_errors= max(found_errors,2)
+        
+        return found_errors 
+
+    def _get_transfer_container(self,reagent,molarity,total_vol,ratio=1.0):
+        '''
+        This function is responsible for converting from a reagent (without concentration) to
+        a uniquely identified container that holds that reagent. This is used when rows are
+        specified as molarities as opposed to volumes because the container must be chosen
+        from a number of containers that may hold that reagent at different concentations.
+        There are a number of ways to optimize which container should be chosen. This 
+        algorithm will always take the most concentrated solution unless there is not sufficient
+        volume, or the volume that would be required to pipette is less than the minimum
+        pipettable volume. defined here as 2uL.  
+        params:  
+            str reagent: the name of the reagent that you are searching for a container for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            tuple<str, float>: if a match was found for the reagent   
+                str: the container name.  
+                float: the volume that must be transfered with this container.  
+        raises:  
+            ConversionError: when the molarity cannot be acheived without overdrawing from
+              container, or by pipetting less than min_vol  
+        Preconditions:
+            the cached_reader_locs should be up to date  
+        '''
+        min_vol = 5
+        containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(reagent+'C\d*\.\d*', key)]
+        containers.sort(key=self._get_conc)
+        filtered_conts = [] #this will hold the containers that are diluted enough to be able
+        #to transfer without exceeding min_vol
+        for cont in containers:
+            vol = self._get_transfer_vol(cont,molarity,total_vol,ratio)
+            if vol > min_vol:
+                filtered_conts.append(cont)
+                if vol < self._cached_reader_locs[cont].aspirable_vol:
+                    return cont, vol
+        raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
+
+
+    def _convert_conc_to_vol(self, rxn_df, products):
+        '''
+        This function converts any molarity rows into volume rows  
+        params:  
+            df rxn_df: the reaction dataframe with some concentration rows  
+            str products: the names of the products  
+        returns:  
+            df: the rxn_df with all concentrations converted to volumes if things went well  
+        raises:  
+            ConversionError: for too small vol transfer, run out of vol in a reagent, or 
+              overflow  
+        '''
+        #We now need to iterate through df and for each column, calculate the container to pull
+        #from, and volume. Since one row may now pull from muliple reagents, this causes a
+        #rebuild of the dataframe. We accumulate a list of series and then rebuild
+        disassembled_df = [] # list of series
+
+        for i, row in rxn_df.iterrows():
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
+                #needs the concentration to be converted
+                testCont = row[products].reset_index()                
+                cont_vol_key = row[products].reset_index().apply(lambda r:
+                        pd.Series({x: y for x, y in 
+                        zip(['chem_name', 'vol'], 
+                                (np.nan,np.nan) if math.isclose(r.iloc[1], 0, abs_tol=1e-9) else
+                                    self._get_transfer_container(row['reagent'], r.iloc[1],
+                                        self.tot_vols[r['index']],ratio=1.0))}),axis=1)
+                cont_vol_key.index = products
+                conts = cont_vol_key['chem_name'].dropna().unique()
+                for cont in conts:
+                    new_row = row.copy()
+                    new_row['chemical_name'] = cont
+                    new_row['conc'] = self._get_conc(cont)
+                    for product in products:
+                        new_row[product] = cont_vol_key.loc[product,'vol'] if \
+                            cont_vol_key.loc[product,'chem_name'] == cont else 0
+                    disassembled_df.append(new_row)
+            else:
+                disassembled_df.append(row)
+        return pd.DataFrame(disassembled_df)
+
+    def _get_transfer_vol(self,reagent,molarity,total_vol,ratio):
+        '''
+        helper function to calculate the necessary volume for a transfer given a reagent and
+        desired molarity and a volume (and some other stuff)  
+        params:  
+            str reagent: the chemical name of the reagent fullname that you are searching for  
+            float molarity: the desired molarity at end of reaction.  
+            float total_vol: the total volume that this well will have at end of the reaction.  
+            float ratio: between 1 and 0 if specified, this specifies that this addition 
+              will only add the ratio of the reagent, (important because it affects the min
+              vol that would be added with this transfer. effectively multiplies total_vol 
+              by ratio)  
+        returns:  
+            float: the volume to transfer from the reagent for desired end molarity  
+        '''
+        conc = self._get_conc(reagent)
+        vol = molarity * (total_vol*ratio) / conc
+        return vol
+        
+    def _vol_calc(self, name):
+        '''
+        calculates the total volume of a column at the end of rxn  
+        params:
+            str name: chem_name
+        returns:
+            volume at end in that name
+        '''
+        dispenses = self.rxn_df.loc[(self.rxn_df['op'] == 'dilution') |
+                (self.rxn_df['op'] == 'transfer')][name].sum()
+        transfer_aspirations = self.rxn_df.loc[(self.rxn_df['op']=='transfer') &\
+                (self.rxn_df['chemical_name'] == name),self._products].sum().sum()
+        dilution_rows = self.rxn_df.loc[(self.rxn_df['op']=='dilution') &\
+                (self.rxn_df['chemical_name'] == name),:]
+        def calc_dilution_vol(row):
+            return self._get_dilution_transfer_vols(row)[1]
+
+        if dilution_rows.empty:
+            dilution_aspirations = 0.0
+        else:
+            dilution_vols = dilution_rows.apply(lambda r: calc_dilution_vol(r),axis=1)
+            dilution_aspirations = dilution_vols.sum()
+        return dispenses - transfer_aspirations - dilution_aspirations
+    
+    def _get_conc(self, chem_name):
+        '''
+        handy method for getting the concentration from a chemical name  
+        params:  
+            str chem_name: the chemical name to strip a concentration from  
+        returns:  
+            float: the concentration parsed from the chem_name  
+        '''
+        return float(re.search('C\d*\.\d*$', chem_name).group(0)[1:])
+
+    def _get_reagent(self, chem_name):
+        '''
+        handy method for getting the reagent from a chemical name  
+        The foil of _get_conc  
+        params:  
+            str chem_name: the chemical name to strip a reagent name from  
+        returns:  
+            str: the reagent name parsed from the chem_name  
+        '''
+        
+        return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
+
+    def _handle_conversion_err(self,e):
+        '''
+        This function will handle errors caught in the conversion process from molarity to
+        volume reaction dataframe.  
+        params:  
+            ConversionError e: the conversion error raised  
+        Postconditions:  
+            If the error was pipetting infinitesimal volume, a dilution has been performed on
+            the robot to dilute by 2X   
+        Raises:  
+            NotImplementedError: If you ran out of a reagent you probably need to have Mark
+              restock (or you could dilute a stock maybe)  
+        '''
+        #TO DO!! IMPLEMENT HANDLE_CONVERSION ERROR INTO ABSTRACT, Currently it will produce many errors as we try to integrate this functionality.
+        raise NotImplementedError("We need to implement the handling of dilution errors into the controller. Currently it does not work.")
+           
+
+
+    def _execute_single_dilution(self, end_conc, reagent):
+        '''
+        This function creates a single dilution row and executes that row.  
+        This involves:  
+        + 1 inititializing a new product with the desired name  
+        + 2 constructing a new dilution row (series), and then turn that into a dataframe  
+        + 3 save rxn_df and associated metadata and overwrite with the dilution row.
+            restore immediately after execution
+        params:  
+            float end_conc: the end concentration of the dilution  
+            str reagent: the full chemical name of the reagent to be diluted  
+            float vol: the end volume of the dilution  
+        Postconditions:  
+            a command has been sent to the robot requesting initialization of a container for
+            this dilution  
+            a command has been sent to the robot to perform a dilution  
+        '''
+        #1 initialize the new product on the robot
+        product = '{}C{}'.format(self._get_reagent(reagent), end_conc)
+        product_df = pd.DataFrame(
+                    {'labware':'',
+                    'container':self.dilution_params.cont,
+                    'max_vol':self.dilution_params.vol}, index=[product])
+        self.portal.send_pack('init_containers', product_df.to_dict())
+        #2 construct a new dilution row (series)
+        colList = self.rxn_df.loc[:,:'reagent'].columns        
+        row = pd.Series(np.nan, colList)
+        row['op'] = 'dilution'
+        row['callbacks'] = ''
+        row['dilution_conc'] = end_conc
+        row['chemical_name'] = reagent
+        row['conc'] = self._get_conc(reagent)
+        row['reagent'] = self._get_reagent(reagent)
+        row['Template'] = self.dilution_params.vol
+        row.rename({'Template':product},inplace=True)
+        #print(row)
+        #3 call send_dilution
+        #here we're appropriating a method that was designed to be run on the dataframe with
+        #associated metaparameters (esp _products). We temporarilly overwrite products and restore
+        #immediately afterwards
+        cached_products = self._products
+        cached_rxn_df = self.rxn_df
+        self._products = [product]
+        self.rxn_df = pd.DataFrame([row])
+        self.execute_protocol_df()
+        self._products = cached_products
+        self.rxn_df = cached_rxn_df
+
+    def _scan_until_complete(self,row,i):
+        """
+        This function handles the scan_until_complete operation.
+        This involves:
+            executing and creating a new scan row, that takes in the scan row,
+            executes the scan, and then compares the oldScan to the newScan with a different
+            filename to allow spacing between the two scans until they are indifferentiably the same
+        """
+        #Count is declared to track how long we want the process to run if it is going to take too long for there to be distinction
+        count = 1
+        
+        #Eps represents the difference variable that we want in order to check if the scans are similar enough
+        eps = 1/700 
+            
+        scan_product_index = row[self._products].ne(0)
+        
+        wellnames = row[self._products][scan_product_index].index
+        oldScan = self._build_suc_row(row,count)
+        self._execute_scan(oldScan,i)
+        
+        #cached reader locs updated by scan
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        
+        old_scan_data, metadata = self.pr.load_reader_data(oldScan['scan_filename'], pr_dict)
+        
+        if not self.simulate: 
+            time.sleep(row['pause_time'])
+        
+        count += 1
+        
+        newScan = self._build_suc_row(row,count)
+        self._execute_scan(newScan,i)
+        new_scan_data,metadata =  self.pr.load_reader_data(newScan['scan_filename'], pr_dict)
+         
+        #checks difference, defines old_scan to new scan, until they are similar
+        #Divide by 700 eps should = 3/700
+        #divide result by 700 aswell
+        while (((((((new_scan_data - old_scan_data)**2)/700)>eps).any()).any()) and (count < row['max_num_scans'])):    
+            oldScan = newScan
+            old_scan_data = new_scan_data
+            
+            if not self.simulate:
+                time.sleep(row['pause_time'])
+            
+            newScan = self._build_suc_row(row,count)
+            self._execute_scan(newScan,i)
+            new_scan_data,metadata = self.pr.load_reader_data(newScan['scan_filename'], pr_dict) 
+            count += 1
+        #Renames the unique filename back to what it was declared as in the sheet    
+        self.pr._rename_scan(newScan['scan_filename'],row['scan_filename'])
+        
+
+    def _build_suc_row(self,row,count):
+       #Builds a row for the scan_until_complete function
+        
+        newFilename =  "{}_suc_{}".format(row['scan_filename'], count)
+        newRow = row.copy()
+        newRow['op'] = 'scan'
+        newRow['scan_filename'] = newFilename
+        
+        return newRow
+
+    def check_conc(self):
+        """
+        Makes checks about concentration to see if the concentrations declared are legal declarations
+        """
+
+        found_errors = 0
+        #Check to make sure water always has a concentration defined
+        check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
+        if check_water_conc.any():
+            print("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
+            found_errors = max(found_errors,2)
+        #Check to make sure you don't transfer a reagent with a concentration into a reagent with a volume
+        #boolean list of all concentrations that are nan
+                
+        check_conc = (self.rxn_df.loc[(self.rxn_df['op']== 'transfer'),'conc'].isna())
+        transfer_df = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer')]
+        #Check_nan a list of all reagents that dont have a concentration
+        check_nan = (transfer_df.loc[(check_conc),'reagent'].unique())
+        #check_vol list of all reagents that dont have a volume
+        check_vol = (transfer_df.loc[(~check_conc),'reagent'].unique())
+        
+        for prod in self._products:
+            col = self.rxn_df[prod].ne(0)
+            product_df = self.rxn_df.loc[col]
+            check_concs = (product_df.loc[(product_df['op'] == 'transfer'),'conc'].isna())
+            transfer_dfs = product_df.loc[(product_df['op'] == 'transfer')]
+            check_nans = (transfer_dfs.loc[(check_concs),'reagent'].unique())
+            check_vols = (transfer_dfs.loc[(~check_concs),'reagent'].unique())
+            for val in check_nans:
+                if val in check_vols:
+                    print("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into the same product with a reagent with concentration.")
+        
+        #Checks to make sure all reagents with molarity get transferred into products with total volume
+        tot_vol_mol = transfer_df.loc[check_conc,self._products]
+        if not tot_vol_mol.empty:
+            tot_vol_mol = tot_vol_mol.sum().apply(lambda x: not math.isclose(x, 0, abs_tol=1e-9))
+            tot_vol_mol = tot_vol_mol.loc[tot_vol_mol].index
+            for i in tot_vol_mol:
+                if i not in self.tot_vols.keys():
+                    print("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+                    found_errors = max(found_errors, 2)
+        return found_errors
+
+class AutoContr(Controller):
+    '''
+    This is a completely automated controller. It takes as input a layout sheet, and then does
+    it's own experiments, pulling data etc  
+    We're adding in self.rxn_df_template, which uses the same parsing style as rxn_df
+    but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
+    '''
+
+    def _clean_template(self):
+        '''
+        There are some traces of the template column that must be removed from the rxn_df and 
+        associated data structures at this point before further processing.  
+        Preconditions:  
+            self._products includes 'Template'  
+            self.tot_vols includes 'Template'  
+            self.robo_params['product_df'] holds the product info for Template  
+        Postconditions:  
+            'Template' has been removed from self._products  
+            'Template' has been removed from self.tot_vols  
+            self.template_meta has been initialized to a dictionary with meta data for template
+            The key 'product_df' has been removed from self.robo_params (you should never have
+              need to access it.  
+        '''
+        self.template_meta = {
+                'tot_vol':self.tot_vols['Template'],
+                'cont':self.robo_params['product_df'].loc['Template', 'container'],
+                'labware':self.robo_params['product_df'].loc['Template', 'labware']
+                }
+        del self.robo_params['product_df']
+        self._products = []
+        del self.tot_vols['Template']
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
+        self.run_all_checks()
+        self.rxn_df_template = self.rxn_df
+        self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
+        self._clean_template() #moves template data out of the data for rxn_df
+
+ 
+    def run_simulation(self,model=None,no_pr=False,params=None,initial_recipes=None, kind = None):
+        '''
+        runs a full simulation of the protocol on local machine
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function  
+        params:
+            MLModel model: the model to use when training and predicting  
+        Returns:  
+            bool: True if all tests were passed  
+        '''
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        self.server_ip = '127.0.0.1'
+        self.simulate = True
+        if model == None:
+            #you're simulating with a dummy model.
+            print('<<controller>> running with dummy ml')
+            model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
+        print('<<controller>> ENTERING SIMULATION')
+        port = 50000
+        #launch an eve server in background for simulation purposes
+        b = threading.Barrier(2,timeout=20)
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
+        eve_thread.start()
+        #do create a connection
+        b.wait()
+        returned_ml= self._run(port, True, model, no_pr,params,initial_recipes, kind)
+
+        time.sleep(20)
+        #collect the eve thread
+        eve_thread.join()
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
+        print('<<controller>> EXITING SIMULATION')
+        return {"W":returned_ml["W"], "b":returned_ml["b"]}
+
+    def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False, params=None, kind= None,initial_recipes= None):
+        '''
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
+            str simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: if True, will not use the plate reader even if possible to simulate
+            MLModel model: the model to use when training and predicting  
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
+        '''
+        print('<<controller>> RUNNING')
+        if model == None:
+            #you're simulating with a dummy model.
+            print('<<controller>> running with dummy ml')
+            model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
+            self._run(port, simulate, model, no_pr) ##ProbPPP
+            print('<<controller>> EXITING')
+        else:
+            if params == None:
+                print("Training in the robot: No trained params")
+                self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
+                print('<<controller>> EXITING 1')
+            else:
+                print("Online: With Trained params")
+                self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
+                print('<<controller>> EXITING 2')
+
+    def _rename_products(self, rxn_df):
+        '''
+        required for class compatibility, but not used by the Auto  
+        '''
+        pass
+
+    @error_exit
+    def _run(self, port, simulate, model, no_pr, params, initial_recipes, kind):
+        '''
+        private function to run
+        '''
+        def simplePrediction(X,W,b):
+            X= np.array([X],dtype=float)
+            W= np.array([W],dtype=float)
+            b= np.array([b],dtype=float)
+            # print("predicting",X)
+            # print("predictor W",W)
+            # print("predictor W",b)
+            
+            Y_hat = X * W + b
+            return Y_hat
+
+        #maxwav
+        
+        def maxWaveLe(arr):
+            obs=[]
+            for r in range(50,len(arr)-100):
+                obs.append(arr[r])
+                
+            waveL= obs.index(np.max(obs))+300
+            return waveL
+
+        def MaxWaveLength(scan):
+    
+            now = datetime.now().time() # time object
+
+            X_new=[]
+            for i in range(len(scan)): #701
+                X_new.append(300+i)
+            #to numpy
+            X_axis= np.array(X_new)
+            our_Y= np.array(scan)
+            
+            #restricting wavelengths 
+            X_axis= X_axis[50:-100]
+            our_Y= our_Y[50:-100]
+            
+            #ploting for checking
+            fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+            plt.plot(X_axis,our_Y)
+            plt.show() 
+            fig.savefig("waves-"+str(now)+".png",dpi=fig.dpi)
+            
+            #max 
+            max_ob= np.argmax(our_Y)
+            
+            #max_wave
+            return X_axis[max_ob], X_axis, our_Y
+            
+        ##Rest for Water
+        # sp= sm.tolist()
+        WaterS= []
+        # sp.tolist()
+
+        def MaxWaveLength_Obs(scan):
+    
+    
+            now = datetime.now().time() # time object
+
+            X_new=[]
+            for i in range(len(scan)): #701
+                X_new.append(300+i)
+            #to numpy
+            X_axis= np.array(X_new)
+            our_Y= np.array(scan)
+            
+            #water
+            blank= pd.read_excel("Blankdataaverages.xlsx")
+            bl= np.array(blank.loc[28].tolist())
+            
+            #rest
+            modify_Y= bl-our_Y
+            print("Modify",modify_Y)
+            #restricting wavelengths 
+            X_axis= X_axis[50:-100]
+            our_Y= modify_Y[50:-100]
+            
+            #ploting for checking
+            fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+            plt.plot(X_axis,our_Y)
+            plt.show() 
+            fig.savefig("waves-"+str(now)+".png",dpi=fig.dpi)
+            
+            #max 
+            max_ob= np.argmax(our_Y)
+            
+            #max_wave
+            return X_axis[max_ob], X_axis, our_Y, our_Y[max_ob]
+
+
+
+        
+        self.batch_num = 0 #used internally for unique filenames
+        self.well_count = 0 #used internally for unique wellnames
+        self._init_pr(simulate, no_pr)
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
+        print("<<controller>> connected")
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
+        self.init_robot(simulate)
+        
+        if kind == "linear":
+
+            if params == None:
+
+                print("Linear")
+                print("----Simulation----")
+                recipes = model.generate_seed_rxns(3) #number of recipes
+                print("Our initital recipes:",recipes)
+                print("----Breaking our initial recipes----")
+                recipe1 = recipes[:][0:1][0]
+                recipe2 = recipes[:][3:4][0]
+                recipe3 = recipes[:][6:7][0]
+                # print("RRR",recipe1)
+                # print("RRR",recipe2)
+                # print("RRR",recipe3)
+
+                #we would get observance for each recipe:
+                wavelengths=[]
+                wavelengths_to_train =[]
+                recipes_to_train = []
+
+                wavelengths_to_train_2 =[]
+                recipes_to_train_2 = []
+
+                wavelengths_to_train_3 =[]
+                recipes_to_train_3 = []
+
+                wavelengths_for_recipe_1 = []
+                wavelengths_for_recipe_2 = []
+                wavelengths_for_recipe_3 = []
+
+                waves_evol_1=[]
+                waves_evol_2=[]
+                waves_evol_3=[]
+
+                index_for_l=0
+                index_for_l_2=0
+                index_for_l_3=0
+                
+                number_rep_recip= 0
+                for r in range(3):
+
+                    
+                    # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
+                    recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                    print("----Start ",str(r+1)," ----")
+                    print('recipe block', str(r+1) ,recipe_block)
+                    #do the first one
+                    # print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {}'.format(str(r+1)))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                    print("Wellnames",wellnames)
+                    #plan and execute a reaction
+                    self._create_samples(wellnames, recipe_block)
+                    #pull in the scan data
+                    filenames = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                    scan_data = self._get_sample_data(wellnames, last_filename)
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y= scan_data.T.to_numpy()
+                    
+
+                    scan_Y_1 = scan_Y[0]
+                    scan_Y_2 = scan_Y[1]
+                    scan_Y_3 = scan_Y[2]
+
+                    #print("len rp1",len(scan_Y_1),scan_Y_1)
+                    # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                    # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                    maxWave_scan_1, X_scan_1, Y_scan_1 = MaxWaveLength(scan_Y_1)
+                    maxWave_scan_2, X_scan_2, Y_scan_2 = MaxWaveLength(scan_Y_2)
+                    maxWave_scan_3, X_scan_3, Y_scan_3 = MaxWaveLength(scan_Y_3)
+
+                    # print()
+                    # Plot the wave obs of the three samples
+
+                    fig_wave_obs= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(X_scan_1,Y_scan_1)
+                    plt.plot(X_scan_2,Y_scan_2)
+                    plt.plot(X_scan_3,Y_scan_3)
+                    plt.show() 
+                    fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
+
+
+                    # print("WaveL max 1"+". ", maxWave_scan_1)
+                    # print("WaveL max 2"+". ", maxWave_scan_2)
+                    # print("WaveL max 3"+". ", maxWave_scan_3)
+                    
+                    #
+                    #Add to the list of wavelengths
+                    if r== 0:
+                        print("----First initial recipes----")
+                        print(recipe1)
+                        print(type(recipe1), np.array([recipe1]))
+                        print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                        
+
+                        new_plots_x =[]
+                        new_plots_y = []
+
+                        wavelengths_for_recipe_1.append(maxWave_scan_1)
+                        wavelengths_for_recipe_1.append(maxWave_scan_2)
+                        wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                        waves_evol_1.append(maxWave_scan_1)
+                        waves_evol_1.append(maxWave_scan_2)
+                        waves_evol_1.append(maxWave_scan_3)
+
+                        waves_recipe1 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe1_sorted = sorted(waves_recipe1)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe1_sorted), "recipes")
+                            print("--------------------------")
+                            distances = []
+                            for rr in range(1,len(waves_recipe1_sorted)):
+                                distances.append(waves_recipe1_sorted[rr]-waves_recipe1_sorted[rr-1])
+
+                            print("Distances",distances)
+                            
+                            store_indices=[]
+                            for i in range(len(distances)):
+                                if i!= len(distances):
+                                    if distances[i] <= 100:
+                                        store_indices.append(i)
+                                    print("stored indices",store_indices)
+                                        
+                            print(" ")
+
+                            if len(store_indices)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe1_sorted)
+                                if len(waves_recipe1_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe1])
+
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                print("Creating one more sample",recipe_block_2)
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_1_second = scan_Y[0]
+                                    
+
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                    
+
+                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new = MaxWaveLength(scan_Y_1_second)
+                                new_plots_x.append(X_scan_1_new)
+                                new_plots_y.append(Y_scan_1_new)
+                                waves_recipe1.append(maxWave_scan_1_sec)
+                                waves_recipe1_sorted= sorted(waves_recipe1)
+                                print("")
+                                # if len(waves_recipe1_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff=[]
+                                for w in range(len(store_indices)):
+                                    wave_min_diff.append((waves_recipe1_sorted[store_indices[w]],waves_recipe1_sorted[store_indices[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin= []
+                                for m in range(len(wave_min_diff)):
+                                    for v in range(2):
+                                        wave_min_diff_fin.append(wave_min_diff[m][v])
+
+                                #with repitions
+                                clean_wave = []
+                                for z in wave_min_diff_fin:
+                                    if z not in clean_wave:
+                                        clean_wave.append(z)
+
+                                #Clean with repetitions and without weight
+
+                                new_added_list=[]
+                                new_added_list.append(wave_min_diff[0][0])
+                                new_added_list.append(wave_min_diff[0][1])
+                                for ri in range(len(wave_min_diff)-1):
+                                    print("S",wave_min_diff)
+                                    if wave_min_diff[ri][1] == wave_min_diff[ri+1][0]:
+                                        print("s",wave_min_diff)
+                                        new_added_list.append(wave_min_diff[ri+1][1])
+
+                                #For ploting
+                                #wavelengths_for_recipe_1 = clean_wave
+                                wavelengths_for_recipe_1 = wave_min_diff_fin 
+                                print("Current list sorted",waves_recipe1_sorted)
+                                #print("--->Waves to use",clean_wave)
+                                #print("--->Waves to use",wave_min_diff_fin)
+                                print("--->Waves to use",new_added_list)
+
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black") #COLOR?
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x)):
+                                        plt.plot(new_plots_x[ww],new_plots_y[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new.dpi)
+                                break
+                        
+
+
+
+                    elif r ==1:
+
+                        print("----Second initial recipes----")
+                        print(recipe2)
+                        
+                        wavelengths_for_recipe_2.append(maxWave_scan_1)
+                        wavelengths_for_recipe_2.append(maxWave_scan_2)
+                        wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_3)
+
+                        print("Making comparison")
+                        
+
+                        new_plots_x_2 =[]
+                        new_plots_y_2 = []
+
+
+                        waves_recipe2 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe2_sorted = sorted(waves_recipe2)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe2_sorted), "recipes")
+                            print("--------------------------")
+                            distances_2 = []
+                            for rr in range(1,len(waves_recipe2_sorted)):
+                                distances_2.append(waves_recipe2_sorted[rr]-waves_recipe2_sorted[rr-1])
+
+                            print("Distances",distances_2)
+                            
+                            store_indices_2=[]
+                            for i in range(len(distances_2)):
+                                if i!= len(distances_2):
+                                    if distances_2[i] <= 100:
+                                        store_indices_2.append(i)
+                                    print("stored indices",store_indices_2)
+                                        
+                            print(" ")
+
+                            if len(store_indices_2)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe2_sorted)
+                                if len(waves_recipe2_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+                                recipe_block_2 = np.array([recipe2])
+                                print("Creating one more sample",recipe_block_2)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                    # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_2_second = scan_Y[0]
+                                    
+
+                                    # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                    
+
+                                maxWave_scan_2_sec, X_scan_2_new, Y_scan_2_new = MaxWaveLength(scan_Y_2_second)
+                                    
+                                    
+
+                                new_plots_x_2.append(X_scan_2_new)
+                                new_plots_y_2.append(Y_scan_2_new)
+                                waves_recipe2.append(maxWave_scan_2_sec)
+                                waves_recipe2_sorted= sorted(waves_recipe2)
+                                print("")
+                                # if len(waves_recipe2_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_2=[]
+                                for w in range(len(store_indices_2)):
+                                    wave_min_diff_2.append((waves_recipe2_sorted[store_indices_2[w]],waves_recipe2_sorted[store_indices_2[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_2= []
+                                for m in range(len(wave_min_diff_2)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_2.append(wave_min_diff_2[m][v])
+
+                                #with repitions
+                                clean_wave_2 = []
+                                for z in wave_min_diff_fin_2:
+                                    if z not in clean_wave_2:
+                                        clean_wave_2.append(z)
+
+                                new_added_list_2=[]
+                                new_added_list_2.append(wave_min_diff_2[0][0])
+                                new_added_list_2.append(wave_min_diff_2[0][1])
+                                for ri in range(len(wave_min_diff_2)-1):
+                                    print("S",wave_min_diff_2)
+                                    if wave_min_diff_2[ri][1] == wave_min_diff_2[ri+1][0]:
+                                        print("s",wave_min_diff_2)
+                                        new_added_list_2.append(wave_min_diff_2[ri+1][1])
+
+
+                                print("Current list sorted",waves_recipe2_sorted)
+                                #print("--->Waves to use",wave_min_diff_fin_2)
+                                print("--->Waves to use",new_added_list_2)
+                                #for ploting
+                                wavelengths_for_recipe_2 =wave_min_diff_fin_2
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+
+                                    plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black")
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x_2)):
+                                        plt.plot(new_plots_x_2[ww],new_plots_y_2[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_2.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_2.dpi)
+                                break
+                                
+                                            
+                    elif r ==2:
+
+                        print("----Third initial recipes----")
+                        print(recipe3)
+
+                        wavelengths_for_recipe_3.append(maxWave_scan_1)
+                        wavelengths_for_recipe_3.append(maxWave_scan_2)
+                        wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+                        waves_evol_3.append(maxWave_scan_1)
+                        waves_evol_3.append(maxWave_scan_2)
+                        waves_evol_3.append(maxWave_scan_3)
+
+        
+
+                        new_plots_x_3 =[]
+                        new_plots_y_3 = []
+
+
+                        waves_recipe3 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe3_sorted = sorted(waves_recipe3)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe3_sorted), "recipes")
+                            print("--------------------------")
+                            distances_3 = []
+                            for rr in range(1,len(waves_recipe3_sorted)):
+                                distances_3.append(waves_recipe3_sorted[rr]-waves_recipe3_sorted[rr-1])
+
+                            print("Distances",distances_3)
+                            
+                            store_indices_3=[]
+                            for i in range(len(distances_3)):
+                                if i!= len(distances_3):
+                                    if distances_3[i] <= 100:
+                                        store_indices_3.append(i)
+                                    print("stored indices",store_indices_3)
+                                        
+                            print(" ")
+
+                            if len(store_indices_3)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe3_sorted)
+                                if len(waves_recipe3_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe3])
+                                print("Creating one more sample",recipe_block_2)
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10, recipe 3")
+                                scan_Y_3_second = scan_Y[0]                                
+                                
+                                    
+
+                                maxWave_scan_3_sec, X_scan_3_new, Y_scan_3_new = MaxWaveLength(scan_Y_3_second)
+                                    
+                                    
+
+                                new_plots_x_3.append(X_scan_3_new)
+                                new_plots_y_3.append(Y_scan_3_new)
+                                waves_recipe3.append(maxWave_scan_3_sec)
+                                waves_recipe3_sorted= sorted(waves_recipe3)
+                                print("")
+                                # if len(waves_recipe3_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                            
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_3=[]
+                                for w in range(len(store_indices_3)):
+                                    wave_min_diff_3.append((waves_recipe3_sorted[store_indices_3[w]],waves_recipe3_sorted[store_indices_3[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_3= []
+                                for m in range(len(wave_min_diff_3)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_3.append(wave_min_diff_3[m][v])
+
+                                #with repitions
+                                clean_wave_3 = []
+                                for z in wave_min_diff_fin_3:
+                                    if z not in clean_wave_3:
+                                        clean_wave_3.append(z)
+
+
+
+                                new_added_list_3=[]
+                                new_added_list_3.append(wave_min_diff_3[0][0])
+                                new_added_list_3.append(wave_min_diff_3[0][1])
+                                for ri in range(len(wave_min_diff_3)-1):
+                                    print("S",wave_min_diff_3)
+                                    if wave_min_diff_3[ri][1] == wave_min_diff_3[ri+1][0]:
+                                        print("s",wave_min_diff_3)
+                                        new_added_list_3.append(wave_min_diff_3[ri+1][1])
+
+                                # print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",clean_wave_3)
+                                # #for ploting
+                                # wavelengths_for_recipe_3 = clean_wave_3
+                                print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",wave_min_diff_fin_3)
+                                print("--->Waves to use",new_added_list_3)
+                                #for ploting
+                                wavelengths_for_recipe_3 = wave_min_diff_fin_3
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                    plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1)
+                                    plt.plot(X_scan_2,Y_scan_2)
+                                    plt.plot(X_scan_3,Y_scan_3)
+                                    for ww in range(len(new_plots_x_3)):
+                                        plt.plot(new_plots_x_3[ww],new_plots_y_3[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
+                                break
+
+                    number_rep_recip += 3
+
+                print("Checking our input (Wavelengths)")
+                # print("wavelength 1",clean_wave)
+                # print("wavelength 3",clean_wave_2)
+                # print("wavelength 3",clean_wave_3)
+                print("wavelength 1",new_added_list)
+                print("wavelength 3",new_added_list_2)
+                print("wavelength 3",new_added_list_3)
+                
+                ##
+                # avg for plots
+                Avg_1= sum(new_added_list)/len(new_added_list)
+                Avg_2= sum(new_added_list_2)/len(new_added_list_2)
+                Avg_3= sum(new_added_list_3)/len(new_added_list_3)
+
+                ##
+                # print("Checking our input: wavelengths")
+                # print("wavelength 1",wavelengths_for_recipe_1)
+                # print("wavelength 3",wavelengths_for_recipe_2)
+                # print("wavelength 3",wavelengths_for_recipe_3)
+                # print("Waves pass 1", clean_list_1)
+                # print("Waves pass 2", clean_list_2)
+                # print("Waves pass ", clean_list_3)
+                total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+                #Consider duplocates or not
+                #total_waves=  clean_wave+clean_wave_2+clean_wave_3
+                #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+                total_waves= new_added_list+ new_added_list_2+ new_added_list_3
+                print("Total Waves", total_waves)
+                recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+                print("Plot change",type(recipes_plot),recipes_plot)
+                # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
+                # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+                
+                waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
+                print(type(waves_evol_plot),waves_evol_plot)
+                print(waves_evol_plot[0])
+                print(recipes_to_train_3)
+                #Ploting change
+
+                fig_changhe= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","green","blue"]
+                # plt.rc('axes', linewidth = 2)
+                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                plt.title(str("Generations"), fontsize = 16, pad = 20)
+                for t in range(len(recipes_plot)):
+                            #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                            #print(u)
+                            print(recipes_plot[t])
+                            #print(waves_evol_plot[u])
+                            plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+                #plt.xlim(0.00001, 0.003)
+                plt.legend(loc="upper right",  prop={"size":6})
+                fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
+                print("Wav ori", total_waves_2)
+                # print("Waves evol", )
+                print("Wav nw Final",total_waves)
+                # Y= np.array([wavelengths])
+                Y= np.array([total_waves])
+                print("recipes----")
+                print(recipes)
+
+                recipes_1_out = np.repeat(np.array([recipe1]), len(new_added_list), axis=0)
+                recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
+                recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
+
+                #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+                # print("our recipes", recipes)
+                final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
+                #passing to list
+                print("----------------------------")
+                print("Final recipes", final_recipes)
+                print("Final Y",Y)
+                X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+                #Checking that they are list Y_df
+                print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+
+                ##creadting the dataframe
+                df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                #sorting by Concentration
+                df = df.sort_values(by=['Concentration'])
+
+                input_user= input("Please enter the desire Wavelength: ")
+                input_user= float(input_user)
+
+                W_list=[]
+                b_list=[]
+                ##Training 
+                #Receive data from robot
+                wavelengths_prediction_test=[]
+                wavelengths_progress_test=[]
+                wavelengths_to_test=[]
+                user_concentrations=[]
+                Avg_test=[]
+                
+                for r in range(5):
+                    print("Epoch", r+1)
+                    input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
+                    W_list.append(W)
+                    b_list.append(b)
+                    ##pas to the robot THE USER_CONCENTRATION
+                    # Robot_answer= 465
+                    ##Testing
+
+                    testing_recipes = [user_concentration]
+                    
+                    
+                    # for r in range(len(testing_recipes[0])):
+                    recipe_unit_test = np.array([[user_concentration]])
+                    recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=0)
+                    print("Recipes Test",recipe_unit_test)
+                    #do the first one
+                    #print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {} for testing'.format(1))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                    #plan and execute a reaction
+                    self._create_samples(wellnames_testing, recipe_unit_test)
+                    #pull in the scan data
+                    filenames_testing = self.rxn_df[
+                                    (self.rxn_df['op'] == 'scan') |
+                                    (self.rxn_df['op'] == 'scan_until_complete')
+                                    ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y_testing= scan_data_testing.T.to_numpy()
+                    
+
+                    scan_Y_1_test = scan_Y_testing[0]
+                    scan_Y_2_test = scan_Y_testing[1]
+                    scan_Y_3_test = scan_Y_testing[2]
+
+    
+
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1 = MaxWaveLength(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2 = MaxWaveLength(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3 = MaxWaveLength(scan_Y_3_test)
+
+                    wavelengths_prediction_test.append(maxWave_scan_1_test)
+                    wavelengths_prediction_test.append(maxWave_scan_2_test)
+                    wavelengths_prediction_test.append(maxWave_scan_3_test)
+                    ###     
+                    wavelengths_progress_test.append(maxWave_scan_1_test)
+                    wavelengths_progress_test.append(maxWave_scan_2_test)
+                    wavelengths_progress_test.append(maxWave_scan_3_test)
+
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+
+
+
+                    new_plots_x_test =[]
+                    new_plots_y_test = []
+
+                    waves_recipe1_test = [maxWave_scan_1_test,maxWave_scan_2_test,maxWave_scan_3_test]
+                    waves_recipe1_sorted_test = sorted(waves_recipe1_test)
+
+                    for l in range(4):
+                        
+                        print("----------------------------------")
+                        print("Comparing", len(waves_recipe1_sorted_test), "recipes from Test/Model")
+                        print("--------------------------")
+                        distances_test = []
+                        for rr in range(1,len(waves_recipe1_sorted_test)):
+                            distances_test.append(waves_recipe1_sorted_test[rr]-waves_recipe1_sorted_test[rr-1])
+
+                            print("Distances",distances_test)
+                            
+                        store_indices_test=[]
+                        for i in range(len(distances_test)):
+                            if i!= len(distances_test):
+                                if distances_test[i] <= 100:
+                                    store_indices_test.append(i)
+                                print("stored indices test",store_indices_test)
+                                        
+                        print(" ")
+
+                        if len(store_indices_test)==0 :
+                            print("We do NOT find a distance less than 10")
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            if len(waves_recipe1_sorted_test) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
+                            print("...Creating one more sample of the recipe")
+                            #insert robot
+                            #waves_recipe1.append(random.randint(500, 600))
+                            #
+
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # #do the first one
+                            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            # #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            # #don't have data to train, so, not training
+                            # #generate new wellnames for next batch
+                            recipe_unit_test_rep = np.array([[user_concentration]])
+                            # recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_unit_test_rep)
+                            recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 1, axis=1)
+                            print("Recipes Test again",recipe_unit_test_rep)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_unit_test_rep)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y_test_rep= scan_data.T.to_numpy()
+                            #print("Scan When Distance is > 10", scan_Y)
+                            print("Scan When Distance is > 10 for test")
+
+                            scan_Y_rep_1 = scan_Y_test_rep[0]
+                            # scan_Y_rep_2 = scan_Y_test_rep[1]
+                                    
+
+                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength(scan_Y_rep_1)
+                            new_plots_x.append(X_scan_1_new_test)
+                            new_plots_y.append(Y_scan_1_new_test)
+                            waves_recipe1_test.append(maxWave_scan_1_sec_test)
+                            waves_recipe1_sorted_test= sorted(waves_recipe1_test)
+                            print("")
+                            # if len(waves_recipe1_sorted_test) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
+                                
+                        else:
+                            #getting the wavelengths which difference is less than 10
+                            wave_min_diff_test=[]
+                            for w in range(len(store_indices_test)):
+                                wave_min_diff_test.append((waves_recipe1_sorted_test[store_indices_test[w]],waves_recipe1_sorted_test[store_indices_test[w]+1]))
+
+
+                            #with  repitions
+                            wave_min_diff_fin_test= []
+                            for m in range(len(wave_min_diff_test)):
+                                for v in range(2):
+                                    wave_min_diff_fin_test.append(wave_min_diff_test[m][v])
+
+                            #with repitions
+                            clean_wave_test = []
+                            for z in wave_min_diff_fin_test:
+                                if z not in clean_wave_test:
+                                    clean_wave_test.append(z)
+
+
+                            new_added_list_test=[]
+                            new_added_list_test.append(wave_min_diff_test[0][0])
+                            new_added_list_test.append(wave_min_diff_test[0][1])
+                            for ri in range(len(wave_min_diff_test)-1):
+                                print("S",wave_min_diff_test)
+                                if wave_min_diff_test[ri][1] == wave_min_diff_test[ri+1][0]:
+                                        print("s",wave_min_diff_test)
+                                        new_added_list_test.append(wave_min_diff_test[ri+1][1])
+                            
+                            
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            #print("--->Waves to use",clean_wave_test)
+                            print("--->Waves to use",new_added_list_test)
+                            if l !=0:
+                                #Plot after training
+                                print("Plotting---")
+                                fig_wave_test= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                plt.title("Generation in Test", fontsize = 16, pad = 20)
+                                plt.plot(X_scan_test_1,Y_scan_test_1)
+                                plt.plot(X_scan_test_2,Y_scan_test_2)
+                                plt.plot(X_scan_test_3,Y_scan_test_3)
+                                for ww in range(len(new_plots_x_test)):
+                                    plt.plot(new_plots_x_test[ww],new_plots_y_test[ww],color="green")
+                                plt.show() 
+                                fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
+                            break
+
+                    
+
+                    #print("We get the following wavelengths",clean_wave_test)
+                    print("We get the following wavelengths",new_added_list_test)
+                    average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
+                    print("The average is ", average_of_wave_test)
+                    
+                    
+                        
+
+                    #Robot_answer=wavelengths_prediction_test[0]
+                    #print("Y_TEST_ROBOT", Y_testing)
+                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
+                    #Here we change 
+                    print("sending len",len(new_added_list_test))
+                    Robot_answer= average_of_wave_test
+
+                    print("Robot send back a wavelenght of", Robot_answer)
+                    print("User input was ", input_user)
+                    test_error= Robot_answer- input_user
+                    print("Our test error is ", test_error)
+                    
+                    ##Plot
+                    figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
+                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    plt.xlabel("[KBr] Concentration (mM)")
+                    plt.ylabel("Wavelength (nm)")
+                    plt.legend(prop={"size":6})
+                    plt.show()
+                    figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+
+                    #Plot2
+                
+
+
+                    figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                    #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    plt.xlabel("[KBr] Concentration (mM)")
+                    plt.ylabel("Wavelength (nm)")
+                    plt.legend(prop={"size":6})
+                    plt.show()
+                    figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+
+                    if test_error < 10 and test_error>-10:
+                        print("The model is trained----")
+                        break
+                    else:
+                        print("Model would try to reduce the error")
+                        if r == 8:
+                            print("---->Done training<----")
+                        else:
+                            print("-----")
+                        for sert in range(len(new_added_list_test)):
+                            # print("Ln", len(clean_wave_test))
+                            print("Insert in", sert)
+                            new_data = {'Concentration': user_concentration, 'Wavelength': new_added_list_test[sert]}
+                            df = df.append(new_data, ignore_index = True)
+                            Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
+                            # print("Actual df",df)
+                
+                print("Dt",df)
+                print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
+
+                fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","orange","blue"]
+                #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+                waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+                print("Printtttttttt",waves_1)
+                for ke in range(len(label_names)):
+                    #print(label_names_2[r], waves[r])
+                    for nnm in range(len(waves_1[ke])):
+                        plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+                # for ke in range(len(label_names)):
+                #     #print(label_names_2[r], waves[r])
+                #         plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+                # for t in range(len(recipes_plot)):
+                #     for u in range(len(waves_evol_plot[t])):
+                #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                #             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+                
+                ##CCCCCC
+                # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+                plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
+                plt.axhline(y=input_user-5,color='r', linestyle=':')
+                plt.axhline(y=input_user,color='r', linestyle='-')
+                plt.axhline(y=input_user+5,color='r', linestyle=':')
+
+
+                #plt.xlim(0.00001, 0.003)
+                #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+                plt.legend(loc="upper right",  prop={"size":6})
+                plt.show()
+                fig_changhe_model.savefig('changeInWavesModel.png')
+
+                #Plot recipes and the input
+
+                waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
+                print("Ltp",waves)
+                # input_user=50
+                fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                colors_2= ["red","green","blue"]
+                label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
+
+                for k in range(len(label_names_2)):
+                    #print(label_names_2[r], waves[r])
+                    for nn in range(len(waves[k])):
+                        plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
+
+                plt.axhline(y=input_user-5,color='r', linestyle=':')
+                plt.axhline(y=input_user,color='r', linestyle='-')
+                plt.axhline(y=input_user+5,color='r', linestyle=':')
+                fig_last.savefig('Input-Recipes.png')
+
+
+
+                pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
+                print("Pppppppp",pattt)
+                patternFoll = df.groupby('Concentration')['Wavelength'].mean()
+                patternFoll = patternFoll.reset_index()
+                print("Pppppppp",patternFoll)
+
+                # recipesTaken= df.Concentration.unique()
+                recipesTaken = patternFoll["Concentration"].ravel().tolist()
+                patternFollowed = patternFoll["Wavelength"].ravel().tolist()
+                print("RRRR",patternFollowed,recipesTaken)
+                fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
+                plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                plt.xlabel("[KBr] Concentration (mM)")
+                plt.ylabel("Wavelength (nm)")
+                plt.legend(prop={"size":6})
+                plt.show()
+                fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
+
+                print("Before entering to the while loop: scan_data",scan_data)        
+                
+                self.close_connection()
+                self.pr.shutdown()
+                return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+
+            #Graph / Threshold
+
+            else:
+
+                print("Linear")
+                print("----Robot----")
+                recipes = model.generate_seed_rxns(3) #number of recipes
+                print("Our initital recipes:",recipes)
+                print("----Breaking our initial recipes----")
+                recipe1 = recipes[:][0:1][0]
+                recipe2 = recipes[:][3:4][0]
+                recipe3 = recipes[:][6:7][0]
+                # print("RRR",recipe1)
+                # print("RRR",recipe2)
+                # print("RRR",recipe3)
+
+                #we would get observance for each recipe:
+                wavelengths=[]
+                wavelengths_to_train =[]
+                recipes_to_train = []
+
+                wavelengths_to_train_2 =[]
+                recipes_to_train_2 = []
+
+                wavelengths_to_train_3 =[]
+                recipes_to_train_3 = []
+
+                wavelengths_for_recipe_1 = []
+                wavelengths_for_recipe_2 = []
+                wavelengths_for_recipe_3 = []
+
+                waves_evol_1=[]
+                waves_evol_2=[]
+                waves_evol_3=[]
+
+                index_for_l=0
+                index_for_l_2=0
+                index_for_l_3=0
+                
+                number_rep_recip= 0
+                for r in range(3):
+
+                    
+                    # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
+                    recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                    print("----Start ",str(r+1)," ----")
+                    print('recipe block', str(r+1) ,recipe_block)
+                    #do the first one
+                    # print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {}'.format(str(r+1)))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                    print("Wellnames",wellnames)
+                    #plan and execute a reaction
+                    self._create_samples(wellnames, recipe_block)
+                    #pull in the scan data
+                    filenames = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                    scan_data = self._get_sample_data(wellnames, last_filename)
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y= scan_data.T.to_numpy()
+                    
+
+                    scan_Y_1 = scan_Y[0]
+                    scan_Y_2 = scan_Y[1]
+                    scan_Y_3 = scan_Y[2]
+
+                    #print("len rp1",len(scan_Y_1),scan_Y_1)
+                    # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                    # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                    maxWave_scan_1, X_scan_1, Y_scan_1 = MaxWaveLength(scan_Y_1)
+                    maxWave_scan_2, X_scan_2, Y_scan_2 = MaxWaveLength(scan_Y_2)
+                    maxWave_scan_3, X_scan_3, Y_scan_3 = MaxWaveLength(scan_Y_3)
+
+                    # print()
+                    # Plot the wave obs of the three samples
+
+                    fig_wave_obs= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(X_scan_1,Y_scan_1)
+                    plt.plot(X_scan_2,Y_scan_2)
+                    plt.plot(X_scan_3,Y_scan_3)
+                    plt.show() 
+                    fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
+
+
+                    # print("WaveL max 1"+". ", maxWave_scan_1)
+                    # print("WaveL max 2"+". ", maxWave_scan_2)
+                    # print("WaveL max 3"+". ", maxWave_scan_3)
+                    
+                    #
+                    #Add to the list of wavelengths
+                    if r== 0:
+                        print("----First initial recipes----")
+                        print(recipe1)
+                        print(type(recipe1), np.array([recipe1]))
+                        print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                        
+
+                        new_plots_x =[]
+                        new_plots_y = []
+
+                        wavelengths_for_recipe_1.append(maxWave_scan_1)
+                        wavelengths_for_recipe_1.append(maxWave_scan_2)
+                        wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                        waves_evol_1.append(maxWave_scan_1)
+                        waves_evol_1.append(maxWave_scan_2)
+                        waves_evol_1.append(maxWave_scan_3)
+
+                        waves_recipe1 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe1_sorted = sorted(waves_recipe1)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe1_sorted), "recipes")
+                            print("--------------------------")
+                            distances = []
+                            for rr in range(1,len(waves_recipe1_sorted)):
+                                distances.append(waves_recipe1_sorted[rr]-waves_recipe1_sorted[rr-1])
+
+                            print("Distances",distances)
+                            
+                            store_indices=[]
+                            for i in range(len(distances)):
+                                if i!= len(distances):
+                                    if distances[i] <= 10:
+                                        store_indices.append(i)
+                                    print("stored indices",store_indices)
+                                        
+                            print(" ")
+
+                            if len(store_indices)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe1_sorted)
+                                if len(waves_recipe1_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe1])
+
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                print("Creating one more sample",recipe_block_2)
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_1_second = scan_Y[0]
+                                    
+
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                    
+
+                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new = MaxWaveLength(scan_Y_1_second)
+                                new_plots_x.append(X_scan_1_new)
+                                new_plots_y.append(Y_scan_1_new)
+                                waves_recipe1.append(maxWave_scan_1_sec)
+                                waves_recipe1_sorted= sorted(waves_recipe1)
+                                print("")
+                                # if len(waves_recipe1_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff=[]
+                                for w in range(len(store_indices)):
+                                    wave_min_diff.append((waves_recipe1_sorted[store_indices[w]],waves_recipe1_sorted[store_indices[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin= []
+                                for m in range(len(wave_min_diff)):
+                                    for v in range(2):
+                                        wave_min_diff_fin.append(wave_min_diff[m][v])
+
+                                #with repitions
+                                clean_wave = []
+                                for z in wave_min_diff_fin:
+                                    if z not in clean_wave:
+                                        clean_wave.append(z)
+
+                                #Clean with repetitions and without weight
+
+                                new_added_list=[]
+                                new_added_list.append(wave_min_diff[0][0])
+                                new_added_list.append(wave_min_diff[0][1])
+                                for ri in range(len(wave_min_diff)-1):
+                                    print("S",wave_min_diff)
+                                    if wave_min_diff[ri][1] == wave_min_diff[ri+1][0]:
+                                        print("s",wave_min_diff)
+                                        new_added_list.append(wave_min_diff[ri+1][1])
+
+                                #For ploting
+                                #wavelengths_for_recipe_1 = clean_wave
+                                wavelengths_for_recipe_1 = wave_min_diff_fin 
+                                print("Current list sorted",waves_recipe1_sorted)
+                                #print("--->Waves to use",clean_wave)
+                                #print("--->Waves to use",wave_min_diff_fin)
+                                print("--->Waves to use",new_added_list)
+
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black") #COLOR?
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x)):
+                                        plt.plot(new_plots_x[ww],new_plots_y[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new.dpi)
+                                break
+                        
+
+
+
+                    elif r ==1:
+
+                        print("----Second initial recipes----")
+                        print(recipe2)
+                        
+                        wavelengths_for_recipe_2.append(maxWave_scan_1)
+                        wavelengths_for_recipe_2.append(maxWave_scan_2)
+                        wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_3)
+
+                        print("Making comparison")
+                        
+
+                        new_plots_x_2 =[]
+                        new_plots_y_2 = []
+
+
+                        waves_recipe2 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe2_sorted = sorted(waves_recipe2)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe2_sorted), "recipes")
+                            print("--------------------------")
+                            distances_2 = []
+                            for rr in range(1,len(waves_recipe2_sorted)):
+                                distances_2.append(waves_recipe2_sorted[rr]-waves_recipe2_sorted[rr-1])
+
+                            print("Distances",distances_2)
+                            
+                            store_indices_2=[]
+                            for i in range(len(distances_2)):
+                                if i!= len(distances_2):
+                                    if distances_2[i] <= 10:
+                                        store_indices_2.append(i)
+                                    print("stored indices",store_indices_2)
+                                        
+                            print(" ")
+
+                            if len(store_indices_2)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe2_sorted)
+                                if len(waves_recipe2_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+                                recipe_block_2 = np.array([recipe2])
+                                print("Creating one more sample",recipe_block_2)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                    # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_2_second = scan_Y[0]
+                                    
+
+                                    # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                    
+
+                                maxWave_scan_2_sec, X_scan_2_new, Y_scan_2_new = MaxWaveLength(scan_Y_2_second)
+                                    
+                                    
+
+                                new_plots_x_2.append(X_scan_2_new)
+                                new_plots_y_2.append(Y_scan_2_new)
+                                waves_recipe2.append(maxWave_scan_2_sec)
+                                waves_recipe2_sorted= sorted(waves_recipe2)
+                                print("")
+                                # if len(waves_recipe2_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_2=[]
+                                for w in range(len(store_indices_2)):
+                                    wave_min_diff_2.append((waves_recipe2_sorted[store_indices_2[w]],waves_recipe2_sorted[store_indices_2[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_2= []
+                                for m in range(len(wave_min_diff_2)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_2.append(wave_min_diff_2[m][v])
+
+                                #with repitions
+                                clean_wave_2 = []
+                                for z in wave_min_diff_fin_2:
+                                    if z not in clean_wave_2:
+                                        clean_wave_2.append(z)
+
+                                new_added_list_2=[]
+                                new_added_list_2.append(wave_min_diff_2[0][0])
+                                new_added_list_2.append(wave_min_diff_2[0][1])
+                                for ri in range(len(wave_min_diff_2)-1):
+                                    print("S",wave_min_diff_2)
+                                    if wave_min_diff_2[ri][1] == wave_min_diff_2[ri+1][0]:
+                                        print("s",wave_min_diff_2)
+                                        new_added_list_2.append(wave_min_diff_2[ri+1][1])
+
+
+                                print("Current list sorted",waves_recipe2_sorted)
+                                #print("--->Waves to use",wave_min_diff_fin_2)
+                                print("--->Waves to use",new_added_list_2)
+                                #for ploting
+                                wavelengths_for_recipe_2 =wave_min_diff_fin_2
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+
+                                    plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black")
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x_2)):
+                                        plt.plot(new_plots_x_2[ww],new_plots_y_2[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_2.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_2.dpi)
+                                break
+                                
+                                            
+                    elif r ==2:
+
+                        print("----Third initial recipes----")
+                        print(recipe3)
+
+                        wavelengths_for_recipe_3.append(maxWave_scan_1)
+                        wavelengths_for_recipe_3.append(maxWave_scan_2)
+                        wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+                        waves_evol_3.append(maxWave_scan_1)
+                        waves_evol_3.append(maxWave_scan_2)
+                        waves_evol_3.append(maxWave_scan_3)
+
+        
+
+                        new_plots_x_3 =[]
+                        new_plots_y_3 = []
+
+
+                        waves_recipe3 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe3_sorted = sorted(waves_recipe3)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe3_sorted), "recipes")
+                            print("--------------------------")
+                            distances_3 = []
+                            for rr in range(1,len(waves_recipe3_sorted)):
+                                distances_3.append(waves_recipe3_sorted[rr]-waves_recipe3_sorted[rr-1])
+
+                            print("Distances",distances_3)
+                            
+                            store_indices_3=[]
+                            for i in range(len(distances_3)):
+                                if i!= len(distances_3):
+                                    if distances_3[i] <= 10:
+                                        store_indices_3.append(i)
+                                    print("stored indices",store_indices_3)
+                                        
+                            print(" ")
+
+                            if len(store_indices_3)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe3_sorted)
+                                if len(waves_recipe3_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe3])
+                                print("Creating one more sample",recipe_block_2)
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10, recipe 3")
+                                scan_Y_3_second = scan_Y[0]                                
+                                
+                                    
+
+                                maxWave_scan_3_sec, X_scan_3_new, Y_scan_3_new = MaxWaveLength(scan_Y_3_second)
+                                    
+                                    
+
+                                new_plots_x_3.append(X_scan_3_new)
+                                new_plots_y_3.append(Y_scan_3_new)
+                                waves_recipe3.append(maxWave_scan_3_sec)
+                                waves_recipe3_sorted= sorted(waves_recipe3)
+                                print("")
+                                # if len(waves_recipe3_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                            
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_3=[]
+                                for w in range(len(store_indices_3)):
+                                    wave_min_diff_3.append((waves_recipe3_sorted[store_indices_3[w]],waves_recipe3_sorted[store_indices_3[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_3= []
+                                for m in range(len(wave_min_diff_3)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_3.append(wave_min_diff_3[m][v])
+
+                                #with repitions
+                                clean_wave_3 = []
+                                for z in wave_min_diff_fin_3:
+                                    if z not in clean_wave_3:
+                                        clean_wave_3.append(z)
+
+
+
+                                new_added_list_3=[]
+                                new_added_list_3.append(wave_min_diff_3[0][0])
+                                new_added_list_3.append(wave_min_diff_3[0][1])
+                                for ri in range(len(wave_min_diff_3)-1):
+                                    print("S",wave_min_diff_3)
+                                    if wave_min_diff_3[ri][1] == wave_min_diff_3[ri+1][0]:
+                                        print("s",wave_min_diff_3)
+                                        new_added_list_3.append(wave_min_diff_3[ri+1][1])
+
+                                # print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",clean_wave_3)
+                                # #for ploting
+                                # wavelengths_for_recipe_3 = clean_wave_3
+                                print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",wave_min_diff_fin_3)
+                                print("--->Waves to use",new_added_list_3)
+                                #for ploting
+                                wavelengths_for_recipe_3 = wave_min_diff_fin_3
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                    plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1)
+                                    plt.plot(X_scan_2,Y_scan_2)
+                                    plt.plot(X_scan_3,Y_scan_3)
+                                    for ww in range(len(new_plots_x_3)):
+                                        plt.plot(new_plots_x_3[ww],new_plots_y_3[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
+                                break
+
+                    number_rep_recip += 3
+
+                print("Checking our input (Wavelengths)")
+                # print("wavelength 1",clean_wave)
+                # print("wavelength 3",clean_wave_2)
+                # print("wavelength 3",clean_wave_3)
+                print("wavelength 1",new_added_list)
+                print("wavelength 3",new_added_list_2)
+                print("wavelength 3",new_added_list_3)
+                
+                ##
+                # avg for plots
+                Avg_1= sum(new_added_list)/len(new_added_list)
+                Avg_2= sum(new_added_list_2)/len(new_added_list_2)
+                Avg_3= sum(new_added_list_3)/len(new_added_list_3)
+
+                ##
+                # print("Checking our input: wavelengths")
+                # print("wavelength 1",wavelengths_for_recipe_1)
+                # print("wavelength 3",wavelengths_for_recipe_2)
+                # print("wavelength 3",wavelengths_for_recipe_3)
+                # print("Waves pass 1", clean_list_1)
+                # print("Waves pass 2", clean_list_2)
+                # print("Waves pass ", clean_list_3)
+                total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+                #Consider duplocates or not
+                #total_waves=  clean_wave+clean_wave_2+clean_wave_3
+                #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+                total_waves= new_added_list+ new_added_list_2+ new_added_list_3
+                print("Total Waves", total_waves)
+                recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+                print("Plot change",type(recipes_plot),recipes_plot)
+                # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
+                # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+                
+                waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
+                print(type(waves_evol_plot),waves_evol_plot)
+                print(waves_evol_plot[0])
+                print(recipes_to_train_3)
+                #Ploting change
+
+                fig_changhe= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","green","blue"]
+                # plt.rc('axes', linewidth = 2)
+                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                plt.title(str("Generations"), fontsize = 16, pad = 20)
+                for t in range(len(recipes_plot)):
+                            #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                            #print(u)
+                            print(recipes_plot[t])
+                            #print(waves_evol_plot[u])
+                            plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+                #plt.xlim(0.00001, 0.003)
+                plt.legend(loc="upper right",  prop={"size":6})
+                fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
+                print("Wav ori", total_waves_2)
+                # print("Waves evol", )
+                print("Wav nw Final",total_waves)
+                # Y= np.array([wavelengths])
+                Y= np.array([total_waves])
+                print("recipes----")
+                print(recipes)
+
+                recipes_1_out = np.repeat(np.array([recipe1]), len(new_added_list), axis=0)
+                recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
+                recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
+
+                #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+                # print("our recipes", recipes)
+                final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
+                #passing to list
+                print("----------------------------")
+                print("Final recipes", final_recipes)
+                print("Final Y",Y)
+                X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+                #Checking that they are list Y_df
+                print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+
+                ##creadting the dataframe
+                df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                #sorting by Concentration
+                df = df.sort_values(by=['Concentration'])
+
+                input_user= input("Please enter the desire Wavelength: ")
+                input_user= float(input_user)
+
+                W_list=[]
+                b_list=[]
+                ##Training 
+                #Receive data from robot
+                wavelengths_prediction_test=[]
+                wavelengths_progress_test=[]
+                wavelengths_to_test=[]
+                user_concentrations=[]
+                Avg_test=[]
+                
+                for r in range(5):
+                    print("Epoch", r+1)
+                    input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
+                    W_list.append(W)
+                    b_list.append(b)
+                    ##pas to the robot THE USER_CONCENTRATION
+                    # Robot_answer= 465
+                    ##Testing
+
+                    testing_recipes = [user_concentration]
+                    
+                    
+                    # for r in range(len(testing_recipes[0])):
+                    recipe_unit_test = np.array([[user_concentration]])
+                    recipe_unit_test = np.repeat(recipe_unit_test, 3, axis=0)
+                    print("Recipes Test",recipe_unit_test)
+                    #do the first one
+                    #print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {} for testing'.format(1))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                    #plan and execute a reaction
+                    self._create_samples(wellnames_testing, recipe_unit_test)
+                    #pull in the scan data
+                    filenames_testing = self.rxn_df[
+                                    (self.rxn_df['op'] == 'scan') |
+                                    (self.rxn_df['op'] == 'scan_until_complete')
+                                    ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y_testing= scan_data_testing.T.to_numpy()
+                    
+
+                    scan_Y_1_test = scan_Y_testing[0]
+                    scan_Y_2_test = scan_Y_testing[1]
+                    scan_Y_3_test = scan_Y_testing[2]
+
+    
+
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1 = MaxWaveLength(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2 = MaxWaveLength(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3 = MaxWaveLength(scan_Y_3_test)
+
+                    wavelengths_prediction_test.append(maxWave_scan_1_test)
+                    wavelengths_prediction_test.append(maxWave_scan_2_test)
+                    wavelengths_prediction_test.append(maxWave_scan_3_test)
+                    ###     
+                    wavelengths_progress_test.append(maxWave_scan_1_test)
+                    wavelengths_progress_test.append(maxWave_scan_2_test)
+                    wavelengths_progress_test.append(maxWave_scan_3_test)
+
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+
+
+
+                    new_plots_x_test =[]
+                    new_plots_y_test = []
+
+                    waves_recipe1_test = [maxWave_scan_1_test,maxWave_scan_2_test,maxWave_scan_3_test]
+                    waves_recipe1_sorted_test = sorted(waves_recipe1_test)
+
+                    for l in range(4):
+                        
+                        print("----------------------------------")
+                        print("Comparing", len(waves_recipe1_sorted_test), "recipes from Test/Model")
+                        print("--------------------------")
+                        distances_test = []
+                        for rr in range(1,len(waves_recipe1_sorted_test)):
+                            distances_test.append(waves_recipe1_sorted_test[rr]-waves_recipe1_sorted_test[rr-1])
+
+                            print("Distances",distances_test)
+                            
+                        store_indices_test=[]
+                        for i in range(len(distances_test)):
+                            if i!= len(distances_test):
+                                if distances_test[i] <= 10:
+                                    store_indices_test.append(i)
+                                print("stored indices test",store_indices_test)
+                                        
+                        print(" ")
+
+                        if len(store_indices_test)==0 :
+                            print("We do NOT find a distance less than 10")
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            if len(waves_recipe1_sorted_test) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
+                            print("...Creating one more sample of the recipe")
+                            #insert robot
+                            #waves_recipe1.append(random.randint(500, 600))
+                            #
+
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # #do the first one
+                            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            # #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            # #don't have data to train, so, not training
+                            # #generate new wellnames for next batch
+                            recipe_unit_test_rep = np.array([[user_concentration]])
+                            # recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_unit_test_rep)
+                            recipe_unit_test_rep = np.repeat(recipe_unit_test_rep, 1, axis=1)
+                            print("Recipes Test again",recipe_unit_test_rep)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_unit_test_rep)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y_test_rep= scan_data.T.to_numpy()
+                            #print("Scan When Distance is > 10", scan_Y)
+                            print("Scan When Distance is > 10 for test")
+
+                            scan_Y_rep_1 = scan_Y_test_rep[0]
+                            # scan_Y_rep_2 = scan_Y_test_rep[1]
+                                    
+
+                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test = MaxWaveLength(scan_Y_rep_1)
+                            new_plots_x.append(X_scan_1_new_test)
+                            new_plots_y.append(Y_scan_1_new_test)
+                            waves_recipe1_test.append(maxWave_scan_1_sec_test)
+                            waves_recipe1_sorted_test= sorted(waves_recipe1_test)
+                            print("")
+                            # if len(waves_recipe1_sorted_test) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
+                                
+                        else:
+                            #getting the wavelengths which difference is less than 10
+                            wave_min_diff_test=[]
+                            for w in range(len(store_indices_test)):
+                                wave_min_diff_test.append((waves_recipe1_sorted_test[store_indices_test[w]],waves_recipe1_sorted_test[store_indices_test[w]+1]))
+
+
+                            #with  repitions
+                            wave_min_diff_fin_test= []
+                            for m in range(len(wave_min_diff_test)):
+                                for v in range(2):
+                                    wave_min_diff_fin_test.append(wave_min_diff_test[m][v])
+
+                            #with repitions
+                            clean_wave_test = []
+                            for z in wave_min_diff_fin_test:
+                                if z not in clean_wave_test:
+                                    clean_wave_test.append(z)
+
+
+                            new_added_list_test=[]
+                            new_added_list_test.append(wave_min_diff_test[0][0])
+                            new_added_list_test.append(wave_min_diff_test[0][1])
+                            for ri in range(len(wave_min_diff_test)-1):
+                                print("S",wave_min_diff_test)
+                                if wave_min_diff_test[ri][1] == wave_min_diff_test[ri+1][0]:
+                                        print("s",wave_min_diff_test)
+                                        new_added_list_test.append(wave_min_diff_test[ri+1][1])
+                            
+                            
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            #print("--->Waves to use",clean_wave_test)
+                            print("--->Waves to use",new_added_list_test)
+                            if l !=0:
+                                #Plot after training
+                                print("Plotting---")
+                                fig_wave_test= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                plt.title("Generation in Test", fontsize = 16, pad = 20)
+                                plt.plot(X_scan_test_1,Y_scan_test_1)
+                                plt.plot(X_scan_test_2,Y_scan_test_2)
+                                plt.plot(X_scan_test_3,Y_scan_test_3)
+                                for ww in range(len(new_plots_x_test)):
+                                    plt.plot(new_plots_x_test[ww],new_plots_y_test[ww],color="green")
+                                plt.show() 
+                                fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
+                            break
+
+                    
+
+                    #print("We get the following wavelengths",clean_wave_test)
+                    print("We get the following wavelengths",new_added_list_test)
+                    average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
+                    print("The average is ", average_of_wave_test)
+                    
+                    
+                        
+
+                    #Robot_answer=wavelengths_prediction_test[0]
+                    #print("Y_TEST_ROBOT", Y_testing)
+                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
+                    #Here we change 
+                    print("sending len",len(new_added_list_test))
+                    Robot_answer= average_of_wave_test
+
+                    print("Robot send back a wavelenght of", Robot_answer)
+                    print("User input was ", input_user)
+                    test_error= Robot_answer- input_user
+                    print("Our test error is ", test_error)
+                    
+                    ##Plot
+                    figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
+                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    plt.xlabel("[KBr] Concentration (mM)")
+                    plt.ylabel("Wavelength (nm)")
+                    plt.legend(prop={"size":6})
+                    plt.show()
+                    figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+
+                    #Plot2
+                
+
+
+                    figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                    #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    plt.xlabel("[KBr] Concentration (mM)")
+                    plt.ylabel("Wavelength (nm)")
+                    plt.legend(prop={"size":6})
+                    plt.show()
+                    figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+
+                    if test_error < 10 and test_error>-10:
+                        print("The model is trained----")
+                        break
+                    else:
+                        print("Model would try to reduce the error")
+                        if r == 8:
+                            print("---->Done training<----")
+                        else:
+                            print("-----")
+                        for sert in range(len(new_added_list_test)):
+                            # print("Ln", len(clean_wave_test))
+                            print("Insert in", sert)
+                            new_data = {'Concentration': user_concentration, 'Wavelength': new_added_list_test[sert]}
+                            df = df.append(new_data, ignore_index = True)
+                            Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
+                            # print("Actual df",df)
+                
+                print("Dt",df)
+                print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
+
+                fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","orange","blue"]
+                #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+                waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+                print("Printtttttttt",waves_1)
+                for ke in range(len(label_names)):
+                    #print(label_names_2[r], waves[r])
+                    for nnm in range(len(waves_1[ke])):
+                        plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+                # for ke in range(len(label_names)):
+                #     #print(label_names_2[r], waves[r])
+                #         plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+                # for t in range(len(recipes_plot)):
+                #     for u in range(len(waves_evol_plot[t])):
+                #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                #             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+                
+                ##CCCCCC
+                # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+                plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
+                plt.axhline(y=input_user-5,color='r', linestyle=':')
+                plt.axhline(y=input_user,color='r', linestyle='-')
+                plt.axhline(y=input_user+5,color='r', linestyle=':')
+
+
+                #plt.xlim(0.00001, 0.003)
+                #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+                plt.legend(loc="upper right",  prop={"size":6})
+                plt.show()
+                fig_changhe_model.savefig('changeInWavesModel.png')
+
+                #Plot recipes and the input
+
+                waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
+                print("Ltp",waves)
+                # input_user=50
+                fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                colors_2= ["red","green","blue"]
+                label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
+
+                for k in range(len(label_names_2)):
+                    #print(label_names_2[r], waves[r])
+                    for nn in range(len(waves[k])):
+                        plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
+
+                plt.axhline(y=input_user-5,color='r', linestyle=':')
+                plt.axhline(y=input_user,color='r', linestyle='-')
+                plt.axhline(y=input_user+5,color='r', linestyle=':')
+                fig_last.savefig('Input-Recipes.png')
+
+
+
+                pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
+                print("Pppppppp",pattt)
+                patternFoll = df.groupby('Concentration')['Wavelength'].mean()
+                patternFoll = patternFoll.reset_index()
+                print("Pppppppp",patternFoll)
+
+                # recipesTaken= df.Concentration.unique()
+                recipesTaken = patternFoll["Concentration"].ravel().tolist()
+                patternFollowed = patternFoll["Wavelength"].ravel().tolist()
+                print("RRRR",patternFollowed,recipesTaken)
+                fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
+                plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                plt.xlabel("[KBr] Concentration (mM)")
+                plt.ylabel("Wavelength (nm)")
+                plt.legend(prop={"size":6})
+                plt.show()
+                fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
+                
+                self.close_connection()
+                self.pr.shutdown()
+                return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+        
+        elif kind == "neural":
+
+            if params == None:
+
+                print("Neural")
+                print("--- Neural Simulation----")
+                recipes = model.generate_seed_rxns(3) #number of recipes
+                print("Our initital recipes:",recipes)
+                print("----Breaking our initial recipes----")
+                recipe1 = recipes[:][0:1][0]
+                recipe2 = recipes[:][3:4][0]
+                recipe3 = recipes[:][6:7][0]
+                # print("RRR",recipe1)
+                # print("RRR",recipe2)
+                # print("RRR",recipe3)
+
+                #we would get observance for each recipe:
+                wavelengths=[]
+                wavelengths_to_train =[]
+                recipes_to_train = []
+
+                wavelengths_to_train_2 =[]
+                recipes_to_train_2 = []
+
+                wavelengths_to_train_3 =[]
+                recipes_to_train_3 = []
+
+                wavelengths_for_recipe_1 = []
+                wavelengths_for_recipe_2 = []
+                wavelengths_for_recipe_3 = []
+                
+                obs_for_recipe_1 = {}
+                obs_for_recipe_2 = {}
+                obs_for_recipe_3 = {}
+
+                obs_for_recipe_1_test={}
+
+                waves_evol_1=[]
+                waves_evol_2=[]
+                waves_evol_3=[]
+
+                index_for_l=0
+                index_for_l_2=0
+                index_for_l_3=0
+                
+                number_rep_recip= 0
+                for r in range(3):
+
+                    
+                    # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
+                    recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                    print("----Start ",str(r+1)," ----")
+                    print('recipe block', str(r+1) ,recipe_block)
+                    #do the first one
+                    # print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {}'.format(str(r+1)))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                    print("Wellnames",wellnames)
+                    #plan and execute a reaction
+                    self._create_samples(wellnames, recipe_block)
+                    #pull in the scan data
+                    filenames = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                    scan_data = self._get_sample_data(wellnames, last_filename)
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y= scan_data.T.to_numpy()
+                    
+
+                    scan_Y_1 = scan_Y[0]
+                    scan_Y_2 = scan_Y[1]
+                    scan_Y_3 = scan_Y[2]
+
+                    #print("len rp1",len(scan_Y_1),scan_Y_1)
+                    # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                    # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                    maxWave_scan_1, X_scan_1, Y_scan_1, Obs_scan_1 = MaxWaveLength_Obs(scan_Y_1)
+                    maxWave_scan_2, X_scan_2, Y_scan_2, Obs_scan_2 = MaxWaveLength_Obs(scan_Y_2)
+                    maxWave_scan_3, X_scan_3, Y_scan_3, Obs_scan_3 = MaxWaveLength_Obs(scan_Y_3)
+
+                    print("W-O",maxWave_scan_1,Obs_scan_1)
+                    print("W-O",maxWave_scan_2,Obs_scan_2)
+                    print("W-O",maxWave_scan_3,Obs_scan_3)
+
+
+                    # print()
+                    # Plot the wave obs of the three samples
+
+                    fig_wave_obs= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(X_scan_1,Y_scan_1)
+                    plt.plot(X_scan_2,Y_scan_2)
+                    plt.plot(X_scan_3,Y_scan_3)
+                    plt.show() 
+                    fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
+
+
+                    # print("WaveL max 1"+". ", maxWave_scan_1)
+                    # print("WaveL max 2"+". ", maxWave_scan_2)
+                    # print("WaveL max 3"+". ", maxWave_scan_3)
+                    
+                    #
+                    #Add to the list of wavelengths
+                    if r== 0:
+                        print("----First initial recipes----")
+                        print(recipe1)
+                        print(type(recipe1), np.array([recipe1]))
+                        print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                        
+
+                        new_plots_x =[]
+                        new_plots_y = []
+
+                        wavelengths_for_recipe_1.append(maxWave_scan_1)
+                        wavelengths_for_recipe_1.append(maxWave_scan_2)
+                        wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                        obs_for_recipe_1[wavelengths_for_recipe_1[0]]= Obs_scan_1
+                        obs_for_recipe_1[wavelengths_for_recipe_1[1]]= Obs_scan_2
+                        obs_for_recipe_1[wavelengths_for_recipe_1[2]]= Obs_scan_3
+
+
+                        waves_evol_1.append(maxWave_scan_1)
+                        waves_evol_1.append(maxWave_scan_2)
+                        waves_evol_1.append(maxWave_scan_3)
+
+
+                        waves_recipe1 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe1_sorted = sorted(waves_recipe1)
+
+
+
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe1_sorted), "recipes")
+                            print("--------------------------")
+                            distances = []
+                            for rr in range(1,len(waves_recipe1_sorted)):
+                                distances.append(waves_recipe1_sorted[rr]-waves_recipe1_sorted[rr-1])
+
+                            print("Distances",distances)
+                            
+                            store_indices=[]
+                            for i in range(len(distances)):
+                                if i!= len(distances):
+                                    if distances[i] <= 100:
+                                        store_indices.append(i)
+                                    print("stored indices",store_indices)
+                                        
+                            print(" ")
+
+                            if len(store_indices)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe1_sorted)
+                                if len(waves_recipe1_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe1])
+
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                print("Creating one more sample",recipe_block_2)
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_1_second = scan_Y[0]
+                                    
+
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                    
+
+                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new,Obs_scan_1_new = MaxWaveLength_Obs(scan_Y_1_second)
+                                print("W-O",maxWave_scan_1_sec,Obs_scan_1_new)
+                               
+                                new_plots_x.append(X_scan_1_new)
+                                new_plots_y.append(Y_scan_1_new)
+                                waves_recipe1.append(maxWave_scan_1_sec)
+                                waves_recipe1_sorted= sorted(waves_recipe1)
+                                obs_for_recipe_1[maxWave_scan_1_sec]=Obs_scan_1_new
+
+                                print("")
+                                # if len(waves_recipe1_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff=[]
+                                for w in range(len(store_indices)):
+                                    wave_min_diff.append((waves_recipe1_sorted[store_indices[w]],waves_recipe1_sorted[store_indices[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin= []
+                                for m in range(len(wave_min_diff)):
+                                    for v in range(2):
+                                        wave_min_diff_fin.append(wave_min_diff[m][v])
+
+                                #with repitions
+                                clean_wave = []
+                                for z in wave_min_diff_fin:
+                                    if z not in clean_wave:
+                                        clean_wave.append(z)
+
+                                #Clean with repetitions and without weight
+
+                                new_added_list=[]
+                                new_added_list.append(wave_min_diff[0][0])
+                                new_added_list.append(wave_min_diff[0][1])
+                                for ri in range(len(wave_min_diff)-1):
+                                    print("S",wave_min_diff)
+                                    if wave_min_diff[ri][1] == wave_min_diff[ri+1][0]:
+                                        print("s",wave_min_diff)
+                                        new_added_list.append(wave_min_diff[ri+1][1])
+
+                                last_obs_1=[]
+                                for rii in range(len(new_added_list)):
+                                    last_obs_1.append((new_added_list[rii],obs_for_recipe_1[new_added_list[rii]]))
+
+                                #For ploting
+                                #wavelengths_for_recipe_1 = clean_wave
+                                wavelengths_for_recipe_1 = wave_min_diff_fin 
+                                print("Current list sorted",waves_recipe1_sorted)
+                                #print("--->Waves to use",clean_wave)
+                                #print("--->Waves to use",wave_min_diff_fin)
+                                print("--->Waves to use",new_added_list)
+                                print("--->Data to use",last_obs_1)
+
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black") #COLOR?
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x)):
+                                        plt.plot(new_plots_x[ww],new_plots_y[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new.dpi)
+                                break
+                        
+
+
+
+                    elif r ==1:
+
+                        print("----Second initial recipes----")
+                        print(recipe2)
+                        
+                        wavelengths_for_recipe_2.append(maxWave_scan_1)
+                        wavelengths_for_recipe_2.append(maxWave_scan_2)
+                        wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                        obs_for_recipe_2[wavelengths_for_recipe_2[0]] = Obs_scan_1
+                        obs_for_recipe_2[wavelengths_for_recipe_2[1]] = Obs_scan_2
+                        obs_for_recipe_2[wavelengths_for_recipe_2[2]] = Obs_scan_3
+
+
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_3)
+
+                        print("Making comparison")
+                        
+
+                        new_plots_x_2 =[]
+                        new_plots_y_2 = []
+
+
+                        waves_recipe2 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe2_sorted = sorted(waves_recipe2)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe2_sorted), "recipes")
+                            print("--------------------------")
+                            distances_2 = []
+                            for rr in range(1,len(waves_recipe2_sorted)):
+                                distances_2.append(waves_recipe2_sorted[rr]-waves_recipe2_sorted[rr-1])
+
+                            print("Distances",distances_2)
+                            
+                            store_indices_2=[]
+                            for i in range(len(distances_2)):
+                                if i!= len(distances_2):
+                                    if distances_2[i] <= 100:
+                                        store_indices_2.append(i)
+                                    print("stored indices",store_indices_2)
+                                        
+                            print(" ")
+
+                            if len(store_indices_2)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe2_sorted)
+                                if len(waves_recipe2_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+                                recipe_block_2 = np.array([recipe2])
+                                print("Creating one more sample",recipe_block_2)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                    # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_2_second = scan_Y[0]
+                                    
+
+                                    # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                    
+
+                                maxWave_scan_2_sec, X_scan_2_new, Y_scan_2_new, Obs_scan_2_new = MaxWaveLength_Obs(scan_Y_2_second)
+                                    
+                                    
+                                print("W-O",maxWave_scan_2_sec,Obs_scan_2_new)
+                                new_plots_x_2.append(X_scan_2_new)
+                                new_plots_y_2.append(Y_scan_2_new)
+                                waves_recipe2.append(maxWave_scan_2_sec)
+                                waves_recipe2_sorted= sorted(waves_recipe2)
+                                obs_for_recipe_2[maxWave_scan_2_sec]=Obs_scan_2_new
+                                print("")
+                                # if len(waves_recipe2_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_2=[]
+                                for w in range(len(store_indices_2)):
+                                    wave_min_diff_2.append((waves_recipe2_sorted[store_indices_2[w]],waves_recipe2_sorted[store_indices_2[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_2= []
+                                for m in range(len(wave_min_diff_2)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_2.append(wave_min_diff_2[m][v])
+
+                                #with repitions
+                                clean_wave_2 = []
+                                for z in wave_min_diff_fin_2:
+                                    if z not in clean_wave_2:
+                                        clean_wave_2.append(z)
+
+                                new_added_list_2=[]
+                                new_added_list_2.append(wave_min_diff_2[0][0])
+                                new_added_list_2.append(wave_min_diff_2[0][1])
+                                for ri in range(len(wave_min_diff_2)-1):
+                                    print("S",wave_min_diff_2)
+                                    if wave_min_diff_2[ri][1] == wave_min_diff_2[ri+1][0]:
+                                        print("s",wave_min_diff_2)
+                                        new_added_list_2.append(wave_min_diff_2[ri+1][1])
+
+                                last_obs_2=[]
+                                for rii in range(len(new_added_list_2)):
+                                    last_obs_2.append((new_added_list_2[rii],obs_for_recipe_2[new_added_list_2[rii]]))
+
+                                print("Current list sorted",waves_recipe2_sorted)
+                                #print("--->Waves to use",wave_min_diff_fin_2)
+                                print("--->Waves to use",new_added_list_2)
+                                print("--->Data to use", last_obs_2)
+
+
+                                #for ploting
+                                wavelengths_for_recipe_2 =wave_min_diff_fin_2
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+
+                                    plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black")
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x_2)):
+                                        plt.plot(new_plots_x_2[ww],new_plots_y_2[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_2.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_2.dpi)
+                                break
+                                
+                                            
+                    elif r ==2:
+
+                        print("----Third initial recipes----")
+                        print(recipe3)
+
+                        wavelengths_for_recipe_3.append(maxWave_scan_1)
+                        wavelengths_for_recipe_3.append(maxWave_scan_2)
+                        wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+
+                        waves_evol_3.append(maxWave_scan_1)
+                        waves_evol_3.append(maxWave_scan_2)
+                        waves_evol_3.append(maxWave_scan_3)
+
+        
+
+                        new_plots_x_3 =[]
+                        new_plots_y_3 = []
+
+
+                        waves_recipe3 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe3_sorted = sorted(waves_recipe3)
+
+                        obs_for_recipe_3[maxWave_scan_1] = Obs_scan_1
+                        obs_for_recipe_3[maxWave_scan_2] = Obs_scan_2
+                        obs_for_recipe_3[maxWave_scan_3] = Obs_scan_3
+
+                        # print("W-O",maxWave_scan_1,Obs_scan_1)
+                        # print("W-O",maxWave_scan_2,Obs_scan_2)                      
+                        # print("W-O",maxWave_scan_3,Obs_scan_3)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe3_sorted), "recipes")
+                            print("--------------------------")
+                            distances_3 = []
+                            for rr in range(1,len(waves_recipe3_sorted)):
+                                distances_3.append(waves_recipe3_sorted[rr]-waves_recipe3_sorted[rr-1])
+
+                            print("Distances",distances_3)
+                            
+                            store_indices_3=[]
+                            for i in range(len(distances_3)):
+                                if i!= len(distances_3):
+                                    if distances_3[i] <= 100:
+                                        store_indices_3.append(i)
+                                    print("stored indices",store_indices_3)
+                                        
+                            print(" ")
+
+                            if len(store_indices_3)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe3_sorted)
+                                if len(waves_recipe3_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe3])
+                                print("Creating one more sample",recipe_block_2)
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10, recipe 3")
+                                scan_Y_3_second = scan_Y[0]                                
+                                
+                                    
+
+                                maxWave_scan_3_sec, X_scan_3_new, Y_scan_3_new, Obs_scan_3_new = MaxWaveLength_Obs(scan_Y_3_second)
+                                    
+                                    
+                                print("W-O",maxWave_scan_3_sec,Obs_scan_3_new)
+                                new_plots_x_3.append(X_scan_3_new)
+                                new_plots_y_3.append(Y_scan_3_new)
+                                waves_recipe3.append(maxWave_scan_3_sec)
+                                waves_recipe3_sorted= sorted(waves_recipe3)
+                                obs_for_recipe_3[maxWave_scan_3_sec] = Obs_scan_3_new
+                                print("")
+                                # if len(waves_recipe3_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                            
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_3=[]
+                                for w in range(len(store_indices_3)):
+                                    wave_min_diff_3.append((waves_recipe3_sorted[store_indices_3[w]],waves_recipe3_sorted[store_indices_3[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_3= []
+                                for m in range(len(wave_min_diff_3)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_3.append(wave_min_diff_3[m][v])
+
+                                #with repitions
+                                clean_wave_3 = []
+                                for z in wave_min_diff_fin_3:
+                                    if z not in clean_wave_3:
+                                        clean_wave_3.append(z)
+
+
+
+                                new_added_list_3=[]
+                                new_added_list_3.append(wave_min_diff_3[0][0])
+                                new_added_list_3.append(wave_min_diff_3[0][1])
+                                for ri in range(len(wave_min_diff_3)-1):
+                                    print("S",wave_min_diff_3)
+                                    if wave_min_diff_3[ri][1] == wave_min_diff_3[ri+1][0]:
+                                        print("s",wave_min_diff_3)
+                                        new_added_list_3.append(wave_min_diff_3[ri+1][1])
+
+                                last_obs_3=[]
+                                for rii in range(len(new_added_list_3)):
+                                    last_obs_3.append((new_added_list_3[rii],obs_for_recipe_3[new_added_list_3[rii]]))
+
+                                # print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",clean_wave_3)
+                                # #for ploting
+                                # wavelengths_for_recipe_3 = clean_wave_3
+                                print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",wave_min_diff_fin_3)
+                                print("--->Waves to use",new_added_list_3)
+                                print("--->Data to use",last_obs_3)
+
+                                #for ploting
+                                wavelengths_for_recipe_3 = wave_min_diff_fin_3
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                    plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1)
+                                    plt.plot(X_scan_2,Y_scan_2)
+                                    plt.plot(X_scan_3,Y_scan_3)
+                                    for ww in range(len(new_plots_x_3)):
+                                        plt.plot(new_plots_x_3[ww],new_plots_y_3[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
+                                break
+
+                    number_rep_recip += 3
+
+                print("Checking our input (Wavelengths)")
+                # print("wavelength 1",clean_wave)
+                # print("wavelength 3",clean_wave_2)
+                # print("wavelength 3",clean_wave_3)
+                print("wavelength 1",new_added_list)
+                print("wavelength 3",new_added_list_2)
+                print("wavelength 3",new_added_list_3)
+                print("Data",last_obs_1,last_obs_2,last_obs_3)
+                ##
+                # avg for plots
+                Avg_1= sum(new_added_list)/len(new_added_list)
+                Avg_2= sum(new_added_list_2)/len(new_added_list_2)
+                Avg_3= sum(new_added_list_3)/len(new_added_list_3)
+
+                ##
+                # print("Checking our input: wavelengths")
+                # print("wavelength 1",wavelengths_for_recipe_1)
+                # print("wavelength 3",wavelengths_for_recipe_2)
+                # print("wavelength 3",wavelengths_for_recipe_3)
+                # print("Waves pass 1", clean_list_1)
+                # print("Waves pass 2", clean_list_2)
+                # print("Waves pass ", clean_list_3)
+                total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+                #Consider duplocates or not
+                #total_waves=  clean_wave+clean_wave_2+clean_wave_3
+                #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+                total_waves= new_added_list+ new_added_list_2+ new_added_list_3
+                print("Total Waves", total_waves)
+                recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+                print("Plot change",type(recipes_plot),recipes_plot)
+                # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
+                # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+                
+                waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
+                print(type(waves_evol_plot),waves_evol_plot)
+                print(waves_evol_plot[0])
+                print(recipes_to_train_3)
+                #Ploting change
+
+                fig_changhe= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","green","blue"]
+                # plt.rc('axes', linewidth = 2)
+                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                plt.title(str("Generations"), fontsize = 16, pad = 20)
+                for t in range(len(recipes_plot)):
+                            #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                            #print(u)
+                            print(recipes_plot[t])
+                            #print(waves_evol_plot[u])
+                            plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+                #plt.xlim(0.00001, 0.003)
+                plt.legend(loc="upper right",  prop={"size":6})
+                fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
+                print("Wav ori", total_waves_2)
+                # print("Waves evol", )
+                print("Wav nw Final",total_waves)
+                # Y= np.array([wavelengths])
+                # Y= np.array([total_waves])
+                J = last_obs_1+last_obs_2+last_obs_3
+                Y = np.array([J])
+
+
+                print("recipes----")
+                print(recipes)
+
+                recipes_1_out = np.repeat(np.array([recipe1]), len(new_added_list), axis=0)
+                recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
+                recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
+
+                #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+                # print("our recipes", recipes)
+                final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
+                #passing to list
+                print("----------------------------")
+                print("Final recipes", final_recipes)
+                print("Final Y",Y)
+                X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+
+                X_df_Cit = [final_recipes[:][z][0] for z in range(len(final_recipes[:][:]))]
+                X_df_Ag = [final_recipes[:][z][1] for z in range(len(final_recipes[:][:]))]
+                X_df_KBr = [final_recipes[:][z][2] for z in range(len(final_recipes[:][:]))]
+
+
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+                WaveLength_df= [Y_df[m][0] for m in range(len(Y_df))]
+                Obs_df= [Y_df[m][1] for m in range(len(Y_df))]
+                #print(X_df_Cit)
+                #print(X_df_Ag)
+                #print(X_df_KBr)
+                #print(WaveLength_df)
+                #print(Obs_df)  
+
+
+                #Checking that they are list Y_df
+                # print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+                print("Checking if X and Y are list now: ", type(X_df_Cit),type(Y_df))
+
+
+
+                ##creadting the dataframe
+                # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                # #sorting by Concentration
+                # df = df.sort_values(by=['Concentration'])
+                df = pd.DataFrame(list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
+                #sorting by Concentration
+                #df = df.sort_values(by=['Concentration'])
+                print("DFrame")
+                print("")
+                print(df)
+
+
+                input_user= input("Please enter the desire [Wavelength - Observance] : ")
+                print(input_user, type(input_user))
+                print(input_user.find("-"))
+                format_pos= input_user.find("-")
+                while True:
+
+                    if format_pos == -1:
+                        print("Enter the correct form ")
+                        input_user= input("Please enter the desire Wavelength - Observance : ")
+                        format_pos= input_user.find("-")
+                    else :
+                        break
+
+                print("FINISH",input_user)
+                input_user_model = (float(input_user[:format_pos]),float(input_user[format_pos+1:]))
+                input_user_model = np.array([input_user_model])
+                print(input_user_model,type(input_user_model))
+
+
+                #NN model
+            
+                W_list=[]
+                b_list=[]
+                ##Training 
+                #Receive data from robot
+                wavelengths_prediction_test=[]
+                wavelengths_progress_test=[]
+                wavelengths_to_test=[]
+                user_concentrations=[]
+                Avg_test=[]
+                
+
+                
+                for r in range(5):
+                    print("Epoch", r+1)
+
+                    # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
+                    input_user_model, user_concentration, train_prediction, W, b = model.training(df,input_user_model,r)#550, 0.0002, 480 , 10000, 20
+                    
+                    # W_list.append(W)
+                    # b_list.append(b)
+                    ##pas to the robot THE USER_CONCENTRATION
+                    # Robot_answer= 465
+                    ##Testing
+                    print("Cont0",input_user_model,user_concentration)
+                    testing_recipes = [user_concentration]
+                    
+                    
+                    # for r in range(len(testing_recipes[0])):
+                    # recipe_unit_test = np.array([[user_concentration]])
+                    recipe_unit_test = user_concentration
+                    recipe_unit_test = np.repeat(user_concentration, 3, axis=0)
+                    print("Recipes Test",recipe_unit_test)
+                    #do the first one
+                    #print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {} for testing'.format(1))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                    #plan and execute a reaction
+                    self._create_samples(wellnames_testing, recipe_unit_test)
+                    #pull in the scan data
+                    filenames_testing = self.rxn_df[
+                                    (self.rxn_df['op'] == 'scan') |
+                                    (self.rxn_df['op'] == 'scan_until_complete')
+                                    ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y_testing= scan_data_testing.T.to_numpy()
+                    
+
+                    scan_Y_1_test = scan_Y_testing[0]
+                    scan_Y_2_test = scan_Y_testing[1]
+                    scan_Y_3_test = scan_Y_testing[2]
+
+
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1, Obs_scan_test_1 = MaxWaveLength_Obs(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2, Obs_scan_test_2 = MaxWaveLength_Obs(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3, Obs_scan_test_3 = MaxWaveLength_Obs(scan_Y_3_test)
+
+                    wavelengths_prediction_test.append(maxWave_scan_1_test)
+                    wavelengths_prediction_test.append(maxWave_scan_2_test)
+                    wavelengths_prediction_test.append(maxWave_scan_3_test)
+                    ###     
+                    wavelengths_progress_test.append(maxWave_scan_1_test)
+                    wavelengths_progress_test.append(maxWave_scan_2_test)
+                    wavelengths_progress_test.append(maxWave_scan_3_test)
+
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+
+
+
+                    new_plots_x_test =[]
+                    new_plots_y_test = []
+
+                    waves_recipe1_test = [maxWave_scan_1_test,maxWave_scan_2_test,maxWave_scan_3_test]
+                    waves_recipe1_sorted_test = sorted(waves_recipe1_test)
+                    
+                    obs_for_recipe_1_test[maxWave_scan_1_test] = Obs_scan_test_1
+                    obs_for_recipe_1_test[maxWave_scan_2_test] = Obs_scan_test_2
+                    obs_for_recipe_1_test[maxWave_scan_3_test] = Obs_scan_test_3
+
+                    for l in range(4):
+                        
+                        print("----------------------------------")
+                        print("Comparing", len(waves_recipe1_sorted_test), "recipes from Test/Model")
+                        print("--------------------------")
+                        distances_test = []
+                        for rr in range(1,len(waves_recipe1_sorted_test)):
+                            distances_test.append(waves_recipe1_sorted_test[rr]-waves_recipe1_sorted_test[rr-1])
+
+                            print("Distances",distances_test)
+                            
+                        store_indices_test=[]
+                        for i in range(len(distances_test)):
+                            if i!= len(distances_test):
+                                if distances_test[i] <= 100:
+                                    store_indices_test.append(i)
+                                print("stored indices test",store_indices_test)
+                                        
+                        print(" ")
+
+                        if len(store_indices_test)==0 :
+                            print("We do NOT find a distance less than 10")
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            if len(waves_recipe1_sorted_test) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
+                            print("...Creating one more sample of the recipe")
+                            #insert robot
+                            #waves_recipe1.append(random.randint(500, 600))
+                            #
+
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # #do the first one
+                            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            # #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            # #don't have data to train, so, not training
+                            # #generate new wellnames for next batch
+                            
+                            recipe_unit_test_rep = user_concentration
+                            # recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_unit_test_rep)
+                            recipe_unit_test_rep = np.repeat(user_concentration, 1, axis=1)
+                            print("Recipes Test again",recipe_unit_test_rep)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_unit_test_rep)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y_test_rep= scan_data.T.to_numpy()
+                            #print("Scan When Distance is > 10", scan_Y)
+                            print("Scan When Distance is > 10 for test")
+
+                            scan_Y_rep_1 = scan_Y_test_rep[0]
+                            # scan_Y_rep_2 = scan_Y_test_rep[1]
+                                    
+
+                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
+                            
+                            
+                            print("W-O",maxWave_scan_1_sec_test,Obs_scan_test_1_new)
+                            
+                            new_plots_x.append(X_scan_1_new_test)
+                            new_plots_y.append(Y_scan_1_new_test)
+                            waves_recipe1_test.append(maxWave_scan_1_sec_test)
+                            waves_recipe1_sorted_test= sorted(waves_recipe1_test)
+
+
+                            obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
+
+                            print("")
+                            # if len(waves_recipe1_sorted_test) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
+                                
+                        else:
+                            #getting the wavelengths which difference is less than 10
+                            wave_min_diff_test=[]
+                            for w in range(len(store_indices_test)):
+                                wave_min_diff_test.append((waves_recipe1_sorted_test[store_indices_test[w]],waves_recipe1_sorted_test[store_indices_test[w]+1]))
+
+
+                            #with  repitions
+                            wave_min_diff_fin_test= []
+                            for m in range(len(wave_min_diff_test)):
+                                for v in range(2):
+                                    wave_min_diff_fin_test.append(wave_min_diff_test[m][v])
+
+                            #with repitions
+                            clean_wave_test = []
+                            for z in wave_min_diff_fin_test:
+                                if z not in clean_wave_test:
+                                    clean_wave_test.append(z)
+
+
+                            new_added_list_test=[]
+                            new_added_list_test.append(wave_min_diff_test[0][0])
+                            new_added_list_test.append(wave_min_diff_test[0][1])
+                            for ri in range(len(wave_min_diff_test)-1):
+                                print("S",wave_min_diff_test)
+                                if wave_min_diff_test[ri][1] == wave_min_diff_test[ri+1][0]:
+                                        print("s",wave_min_diff_test)
+                                        new_added_list_test.append(wave_min_diff_test[ri+1][1])
+                            
+                            last_obs_test=[]
+                            for riit in range(len(new_added_list_test)):
+                                last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
+
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            #print("--->Waves to use",clean_wave_test)
+                            print("--->Waves to use",new_added_list_test)
+                            print("--->Data to use",last_obs_test)
+                            
+                            if l !=0:
+                                #Plot after training
+                                print("Plotting---")
+                                fig_wave_test= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                plt.title("Generation in Test", fontsize = 16, pad = 20)
+                                plt.plot(X_scan_test_1,Y_scan_test_1)
+                                plt.plot(X_scan_test_2,Y_scan_test_2)
+                                plt.plot(X_scan_test_3,Y_scan_test_3)
+                                for ww in range(len(new_plots_x_test)):
+                                    plt.plot(new_plots_x_test[ww],new_plots_y_test[ww],color="green")
+                                plt.show() 
+                                fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
+                            break
+
+                    
+
+                    #print("We get the following wavelengths",clean_wave_test)
+                    print("We get the following wavelengths",new_added_list_test)
+                    # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
+                    # print("The average is ", average_of_wave_test)
+                    Wave_pre =0
+                    Obs_pre =0
+                    for tpl in range(len(last_obs_test)):
+                        Wave_pre += last_obs_test[tpl][0]
+                        Obs_pre  += last_obs_test[tpl][1]
+                    Wave_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Robot_answer = np.array([[Wave_pre,Obs_pre]])
+      
+                    print("The average is ", Wave_pre,Obs_pre)
+
+                    #Robot_answer=wavelengths_prediction_test[0]
+                    #print("Y_TEST_ROBOT", Y_testing)
+                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
+                    #Here we change 
+                    print("sending len",len(last_obs_test))
+
+                    print("Robot send back a wavelenght of", Robot_answer)
+                    print("User input was ", input_user_model, input_user)
+                    test_error= Robot_answer - input_user_model
+                    print("Our test error is ", test_error)
+                    
+                    # ##Plot
+                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+
+                    # #Plot2
+                
+
+
+                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+
+                    if test_error[0][0]< 200 and test_error[0][0]>-200:
+                        print("The model is trained----")
+                        break
+                    else:
+                        print("Model would try to reduce the error")
+                        if r == 8:
+                            print("---->Done training<----")
+                        else:
+                            print("-----")
+                        for sert in range(len(last_obs_test)):
+                            # print("Ln", len(clean_wave_test))
+                            print("Insert in", sert)
+                            new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
+                            df = df.append(new_data, ignore_index = True)
+                            Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
+
+                
+                print("Dt",df)
+                print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
+
+                # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                # color_names = ["red","orange","blue"]
+                # #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+                # waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+                # print("Printtttttttt",waves_1)
+                # for ke in range(len(label_names)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nnm in range(len(waves_1[ke])):
+                #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+
+                
+                # ##CCCCCC
+                # # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+                # plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
+
+
+                # #plt.xlim(0.00001, 0.003)
+                # #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+                # plt.legend(loc="upper right",  prop={"size":6})
+                # plt.show()
+                # fig_changhe_model.savefig('changeInWavesModel.png')
+
+                # #Plot recipes and the input
+
+                # waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
+                # print("Ltp",waves)
+                # # input_user=50
+                # fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # colors_2= ["red","green","blue"]
+                # label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
+
+                # for k in range(len(label_names_2)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nn in range(len(waves[k])):
+                #         plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
+
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
+                # fig_last.savefig('Input-Recipes.png')
+
+
+
+                # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
+                # print("Pppppppp",pattt)
+                # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
+                # patternFoll = patternFoll.reset_index()
+                # print("Pppppppp",patternFoll)
+
+                # # recipesTaken= df.Concentration.unique()
+                # recipesTaken = patternFoll["Concentration"].ravel().tolist()
+                # patternFollowed = patternFoll["Wavelength"].ravel().tolist()
+                # print("RRRR",patternFollowed,recipesTaken)
+                # fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                # #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                # plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
+                # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                # plt.xlabel("[KBr] Concentration (mM)")
+                # plt.ylabel("Wavelength (nm)")
+                # plt.legend(prop={"size":6})
+                # plt.show()
+                # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
+
+                print("Before entering to the while loop: scan_data",scan_data)        
+                
+                self.close_connection()
+                self.pr.shutdown()
+                return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+
+            #Graph / Threshold
+
+            else:
+                print("Neural")
+                print("--- Neural Simulation----")
+                recipes = model.generate_seed_rxns(3) #number of recipes
+                print("Our initital recipes:",recipes)
+                print("----Breaking our initial recipes----")
+                recipe1 = recipes[:][0:1][0]
+                recipe2 = recipes[:][3:4][0]
+                recipe3 = recipes[:][6:7][0]
+                # print("RRR",recipe1)
+                # print("RRR",recipe2)
+                # print("RRR",recipe3)
+
+                #we would get observance for each recipe:
+                wavelengths=[]
+                wavelengths_to_train =[]
+                recipes_to_train = []
+
+                wavelengths_to_train_2 =[]
+                recipes_to_train_2 = []
+
+                wavelengths_to_train_3 =[]
+                recipes_to_train_3 = []
+
+                wavelengths_for_recipe_1 = []
+                wavelengths_for_recipe_2 = []
+                wavelengths_for_recipe_3 = []
+                
+                obs_for_recipe_1 = {}
+                obs_for_recipe_2 = {}
+                obs_for_recipe_3 = {}
+
+                obs_for_recipe_1_test={}
+
+                waves_evol_1=[]
+                waves_evol_2=[]
+                waves_evol_3=[]
+
+                index_for_l=0
+                index_for_l_2=0
+                index_for_l_3=0
+                
+                number_rep_recip= 0
+                for r in range(3):
+
+                    
+                    # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
+                    recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
+                    print("----Start ",str(r+1)," ----")
+                    print('recipe block', str(r+1) ,recipe_block)
+                    #do the first one
+                    # print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {}'.format(str(r+1)))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames = [self._generate_wellname() for i in range(recipe_block.shape[0])]
+                    print("Wellnames",wellnames)
+                    #plan and execute a reaction
+                    self._create_samples(wellnames, recipe_block)
+                    #pull in the scan data
+                    filenames = self.rxn_df[
+                                (self.rxn_df['op'] == 'scan') |
+                                (self.rxn_df['op'] == 'scan_until_complete')
+                                ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                    scan_data = self._get_sample_data(wellnames, last_filename)
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y= scan_data.T.to_numpy()
+                    
+
+                    scan_Y_1 = scan_Y[0]
+                    scan_Y_2 = scan_Y[1]
+                    scan_Y_3 = scan_Y[2]
+
+                    #print("len rp1",len(scan_Y_1),scan_Y_1)
+                    # print("len rp2",len(scan_Y_2),len(scan_Y_2))
+                    # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+
+                    maxWave_scan_1, X_scan_1, Y_scan_1, Obs_scan_1 = MaxWaveLength_Obs(scan_Y_1)
+                    maxWave_scan_2, X_scan_2, Y_scan_2, Obs_scan_2 = MaxWaveLength_Obs(scan_Y_2)
+                    maxWave_scan_3, X_scan_3, Y_scan_3, Obs_scan_3 = MaxWaveLength_Obs(scan_Y_3)
+
+                    print("W-O",maxWave_scan_1,Obs_scan_1)
+                    print("W-O",maxWave_scan_2,Obs_scan_2)
+                    print("W-O",maxWave_scan_3,Obs_scan_3)
+
+
+                    # print()
+                    # Plot the wave obs of the three samples
+
+                    fig_wave_obs= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    plt.plot(X_scan_1,Y_scan_1)
+                    plt.plot(X_scan_2,Y_scan_2)
+                    plt.plot(X_scan_3,Y_scan_3)
+                    plt.show() 
+                    fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
+
+
+                    # print("WaveL max 1"+". ", maxWave_scan_1)
+                    # print("WaveL max 2"+". ", maxWave_scan_2)
+                    # print("WaveL max 3"+". ", maxWave_scan_3)
+                    
+                    #
+                    #Add to the list of wavelengths
+                    if r== 0:
+                        print("----First initial recipes----")
+                        print(recipe1)
+                        print(type(recipe1), np.array([recipe1]))
+                        print(type(np.array([recipes[0][number_rep_recip:number_rep_recip+1]]))),np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                        
+
+                        new_plots_x =[]
+                        new_plots_y = []
+
+                        wavelengths_for_recipe_1.append(maxWave_scan_1)
+                        wavelengths_for_recipe_1.append(maxWave_scan_2)
+                        wavelengths_for_recipe_1.append(maxWave_scan_3)
+
+                        obs_for_recipe_1[wavelengths_for_recipe_1[0]]= Obs_scan_1
+                        obs_for_recipe_1[wavelengths_for_recipe_1[1]]= Obs_scan_2
+                        obs_for_recipe_1[wavelengths_for_recipe_1[2]]= Obs_scan_3
+
+
+                        waves_evol_1.append(maxWave_scan_1)
+                        waves_evol_1.append(maxWave_scan_2)
+                        waves_evol_1.append(maxWave_scan_3)
+
+
+                        waves_recipe1 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe1_sorted = sorted(waves_recipe1)
+
+
+
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe1_sorted), "recipes")
+                            print("--------------------------")
+                            distances = []
+                            for rr in range(1,len(waves_recipe1_sorted)):
+                                distances.append(waves_recipe1_sorted[rr]-waves_recipe1_sorted[rr-1])
+
+                            print("Distances",distances)
+                            
+                            store_indices=[]
+                            for i in range(len(distances)):
+                                if i!= len(distances):
+                                    if distances[i] <= 10:
+                                        store_indices.append(i)
+                                    print("stored indices",store_indices)
+                                        
+                            print(" ")
+
+                            if len(store_indices)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe1_sorted)
+                                if len(waves_recipe1_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe1])
+
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                print("Creating one more sample",recipe_block_2)
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+                                scan_Y= scan_data.T.to_numpy()
+                                # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_1_second = scan_Y[0]
+                                    
+
+                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                                    
+
+                                maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new,Obs_scan_1_new = MaxWaveLength_Obs(scan_Y_1_second)
+                                print("W-O",maxWave_scan_1_sec,Obs_scan_1_new)
+                               
+                                new_plots_x.append(X_scan_1_new)
+                                new_plots_y.append(Y_scan_1_new)
+                                waves_recipe1.append(maxWave_scan_1_sec)
+                                waves_recipe1_sorted= sorted(waves_recipe1)
+                                obs_for_recipe_1[maxWave_scan_1_sec]=Obs_scan_1_new
+
+                                print("")
+                                # if len(waves_recipe1_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff=[]
+                                for w in range(len(store_indices)):
+                                    wave_min_diff.append((waves_recipe1_sorted[store_indices[w]],waves_recipe1_sorted[store_indices[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin= []
+                                for m in range(len(wave_min_diff)):
+                                    for v in range(2):
+                                        wave_min_diff_fin.append(wave_min_diff[m][v])
+
+                                #with repitions
+                                clean_wave = []
+                                for z in wave_min_diff_fin:
+                                    if z not in clean_wave:
+                                        clean_wave.append(z)
+
+                                #Clean with repetitions and without weight
+
+                                new_added_list=[]
+                                new_added_list.append(wave_min_diff[0][0])
+                                new_added_list.append(wave_min_diff[0][1])
+                                for ri in range(len(wave_min_diff)-1):
+                                    print("S",wave_min_diff)
+                                    if wave_min_diff[ri][1] == wave_min_diff[ri+1][0]:
+                                        print("s",wave_min_diff)
+                                        new_added_list.append(wave_min_diff[ri+1][1])
+
+                                last_obs_1=[]
+                                for rii in range(len(new_added_list)):
+                                    last_obs_1.append((new_added_list[rii],obs_for_recipe_1[new_added_list[rii]]))
+
+                                #For ploting
+                                #wavelengths_for_recipe_1 = clean_wave
+                                wavelengths_for_recipe_1 = wave_min_diff_fin 
+                                print("Current list sorted",waves_recipe1_sorted)
+                                #print("--->Waves to use",clean_wave)
+                                #print("--->Waves to use",wave_min_diff_fin)
+                                print("--->Waves to use",new_added_list)
+                                print("--->Data to use",last_obs_1)
+
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black") #COLOR?
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x)):
+                                        plt.plot(new_plots_x[ww],new_plots_y[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new.dpi)
+                                break
+                        
+
+
+
+                    elif r ==1:
+
+                        print("----Second initial recipes----")
+                        print(recipe2)
+                        
+                        wavelengths_for_recipe_2.append(maxWave_scan_1)
+                        wavelengths_for_recipe_2.append(maxWave_scan_2)
+                        wavelengths_for_recipe_2.append(maxWave_scan_3)
+
+                        obs_for_recipe_2[wavelengths_for_recipe_2[0]] = Obs_scan_1
+                        obs_for_recipe_2[wavelengths_for_recipe_2[1]] = Obs_scan_2
+                        obs_for_recipe_2[wavelengths_for_recipe_2[2]] = Obs_scan_3
+
+
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_2)
+                        waves_evol_2.append(maxWave_scan_3)
+
+                        print("Making comparison")
+                        
+
+                        new_plots_x_2 =[]
+                        new_plots_y_2 = []
+
+
+                        waves_recipe2 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe2_sorted = sorted(waves_recipe2)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe2_sorted), "recipes")
+                            print("--------------------------")
+                            distances_2 = []
+                            for rr in range(1,len(waves_recipe2_sorted)):
+                                distances_2.append(waves_recipe2_sorted[rr]-waves_recipe2_sorted[rr-1])
+
+                            print("Distances",distances_2)
+                            
+                            store_indices_2=[]
+                            for i in range(len(distances_2)):
+                                if i!= len(distances_2):
+                                    if distances_2[i] <= 10:
+                                        store_indices_2.append(i)
+                                    print("stored indices",store_indices_2)
+                                        
+                            print(" ")
+
+                            if len(store_indices_2)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe2_sorted)
+                                if len(waves_recipe2_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+                                recipe_block_2 = np.array([recipe2])
+                                print("Creating one more sample",recipe_block_2)
+                                #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                    # print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10")
+
+                                scan_Y_2_second = scan_Y[0]
+                                    
+
+                                    # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
+                                    
+
+                                maxWave_scan_2_sec, X_scan_2_new, Y_scan_2_new, Obs_scan_2_new = MaxWaveLength_Obs(scan_Y_2_second)
+                                    
+                                    
+                                print("W-O",maxWave_scan_2_sec,Obs_scan_2_new)
+                                new_plots_x_2.append(X_scan_2_new)
+                                new_plots_y_2.append(Y_scan_2_new)
+                                waves_recipe2.append(maxWave_scan_2_sec)
+                                waves_recipe2_sorted= sorted(waves_recipe2)
+                                obs_for_recipe_2[maxWave_scan_2_sec]=Obs_scan_2_new
+                                print("")
+                                # if len(waves_recipe2_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                                
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_2=[]
+                                for w in range(len(store_indices_2)):
+                                    wave_min_diff_2.append((waves_recipe2_sorted[store_indices_2[w]],waves_recipe2_sorted[store_indices_2[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_2= []
+                                for m in range(len(wave_min_diff_2)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_2.append(wave_min_diff_2[m][v])
+
+                                #with repitions
+                                clean_wave_2 = []
+                                for z in wave_min_diff_fin_2:
+                                    if z not in clean_wave_2:
+                                        clean_wave_2.append(z)
+
+                                new_added_list_2=[]
+                                new_added_list_2.append(wave_min_diff_2[0][0])
+                                new_added_list_2.append(wave_min_diff_2[0][1])
+                                for ri in range(len(wave_min_diff_2)-1):
+                                    print("S",wave_min_diff_2)
+                                    if wave_min_diff_2[ri][1] == wave_min_diff_2[ri+1][0]:
+                                        print("s",wave_min_diff_2)
+                                        new_added_list_2.append(wave_min_diff_2[ri+1][1])
+
+                                last_obs_2=[]
+                                for rii in range(len(new_added_list_2)):
+                                    last_obs_2.append((new_added_list_2[rii],obs_for_recipe_2[new_added_list_2[rii]]))
+
+                                print("Current list sorted",waves_recipe2_sorted)
+                                #print("--->Waves to use",wave_min_diff_fin_2)
+                                print("--->Waves to use",new_added_list_2)
+                                print("--->Data to use", last_obs_2)
+
+
+                                #for ploting
+                                wavelengths_for_recipe_2 =wave_min_diff_fin_2
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_2= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+
+                                    plt.title("Spectrum Recipe 2", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1, color="black")
+                                    plt.plot(X_scan_2,Y_scan_2, color="black")
+                                    plt.plot(X_scan_3,Y_scan_3, color="black")
+                                    for ww in range(len(new_plots_x_2)):
+                                        plt.plot(new_plots_x_2[ww],new_plots_y_2[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_2.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_2.dpi)
+                                break
+                                
+                                            
+                    elif r ==2:
+
+                        print("----Third initial recipes----")
+                        print(recipe3)
+
+                        wavelengths_for_recipe_3.append(maxWave_scan_1)
+                        wavelengths_for_recipe_3.append(maxWave_scan_2)
+                        wavelengths_for_recipe_3.append(maxWave_scan_3)
+
+
+
+                        waves_evol_3.append(maxWave_scan_1)
+                        waves_evol_3.append(maxWave_scan_2)
+                        waves_evol_3.append(maxWave_scan_3)
+
+        
+
+                        new_plots_x_3 =[]
+                        new_plots_y_3 = []
+
+
+                        waves_recipe3 = [maxWave_scan_1,maxWave_scan_2,maxWave_scan_3]
+                        waves_recipe3_sorted = sorted(waves_recipe3)
+
+                        obs_for_recipe_3[maxWave_scan_1] = Obs_scan_1
+                        obs_for_recipe_3[maxWave_scan_2] = Obs_scan_2
+                        obs_for_recipe_3[maxWave_scan_3] = Obs_scan_3
+
+                        # print("W-O",maxWave_scan_1,Obs_scan_1)
+                        # print("W-O",maxWave_scan_2,Obs_scan_2)                      
+                        # print("W-O",maxWave_scan_3,Obs_scan_3)
+
+                        for l in range(6):
+                            print("----------------------------------")
+                            print("Comparing", len(waves_recipe3_sorted), "recipes")
+                            print("--------------------------")
+                            distances_3 = []
+                            for rr in range(1,len(waves_recipe3_sorted)):
+                                distances_3.append(waves_recipe3_sorted[rr]-waves_recipe3_sorted[rr-1])
+
+                            print("Distances",distances_3)
+                            
+                            store_indices_3=[]
+                            for i in range(len(distances_3)):
+                                if i!= len(distances_3):
+                                    if distances_3[i] <= 10:
+                                        store_indices_3.append(i)
+                                    print("stored indices",store_indices_3)
+                                        
+                            print(" ")
+
+                            if len(store_indices_3)==0 :
+                                print("We do NOT find a distance less than 10")
+                                print("Current list sorted",waves_recipe3_sorted)
+                                if len(waves_recipe3_sorted) == 8:
+                                    print("No stable waves were found, stopping the program")
+                                    sys.exit()
+                                print("...Creating one more sample of the recipe")
+                                #insert robot
+                                #waves_recipe1.append(random.randint(500, 600))
+                                #
+
+                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                recipe_block_2 = np.array([recipe3])
+                                print("Creating one more sample",recipe_block_2)
+                                #do the first one
+                                #print('<<controller>> executing batch {}'.format(self.batch_num))
+                                #print('<<controller>> executing batch {}'.format(str(r+1)))
+                                #don't have data to train, so, not training
+                                #generate new wellnames for next batch
+                                wellnames = [self._generate_wellname() for i in range(recipe_block_2.shape[0])]
+                                #plan and execute a reaction
+                                self._create_samples(wellnames, recipe_block_2)
+                                #pull in the scan data
+                                filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                                #TODO filenames is empty. dunno why
+                                last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                                scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                                scan_Y= scan_data.T.to_numpy()
+                                #print("Scan When Distance is > 10", scan_Y)
+                                print("Scan When Distance is > 10, recipe 3")
+                                scan_Y_3_second = scan_Y[0]                                
+                                
+                                    
+
+                                maxWave_scan_3_sec, X_scan_3_new, Y_scan_3_new, Obs_scan_3_new = MaxWaveLength_Obs(scan_Y_3_second)
+                                    
+                                    
+                                print("W-O",maxWave_scan_3_sec,Obs_scan_3_new)
+                                new_plots_x_3.append(X_scan_3_new)
+                                new_plots_y_3.append(Y_scan_3_new)
+                                waves_recipe3.append(maxWave_scan_3_sec)
+                                waves_recipe3_sorted= sorted(waves_recipe3)
+                                obs_for_recipe_3[maxWave_scan_3_sec] = Obs_scan_3_new
+                                print("")
+                                # if len(waves_recipe3_sorted) == 9:
+                                #     print("No stable waves were found, stopping the program")
+                                #     sys.exit()
+                            
+                            else:
+                                #getting the wavelengths which difference is less than 10
+                                wave_min_diff_3=[]
+                                for w in range(len(store_indices_3)):
+                                    wave_min_diff_3.append((waves_recipe3_sorted[store_indices_3[w]],waves_recipe3_sorted[store_indices_3[w]+1]))
+
+
+                                #with  repitions
+                                wave_min_diff_fin_3= []
+                                for m in range(len(wave_min_diff_3)):
+                                    for v in range(2):
+                                        wave_min_diff_fin_3.append(wave_min_diff_3[m][v])
+
+                                #with repitions
+                                clean_wave_3 = []
+                                for z in wave_min_diff_fin_3:
+                                    if z not in clean_wave_3:
+                                        clean_wave_3.append(z)
+
+
+
+                                new_added_list_3=[]
+                                new_added_list_3.append(wave_min_diff_3[0][0])
+                                new_added_list_3.append(wave_min_diff_3[0][1])
+                                for ri in range(len(wave_min_diff_3)-1):
+                                    print("S",wave_min_diff_3)
+                                    if wave_min_diff_3[ri][1] == wave_min_diff_3[ri+1][0]:
+                                        print("s",wave_min_diff_3)
+                                        new_added_list_3.append(wave_min_diff_3[ri+1][1])
+
+                                last_obs_3=[]
+                                for rii in range(len(new_added_list_3)):
+                                    last_obs_3.append((new_added_list_3[rii],obs_for_recipe_3[new_added_list_3[rii]]))
+
+                                # print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",clean_wave_3)
+                                # #for ploting
+                                # wavelengths_for_recipe_3 = clean_wave_3
+                                print("Current list sorted",waves_recipe3_sorted)
+                                # print("--->Waves to use",wave_min_diff_fin_3)
+                                print("--->Waves to use",new_added_list_3)
+                                print("--->Data to use",last_obs_3)
+
+                                #for ploting
+                                wavelengths_for_recipe_3 = wave_min_diff_fin_3
+                                if l !=0:
+                                    #Plot after training
+                                    print("Plotting---")
+                                    fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                    # plt.rc('axes', linewidth = 2)
+                                    plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                    plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
+                                    plt.plot(X_scan_1,Y_scan_1)
+                                    plt.plot(X_scan_2,Y_scan_2)
+                                    plt.plot(X_scan_3,Y_scan_3)
+                                    for ww in range(len(new_plots_x_3)):
+                                        plt.plot(new_plots_x_3[ww],new_plots_y_3[ww],color="green")
+                                    plt.show() 
+                                    fig_wave_new_3.savefig("waves-recipe"+str(r)+"more"+".png",dpi=fig_wave_new_3.dpi)
+                                break
+
+                    number_rep_recip += 3
+
+                print("Checking our input (Wavelengths)")
+                # print("wavelength 1",clean_wave)
+                # print("wavelength 3",clean_wave_2)
+                # print("wavelength 3",clean_wave_3)
+                print("wavelength 1",new_added_list)
+                print("wavelength 3",new_added_list_2)
+                print("wavelength 3",new_added_list_3)
+                print("Data",last_obs_1,last_obs_2,last_obs_3)
+                ##
+                # avg for plots
+                Avg_1= sum(new_added_list)/len(new_added_list)
+                Avg_2= sum(new_added_list_2)/len(new_added_list_2)
+                Avg_3= sum(new_added_list_3)/len(new_added_list_3)
+
+                ##
+                # print("Checking our input: wavelengths")
+                # print("wavelength 1",wavelengths_for_recipe_1)
+                # print("wavelength 3",wavelengths_for_recipe_2)
+                # print("wavelength 3",wavelengths_for_recipe_3)
+                # print("Waves pass 1", clean_list_1)
+                # print("Waves pass 2", clean_list_2)
+                # print("Waves pass ", clean_list_3)
+                total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
+                #Consider duplocates or not
+                #total_waves=  clean_wave+clean_wave_2+clean_wave_3
+                #total_waves= wave_min_diff_fin+ wave_min_diff_fin_2+ wave_min_diff_fin_3
+                total_waves= new_added_list+ new_added_list_2+ new_added_list_3
+                print("Total Waves", total_waves)
+                recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
+                print("Plot change",type(recipes_plot),recipes_plot)
+                # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
+                # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+                
+                waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
+                print(type(waves_evol_plot),waves_evol_plot)
+                print(waves_evol_plot[0])
+                print(recipes_to_train_3)
+                #Ploting change
+
+                fig_changhe= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                color_names = ["red","green","blue"]
+                # plt.rc('axes', linewidth = 2)
+                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                plt.title(str("Generations"), fontsize = 16, pad = 20)
+                for t in range(len(recipes_plot)):
+                            #print(recipes_plot[t]*len(waves_evol_plot[u]))
+                            #print(u)
+                            print(recipes_plot[t])
+                            #print(waves_evol_plot[u])
+                            plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
+                        
+                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
+                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
+                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
+                #plt.xlim(0.00001, 0.003)
+                plt.legend(loc="upper right",  prop={"size":6})
+                fig_changhe.savefig('changeInWaves.png')
+
+
+
+
+
+                print("Wav ori", total_waves_2)
+                # print("Waves evol", )
+                print("Wav nw Final",total_waves)
+                # Y= np.array([wavelengths])
+                # Y= np.array([total_waves])
+                J = last_obs_1+last_obs_2+last_obs_3
+                Y = np.array([J])
+
+
+                print("recipes----")
+                print(recipes)
+
+                recipes_1_out = np.repeat(np.array([recipe1]), len(new_added_list), axis=0)
+                recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
+                recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
+
+                #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
+                # print("our recipes", recipes)
+                final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
+                #passing to list
+                print("----------------------------")
+                print("Final recipes", final_recipes)
+                print("Final Y",Y)
+                X_df = [final_recipes[:][r][0] for r in range(len(final_recipes[:][:]))]
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+
+                X_df_Cit = [final_recipes[:][z][0] for z in range(len(final_recipes[:][:]))]
+                X_df_Ag = [final_recipes[:][z][1] for z in range(len(final_recipes[:][:]))]
+                X_df_KBr = [final_recipes[:][z][2] for z in range(len(final_recipes[:][:]))]
+
+
+                Y_df = [Y[0][m] for m in range(len(Y[0]))]
+                WaveLength_df= [Y_df[m][0] for m in range(len(Y_df))]
+                Obs_df= [Y_df[m][1] for m in range(len(Y_df))]
+                #print(X_df_Cit)
+                #print(X_df_Ag)
+                #print(X_df_KBr)
+                #print(WaveLength_df)
+                #print(Obs_df)  
+
+
+                #Checking that they are list Y_df
+                # print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
+                print("Checking if X and Y are list now: ", type(X_df_Cit),type(Y_df))
+
+
+
+                ##creadting the dataframe
+                # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                # #sorting by Concentration
+                # df = df.sort_values(by=['Concentration'])
+                df = pd.DataFrame(list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
+                #sorting by Concentration
+                #df = df.sort_values(by=['Concentration'])
+                print("DFrame")
+                print("")
+                print(df)
+
+
+                input_user= input("Please enter the desire [Wavelength - Observance] : ")
+                print(input_user, type(input_user))
+                print(input_user.find("-"))
+                format_pos= input_user.find("-")
+                while True:
+
+                    if format_pos == -1:
+                        print("Enter the correct form ")
+                        input_user= input("Please enter the desire Wavelength - Observance : ")
+                        format_pos= input_user.find("-")
+                    else :
+                        break
+
+                print("FINISH",input_user)
+                input_user_model = (float(input_user[:format_pos]),float(input_user[format_pos+1:]))
+                input_user_model = np.array([input_user_model])
+                print(input_user_model,type(input_user_model))
+
+
+                #NN model
+            
+                W_list=[]
+                b_list=[]
+                ##Training 
+                #Receive data from robot
+                wavelengths_prediction_test=[]
+                wavelengths_progress_test=[]
+                wavelengths_to_test=[]
+                user_concentrations=[]
+                Avg_test=[]
+                
+
+                
+                for r in range(5):
+                    print("Epoch", r+1)
+
+                    # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
+                    input_user_model, user_concentration, train_prediction, W, b = model.training(df,input_user_model,r)#550, 0.0002, 480 , 10000, 20
+                    
+                    # W_list.append(W)
+                    # b_list.append(b)
+                    ##pas to the robot THE USER_CONCENTRATION
+                    # Robot_answer= 465
+                    ##Testing
+                    print("Cont0",input_user_model,user_concentration)
+                    print("")
+                    print("---")
+                    testing_recipes = [user_concentration]
+                    
+                    
+                    # for r in range(len(testing_recipes[0])):
+                    # recipe_unit_test = np.array([[user_concentration]])
+                    recipe_unit_test = user_concentration
+                    recipe_unit_test = np.repeat(user_concentration, 3, axis=0)
+                    print("Recipes Test",recipe_unit_test)
+                    #do the first one
+                    #print('<<controller>> executing batch {}'.format(self.batch_num))
+                    print('<<controller>> executing batch {} for testing'.format(1))
+                    #don't have data to train, so, not training
+                    #generate new wellnames for next batch
+                    wellnames_testing = [self._generate_wellname() for i in range(recipe_unit_test.shape[0])]
+                    #plan and execute a reaction
+                    self._create_samples(wellnames_testing, recipe_unit_test)
+                    #pull in the scan data
+                    filenames_testing = self.rxn_df[
+                                    (self.rxn_df['op'] == 'scan') |
+                                    (self.rxn_df['op'] == 'scan_until_complete')
+                                    ].reset_index()
+                    #TODO filenames is empty. dunno why
+                    last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
+                    scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
+                    #scan_data = observance
+                    #We process scan_data to get lambda
+                    scan_Y_testing= scan_data_testing.T.to_numpy()
+                    
+
+                    scan_Y_1_test = scan_Y_testing[0]
+                    scan_Y_2_test = scan_Y_testing[1]
+                    scan_Y_3_test = scan_Y_testing[2]
+
+
+                    maxWave_scan_1_test, X_scan_test_1, Y_scan_test_1, Obs_scan_test_1 = MaxWaveLength_Obs(scan_Y_1_test)
+                    maxWave_scan_2_test, X_scan_test_2, Y_scan_test_2, Obs_scan_test_2 = MaxWaveLength_Obs(scan_Y_2_test)
+                    maxWave_scan_3_test, X_scan_test_3, Y_scan_test_3, Obs_scan_test_3 = MaxWaveLength_Obs(scan_Y_3_test)
+
+                    wavelengths_prediction_test.append(maxWave_scan_1_test)
+                    wavelengths_prediction_test.append(maxWave_scan_2_test)
+                    wavelengths_prediction_test.append(maxWave_scan_3_test)
+                    ###     
+                    wavelengths_progress_test.append(maxWave_scan_1_test)
+                    wavelengths_progress_test.append(maxWave_scan_2_test)
+                    wavelengths_progress_test.append(maxWave_scan_3_test)
+
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+                    user_concentrations.append(user_concentration)
+
+
+
+                    new_plots_x_test =[]
+                    new_plots_y_test = []
+
+                    waves_recipe1_test = [maxWave_scan_1_test,maxWave_scan_2_test,maxWave_scan_3_test]
+                    waves_recipe1_sorted_test = sorted(waves_recipe1_test)
+                    
+                    obs_for_recipe_1_test[maxWave_scan_1_test] = Obs_scan_test_1
+                    obs_for_recipe_1_test[maxWave_scan_2_test] = Obs_scan_test_2
+                    obs_for_recipe_1_test[maxWave_scan_3_test] = Obs_scan_test_3
+
+                    for l in range(4):
+                        
+                        print("----------------------------------")
+                        print("Comparing", len(waves_recipe1_sorted_test), "recipes from Test/Model")
+                        print("--------------------------")
+                        distances_test = []
+                        for rr in range(1,len(waves_recipe1_sorted_test)):
+                            distances_test.append(waves_recipe1_sorted_test[rr]-waves_recipe1_sorted_test[rr-1])
+
+                            print("Distances",distances_test)
+                            
+                        store_indices_test=[]
+                        for i in range(len(distances_test)):
+                            if i!= len(distances_test):
+                                if distances_test[i] <= 10:
+                                    store_indices_test.append(i)
+                                print("stored indices test",store_indices_test)
+                                        
+                        print(" ")
+
+                        if len(store_indices_test)==0 :
+                            print("We do NOT find a distance less than 10")
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            if len(waves_recipe1_sorted_test) == 8:
+                                print("No stable waves were found, stopping the program")
+                                sys.exit()
+                            print("...Creating one more sample of the recipe")
+                            #insert robot
+                            #waves_recipe1.append(random.randint(500, 600))
+                            #
+
+                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            # #do the first one
+                            # #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            # #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            # #don't have data to train, so, not training
+                            # #generate new wellnames for next batch
+                            
+                            recipe_unit_test_rep = user_concentration
+                            # recipe_block_2 = np.array([recipe2])
+                            print("Creating one more sample",recipe_unit_test_rep)
+                            recipe_unit_test_rep = np.repeat(user_concentration, 1, axis=1)
+                            print("Recipes Test again",recipe_unit_test_rep)
+                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            #do the first one
+                            #print('<<controller>> executing batch {}'.format(self.batch_num))
+                            #print('<<controller>> executing batch {}'.format(str(r+1)))
+                            #don't have data to train, so, not training
+                            #generate new wellnames for next batch
+                            wellnames = [self._generate_wellname() for i in range(recipe_unit_test_rep.shape[0])]
+                            #plan and execute a reaction
+                            self._create_samples(wellnames, recipe_unit_test_rep)
+                            #pull in the scan data
+                            filenames = self.rxn_df[
+                                            (self.rxn_df['op'] == 'scan') |
+                                            (self.rxn_df['op'] == 'scan_until_complete')
+                                            ].reset_index()
+                            #TODO filenames is empty. dunno why
+                            last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
+                            scan_data = self._get_sample_data(wellnames, last_filename)
+
+
+                            scan_Y_test_rep= scan_data.T.to_numpy()
+                            #print("Scan When Distance is > 10", scan_Y)
+                            print("Scan When Distance is > 10 for test")
+
+                            scan_Y_rep_1 = scan_Y_test_rep[0]
+                            # scan_Y_rep_2 = scan_Y_test_rep[1]
+                                    
+
+                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
+                            
+                            
+                            print("W-O",maxWave_scan_1_sec_test,Obs_scan_test_1_new)
+                            
+                            new_plots_x.append(X_scan_1_new_test)
+                            new_plots_y.append(Y_scan_1_new_test)
+                            waves_recipe1_test.append(maxWave_scan_1_sec_test)
+                            waves_recipe1_sorted_test= sorted(waves_recipe1_test)
+
+
+                            obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
+
+                            print("")
+                            # if len(waves_recipe1_sorted_test) == 9:
+                            #     print("No stable waves were found, stopping the program")
+                            #     sys.exit()
+                                
+                        else:
+                            #getting the wavelengths which difference is less than 10
+                            wave_min_diff_test=[]
+                            for w in range(len(store_indices_test)):
+                                wave_min_diff_test.append((waves_recipe1_sorted_test[store_indices_test[w]],waves_recipe1_sorted_test[store_indices_test[w]+1]))
+
+
+                            #with  repitions
+                            wave_min_diff_fin_test= []
+                            for m in range(len(wave_min_diff_test)):
+                                for v in range(2):
+                                    wave_min_diff_fin_test.append(wave_min_diff_test[m][v])
+
+                            #with repitions
+                            clean_wave_test = []
+                            for z in wave_min_diff_fin_test:
+                                if z not in clean_wave_test:
+                                    clean_wave_test.append(z)
+
+
+                            new_added_list_test=[]
+                            new_added_list_test.append(wave_min_diff_test[0][0])
+                            new_added_list_test.append(wave_min_diff_test[0][1])
+                            for ri in range(len(wave_min_diff_test)-1):
+                                print("S",wave_min_diff_test)
+                                if wave_min_diff_test[ri][1] == wave_min_diff_test[ri+1][0]:
+                                        print("s",wave_min_diff_test)
+                                        new_added_list_test.append(wave_min_diff_test[ri+1][1])
+                            
+                            last_obs_test=[]
+                            for riit in range(len(new_added_list_test)):
+                                last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
+
+                            print("Current list sorted",waves_recipe1_sorted_test)
+                            #print("--->Waves to use",clean_wave_test)
+                            print("--->Waves to use",new_added_list_test)
+                            print("--->Data to use",last_obs_test)
+                            
+                            if l !=0:
+                                #Plot after training
+                                print("Plotting---")
+                                fig_wave_test= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                                plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
+                                plt.title("Generation in Test", fontsize = 16, pad = 20)
+                                plt.plot(X_scan_test_1,Y_scan_test_1)
+                                plt.plot(X_scan_test_2,Y_scan_test_2)
+                                plt.plot(X_scan_test_3,Y_scan_test_3)
+                                for ww in range(len(new_plots_x_test)):
+                                    plt.plot(new_plots_x_test[ww],new_plots_y_test[ww],color="green")
+                                plt.show() 
+                                fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
+                            break
+
+                    
+
+                    #print("We get the following wavelengths",clean_wave_test)
+                    print("We get the following wavelengths",new_added_list_test)
+                    # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
+                    # print("The average is ", average_of_wave_test)
+                    Wave_pre =0
+                    Obs_pre =0
+                    for tpl in range(len(last_obs_test)):
+                        Wave_pre += last_obs_test[tpl][0]
+                        Obs_pre  += last_obs_test[tpl][1]
+                    Wave_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Robot_answer = np.array([[Wave_pre,Obs_pre]])
+      
+                    print("The average is ", Wave_pre,Obs_pre)
+
+                    #Robot_answer=wavelengths_prediction_test[0]
+                    #print("Y_TEST_ROBOT", Y_testing)
+                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
+                    #Here we change 
+                    print("sending len",len(last_obs_test))
+
+                    print("Robot send back a wavelenght of", Robot_answer)
+                    print("User input was ", input_user_model, input_user)
+                    test_error= Robot_answer - input_user_model
+                    print("Our test error is ", test_error)
+                    
+                    # ##Plot
+                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+
+                    # #Plot2
+                
+
+
+                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+
+                    if test_error[0][0]< 10 and test_error[0][0]> -10:
+                        print("The model is trained----")
+                        break
+                    else:
+                        print("Model would try to reduce the error")
+                        if r == 8:
+                            print("---->Done training<----")
+                        else:
+                            print("-----")
+                        for sert in range(len(last_obs_test)):
+                            # print("Ln", len(clean_wave_test))
+                            print("Insert in", sert)
+                            new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
+                            df = df.append(new_data, ignore_index = True)
+                            Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
+
+                
+                print("Dt",df)
+                print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
+
+                # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                # color_names = ["red","orange","blue"]
+                # #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+                # waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+                # print("Printtttttttt",waves_1)
+                # for ke in range(len(label_names)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nnm in range(len(waves_1[ke])):
+                #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                
+
+                
+                # ##CCCCCC
+                # # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+                # plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
+
+
+                # #plt.xlim(0.00001, 0.003)
+                # #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+                # plt.legend(loc="upper right",  prop={"size":6})
+                # plt.show()
+                # fig_changhe_model.savefig('changeInWavesModel.png')
+
+                # #Plot recipes and the input
+
+                # waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
+                # print("Ltp",waves)
+                # # input_user=50
+                # fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # colors_2= ["red","green","blue"]
+                # label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
+
+                # for k in range(len(label_names_2)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nn in range(len(waves[k])):
+                #         plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
+
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
+                # fig_last.savefig('Input-Recipes.png')
+
+
+
+                # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
+                # print("Pppppppp",pattt)
+                # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
+                # patternFoll = patternFoll.reset_index()
+                # print("Pppppppp",patternFoll)
+
+                # # recipesTaken= df.Concentration.unique()
+                # recipesTaken = patternFoll["Concentration"].ravel().tolist()
+                # patternFollowed = patternFoll["Wavelength"].ravel().tolist()
+                # print("RRRR",patternFollowed,recipesTaken)
+                # fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                # #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                # plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
+                # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                # plt.xlabel("[KBr] Concentration (mM)")
+                # plt.ylabel("Wavelength (nm)")
+                # plt.legend(prop={"size":6})
+                # plt.show()
+                # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
+                
+                self.close_connection()
+                self.pr.shutdown()
+                return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+
+
+        else:
+            print("None")
+            self.close_connection()
+            self.pr.shutdown()
+            return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+        
+           
+
+    def _get_sample_data(self,wellnames, filename):
+        '''
+        loads the spectra for the wells specified from the scan file specified  
+        params:  
+            list<str> wellnames: the names of the wells to be scanned  
+            str filename: the name of the file that holds the scans  
+        returns:  
+            df: n_wells, by size of spectra, the scan data.  
+        ''' 
+        self._update_cached_locs(wellnames)
+        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
+        unordered_data, metadata = self.pr.load_reader_data(filename, pr_dict)
+        #reorder according to order of wellnames
+        return unordered_data[wellnames]
+
+    def _create_samples(self, wellnames, recipes):
+        '''
+        creates the desired reactions on the platereader  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+              you can use for each reaction you want to perform  
+        returns:  
+            list<str> wellnames: the names of the wells produced ordered in accordance to the
+              order of recipes
+        Postconditions:
+        '''
+        self.portal.send_pack('init_containers', pd.DataFrame(
+                {'labware':self.template_meta['labware'],
+                'container':self.template_meta['cont'], 
+                'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
+        #clean and update metadata from last reaction
+        self._clean_meta(wellnames)
+        successful_build = False #Flag True when a self.rxn_df using volumes has been generated
+        #from the concentrations
+        while not successful_build:
+            try:
+                #build new df
+                self.rxn_df = self._build_rxn_df(wellnames, recipes)
+                self._insert_tot_vol_transfer()
+                if self.tot_vols: #has at least one element
+                    if (self.rxn_df.loc[0,self._products] < 0).any():
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                successful_build = True
+            except ConversionError as e:
+                self._handle_conversion_err(e)
+        self.execute_protocol_df()
+
+
+
+    def _clean_meta(self, wellnames):
+        '''
+        In addition to replacing the rxn_df, there is some metadata associated with a reaction
+        and it's reagents that must be cleaned after a reaction.  
+        params:  
+            str wellnames: the ordered names of the wells you want to produce  
+        Preconditions:  
+            self._products_contains products from last reaction  
+            self._tot_vols has products from last reaction as keys  
+        Postconditions:  
+            self._products has been reset to be wellnames  
+            self.tot_vols has been reset to have only the wellnames as keys and template vol
+              as the value  
+        '''
+        #remove old products
+        for product in self._products:
+            del self.tot_vols[product]
+        #add new keys
+        self.tot_vols.update({wellname:self.template_meta['tot_vol'] for wellname in wellnames})
+        #update products
+        self._products = wellnames
+            
+
+    def _generate_wellname(self):
+        '''
+        returns:  
+            str: a unique name for a new well
+        '''
+        wellname = "autowell{}C1.0".format(self.well_count)
+        self.well_count += 1
+        return wellname
+
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        This is used right now because it's best I've got. Ideally, you could drop the part 
+        of init that constructs product_df
+        '''
+        return self.tot_vols['Template']
+
+    def _build_rxn_df(self,wellnames,recipes):
+        '''
+        used to construct a rxn_df for this batch of reactions
+        Postconditions:  
+            self.tot_vols has been updated to 
+        '''
+        rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        self._update_cached_locs('all')
+        def build_product_rows(row):
+            '''
+            params:  
+                pd.Series row: a row of the template df  
+            returns:  
+                pd.Series: a row for the new df
+            '''
+            d = {}
+            if row['op'] == 'transfer' and pd.isna(row['conc']):
+                #is a transfer, so we want to lookup the volume of that reagent in recipe_df
+                return recipe_df.loc[:, row['reagent']]
+            else:
+                #if not a tranfer, we want to keep whatever value was there
+                return pd.Series(row['Template'], index=recipe_df.index)
+        rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
+        rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
+        rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
+        rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: np.nan if pd.isna(x) 
+                else "{}-{}".format(x, self.batch_num))
+        rxn_df.drop(columns='Template',inplace=True) #no longer need template
+        return rxn_df
+
+    def run_all_checks(self): 
+        found_errors = super().run_all_checks()
+        found_errors = max(found_errors,self.check_conc())
+        if found_errors == 0:
+            print("<<controller>> All prechecks passed!")
+            return
+        elif found_errors == 1:
+            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key "):
+                return
+            else:
+                raise Exception('Aborting base on user input')
+        elif found_errors == 2:
+            raise Exception('Critical Errors encountered during prechecks. Aborting')
+
+    def _handle_conversion_err(self,e):
+        '''
+        This function will handle errors caught in the conversion process from molarity to
+        volume reaction dataframe.  
+        params:  
+            ConversionError e: the conversion error raised  
+        Postconditions:  
+            If the error was pipetting infinitesimal volume, a dilution has been performed on
+            the robot to dilute by 2X   
+        Raises:  
+            NotImplementedError: If you ran out of a reagent you probably need to have Mark
+              restock (or you could dilute a stock maybe)  
+        '''
+        print('<<controller>> handling conversion error')
+        if e.empty_reagents:
+            #You ran out of something
+            #query the user
+            #It is also possible here that you might be able to perform dilution
+            raise NotImplementedError("You ran out of a reagent. Future functionality will call Mark at this point")
+        else:
+            #you're trying to pipette an infinitesimal volume
+            #send a single dilution column to the robot that will solve this problem
+            #we have the data here to do something smart with how much we want to dilute, but
+            #for now lets do something dumb like dilute 2x
+
+            #generate necessary parameters
+            containers = [key for key in self._cached_reader_locs.keys() 
+                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
+            stock_cont = max(containers, key=self._get_conc)
+            min_conc = min(map(self._get_conc, containers))
+            new_conc = min_conc / 2
+            #execute dilution
+            self._execute_single_dilution(new_conc, stock_cont)
+
+
+
+    def check_rxn_df(self):
+        '''
+        Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
+        Advised options are printed and if an error code is returned
+        Will run through and check all rows, even if errors are found
+        Preconditions:
+            self.rxn_df is rxn_df template at this point  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        #at this point self.rxn_df
+        found_errors = super().check_rxn_df()
+        reagent_ratios  = self.rxn_df.loc[(self.rxn_df['conc'].isna()) & (self.rxn_df['op'] == 'transfer'),\
+                ['Template','reagent']].groupby('reagent').sum()['Template']
+        has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
+                abs_tol=1e-9)).any()
+        if has_invalid_ratio:
+            print('<<controller>> precheck error: invalid ratio of reagents (doesn\'t add to 1)')
+            print('  ratios were {}'.format(reagent_ratios))
+            found_errors = max(found_errors, 2)
+        return found_errors
+
+class ProtocolExecutor(Controller): 
+    '''
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+    ATTRIBUTES:  
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+        df rxn_df: the reaction df. Not passed in, but created in init  
+    INHERITED ATTRIBUTES:  
+        armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache,   
+        str eve_files_path, str debug_path, str my_ip, str server_ip,  
+        dict<str:object> robo_params, bool simulate, int buff_size  
+    PRIVATE ATTRS:  
+        pd.index _products: the product columns  
+    INHERITED PRIVATE ATTRS:  
+        dict<str:tuple<obj>> _cached_reader_locs  
+    METHODS:  
+        execute_protocol_df() void: used to execute a single row of the reaction df  
+        run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
+          run automatically when you run your simulation  
+        CHECKS: all print messages for errors and return error codes  
+        check_rxn_df() int: checks for errors in input.  
+        check_labware() int: checks for errors in labware/labware assignments.   
+        check_products() int: checks for errors in the product placement.  
+        check_reagents() int: checks for errors in the reagent_info tab.   
+    INHERITED METHODS:  
+        run_protocol(simulate, port) void, close_connection() void, init_robot(simulate), 
+        translate_wellmap() void, run_simulation() bool  
+    '''
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False):
+        '''
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        is instantiated in run
+        '''
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
+        self.run_all_checks() 
+
+    def run_simulation(self, no_pr=False):
+        '''
+        runs a full simulation of the protocol with
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function  
+        Returns:  
+            bool: True if all tests were passed  
+        '''
+        
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        stored_cached_reader_locs = self._cached_reader_locs
+        self.server_ip = '127.0.0.1'
+        self.simulate = True
+        print('<<controller>> ENTERING SIMULATION')
+        port = 50000
+        #launch an eve server in background for simulation purposes
+        b = threading.Barrier(2,timeout=20)
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={'my_ip':'','barrier':b},name='eve_thread')
+        eve_thread.start()
+
+        #do create a connection
+        b.wait()
+        self._run(port, simulate=True, no_pr=no_pr)
+
+
+
+        #collect the eve thread
+        eve_thread.join()
+
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
+        self._cached_reader_locs = stored_cached_reader_locs
+        print('<<controller>> EXITING SIMULATION')
+    
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
+        '''
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
+        '''
+        print('<<controller>> RUNNING PROTOCOL')
+        self._run(port, simulate=simulate, no_pr=no_pr)
+        print('<<controller>> EXITING PROTOCOL')
+        
+    @error_exit
+    def _run(self, port, simulate, no_pr):
+        '''
+        params:  
+            int port: the port number to connect on  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
+        Returns:  
+            bool: True if all tests were passed  
+        '''
+        self._init_pr(simulate, no_pr)
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
+        print("<<controller>> connected")
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
+
+        self.init_robot(simulate)
+        successful_build = False
+        while not successful_build:
+            try:
+                self._update_cached_locs('all')
+                #build new df
+                self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
+                self._insert_tot_vol_transfer()
+                if self.tot_vols: #has at least one element
+                    if (self.rxn_df.loc[0,self._products] < 0).any():
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                successful_build = True
+            except ConversionError as e:
+                self._handle_conversion_err(e)        
+        self.execute_protocol_df()
+        self.close_connection()
+        self.pr.shutdown()
+
+    def init_robot(self,simulate):
+        '''
+        calls super init robot, and then sends an init_containers command to initialize all the
+        prodcuts  
+        params:  
+            bool simulate: whether the robot should run a simulation  
+        '''
+        super().init_robot(simulate)
+        #send robot data to initialize empty product containers. Because we know things like total
+        #vol and desired labware, this makes sense for a planned experiment
+        self.portal.send_pack('init_containers', self.robo_params['product_df'].to_dict())
+    
+    def _rename_products(self, rxn_df):
+        '''
+        renames dilutions acording to the reagent that created them
+        and renames rxns to have a concentration  
+        Preconditions:  
+            dilution cols are named dilution_1/2 etc  
+            callback is the last column in the dataframe  
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization  
+        params:  
+            df rxn_df: the dataframe with all the reactions  
+        Postconditions:  
+            the df has had it's dilution columns renamed to the chemical used to produce it + C<conc>  
+            rxn columns have C1 appended to them  
+        '''
+        dilution_cols = [col for col in rxn_df.columns if 'dilution_placeholder' in col]
+        #get the rxn col names
+        rxn_cols = rxn_df.loc[:, 'reagent':'chemical_name'].drop(columns=['reagent','chemical_name']).columns
+        rename_key = {}
+        for col in rxn_cols:
+            if 'dilution_placeholder' in col:
+                row = rxn_df.loc[rxn_df['op'] == 'dilution'].loc[~rxn_df[col].isna()].squeeze()
+                reagent_name = row['chemical_name']
+                assert (isinstance(reagent_name, str)), "dilution placeholder was used twice"
+                name = reagent_name[:reagent_name.rfind('C')+1]+str(row['dilution_conc'])
+                rename_key[col] = name
+            else:
+                rename_key[col] = "{}C1.0".format(col).replace(' ','_')
+        rxn_df.rename(rename_key, axis=1, inplace=True)
+
+    def _get_rxn_max_vol(self, name, products):
+        '''
+        Preconditions:  
+            volume in a container can change only during a 'transfer' or 'dilution'. Easy to add more
+            by changing the vol_change_rows
+            self.rxn_df is initialized  
+        params:  
+            str name: the column name to be searched  
+            list<str> products: the column names of all reagents (we could look this up in rxn_df, but
+              convenient to pass it in)  
+        returns:  
+            float: the maximum volume that this container will ever hold at one time, not taking into 
+              account aspirations for dilutions  
+        '''
+        if name in self.tot_vols:
+            return self.tot_vols[name]
+        else:
+            vol_change_rows = self.rxn_df.loc[self.rxn_df['op'].apply(lambda x: x in ['transfer','dilution'])]
+            aspirations = vol_change_rows['chemical_name'] == name
+            max_vol = 0
+            current_vol = 0
+            for i, is_aspiration in aspirations.iteritems():
+                if is_aspiration and self.rxn_df.loc[i,'op'] == 'transfer':
+                    #This is a row where we're transfering from this well
+                    current_vol -= self.rxn_df.loc[i, products].sum()
+                elif is_aspiration and self.rxn_df.loc[i, 'op'] == 'dilution':
+                    current_vol -= self._get_dilution_transfer_vols(self.rxn_df.loc[i])[1]
+                else:
+                    current_vol += self.rxn_df.loc[i,name]
+                    max_vol = max(max_vol, current_vol)
+            return max_vol
+
+    
+    #TESTING
+    #PRE Simulation
+    def run_all_checks(self):
+        found_errors = super().run_all_checks()
+        found_errors = max(found_errors, self.check_products())
+        if found_errors == 0:
+            print("<<controller>> All prechecks passed!")
+            return
+        elif found_errors == 1:
+            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
+                return
+            else:
+                raise Exception('Aborting base on user input')
+        elif found_errors == 2:
+            raise Exception('Critical Errors encountered during prechecks. Aborting')
+
+                
+    def check_products(self):
+        '''
+        checks to ensure that the products were correctly initialized  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        '''
+        found_errors = 0
+        for i, r in self.robo_params['product_df'].loc[\
+                ~self.robo_params['product_df']['labware'].astype(bool) & \
+                ~self.robo_params['product_df']['container'].astype(bool)].iterrows():
+            found_errors = max(found_errors,1)
+            print('<<controller>> {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\'s what you want? '.format(i))
+        return found_errors
+
+    #POST Simulation
+
+class AbstractPlateReader(ABC):
+    '''
+    This class is responsible for executing platereader commands. When instantiated, this
+    class changes the config file  
+    METHODS:  
+        edit_layout(protocol_name, layout) void: changes the layout for a protocol  
+        run_protocol(protocol_name, filename, data_path, layout) void: executes a protocol  
+        shutdown() void: kills the platereader and restores default config  
+        shake() void: shakes the platereader  
+        exec_macro(macro, *args) void: low level method to send a command to platereader with
+          arguments  
+        load_reader_data(str filename, dict<str:str> loc_to_name, str path) tuple<df, dict>:
+          reads the platereader data into a df and returns a dictionary of interesting 
+          metadata.  
+    ATTRIBUTES:
+        str data_path: a linux path to where all the data is 
+    '''
+    SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
+    PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
+    SPECTRO_DATA_PATH = "/mnt/c/Users/science_356_lab/Robot_Files/Plate Reader Data"
+
+    def __init__(self, data_path):
+        self.data_path = data_path
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
+        
+    def exec_macro(self, macro, *args):
+        '''
+        sends a macro command to the platereader and blocks waiting for response. If response
+        not ok, it'll crash and burn  
+        params:  
+            str macro: should be a macro from the documentation  
+            *args: associated arguments of the macto  
+        Postconditions:  
+            The command has been sent to the PlateReader, if the return status was not 0 (good)  
+            an error will be thrown  
+        '''
+        pass
+
+    def shake(self, shake_time):
+        '''
+        executes a shake
+        '''
+        pass
+
+    def edit_layout(self, protocol_name, layout):
+        '''
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list<str> wells: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+        Postcondtions:  
+            The protocol has had it's layout updated to include only the wells specified  
+        '''
+        pass
+
+    def run_protocol(self, protocol_name, filename, layout=None):
+        r'''
+        In the abstract version, a dummy file will be written.  
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list<str> layout: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If not specified will not alter layout)  
+        '''
+        filename = '{}.csv'.format(filename)
+        filepath = os.path.join(self.data_path,filename)
+        if os.path.exists(filepath):
+            os.system('rm {}'.format(filepath))
+
+        data = pd.DataFrame(.42*np.random.rand(701,len(layout)), columns=layout)
+        
+
+        with open(filepath, 'a+', encoding='latin1') as file:
+            file.write('No. of Cycles: 1\nT[°C]: \n23.5\n')
+            for name, col in data.iteritems():
+                write_str = name[0] + name[1:].zfill(2) + ':, '
+                write_str += ', '.join([str(i) for i in col])
+                write_str += '\n'
+                file.write(write_str)
+
+    def _rename_scan(self,new_scan_file,old_scan_file):
+        """
+        Helper function for scan until complete,
+        renames the filename back to the original to help deal with
+        scan until complete rows
+        """
+
+        shutil.move(os.path.join(self.data_path, "{}.csv".format(new_scan_file)),
+        os.path.join(self.data_path, "{}.csv".format(old_scan_file)))
+    
+    def shutdown(self):
+        '''
+        closes connection. Use this if you're done with this object at cleanup stage
+        '''
+        pass
+
+    def load_reader_data(self, filename, loc_to_name):
+        '''
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        Note that only the wells specified in loc_to_name will be returned.  
+        params:  
+            str filename: the name of the file to read without extension  
+            df: the scan data for the wellnames supplied in loc_to_name for that file.  
+        returns:  
+            df: the scan data for that file  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        filename = "{}.csv".format(filename)
+        #parse the metadata
+        start_i, metadata = self._parse_metadata(filename)
+        # Read data ignoring first metadata lines
+        df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+        headers = ["{}{}".format(x[0], int(x[1:-1])) for x in df.columns] #rename A01->A1
+        df.columns = headers
+        #get only the things we want
+        df = df[loc_to_name.keys()]
+        #rename by wellname
+        df.rename(columns=loc_to_name, inplace=True)
+        df.dropna(inplace=True)
+        df = df.astype(float)
+        return df, metadata
+
+    def _parse_metadata(self, filename):
+        '''
+        parses the meta data of a platereader output, and returns a dataframe of the scans
+        and a dictionary of parameters  
+        params:  
+            str filename: the name of the file to be read  
+        returns:  
+            int: the index to start reading the dataframe at  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        found_start = False
+        i = 0
+        n_cycles = None
+        line = 'dowhile'
+        with open(os.path.join(self.data_path,filename), 'r',encoding='latin1') as file:
+            while not found_start and line != '':
+                line = file.readline()
+                if bool(re.match(r'No\. of Cycles:',line)):
+                    #is number of cycles
+                    n_cycles = int((re.search(r'\d+', line)).group(0))
+                if line[:6] == 'T[°C]:':
+                    while not bool(re.match('\D\d',line)) and line != '':
+                        #is not of form A1/B03 etc
+                        line = file.readline()
+                        i += 1
+                    i -= 1 #cause you will increment once more 
+                    found_start = True
+                i+=1
+        assert (line != ''), "corrupt reader file. ran out of file to read before finding a scanned well"
+        assert (n_cycles != None), "corrupt reader file. num cycles not found."
+        return i, {'n_cycles':n_cycles,'filename':filename}
+    
+    def merge_scans(self, filenames, dst):
+        '''
+        merges the specified files together into a single scan file.  
+        params:  
+            list<str> filenames: a list of all the files you want to merge without extensions.  
+            str dst: the filename of the output file without extension.  
+        Postconditions:  
+            A new file has been created with the data from all the files.  
+            NOTE metadata may change across scans. the metadata of only the first scan to
+              be merged shall be preserved.
+        Preconditions:  
+            n_cycles must be the same for each scan file.  
+        '''
+        filenames = ['{}.csv'.format(filename) for filename in filenames]
+        dst = dst+'.csv'
+        dst_path = os.path.join(self.data_path, dst)
+        #create the base file you're going to be writing to
+        shutil.copyfile(os.path.join(self.data_path,filenames[0]), dst_path)
+        n_cycles = self._parse_metadata(filenames[0])[1]['n_cycles'] #n_cycles of first file
+        #iterate through the other files
+        for filename in filenames[1:]:
+            #setup
+            filepath = os.path.join(self.data_path, filename)
+            meta = self._parse_metadata(filename)
+            assert (n_cycles == meta[1]['n_cycles']), "scan files to merge, {} and {} had different n_cycles".format(filename, filenames[0])
+            #strip out just the data from the file
+            with open(filepath, 'r', encoding='latin1') as file:
+                #these files are generally pretty small
+                lines = file.read().split('\n')
+                lines = lines[meta[0]:] #grab the raw data without preamble
+            #write the data to the dst file
+            with open(dst_path, 'a') as file:
+                file.write('\n'.join(lines))
+        #cleanup
+        for filename in filenames:
+            filepath = os.path.join(self.data_path, filename)
+            os.remove(filepath)
+
+class DummyReader(AbstractPlateReader):
+    '''
+    Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
+    anything. useful for some simulations
+    '''
+    pass
+
+
+class PlateReader(AbstractPlateReader):
+    '''
+    This class handles all platereader interactions. Inherits from the interface
+    '''
+
+    def __init__(self, data_path, simulate=False):
+        super().__init__(data_path)
+        self.simulate=simulate
+        self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
+        self._set_config_attr('ControlApp','AsDDEserver', 'True')
+        self.exec_macro("dummy")
+        self.exec_macro("init")
+        self.exec_macro('PlateOut')
+        
+    def exec_macro(self, macro, *args):
+        '''
+        sends a macro command to the platereader and blocks waiting for response. If response
+        not ok, it'll crash and burn  
+        params:  
+            str macro: should be a macro from the documentation  
+            *args: associated arguments of the macto  
+        Postconditions:  
+            The command has been sent to the PlateReader, if the return status was not 0 (good)
+            an error will be thrown  
+        '''
+        exec_str = "'{}Cln/DDEClient.exe' {}".format(self.SPECTRO_ROOT_PATH, macro)
+        #add arguments
+        for arg in args:
+            exec_str += " '{}'".format(arg)
+        print('<<Reader>> executing: {}'.format(exec_str))
+        exit_code = os.system(exec_str)
+        try:
+            assert (exit_code == 0)
+        except:
+            if exit_code < 1000:
+                raise Exception("PlateReader rejected command Error")
+            elif exit_code == 1000:
+                raise Exception("PlateReader Nonexistent Protocol Name Error")
+            elif exit_code == 2000:
+                raise Exception("PlateReader Communication Error")
+            else:
+                raise Exception("PlateReader Error. Exited with code {}".format(exit_code))
+
+    def shake(self, shake_time):
+        '''
+        executes a shake
+        '''
+        macro = "Shake"
+        shake_type = 2
+        shake_freq = 300
+        self.exec_macro(macro, shake_type, shake_freq, shake_time)
+
+    def load_reader_data(self, filename, loc_to_name):
+        '''
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        Note that only the wells specified in loc_to_name will be returned.  
+        params:  
+            str filename: the name of the file to read without extension  
+            df: the scan data for the wellnames supplied in loc_to_name for that file.  
+        returns:  
+            df: the scan data for that file  
+            dict<str:obj>: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        '''
+        if self.simulate:
+            return super().load_reader_data(filename, loc_to_name) #return dummy data
+        else:
+            filename = "{}.csv".format(filename)
+            #parse the metadata
+            start_i, metadata = self._parse_metadata(filename)
+            # Read data ignoring first metadata lines
+            df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                    header=None,index_col=0,na_values=["       -"],encoding = 'latin1').T
+            headers = ["{}{}".format(x[0], int(x[1:-1])) for x in df.columns] #rename A01->A1
+            df.columns = headers
+            #get only the things we want
+            df = df[loc_to_name.keys()]
+            #rename by wellname
+            df.rename(columns=loc_to_name, inplace=True)
+            df.dropna(inplace=True)
+            df = df.astype(float)
+            return df, metadata
+
+
+    def edit_layout(self, protocol_name, layout):
+        '''
+        This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
+        in the SPECTROstar root. It is also possible (theoretically) to 
+        send a literal 'edit_layout' command, but this fails for long
+        strings. (not sure why, maybe windows limited sized strings?
+        but the file works). It removes the file after importing  
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list<str> wells: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+        Postcondtions:  
+            The protocol has had it's layout updated to include only the wells specified  
+        '''
+        if layout == 'all':
+            #get a list of all the wellanmes
+            layout = [a+str(i) for a in list('ABCDEFGH') for i in range(1,13,1)]
+        well_entries = []
+        for i, well in enumerate(layout):
+            well_entries.append("{}=X{}".format(well, i+1))
+        filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,'.temp_ot2_bmg_layout.lb')
+        filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,'w'),'.temp_ot2_bmg_layout.lb')
+        with open(filepath_lin, 'w+') as layout:
+            layout.write('EmptyLayout')
+            for entry in well_entries:
+                layout.write("\n{}".format(entry))
+        self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
+        os.remove(filepath_lin)
+
+    def run_protocol(self, protocol_name, filename, layout=None):
+        r'''
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list<str> layout: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If not specified will not alter layout)  
+        '''
+        if layout:
+            self.edit_layout(protocol_name, layout)
+        macro = 'run'
+        #three '' are plate ids to pad. data_path specified once for ascii and once for other
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,'w'), '', '', '', '', filename)
+        #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+        #that, so we move it from the default landing zone to where I actually want it
+        if self.simulate:
+            super().run_protocol(protocol_name, filename, layout)
+        else:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
+                    os.path.join(self.data_path, "{}.csv".format(filename)))
+        
+
+
+    def _set_config_attr(self, header, attr, val):
+        '''
+        opens the Spectrostar nano config file and replaces the value of attr under header
+        with val
+        There are better ways to build this function, but it's not something you'll use much
+        so I'm leaving it here  
+        params:  
+            str header: the header in the config file [header]  
+            str attr: the attribute you want to change  
+            obj val: the value to set the attribute to  
+        Postconditions:  
+            The SPECTROstar Nano.ini has had the attribute under the header overwritten with val
+            or appended to end if it wasn't found   
+        '''
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r'SPECTROstar Nano.ini'), 'r') as config:
+            file_str = config.readlines()
+            write_str = ''
+            header_exists = False
+            i = 0
+            while i < len(file_str): #iterating through lines
+                line = file_str[i]
+                write_str += line
+                if line[1:-2] == header:
+                    header_exists = True#you found the appropriate header
+                    i += 1
+                    found_attr = False
+                    line = file_str[i] #do
+                    while '[' != line[0] and i < len(file_str): #not a header and not EOF
+                        if line[:line.find('=')] == attr:
+                            found_attr = True
+                            write_str += '{}={}\n'.format(attr, val)
+                        else:
+                            write_str += line
+                        i += 1
+                        if i < len(file_str):
+                            line = file_str[i]
+                    if not found_attr:
+                        write_str += '{}={}\n'.format(attr, val)
+                else:
+                    i += 1
+            if not header_exists:
+                write_str += '[{}]\n'.format(header)
+                write_str += '{}={}\n'.format(attr, val)
+
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r'SPECTROstar Nano.ini'), 'w+') as config:
+            config.write(write_str)
+
+    def shutdown(self):
+        '''
+        closes connection. Use this if you're done with this object at cleanup stage
+        '''
+        self.exec_macro('PlateIn')
+        self.exec_macro('Terminate')
+        self._set_config_attr('ControlApp','AsDDEserver','False')
+        self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
+        self._set_config_attr('Configuration','SimulationMode', str(0))
+if __name__ == '__main__':
+    SERVERADDR = "169.254.44.249"
+    main(SERVERADDR)
+

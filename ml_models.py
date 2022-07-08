@@ -866,7 +866,17 @@ class NeuralNet(MLModel):
             logdir2= "logs2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             tensorboard_callback2 = keras.callbacks.TensorBoard(log_dir=logdir2)
 
+            logdirNew= "logsNew/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callbackNew = keras.callbacks.TensorBoard(log_dir=logdirNew)
 
+            logdirNew_2= "logsNew_2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callbackNew_2 = keras.callbacks.TensorBoard(log_dir=logdirNew_2)
+
+            logdir11= "logs11/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback11 = keras.callbacks.TensorBoard(log_dir=logdir11)
+
+            logdir11_2= "logs11_2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback11_2 = keras.callbacks.TensorBoard(log_dir=logdir11_2)
 
             historyML0= ML0.fit(
                 Train_label,
@@ -976,16 +986,8 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
-                verbose = 0,
+                callbacks=[tensorboard_callback11],
 
-            )
-            historyML_new= ML_new.fit(
-                
-                predictions0,
-                Train_label,
-                batch_size=2,
-                epochs=200, 
-                validation_data=(Val_input, Val_label),
                 verbose = 0,
 
             )
@@ -996,9 +998,23 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
+                callbacks=[tensorboard_callback11_2],
+
                 verbose = 0,
 
             )
+            historyML_new= ML_new.fit(
+                
+                predictions0,
+                Train_label,
+                batch_size=2,
+                epochs=200, 
+                validation_data=(Val_input, Val_label),
+                callbacks=[tensorboard_callbackNew],
+                verbose = 0,
+
+            )
+            
             historyML_new_2= ML_new_2.fit(
                 
                 Train_input,
@@ -1006,8 +1022,14 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
+                callbacks=[tensorboard_callbackNew_2],
                 verbose = 0,
             )
+
+
+
+
+
 
             print("weigths Model 11/ Trained", ML11.layers[1].get_weights())
             print("weigths Model NEW/ Trained",ML_new.layers[1].get_weights())
@@ -1068,6 +1090,29 @@ class NeuralNet(MLModel):
             print("ML11",ML11_error)
             print("ML11_2",M11_2_error)
             print("predictions2",np.sum(predictions2-Train_label))
+
+            print("Scores")
+            # print("Evaluating on test data")
+            print("ML_new")
+            resultsMl_new = ML_new.evaluate(Test_input, Test_label, batch_size=5)
+            print("%s: %.2f%%" % (ML_new.metrics_names[1], resultsMl_new[1]*100))
+            print("test loss, test acc:", resultsMl_new)
+
+            print("ML_new_2")
+            resultsMl_new_2 = ML_new_2.evaluate(Test_input, Test_label, batch_size=5)
+            print("%s: %.2f%%" % (ML_new_2.metrics_names[1], resultsMl_new_2[1]*100))
+            print("test loss, test acc:", resultsMl_new_2)
+
+            print("ML11")
+            resultsMl11 = ML11.evaluate(Test_input, Test_label, batch_size=5)
+            print("%s: %.2f%%" % (ML11.metrics_names[1], resultsMl11[1]*100))
+            print("test loss, test acc:", resultsMl11)
+
+            print("ML11_2")
+            resultsMl11_2 = ML11_2.evaluate(Test_input, Test_label, batch_size=5)
+            print("%s: %.2f%%" % (ML11_2.metrics_names[1], resultsMl11_2[1]*100))
+            print("test loss, test acc:", resultsMl11_2)
+
 
             ml = {"ML_new", 
                 "ML_new_2",
@@ -1137,11 +1182,61 @@ class NeuralNet(MLModel):
                 elif ml_to_use == "ML11_2":
                         predicted_by_model = ML11_2.predict(input_user)
 
-            time.sleep(10)
+            from tensorboard import program
+
+            # tracking_address = logdir # the path of your log file.
+
+            #if __name__ == "__main__":
+            tb = program.TensorBoard()
+            tb.configure(argv=[None, '--logdir', logdir0])
+            url = tb.launch()
+            print("ML0")
+            print(f"Tensorflow listening on {url}")
+            print("")
+
+            print("-------")
+            print("ML2")
+            tb.configure(argv=[None, '--logdir', logdir2])
+            url = tb.launch()
+            print(f"Tensorflow listening on {url}")
+            print("")
+
+            print("-------")
+            print("ML_New")
+            tb.configure(argv=[None, '--logdir', logdirNew])
+            url = tb.launch()
+            print(f"Tensorflow listening on {url}")
+            print("")
+
+            print("-------")
+            print("ML_New_2")
+            tb.configure(argv=[None, '--logdir', logdirNew_2])
+            url = tb.launch()
+            print(f"Tensorflow listening on {url}")
+            print("")
+
+            print("-------")
+            print("ML_11")
+            tb.configure(argv=[None, '--logdir', logdir11])
+            url = tb.launch()
+            print(f"Tensorflow listening on {url}")
+            print("")
+
+            print("-------")
+            print("ML_11_2")
+            tb.configure(argv=[None, '--logdir', logdir11_2])
+            url = tb.launch()
+            print(f"Tensorflow listening on {url}")
+
+
+
+            print("predicted_by_model",predicted_by_model)
+            time.sleep(50)
             return input_user, predicted_by_model, 0 , 0, 0
 
-            # logdir= "logNModel/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
-            # tensorboard_callback = keras.callbacks.TensorBoard(log_dir=logdir)
+
+
+
 
             # history= modelN.fit(
             #     Train_input,
@@ -1176,15 +1271,7 @@ class NeuralNet(MLModel):
             # t = threading.Thread(target=launchTensorBoard, args=([]))
             # t.start()
 
-            from tensorboard import program
-
-            tracking_address = logdir # the path of your log file.
-
-            #if __name__ == "__main__":
-            tb = program.TensorBoard()
-            tb.configure(argv=[None, '--logdir', logdir])
-            url = tb.launch()
-            print(f"Tensorflow listening on {url}")
+            
             
             
             # print("b predict",Test_input)
