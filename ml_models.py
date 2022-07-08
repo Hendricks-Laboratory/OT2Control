@@ -875,8 +875,7 @@ class NeuralNet(MLModel):
                 epochs=200, 
                 callbacks=[tensorboard_callback0],
                 validation_data=(Val_label, Val_input),
-                verbose = 2,
-
+                verbose = 0,
             )
 
             #historyML1= ML1.fit(
@@ -897,7 +896,7 @@ class NeuralNet(MLModel):
                 callbacks=[tensorboard_callback2],
                 validation_data=(Val_label, Val_label),
 
-                verbose = 2,
+                verbose = 0,
 
             )
             
@@ -977,7 +976,7 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
-                verbose = 2,
+                verbose = 0,
 
             )
             historyML_new= ML_new.fit(
@@ -987,7 +986,7 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
-                verbose = 2,
+                verbose = 0,
 
             )
             historyML11_2= ML11_2.fit(
@@ -997,7 +996,7 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
-                verbose = 2,
+                verbose = 0,
 
             )
             historyML_new_2= ML_new_2.fit(
@@ -1007,7 +1006,7 @@ class NeuralNet(MLModel):
                 batch_size=2,
                 epochs=200, 
                 validation_data=(Val_input, Val_label),
-                verbose = 2,
+                verbose = 0,
             )
 
             print("weigths Model 11/ Trained", ML11.layers[1].get_weights())

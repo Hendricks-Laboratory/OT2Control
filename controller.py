@@ -5288,7 +5288,7 @@ class AutoContr(Controller):
                     plt.show()
                     figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
-                    if test_error < 10 and test_error>-10:
+                    if test_error[0][0]< 10 and test_error[0][0]>-10:
                         print("The model is trained----")
                         break
                     else:
