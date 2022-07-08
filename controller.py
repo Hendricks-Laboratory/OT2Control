@@ -5256,7 +5256,7 @@ class AutoContr(Controller):
 
                     print("Robot send back a wavelenght of", Robot_answer)
                     print("User input was ", input_user_model, input_user)
-                    test_error= Robot_answer - input_user
+                    test_error= Robot_answer - input_user_model
                     print("Our test error is ", test_error)
                     
                     ##Plot
@@ -5305,6 +5305,12 @@ class AutoContr(Controller):
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
                             # print("Actual df",df)
+                            # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
+                            # #sorting by Concentration
+                            # df = df.sort_values(by=['Concentration'])
+                            # df = pd.DataFrame
+                            # (list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),
+                            # columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
                 
                 print("Dt",df)
                 print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
