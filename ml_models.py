@@ -1182,65 +1182,65 @@ class NeuralNet(MLModel):
                 elif ml_to_use == "ML11_2":
                         predicted_by_model = ML11_2.predict(input_user)
 
-            from tensorboard import program
+            # from tensorboard import program
 
             # tracking_address = logdir # the path of your log file.
 
             #if __name__ == "__main__":
-            tb = program.TensorBoard()
-            tb1= program.TensorBoard()
-            tb2= program.TensorBoard()
-            tb3= program.TensorBoard()
-            tb4= program.TensorBoard()
-            tb5= program.TensorBoard()
+            # tb = program.TensorBoard()
+            # tb1= program.TensorBoard()
+            # tb2= program.TensorBoard()
+            # tb3= program.TensorBoard()
+            # tb4= program.TensorBoard()
+            # tb5= program.TensorBoard()
 
-            tb.configure(argv=[None, '--logdir', logdir0])
-            tb1.configure(argv=[None, '--logdir', logdir2])
-            tb2.configure(argv=[None, '--logdir', logdirNew])
-            tb3.configure(argv=[None, '--logdir', logdirNew_2])
-            tb4.configure(argv=[None, '--logdir', logdir11])
-            tb5.configure(argv=[None, '--logdir', logdir11_2])
+            # tb.configure(argv=[None, '--logdir', logdir0])
+            # tb1.configure(argv=[None, '--logdir', logdir2])
+            # tb2.configure(argv=[None, '--logdir', logdirNew])
+            # tb3.configure(argv=[None, '--logdir', logdirNew_2])
+            # tb4.configure(argv=[None, '--logdir', logdir11])
+            # tb5.configure(argv=[None, '--logdir', logdir11_2])
 
-            url = tb.launch()
-            url1 = tb1.launch()
-            url2 = tb2.launch()
-            url3 = tb3.launch()
-            url4 = tb4.launch()
-            url5 = tb5.launch()
+            # url = tb.launch()
+            # url1 = tb1.launch()
+            # url2 = tb2.launch()
+            # url3 = tb3.launch()
+            # url4 = tb4.launch()
+            # url5 = tb5.launch()
 
-            print("ML0")
-            print(f"Tensorflow listening on {url}")
-            print("")
-            print("")
-            
-            print("-------")
-            print("ML2")
-            print(f"Tensorflow listening on {url1}")
-            print("")
+            # print("ML0")
+            # print(f"Tensorflow listening on {url}")
+            # print("")
+            # print("")
 
-            print("-------")
-            print("ML_New")
-            print(f"Tensorflow listening on {url2}")
-            print("")
+            # print("-------")
+            # print("ML2")
+            # print(f"Tensorflow listening on {url1}")
+            # print("")
 
-            print("-------")
-            print("ML_New_2")
-            print(f"Tensorflow listening on {url3}")
-            print("")
+            # print("-------")
+            # print("ML_New")
+            # print(f"Tensorflow listening on {url2}")
+            # print("")
 
-            print("-------")
-            print("ML_11")
-            print(f"Tensorflow listening on {url4}")
-            print("")
+            # print("-------")
+            # print("ML_New_2")
+            # print(f"Tensorflow listening on {url3}")
+            # print("")
 
-            print("-------")
-            print("ML_11_2")
-            print(f"Tensorflow listening on {url5}")
+            # print("-------")
+            # print("ML_11")
+            # print(f"Tensorflow listening on {url4}")
+            # print("")
+
+            # print("-------")
+            # print("ML_11_2")
+            # print(f"Tensorflow listening on {url5}")
 
 
 
             print("predicted_by_model",predicted_by_model)
-            time.sleep(50)
+            # time.sleep(50)
             return input_user, predicted_by_model, 0 , 0, 0
 
 
