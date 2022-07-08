@@ -5233,23 +5233,29 @@ class AutoContr(Controller):
 
                     #print("We get the following wavelengths",clean_wave_test)
                     print("We get the following wavelengths",new_added_list_test)
-                    average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                    print("The average is ", average_of_wave_test)
-                    
-                    
-                        
+                    # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
+                    # print("The average is ", average_of_wave_test)
+                    Wave_pre =0
+                    Obs_pre =0
+                    for tpl in range(len(last_obs_test)):
+                        Wave_pre += last_obs_test[tpl][0]
+                        Obs_pre  += last_obs_test[tpl][1]
+                    Wave_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Robot_answer = np.array([[Wave_pre,Obs_pre]])
+      
+                    print("The average is ", Wave_pre,Obs_pre)
 
                     #Robot_answer=wavelengths_prediction_test[0]
                     #print("Y_TEST_ROBOT", Y_testing)
                     #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                     #Here we change 
-                    print("sending len",len(new_added_list_test))
-                    Robot_answer= average_of_wave_test
+                    print("sending len",len(last_obs_test))
 
                     print("Robot send back a wavelenght of", Robot_answer)
-                    print("User input was ", input_user_model)
-                    test_error= Robot_answer- input_user
+                    print("User input was ", input_user_model, input_user)
+                    test_error= Robot_answer - input_user
                     print("Our test error is ", test_error)
                     
                     ##Plot
@@ -5313,18 +5319,7 @@ class AutoContr(Controller):
                     for nnm in range(len(waves_1[ke])):
                         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
                 
-                # for ke in range(len(label_names)):
-                #     #print(label_names_2[r], waves[r])
-                #         plt.scatter(x = label_names[ke], y= waves_1[ke], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
-                
-                # for t in range(len(recipes_plot)):
-                #     for u in range(len(waves_evol_plot[t])):
-                #             #print(recipes_plot[t]*len(waves_evol_plot[u]))
-                #             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[u]), waves_evol_plot[u], color= color_names[t], label= label_names[t],s=100)
-                        
-                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
-                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
-                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
+
                 
                 ##CCCCCC
                 # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
