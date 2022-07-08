@@ -2225,7 +2225,7 @@ class AutoContr(Controller):
             bl= np.array(blank.loc[28].tolist())
             
             #rest
-            modify_Y= bl-our_Y
+            modify_Y= our_Y-bl
             print("Modify",modify_Y)
             #restricting wavelengths 
             X_axis= X_axis[50:-100]
