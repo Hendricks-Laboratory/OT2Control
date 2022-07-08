@@ -2178,7 +2178,7 @@ class AutoContr(Controller):
 
         def MaxWaveLength(scan):
     
-            
+            from datetime import datetime
             now = datetime.now().time() # time object
 
             X_new=[]
