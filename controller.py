@@ -5259,37 +5259,37 @@ class AutoContr(Controller):
                     test_error= Robot_answer - input_user_model
                     print("Our test error is ", test_error)
                     
-                    ##Plot
-                    figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    plt.xlabel("[KBr] Concentration (mM)")
-                    plt.ylabel("Wavelength (nm)")
-                    plt.legend(prop={"size":6})
-                    plt.show()
-                    figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+                    # ##Plot
+                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    #Plot2
+                    # #Plot2
                 
 
 
-                    figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
                     # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    plt.xlabel("[KBr] Concentration (mM)")
-                    plt.ylabel("Wavelength (nm)")
-                    plt.legend(prop={"size":6})
-                    plt.show()
-                    figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                    # plt.xlabel("[KBr] Concentration (mM)")
+                    # plt.ylabel("Wavelength (nm)")
+                    # plt.legend(prop={"size":6})
+                    # plt.show()
+                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
-                    if test_error[0][0]< 10 and test_error[0][0]>-10:
+                    if test_error[0][0]< 200 and test_error[0][0]>-200:
                         print("The model is trained----")
                         break
                     else:
@@ -5298,93 +5298,87 @@ class AutoContr(Controller):
                             print("---->Done training<----")
                         else:
                             print("-----")
-                        for sert in range(len(new_added_list_test)):
+                        for sert in range(len(last_obs_test)):
                             # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
-                            new_data = {'Concentration': user_concentration, 'Wavelength': new_added_list_test[sert]}
+                            new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
-                            # print("Actual df",df)
-                            # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
-                            # #sorting by Concentration
-                            # df = df.sort_values(by=['Concentration'])
-                            # df = pd.DataFrame
-                            # (list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),
-                            # columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
+
                 
                 print("Dt",df)
                 print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
 
-                fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                label_names = ["Generation 1", "Generation 2", "Generation 3"]
-                color_names = ["red","orange","blue"]
-                #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
-                waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
-                print("Printtttttttt",waves_1)
-                for ke in range(len(label_names)):
-                    #print(label_names_2[r], waves[r])
-                    for nnm in range(len(waves_1[ke])):
-                        plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
+                # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # label_names = ["Generation 1", "Generation 2", "Generation 3"]
+                # color_names = ["red","orange","blue"]
+                # #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
+                # waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
+                # print("Printtttttttt",waves_1)
+                # for ke in range(len(label_names)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nnm in range(len(waves_1[ke])):
+                #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
                 
 
                 
-                ##CCCCCC
-                # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
-                plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
-                plt.axhline(y=input_user-5,color='r', linestyle=':')
-                plt.axhline(y=input_user,color='r', linestyle='-')
-                plt.axhline(y=input_user+5,color='r', linestyle=':')
+                # ##CCCCCC
+                # # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
+                # plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
 
 
-                #plt.xlim(0.00001, 0.003)
-                #plt.xlim(["Generation 1","Generation 2","Generation 3"])
-                plt.legend(loc="upper right",  prop={"size":6})
-                plt.show()
-                fig_changhe_model.savefig('changeInWavesModel.png')
+                # #plt.xlim(0.00001, 0.003)
+                # #plt.xlim(["Generation 1","Generation 2","Generation 3"])
+                # plt.legend(loc="upper right",  prop={"size":6})
+                # plt.show()
+                # fig_changhe_model.savefig('changeInWavesModel.png')
 
-                #Plot recipes and the input
+                # #Plot recipes and the input
 
-                waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
-                print("Ltp",waves)
-                # input_user=50
-                fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                colors_2= ["red","green","blue"]
-                label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
+                # waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
+                # print("Ltp",waves)
+                # # input_user=50
+                # fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
+                # colors_2= ["red","green","blue"]
+                # label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
 
-                for k in range(len(label_names_2)):
-                    #print(label_names_2[r], waves[r])
-                    for nn in range(len(waves[k])):
-                        plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
+                # for k in range(len(label_names_2)):
+                #     #print(label_names_2[r], waves[r])
+                #     for nn in range(len(waves[k])):
+                #         plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
 
-                plt.axhline(y=input_user-5,color='r', linestyle=':')
-                plt.axhline(y=input_user,color='r', linestyle='-')
-                plt.axhline(y=input_user+5,color='r', linestyle=':')
-                fig_last.savefig('Input-Recipes.png')
+                # plt.axhline(y=input_user-5,color='r', linestyle=':')
+                # plt.axhline(y=input_user,color='r', linestyle='-')
+                # plt.axhline(y=input_user+5,color='r', linestyle=':')
+                # fig_last.savefig('Input-Recipes.png')
 
 
 
-                pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
-                print("Pppppppp",pattt)
-                patternFoll = df.groupby('Concentration')['Wavelength'].mean()
-                patternFoll = patternFoll.reset_index()
-                print("Pppppppp",patternFoll)
+                # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
+                # print("Pppppppp",pattt)
+                # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
+                # patternFoll = patternFoll.reset_index()
+                # print("Pppppppp",patternFoll)
 
-                # recipesTaken= df.Concentration.unique()
-                recipesTaken = patternFoll["Concentration"].ravel().tolist()
-                patternFollowed = patternFoll["Wavelength"].ravel().tolist()
-                print("RRRR",patternFollowed,recipesTaken)
-                fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
-                plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                plt.xlabel("[KBr] Concentration (mM)")
-                plt.ylabel("Wavelength (nm)")
-                plt.legend(prop={"size":6})
-                plt.show()
-                fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
+                # # recipesTaken= df.Concentration.unique()
+                # recipesTaken = patternFoll["Concentration"].ravel().tolist()
+                # patternFollowed = patternFoll["Wavelength"].ravel().tolist()
+                # print("RRRR",patternFollowed,recipesTaken)
+                # fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
+                # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
+                # #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
+                # plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
+                # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
+                # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
+                # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
+                # plt.xlabel("[KBr] Concentration (mM)")
+                # plt.ylabel("Wavelength (nm)")
+                # plt.legend(prop={"size":6})
+                # plt.show()
+                # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
 
                 print("Before entering to the while loop: scan_data",scan_data)        
                 
