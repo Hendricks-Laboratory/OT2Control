@@ -6447,7 +6447,7 @@ class AutoContr(Controller):
                         Wave_pre += last_obs_test[tpl][0]
                         Obs_pre  += last_obs_test[tpl][1]
                     Wave_pre = Wave_pre/len(last_obs_test)
-                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Obs_pre/len(last_obs_test)
                     Robot_answer = np.array([[Wave_pre,Obs_pre]])
       
                     print("The average is ", Wave_pre,Obs_pre)
