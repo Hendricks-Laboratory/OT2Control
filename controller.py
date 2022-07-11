@@ -3138,7 +3138,9 @@ class ScanDataFrame():
             for i in y:
                 if self.experiment_name in i:
                     x=i
-                    if 'control' in x:
+                if ('control' in i.lower()):
+                        x = 'control'
+                if ('blank' in i.lower()):
                         x = 'blank'
             
             well_names.append(x)
@@ -3338,8 +3340,7 @@ class ScanDataFrame():
                 transfers_before_scans = []
                 react = str(react)
                 print(react)
-                if 'blank' in react:
-                    react = 'control'
+                
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
                 
           
