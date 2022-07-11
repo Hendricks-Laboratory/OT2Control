@@ -1128,7 +1128,7 @@ class NeuralNet(MLModel):
             lest_error = [ML_new_error,ML_new_2_error,ML11_error,M11_2_error]
             ml_to_use= ml_errors[min(lest_error)]
             
-            if ml_past == True:
+            if ml_past == False:
                     choosg= input("Do you want to choose a model? [Yes-y/No]")
                     if choosg == "Yes" or choosg=="y":
                         while True:
@@ -1184,7 +1184,18 @@ class NeuralNet(MLModel):
                                 predicted_by_model = ML11_2.predict(input_user)
 
             else:
-                ml_past = True
+                if ml_to_use == "ML_new":
+                        predicted_by_model = ML_new.predict(input_user)
+                                
+                elif ml_to_use == "ML_new_2":
+                        predicted_by_model = ML_new_2.predict(input_user)
+                                
+                elif ml_to_use == "ML11":
+                        predicted_by_model = ML11.predict(input_user)
+                                
+                elif ml_to_use == "ML11_2":
+                        predicted_by_model = ML11_2.predict(input_user)
+            ml_past = True
             # from tensorboard import program
 
             # tracking_address = logdir # the path of your log file.
