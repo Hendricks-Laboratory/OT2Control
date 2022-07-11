@@ -718,7 +718,7 @@ class NeuralNet(MLModel):
     
     #NEW TRAIN
     
-    def training(self, df,input_user,r, n_epochs=30):
+    def training(self, df,input_user,r, n_epochs=30, ml_past=False):
         
 
         # type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
@@ -1128,60 +1128,63 @@ class NeuralNet(MLModel):
             lest_error = [ML_new_error,ML_new_2_error,ML11_error,M11_2_error]
             ml_to_use= ml_errors[min(lest_error)]
             
-            choosg= input("Do you want to choose a model? [Yes-y/No]")
-            if choosg == "Yes" or choosg=="y":
-                while True:
+            if ml_past == True:
+                    choosg= input("Do you want to choose a model? [Yes-y/No]")
+                    if choosg == "Yes" or choosg=="y":
+                        while True:
 
-                    choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
-                    if choosg_ml == "ML_new":
-                        predicted_by_model = ML_new.predict(input_user)
-                        break
-                    elif choosg_ml == "ML_new_2":
-                        predicted_by_model = ML_new_2.predict(input_user)
-                        break
-                    elif choosg_ml == "ML11":
-                        predicted_by_model = ML11.predict(input_user)
-                        break
-                    elif choosg_ml == "ML11_2":
-                        predicted_by_model = ML11_2.predict(input_user)
-                        break
+                            choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
+                            if choosg_ml == "ML_new":
+                                predicted_by_model = ML_new.predict(input_user)
+                                break
+                            elif choosg_ml == "ML_new_2":
+                                predicted_by_model = ML_new_2.predict(input_user)
+                                break
+                            elif choosg_ml == "ML11":
+                                predicted_by_model = ML11.predict(input_user)
+                                break
+                            elif choosg_ml == "ML11_2":
+                                predicted_by_model = ML11_2.predict(input_user)
+                                break
+
+                            else:
+                                print("Type again")
+                                # choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
+
+
+                    elif choosg == "No":
+
+                        print("You choose automatic")
+
+                        if ml_to_use == "ML_new":
+                                predicted_by_model = ML_new.predict(input_user)
+                                
+                        elif ml_to_use == "ML_new_2":
+                                predicted_by_model = ML_new_2.predict(input_user)
+                                
+                        elif ml_to_use == "ML11":
+                                predicted_by_model = ML11.predict(input_user)
+                                
+                        elif ml_to_use == "ML11_2":
+                                predicted_by_model = ML11_2.predict(input_user)
+                                
 
                     else:
-                        print("Type again")
-                        # choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
-
-
-            elif choosg == "No":
-
-                print("You choose automatic")
-
-                if ml_to_use == "ML_new":
-                        predicted_by_model = ML_new.predict(input_user)
-                        
-                elif ml_to_use == "ML_new_2":
-                        predicted_by_model = ML_new_2.predict(input_user)
-                        
-                elif ml_to_use == "ML11":
-                        predicted_by_model = ML11.predict(input_user)
-                        
-                elif ml_to_use == "ML11_2":
-                        predicted_by_model = ML11_2.predict(input_user)
-                        
+                        print("No input recorded")
+                        if ml_to_use == "ML_new":
+                                predicted_by_model = ML_new.predict(input_user)
+                                
+                        elif ml_to_use == "ML_new_2":
+                                predicted_by_model = ML_new_2.predict(input_user)
+                                
+                        elif ml_to_use == "ML11":
+                                predicted_by_model = ML11.predict(input_user)
+                                
+                        elif ml_to_use == "ML11_2":
+                                predicted_by_model = ML11_2.predict(input_user)
 
             else:
-                print("No input recorded")
-                if ml_to_use == "ML_new":
-                        predicted_by_model = ML_new.predict(input_user)
-                        
-                elif ml_to_use == "ML_new_2":
-                        predicted_by_model = ML_new_2.predict(input_user)
-                        
-                elif ml_to_use == "ML11":
-                        predicted_by_model = ML11.predict(input_user)
-                        
-                elif ml_to_use == "ML11_2":
-                        predicted_by_model = ML11_2.predict(input_user)
-
+                ml_past = True
             # from tensorboard import program
 
             # tracking_address = logdir # the path of your log file.
@@ -1241,7 +1244,7 @@ class NeuralNet(MLModel):
 
             print("predicted_by_model",predicted_by_model)
             # time.sleep(50)
-            return input_user, predicted_by_model, 0 , 0, 0
+            return input_user, predicted_by_model, 0 , 0, 0 , ml_past
 
 
 
