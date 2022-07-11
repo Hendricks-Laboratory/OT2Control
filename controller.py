@@ -5022,18 +5022,23 @@ class AutoContr(Controller):
                 
 
                 
+                ml_past = False
+                
                 for r in range(5):
                     print("Epoch", r+1)
-
+                    print("pst",ml_past)
                     # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
-                    input_user_model, user_concentration, train_prediction, W, b = model.training(df,input_user_model,r)#550, 0.0002, 480 , 10000, 20
-                    
+                    input_user_model, user_concentration, train_prediction, W, b , ml_past= model.training(df,input_user_model,r,ml_past)#550, 0.0002, 480 , 10000, 20
+                
+
                     # W_list.append(W)
                     # b_list.append(b)
                     ##pas to the robot THE USER_CONCENTRATION
                     # Robot_answer= 465
                     ##Testing
                     print("Cont0",input_user_model,user_concentration)
+                    print("")
+                    print("---")
                     testing_recipes = [user_concentration]
                     
                     
@@ -5110,7 +5115,7 @@ class AutoContr(Controller):
                         store_indices_test=[]
                         for i in range(len(distances_test)):
                             if i!= len(distances_test):
-                                if distances_test[i] <= 100:
+                                if distances_test[i] <= 10:
                                     store_indices_test.append(i)
                                 print("stored indices test",store_indices_test)
                                         
@@ -5250,7 +5255,7 @@ class AutoContr(Controller):
                         Wave_pre += last_obs_test[tpl][0]
                         Obs_pre  += last_obs_test[tpl][1]
                     Wave_pre = Wave_pre/len(last_obs_test)
-                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Obs_pre/len(last_obs_test)
                     Robot_answer = np.array([[Wave_pre,Obs_pre]])
       
                     print("The average is ", Wave_pre,Obs_pre)
@@ -5297,7 +5302,7 @@ class AutoContr(Controller):
                     # plt.show()
                     # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
-                    if test_error[0][0]< 200 and test_error[0][0]>-200:
+                    if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is trained----")
                         break
                     else:
@@ -5314,6 +5319,73 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 
+                
+                
+                logdir0= "logs0/fit/" 
+
+                logdir2= "logs2/fit/" 
+
+                logdirNew= "logsNew/fit/" 
+
+                logdirNew_2= "logsNew_2/fit/" 
+
+                logdir11= "logs11/fit/" 
+
+                logdir11_2= "logs11_2/fit/" 
+
+
+
+
+                tb = program.TensorBoard()
+                tb1= program.TensorBoard()
+                tb2= program.TensorBoard()
+                tb3= program.TensorBoard()
+                tb4= program.TensorBoard()
+                tb5= program.TensorBoard()
+
+                tb.configure(argv=[None, '--logdir', logdir0])
+                tb1.configure(argv=[None, '--logdir', logdir2])
+                tb2.configure(argv=[None, '--logdir', logdirNew])
+                tb3.configure(argv=[None, '--logdir', logdirNew_2])
+                tb4.configure(argv=[None, '--logdir', logdir11])
+                tb5.configure(argv=[None, '--logdir', logdir11_2])
+
+                url = tb.launch()
+                url1 = tb1.launch()
+                url2 = tb2.launch()
+                url3 = tb3.launch()
+                url4 = tb4.launch()
+                url5 = tb5.launch()
+
+                print("ML0")
+                print(f"Tensorflow listening on {url}")
+                print("")
+                print("")
+                    
+                print("-------")
+                print("ML2")
+                print(f"Tensorflow listening on {url1}")
+                print("")
+
+                print("-------")
+                print("ML_New")
+                print(f"Tensorflow listening on {url2}")
+                print("")
+
+                print("-------")
+                print("ML_New_2")
+                print(f"Tensorflow listening on {url3}")
+                print("")
+
+                print("-------")
+                print("ML_11")
+                print(f"Tensorflow listening on {url4}")
+                print("")
+
+                print("-------")
+                print("ML_11_2")
+                print(f"Tensorflow listening on {url5}")
+
                 print("Dt",df)
                 print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
 
@@ -5387,9 +5459,7 @@ class AutoContr(Controller):
                 # plt.legend(prop={"size":6})
                 # plt.show()
                 # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
-
-                print("Before entering to the while loop: scan_data",scan_data)        
-                
+                time.sleep(50)
                 self.close_connection()
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
@@ -6147,81 +6217,14 @@ class AutoContr(Controller):
                 user_concentrations=[]
                 Avg_test=[]
                 
-
+                ml_past = False
                 
                 for r in range(5):
                     print("Epoch", r+1)
-
+                    print("pst",ml_past)
                     # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
-                    input_user_model, user_concentration, train_prediction, W, b = model.training(df,input_user_model,r)#550, 0.0002, 480 , 10000, 20
-                    
-
-
-                    logdir0= "logs0/fit/" 
-
-                    logdir2= "logs2/fit/" 
-
-                    logdirNew= "logsNew/fit/" 
-
-                    logdirNew_2= "logsNew_2/fit/" 
-
-                    logdir11= "logs11/fit/" 
-
-                    logdir11_2= "logs11_2/fit/" 
-
-
-
-
-                    tb = program.TensorBoard()
-                    tb1= program.TensorBoard()
-                    tb2= program.TensorBoard()
-                    tb3= program.TensorBoard()
-                    tb4= program.TensorBoard()
-                    tb5= program.TensorBoard()
-
-                    tb.configure(argv=[None, '--logdir', logdir0])
-                    tb1.configure(argv=[None, '--logdir', logdir2])
-                    tb2.configure(argv=[None, '--logdir', logdirNew])
-                    tb3.configure(argv=[None, '--logdir', logdirNew_2])
-                    tb4.configure(argv=[None, '--logdir', logdir11])
-                    tb5.configure(argv=[None, '--logdir', logdir11_2])
-
-                    url = tb.launch()
-                    url1 = tb1.launch()
-                    url2 = tb2.launch()
-                    url3 = tb3.launch()
-                    url4 = tb4.launch()
-                    url5 = tb5.launch()
-
-                    print("ML0")
-                    print(f"Tensorflow listening on {url}")
-                    print("")
-                    print("")
-                    
-                    print("-------")
-                    print("ML2")
-                    print(f"Tensorflow listening on {url1}")
-                    print("")
-
-                    print("-------")
-                    print("ML_New")
-                    print(f"Tensorflow listening on {url2}")
-                    print("")
-
-                    print("-------")
-                    print("ML_New_2")
-                    print(f"Tensorflow listening on {url3}")
-                    print("")
-
-                    print("-------")
-                    print("ML_11")
-                    print(f"Tensorflow listening on {url4}")
-                    print("")
-
-                    print("-------")
-                    print("ML_11_2")
-                    print(f"Tensorflow listening on {url5}")
-
+                    input_user_model, user_concentration, train_prediction, W, b , ml_past= model.training(df,input_user_model,r,ml_past)#550, 0.0002, 480 , 10000, 20
+                
 
                     # W_list.append(W)
                     # b_list.append(b)
@@ -6447,7 +6450,7 @@ class AutoContr(Controller):
                         Wave_pre += last_obs_test[tpl][0]
                         Obs_pre  += last_obs_test[tpl][1]
                     Wave_pre = Wave_pre/len(last_obs_test)
-                    Obs_pre = Wave_pre/len(last_obs_test)
+                    Obs_pre = Obs_pre/len(last_obs_test)
                     Robot_answer = np.array([[Wave_pre,Obs_pre]])
       
                     print("The average is ", Wave_pre,Obs_pre)
@@ -6511,6 +6514,73 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 
+                
+                
+                logdir0= "logs0/fit/" 
+
+                logdir2= "logs2/fit/" 
+
+                logdirNew= "logsNew/fit/" 
+
+                logdirNew_2= "logsNew_2/fit/" 
+
+                logdir11= "logs11/fit/" 
+
+                logdir11_2= "logs11_2/fit/" 
+
+
+
+
+                tb = program.TensorBoard()
+                tb1= program.TensorBoard()
+                tb2= program.TensorBoard()
+                tb3= program.TensorBoard()
+                tb4= program.TensorBoard()
+                tb5= program.TensorBoard()
+
+                tb.configure(argv=[None, '--logdir', logdir0])
+                tb1.configure(argv=[None, '--logdir', logdir2])
+                tb2.configure(argv=[None, '--logdir', logdirNew])
+                tb3.configure(argv=[None, '--logdir', logdirNew_2])
+                tb4.configure(argv=[None, '--logdir', logdir11])
+                tb5.configure(argv=[None, '--logdir', logdir11_2])
+
+                url = tb.launch()
+                url1 = tb1.launch()
+                url2 = tb2.launch()
+                url3 = tb3.launch()
+                url4 = tb4.launch()
+                url5 = tb5.launch()
+
+                print("ML0")
+                print(f"Tensorflow listening on {url}")
+                print("")
+                print("")
+                    
+                print("-------")
+                print("ML2")
+                print(f"Tensorflow listening on {url1}")
+                print("")
+
+                print("-------")
+                print("ML_New")
+                print(f"Tensorflow listening on {url2}")
+                print("")
+
+                print("-------")
+                print("ML_New_2")
+                print(f"Tensorflow listening on {url3}")
+                print("")
+
+                print("-------")
+                print("ML_11")
+                print(f"Tensorflow listening on {url4}")
+                print("")
+
+                print("-------")
+                print("ML_11_2")
+                print(f"Tensorflow listening on {url5}")
+
                 print("Dt",df)
                 print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
 
