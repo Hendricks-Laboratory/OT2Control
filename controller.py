@@ -5125,7 +5125,7 @@ class AutoContr(Controller):
                         store_indices_test=[]
                         for i in range(len(distances_test)):
                             if i!= len(distances_test):
-                                if distances_test[i] <= 10:
+                                if distances_test[i] <= 100:
                                     store_indices_test.append(i)
                                 print("stored indices test",store_indices_test)
                                         
