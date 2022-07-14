@@ -2797,9 +2797,7 @@ class PlateReader(AbstractPlateReader):
     '''
 
     def __init__(self, data_path, header_data, eve_files_path, simulate=False):
-        print('1**************************************************')
         super().__init__(data_path)
-        print('2**************************************************')
         self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
@@ -2807,9 +2805,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
-        print('3**************************************************')
         self.data = ScanDataFrame(data_path, self.experiment_name, eve_files_path)
-        print('4**************************************************')      
         
     def exec_macro(self, macro, *args):
         '''
@@ -2992,7 +2988,7 @@ class PlateReader(AbstractPlateReader):
         '''
         closes connection. Use this if you're done with this object at cleanup stage
         '''
-        self.exec_macro('PlateIn')
+        #self.exec_macro('PlateIn')
         self.exec_macro('Terminate')
         self._set_config_attr('ControlApp','AsDDEserver','False')
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
@@ -3027,7 +3023,7 @@ class ScanDataFrame():
         
         temp_file = os.path.join(self.data_path,file_name)
     
- #Extracts and stores data/time metadata for the time column
+        #Extracts and stores data/time metadata for the time column
         print(self.data_path)
         
         df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
@@ -3038,19 +3034,19 @@ class ScanDataFrame():
         if num_cycles != 1:
             raise Exception('Error due to Bad Scan Protocol: too many cycles')
         
-#Extracts and stores wavelength metadata
+        #Extracts and stores wavelength metadata
 
         df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
         wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
         wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
         wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
 
-#Extracts and stores temp metadata for the temp column
+        #Extracts and stores temp metadata for the temp column
         df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    
         temp = float(df_read_data_3[0][2].split(" ")[-1])
         
     
-#Extracts and stores absorbance data 
+        #Extracts and stores absorbance data 
         
         data_df = pd.read_csv(temp_file,skiprows=48,header=None,na_values=["       -"],encoding = 'latin1',)
         
@@ -3061,8 +3057,8 @@ class ScanDataFrame():
         wavvelengths = []
         for x in range (wavelength_blue,wavelength_red+1, wavelength_steps):
             wavvelengths = wavvelengths + [x]
-    
         data_df.columns = wavvelengths
+        
         #Combines metadata with absorbance data
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0,"Temp",temp)
@@ -3072,11 +3068,9 @@ class ScanDataFrame():
         
         if self.isFirst:
             self.df = data_df
-            #full_df = pd.concat([wavvelength_df,data_df])
             self.isFirst = False
         else:
             full_df = data_df
-        
             self.df = pd.concat([self.df,full_df])
         
 #Reorders columns in df
@@ -3108,7 +3102,6 @@ class ScanDataFrame():
         print(file_name)
         
         df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
-        #df = pd.read_csv('CNH_008_full_df1.csv')
 
         self.df = self.df.reset_index()
 
@@ -3134,7 +3127,6 @@ class ScanDataFrame():
             well = "{}{}".format(well[0], int(well[2:]))
            
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
-            #print(y)
             for i in y:
                 if self.experiment_name in i:
                     x=i
@@ -3171,24 +3163,24 @@ class ScanDataFrame():
 
 
 
-        chem_names = ['KBR', 'unsure', 'AGNO3', 'H2O2', 'NABH4']
+        chem_names = ['KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4']
 
 
         KBR = 'potassium_bromide'
-        unsure = 'trisodium_citrate'
+        NA3C6H5O7 = 'trisodium_citrate'
         AGNO3 = 'silver_nitrate'
         H2O2 = 'hydrogen_peroxide'
         NABH4 = 'sodium_borohydride'
 
-        reagents = [KBR, unsure, AGNO3, H2O2, NABH4]
+        reagents = [KBR, NA3C6H5O7, AGNO3, H2O2, NABH4]
 
         KBR_list = []
-        unsure_list = [] 
+        NA3C6H5O7_list = [] 
         AGNO3_list = []
         H2O2_list = [] 
         NABH4_list = []
 
-        reagent_lists = [KBR_list, unsure_list, AGNO3_list, H2O2_list, NABH4_list]
+        reagent_lists = [KBR_list, NA3C6H5O7_list, AGNO3_list, H2O2_list, NABH4_list]
 
         containers = []
         times = []
@@ -3229,15 +3221,7 @@ class ScanDataFrame():
             container = str(container[:3] + head +sep+tail)
             containers.append(container)
             
-            
-            
-            
-
-                
-                
-            
-            
-            
+ 
             #concentration = tail
         pddict = {'time':times, 'vol':volumes, 'cont':containers, 'chem':chems, 'conc': cons} 
         yay = pd.DataFrame(pddict)
@@ -3249,10 +3233,8 @@ class ScanDataFrame():
         n = len(pd.unique(df2['cont']))
 
 
-
-
         base = df2.loc[(df2['cont'].str.contains('blank'))|(df2['cont'].str.contains('control'))]
-        base['KBR'],base['unsure'],base['AGNO3'],base['H2O2'],base['NABH4'] = 0,0,0,0,0
+        base['KBR'],base['NA3C6H5O7'],base['AGNO3'],base['H2O2'],base['NABH4'] = 0,0,0,0,0
         for i in indices: 
 
             if 'blank' not in i and 'control' not in i:
@@ -3269,8 +3251,8 @@ class ScanDataFrame():
                
                 count = 0
                 
-                KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc = [0], [0], [0], [0], [0]
-                reagent_conc = [KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc]
+                KBR_conc, NA3C6H5O7_conc, AGNO3_conc, H2O2_conc, NABH4_conc = [0], [0], [0], [0], [0]
+                reagent_conc = [KBR_conc, NA3C6H5O7_conc, AGNO3_conc, H2O2_conc, NABH4_conc]
                 for chem in temp.chem.tolist():
                     
                    
@@ -3316,7 +3298,7 @@ class ScanDataFrame():
 
 
         kbr_conc_list = []
-        unsure_conc_list = []
+        na3C6h5O7_conc_list = []
         agno3_conc_list = []
         h202_conc_list = []
         nabh4_conc_list = []
@@ -3359,11 +3341,11 @@ class ScanDataFrame():
                     kbr_conc_list.append(kbr_conc[0])
                     
                     
-                unsure_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['unsure'].tolist()
-                if len(unsure_conc)==0:
-                    unsure_conc_list.append(0)
+                na3C6h5O7_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NA3C6H5O7'].tolist()
+                if len(na3C6h5O7_conc)==0:
+                    na3C6h5O7_conc_list.append(0)
                 else:
-                    unsure_conc_list.append(unsure_conc[0])
+                    na3C6h5O7_conc_list.append(na3C6h5O7_conc[0])
                     
                     
                 agno3_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['AGNO3'].tolist()
@@ -3403,7 +3385,7 @@ class ScanDataFrame():
         df['last reagent added'] = last_reagent
 
         df['KBR'] = kbr_conc_list
-        df['NA3C6H5O7'] = unsure_conc_list
+        df['NA3C6H5O7'] = na3C6h5O7_conc_list
         df['AGNO3'] = agno3_conc_list
         df['H2O2'] = h202_conc_list
         df['NABH4'] = nabh4_conc_list
@@ -3414,8 +3396,6 @@ class ScanDataFrame():
                     
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
-
-        #full.to_csv('yus.csv')
         
     
 class Plotter():
@@ -3433,164 +3413,6 @@ class Plotter():
     
     def __init__(self, filename):
         self.filename = filename
-    
-    def _create_plot(self, row, i):
-        '''
-        exectues a plot command  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-            int i: index of this row  
-        '''
-        wellnames = row[self._products][row[self._products].astype(bool)].index
-        plot_type = row['plot_protocol']
-        filename = row['plot_filename']
-        #make sure you have mapping for all files
-
-        self._update_cached_locs(wellnames)
-        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
-        #it's not safe to plot in simulation because the scan file may not exist yet
-        df, metadata = self.pr.load_reader_data(row['scan_filename'], pr_dict)
-        #execute the plot depending on what was specified
-        if plot_type == 'single_kin':
-            for wellname in wellnames:
-                self.plot_single_kin(df, metadata['n_cycles'], wellname, "{}_{}".format(wellname, filename))
-        elif plot_type == 'overlay':
-            self.plot_LAM_overlay(df, wellnames, filename)
-        elif plot_type == 'multi_kin':
-            self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
-            
-    def _plot_setup_overlay(self,title):
-        '''
-        Sets up a figure for an overlay plot  
-        params:  
-            str title: the title of the reaction  
-        '''
-        #formats the figure nicely
-        plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-        plt.legend(loc="upper right",frameon = False, prop={"size":7},labelspacing = 0.5)
-        plt.rc('axes', linewidth = 2)
-        plt.xlabel('Wavelength (nm)',fontsize = 16)
-        plt.ylabel('Absorbance (a.u.)', fontsize = 16)
-        plt.tick_params(axis = "both", width = 2)
-        plt.tick_params(axis = "both", width = 2)
-        plt.xticks([300,400,500,600,700,800,900,1000])
-        plt.yticks([i/10 for i in range(0,11,1)])
-        plt.axis([300, 1000, 0.0 , 1.0])
-        plt.xticks(fontsize = 10)
-        plt.yticks(fontsize = 10)
-        plt.title(str(title), fontsize = 16, pad = 20)
-        
-    def plot_LAM_overlay(self,df,wells,filename=None):
-        '''
-        plots overlayed spectra of wells in the order that they are specified  
-        params:  
-            df df: dataframe with columns = chem_names, and values of each column is a series
-              of scans in 701 intervals.  
-            str filename: the title of the plot, and the file  
-            list<str> wells: an ordered list of all of the chem_names you want to plot.  
-        Postconditions:  
-            plot has been written with name "overlay.png" to the plotting dir. or 
-            {filename}.png if filename was supplied  
-        '''
-        if not filename:
-            filename = "overlay"
-        x_vals = list(range(300,1001))
-        #overlays only things you specify
-        y = []
-        #df = df[df_reorder]
-        #headers = [well_key[k] for k in df.columns]
-        #legend_colors = []
-        for chem_name in wells:
-            y.append(df[chem_name].iloc[-701:].to_list())
-        self._plot_setup_overlay(filename)
-        colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
-        for i in range(len(y)):
-            plt.plot(x_vals,y[i],color = tuple(colors[i]))
-        patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
-        plt.legend(patches, wells, loc='upper right', frameon=False,prop={'size':3})
-        legend = pd.DataFrame({'Color':patches,'Labels': wells})
-        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
-        plt.close()
-       
-    def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
-        '''
-        TODO this function doesn't save properly, but it does show. Don't know issue  
-        plots kinetics for each well in the order given by wells.  
-        params:  
-            df df: the scan data  
-            int n_cycles: the number of cycles for the scan data  
-            list<str> wells: the wells you want to plot in order
-        Postconditions:  
-            plot has been written with name "{filename}_overlay.png" to the plotting dir.  
-            If filename is not supplied, name is kin_subplots
-        '''
-        if not filename:
-            filename='kin_subplots'
-        x_vals = list(range(300,1001))
-        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
-        fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
-        for idx, (chem_name, ax) in enumerate(zip(wells, axes.flatten())):
-            ax.set_title(chem_name)
-            self._plot_kin(ax, df, n_cycles, chem_name)
-            plt.subplots_adjust(wspace=0.3, hspace= -0.1)
-        
-            ax.tick_params(
-                which='both',
-                bottom='off',
-                left='off',
-                right='off',
-                top='off'
-            )
-            ax.set_xlim((300,1000))
-            ax.set_ylim((0,1.0))
-            ax.set_xlabel("Wavlength (nm)")
-            ax.set_ylabel("Absorbance (A.U.)")
-            ax.set_xticks(range(301, 1100, 100))
-            #ax.set_aspect(adjustable='box')
-            #ax.set_yticks(range(0,1))
-        else:
-            [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
-        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
-        plt.close()
-
-    def _plot_kin(self, ax, df, n_cycles, chem_name):
-        '''
-        helper method for kinetics plotting methods  
-        params:  
-            plt.axes ax: or anything with a plot func. the place you want ot plot  
-            df df: the scan data  
-            int n_cycles: the number of cycles in per well scanned  
-            str chem_name: the name of the chemical to be plotted  
-        Postconditions:  
-            a kinetics plot of the well has been plotted on ax  
-        '''
-        x_vals = list(range(300,1001))
-        colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
-        kin = 0
-        col = df[chem_name]
-        for kin in range(n_cycles):
-            ax.plot(x_vals, df[chem_name].iloc[kin*701:(kin+1)*701],color=tuple(colors[kin]))
-        
-    
-    def plot_single_kin(self, df, n_cycles, chem_name, filename=None):
-        '''
-        plots one kinetics trace. 
-        params:  
-            df df: the scan data  
-            int n_cycles: the number of cycles in per well scanned  
-            str chem_name: the name of the chemical to be plotted  
-            str filename: the name of the file to write  
-        Postconditions:  
-            A kinetics trace of the well has been written to the Plots directory.
-            under the name filename. If filename was None, the filename will be 
-            {chem_name}_kinetics.png
-        '''
-        if not filename:
-            filename = '{}_kinetics'.format(chem_name)
-        self._plot_setup_overlay('Kinetics {}: '.format(chem_name))
-        self._plot_kin(plt,df, n_cycles, chem_name)
-        plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
-        plt.close()
     
         
         
