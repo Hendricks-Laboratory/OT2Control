@@ -1251,8 +1251,56 @@ class NeuralNet(MLModel):
             # print("ML_11_2")
             # print(f"Tensorflow listening on {url5}")
 
+            upper_bound_Cit = 8.125
+            lower_bound_Cit = 0.3125
+                    
+            #Boundary for Ag
+                    
+            upper_bound_Ag = 0.24375
+            lower_bound_Ag = 0.0094
+                    
+            #Boundary for KBr
+            upper_bound_KBr = 0.0005
+            lower_bound_KBr = 0.00025
+            out2 = predicted_by_model[0][2]
+            out0 = predicted_by_model[0][0]
+            out1 = predicted_by_model[0][1]
 
+            Nextt_net= False
+            Ngen_net=0
+            while True:
+                print("Checking creations model",(out2*(200)/0.005 + out0*(200)/ 12.5+ out1*(200)/0.375))
+                if (out2*(200)/0.005 + out0*(200)/ 12.5+ out1*(200)/0.375) > 130:
+                    out2 = out2 - 4*(out2/100)
+                    out0 = out0 - 4*(out0/100)
+                    out1 = out1 - 4*(out1/100)
+                    Nextt_net = True
+                    Ngen_net +=1
+                else:
 
+                    if out2 == upper_bound_KBr:
+                        out1 = 0
+                        out0  = 0
+
+                    if out0 == upper_bound_Cit:
+                        out2 = 0
+                        out1  = 0
+
+                    if out1 == upper_bound_Ag:
+                        out0 = 0
+                        out2  = 0
+                    Nextt_net= True
+                    break
+                
+
+                            
+            print("N of rep",Ngen_net)
+            print("Concen after checking (T)",out0,out1,out2)
+
+            predicted_by_model[0][0] =out0
+            predicted_by_model[0][1] =out1
+            predicted_by_model[0][2] =out2
+            print("")       
             print("predicted_by_model",predicted_by_model)
             # time.sleep(50)
             return input_user, predicted_by_model, 0 , 0, 0 , ml_past
