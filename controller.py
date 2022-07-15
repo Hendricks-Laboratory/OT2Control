@@ -6632,7 +6632,7 @@ class AutoContr(Controller):
 
                     #Here we change 
                     print("sending len",len(last_obs_test))
-                    print("")
+                    print(" ")
                     print("Robot send back a wavelenght of", Robot_answer)
                     print("User input was ", input_user_model, input_user)
                     test_error= Robot_answer - input_user_model
