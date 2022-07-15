@@ -208,7 +208,7 @@ class Controller(ABC):
         a run function that creates a portal. The portal is not passed to init because although
         the code must not use more than one portal at a time, the portal may change over the 
         lifetime of the class
-        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        Note that pr cannot be initialized until you know if you're simulating or not, so it
         is instantiated in run
         '''
         #set according to input
@@ -218,6 +218,7 @@ class Controller(ABC):
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size = 4
+        self.rxn_sheet_name = rxn_sheet_name
         self.simulate = False #by default will be changed if a simulation is run
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
@@ -225,6 +226,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
+        self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
@@ -449,7 +451,7 @@ class Controller(ABC):
             else:  
                 None: this is ok because the wks key will not be used if caching  
         '''
-        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        name_key_pairs = self.wks_key_pairs
         try:
             i=0
             wks_key = None
@@ -778,6 +780,18 @@ class Controller(ABC):
                 write_file.write(file_bytes)
         self.translate_wellmap()
         
+    def delete_wks_kay(self):
+        '''
+        deletes key from the reaction key pair google sheet to prevent accidental
+        runs in the future
+        Postconditions:    
+            if the key pair still exists, the key is deleted 
+        '''
+        wks = self.wks_key_pairs
+        cell_list = wks.findall(str(self.rxn_sheet_name))
+        for cell in cell_list   : 
+            if cell:
+                wks.batch_clear(['B'+str(cell.row)])
 
     def close_connection(self):
         '''
@@ -792,7 +806,7 @@ class Controller(ABC):
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
-    
+        
     def translate_wellmap(self):
         '''
         Preconditions:  
