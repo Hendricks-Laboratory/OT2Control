@@ -226,7 +226,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
-        self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
@@ -321,6 +321,11 @@ class Controller(ABC):
                         'name':rxn_sheet_name}
             with open(os.path.join(self.cache_path, '.metadata.json'), 'w') as file:
                 json.dump(metadata, file)
+
+    def _get_key_wks(self, credentials):
+        gc = gspread.authorize(credentials)
+        name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
+        return name_key_wks
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
@@ -780,14 +785,14 @@ class Controller(ABC):
                 write_file.write(file_bytes)
         self.translate_wellmap()
         
-    def delete_wks_kay(self):
+    def delete_wks_key(self):
         '''
         deletes key from the reaction key pair google sheet to prevent accidental
         runs in the future
         Postconditions:    
             if the key pair still exists, the key is deleted 
         '''
-        wks = self.wks_key_pairs
+        wks = self.name_key_wks
         cell_list = wks.findall(str(self.rxn_sheet_name))
         for cell in cell_list   : 
             if cell:
@@ -807,7 +812,7 @@ class Controller(ABC):
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
-        self.delete_wks_kay()
+        self.delete_wks_key()
         
     def translate_wellmap(self):
         '''
