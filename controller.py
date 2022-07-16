@@ -800,12 +800,14 @@ class Controller(ABC):
             Log files have been written to self.out_path  
             Connection has been closed  
         '''
+        
         print('<<controller>> initializing breakdown')
         self.save()
         #server should now send a close command
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
+        self.delete_wks_kay()
         
     def translate_wellmap(self):
         '''
@@ -3234,8 +3236,21 @@ class ScanDataFrame():
             head, sep, tail = container[3:].partition('C')
             container = str(container[:3] + head +sep+tail)
             containers.append(container)
+                  
+        
+        chems_unique = list(set(chems))
+        print(chems_unique, 'yeah')
+        chem_info = {}
+        for chem in chems_unique:
+            chem_info[chem] = [0]
             
- 
+            
+
+                
+                
+            
+            
+            
             #concentration = tail
         pddict = {'time':times, 'vol':volumes, 'cont':containers, 'chem':chems, 'conc': cons} 
         yay = pd.DataFrame(pddict)
@@ -3247,10 +3262,14 @@ class ScanDataFrame():
         n = len(pd.unique(df2['cont']))
 
 
-        base = df2.loc[(df2['cont'].str.contains('blank'))|(df2['cont'].str.contains('control'))]
-        base['KBR'],base['NA3C6H5O7'],base['AGNO3'],base['H2O2'],base['NABH4'] = 0,0,0,0,0
-        for i in indices: 
 
+
+        base = df2.loc[(df2['cont'].str.contains('blank'))|(df2['cont'].str.contains('control'))]
+        #base['KBR'],base['unsure'],base['AGNO3'],base['H2O2'],base['NABH4'] = 0,0,0,0,0
+        for chem in chems_unique:
+            base[chem] = 0
+        for i in indices: 
+            print(i, 'LDKJGAFKLSDJLKFJLAKSDJFLJADSLK')
             if 'blank' not in i and 'control' not in i:
                 temp = df2.loc[df2['cont']==i]
                 temp.sort_values(by='time')
@@ -3265,37 +3284,61 @@ class ScanDataFrame():
                
                 count = 0
                 
-                KBR_conc, NA3C6H5O7_conc, AGNO3_conc, H2O2_conc, NABH4_conc = [0], [0], [0], [0], [0]
-                reagent_conc = [KBR_conc, NA3C6H5O7_conc, AGNO3_conc, H2O2_conc, NABH4_conc]
+                #KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc = [0], [0], [0], [0], [0]
+                #reagent_conc = [KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc]
+                
+                for chem in chems_unique:
+                    chem_info[chem] = [0]
+                
+                
                 for chem in temp.chem.tolist():
+                    print(chem, 'yeyey')
+                    if 'water' in chem.lower():
+                        for i in chems_unique:
+                            chem_info[i].append(chem_info[i][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                    else:
+                            
+                        chem_info[chem].append(float(volumes[count])*float(concentrations[count])/float(sum_volumes[count]))
+                        for x in chems_unique:
+                            if x != chem:
+                                
+                                chem_info[x].append(chem_info[x][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                   
+                   
                     
                    
-                    flag = False
-                    for reagent in reagents:
-                        if reagent in chem:
-                            flag = True
+                    
+                   
+                    
+                   # flag = False
+                   #  for reagent in reagents:
+                   #      if reagent in chem:
+                   #          flag = True
                   
-                    if (chem in reagents) or (flag):
-                        for reagent in reagents:
+                   #  if (chem in reagents) or (flag):
+                   #      for reagent in reagents:
                            
-                            if reagent in chem:
+                   #          if reagent in chem:
                                
-                                reagent_conc[reagents.index(reagent)].append(float(volumes[count])*float(concentrations[count])/float(sum_volumes[count]))
-                                for x in reagents:
-                                    if x != reagent:
+                   #              reagent_conc[reagents.index(reagent)].append(float(volumes[count])*float(concentrations[count])/float(sum_volumes[count]))
+                   #              for x in reagents:
+                   #                  if x != reagent:
                                         
-                                        reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                   #                      reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
                            
-                    elif 'water' in chem.lower():
+                   #  elif 'water' in chem.lower():
                        
-                        for x in reagents:
-                            reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                   #      for x in reagents:
+                   #          reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
                    
                     count += 1
             
                 
-                for i in reagent_conc:
-                    temp[chem_names[reagent_conc.index(i)]] = i[1:]
+                for i in chem_info:
+                    print(i)
+                    print(chem_info[i][1:])
+                    print()
+                    temp[i] = chem_info[i][1:]
              
                 base = pd.concat([base, temp])
             
@@ -3312,12 +3355,16 @@ class ScanDataFrame():
 
 
         kbr_conc_list = []
-        na3C6h5O7_conc_list = []
+        unsure_conc_list = []
         agno3_conc_list = []
         h202_conc_list = []
         nabh4_conc_list = []
 
-
+        #more lists
+        another_dict = {}
+        for x in chems_unique:
+            another_dict[x] = []
+            
 
 
 
@@ -3335,50 +3382,62 @@ class ScanDataFrame():
             for react in df.loc[scan]['Well Name']:
                 transfers_before_scans = []
                 react = str(react)
-                print(react)
-                
+                #print(react)
+                #if 'blank' in react:fsdfsdfsdfsdfsdf
+                    #react = 'control'
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
                 
           
                 for transfer_time in transfer_times:
                     if transfer_time <= time:
-                        print('heyeyeyyeye', transfer_time)
+                        #print('heyeyeyyeye', transfer_time)
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
                 
                 
-                kbr_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['KBR'].tolist()
-                if len(kbr_conc)==0:
-                    kbr_conc_list.append(0)
-                else:
-                    kbr_conc_list.append(kbr_conc[0])
+                
+                
+                for i in chems_unique:
+                    current_chem_conc_list = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)][i].tolist()
+                    if len(current_chem_conc_list)==0:
+                        another_dict[i].append(0)
+                    else:
+                        another_dict[i].append(current_chem_conc_list[0])
+                
+                
+                
+                # kbr_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['KBR'].tolist()
+                # if len(kbr_conc)==0:
+                #     kbr_conc_list.append(0)
+                # else:
+                #     kbr_conc_list.append(kbr_conc[0])
                     
                     
-                na3C6h5O7_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NA3C6H5O7'].tolist()
-                if len(na3C6h5O7_conc)==0:
-                    na3C6h5O7_conc_list.append(0)
-                else:
-                    na3C6h5O7_conc_list.append(na3C6h5O7_conc[0])
+                # unsure_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['unsure'].tolist()
+                # if len(unsure_conc)==0:
+                #     unsure_conc_list.append(0)
+                # else:
+                #     unsure_conc_list.append(unsure_conc[0])
                     
                     
-                agno3_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['AGNO3'].tolist()
-                if len(agno3_conc)==0:
-                    agno3_conc_list.append(0)
-                else:
-                    agno3_conc_list.append(agno3_conc[0])
+                # agno3_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['AGNO3'].tolist()
+                # if len(agno3_conc)==0:
+                #     agno3_conc_list.append(0)
+                # else:
+                #     agno3_conc_list.append(agno3_conc[0])
                     
-                h202_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['H2O2'].tolist()
-                if len(h202_conc)==0:
-                    h202_conc_list.append(0)
-                else:
-                    h202_conc_list.append(h202_conc[0])
+                # h202_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['H2O2'].tolist()
+                # if len(h202_conc)==0:
+                #     h202_conc_list.append(0)
+                # else:
+                #     h202_conc_list.append(h202_conc[0])
                     
-                nabh4_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NABH4'].tolist()
-                if len(h202_conc)==0:
-                    nabh4_conc_list.append(0)
-                else:
-                    nabh4_conc_list.append(nabh4_conc[0])
+                # nabh4_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NABH4'].tolist()
+                # if len(h202_conc)==0:
+                #     nabh4_conc_list.append(0)
+                # else:
+                #     nabh4_conc_list.append(nabh4_conc[0])
                 
                 
                     
@@ -3387,7 +3446,7 @@ class ScanDataFrame():
                    
                 weird.append(latest_transfer_time)
                 last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
-                print(last_reagent_added)
+                #print(last_reagent_added)
                 last_reagent.append(last_reagent_added)
                 
                 
@@ -3398,16 +3457,18 @@ class ScanDataFrame():
         df['time of last reagent added'] = weird
         df['last reagent added'] = last_reagent
 
-        df['KBR'] = kbr_conc_list
-        df['NA3C6H5O7'] = na3C6h5O7_conc_list
-        df['AGNO3'] = agno3_conc_list
-        df['H2O2'] = h202_conc_list
-        df['NABH4'] = nabh4_conc_list
+        for x in another_dict:
+            df[x] = another_dict[x]
+        # df['KBR'] = kbr_conc_list
+        # df['NA3C6H5O7'] = unsure_conc_list
+        # df['AGNO3'] = agno3_conc_list
+        # df['H2O2'] = h202_conc_list
+        # df['NABH4'] = nabh4_conc_list
 
         df.reset_index(inplace=True)
-        df = df[['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']+
-                [c for c in df if c not in ['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']] ]
-                    
+        #df = df[['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']+
+                #[c for c in df if c not in ['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']] ]
+          
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
         
