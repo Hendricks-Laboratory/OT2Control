@@ -226,6 +226,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
+        self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
@@ -792,7 +793,7 @@ class Controller(ABC):
         Postconditions:    
             if the key pair still exists, the key is deleted 
         '''
-        wks = self.name_key_wks
+        wks = self.wks_key_pairs
         cell_list = wks.findall(str(self.rxn_sheet_name))
         for cell in cell_list   : 
             if cell:
