@@ -793,7 +793,7 @@ class Controller(ABC):
         Postconditions:    
             if the key pair still exists, the key is deleted 
         '''
-        wks = self.wks_key_pairs
+        wks = self.name_key_wks
         cell_list = wks.findall(str(self.rxn_sheet_name))
         for cell in cell_list   : 
             if cell:
