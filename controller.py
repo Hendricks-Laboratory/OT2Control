@@ -1390,6 +1390,7 @@ class Controller(ABC):
         if callback_num <= 25:
             callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
         elif callback_num > 25:
+            callback_num -= 25
             callback_alph = str(chr(callback_num + ord('a'))) + str(chr(callback_num + ord('a'))) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
