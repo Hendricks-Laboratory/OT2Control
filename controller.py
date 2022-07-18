@@ -238,6 +238,7 @@ class Controller(ABC):
         empty_containers = self._get_empty_containers(raw_reagent_df)
         self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
         products_to_labware = self._get_products_to_labware(input_data)
+    
         self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
         self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
@@ -1389,7 +1390,7 @@ class Controller(ABC):
         if callback_num <= 25:
             callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
         elif callback_num > 25:
-            callback_alph = str(chr(callback_num + ord('a'))) + str(chr(callback_num + ord('a')) #convert the number to alpha
+            callback_alph = str(chr(callback_num + ord('a'))) + str(chr(callback_num + ord('a'))) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             self._stop(i)
