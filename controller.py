@@ -3411,70 +3411,26 @@ class ScanDataFrame():
                     else:
                         another_dict[i].append(current_chem_conc_list[0])
                 
-                
-                
-                # kbr_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['KBR'].tolist()
-                # if len(kbr_conc)==0:
-                #     kbr_conc_list.append(0)
-                # else:
-                #     kbr_conc_list.append(kbr_conc[0])
-                    
-                    
-                # unsure_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['unsure'].tolist()
-                # if len(unsure_conc)==0:
-                #     unsure_conc_list.append(0)
-                # else:
-                #     unsure_conc_list.append(unsure_conc[0])
-                    
-                    
-                # agno3_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['AGNO3'].tolist()
-                # if len(agno3_conc)==0:
-                #     agno3_conc_list.append(0)
-                # else:
-                #     agno3_conc_list.append(agno3_conc[0])
-                    
-                # h202_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['H2O2'].tolist()
-                # if len(h202_conc)==0:
-                #     h202_conc_list.append(0)
-                # else:
-                #     h202_conc_list.append(h202_conc[0])
-                    
-                # nabh4_conc = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)]['NABH4'].tolist()
-                # if len(h202_conc)==0:
-                #     nabh4_conc_list.append(0)
-                # else:
-                #     nabh4_conc_list.append(nabh4_conc[0])
-                
-                
-                    
-                   
-                    
                    
                 weird.append(latest_transfer_time)
                 last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
                 #print(last_reagent_added)
                 last_reagent.append(last_reagent_added)
                 
-                
-               
-                        
-                    
 
         df['time of last reagent added'] = weird
         df['last reagent added'] = last_reagent
 
         for x in another_dict:
+            
             df[x] = another_dict[x]
-        # df['KBR'] = kbr_conc_list
-        # df['NA3C6H5O7'] = unsure_conc_list
-        # df['AGNO3'] = agno3_conc_list
-        # df['H2O2'] = h202_conc_list
-        # df['NABH4'] = nabh4_conc_list
-
+     
         df.reset_index(inplace=True)
-        #df = df[['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']+
-                #[c for c in df if c not in ['Scan ID', 'Well', 'Well Name', 'KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4', 'time of last reagent added','last reagent added', 'Temp', 'Time']] ]
-          
+        left_list = ['Scan ID', 'Well', 'Well Name']+[i for i in another_dict if 'water' not in i.lower()]+['time of last reagent added','last reagent added', 'Temp', 'Time']
+        right_list = [c for c in df if c not in ['Scan ID', 'Well', 'Well Name']+[i for i in another_dict if 'water' not in i.lower()]+['time of last reagent added','last reagent added', 'Temp', 'Time']]
+        df = df[left_list + right_list]
+        df= df.rename(columns=str.lower)
+                    
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
         
