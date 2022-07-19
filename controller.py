@@ -3032,15 +3032,12 @@ class ScanDataFrame():
     '''
     
  
-    def __init__(self, data_path, header_data, eve_files_path):
+    def __init__(self, data_path, experiment_name, eve_files_path):
         self.df = pd.DataFrame()
         self.data_path = data_path
         self.eve_files_path = eve_files_path
-        #self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
-        self.experiment_name = header_data
+        self.experiment_name = experiment_name
         self.isFirst = True
-        self.isFirst1 = True
-        self.add = True
         
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
@@ -3049,9 +3046,8 @@ class ScanDataFrame():
         
         temp_file = os.path.join(self.data_path,file_name)
     
- #Extracts and stores data/time metadata for the time column
+        #Extracts and stores data/time metadata for the time column
 
-        
         df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
         am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
         hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0]) + 12 if am_pm == "PM" else int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
@@ -3060,19 +3056,19 @@ class ScanDataFrame():
         if num_cycles != 1:
             raise Exception('Error due to Bad Scan Protocol: too many cycles')
         
-#Extracts and stores wavelength metadata
+        #Extracts and stores wavelength metadata
 
         df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
         wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
         wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
         wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
 
-#Extracts and stores temp metadata for the temp column
+        #Extracts and stores temp metadata for the temp column
+        
         df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    
         temp = float(df_read_data_3[0][2].split(" ")[-1])
         
-    
-#Extracts and stores absorbance data 
+        #Extracts and stores absorbance data 
         
         data_df = pd.read_csv(temp_file,skiprows=48,header=None,na_values=["       -"],encoding = 'latin1',)
         
@@ -3083,10 +3079,9 @@ class ScanDataFrame():
         for x in range (wavelength_blue,wavelength_red+1, wavelength_steps):
             wavvelengths = wavvelengths + [x]
     
-        
         #Combines metadata with absorbance data
-        data_df.columns = wavvelengths
         
+        data_df.columns = wavvelengths
         
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0,"Temp",temp)
@@ -3129,17 +3124,12 @@ class ScanDataFrame():
                         x = 'control'
                 if ('blank' in i.lower()):
                         x = 'blank'
-                #print(x)
-            
+               
             well_names.append(x)
 
         data_df.insert(0, 'Well Name', well_names)
 
-        
-        
-        
-        #data_df.to_csv(file_name+'{}'.format('yayaaa.csv'))
-        #self.df.to_csv(file_name+'{}'.format('computer.csv'))
+    
         
         
         if self.isFirst:
@@ -3152,7 +3142,6 @@ class ScanDataFrame():
         
             self.df = pd.concat([full_df,self.df])
         
-        #self.df = self.df.sort_values(by=['Scan ID', 'Well'])
         self.df = self.df.sort_values(['Time', 'Well'])
     
 
@@ -3177,27 +3166,6 @@ class ScanDataFrame():
 
         df = pd.read_csv(os.path.join(self.data_path, reaction+'full_df.csv'))
 
-
-
-        chem_names = ['KBR', 'NA3C6H5O7', 'AGNO3', 'H2O2', 'NABH4']
-
-
-        KBR = 'potassium_bromide'
-        NA3C6H5O7 = 'trisodium_citrate'
-        AGNO3 = 'silver_nitrate'
-        H2O2 = 'hydrogen_peroxide'
-        NABH4 = 'sodium_borohydride'
-
-        reagents = [KBR, NA3C6H5O7, AGNO3, H2O2, NABH4]
-
-        KBR_list = []
-        NA3C6H5O7_list = [] 
-        AGNO3_list = []
-        H2O2_list = [] 
-        NABH4_list = []
-
-        reagent_lists = [KBR_list, NA3C6H5O7_list, AGNO3_list, H2O2_list, NABH4_list]
-
         containers = []
         times = []
         volumes =[]
@@ -3209,15 +3177,13 @@ class ScanDataFrame():
         for container in con_list:
             if (reaction in  container) or ('blank' in container) or ('control' in container):
                 volume = well_hist_df.loc[well_hist_df['container'] == container].index.tolist()
-                #print(volume)
+                
                 
                 indices.append(container)
                 indices = list(set(indices))
 
                 vols.extend(volume)
                 vols = list(set(vols))
-
-
 
 
         for index in vols:
@@ -3239,7 +3205,7 @@ class ScanDataFrame():
                   
         
         chems_unique = list(set(chems))
-        print(chems_unique, 'yeah')
+    
         chem_info = {}
         for chem in chems_unique:
             chem_info[chem] = [0]
@@ -3265,11 +3231,11 @@ class ScanDataFrame():
 
 
         base = df2.loc[(df2['cont'].str.contains('blank'))|(df2['cont'].str.contains('control'))]
-        #base['KBR'],base['unsure'],base['AGNO3'],base['H2O2'],base['NABH4'] = 0,0,0,0,0
+       
         for chem in chems_unique:
             base[chem] = 0
         for i in indices: 
-            print(i, 'LDKJGAFKLSDJLKFJLAKSDJFLJADSLK')
+           
             if 'blank' not in i and 'control' not in i:
                 temp = df2.loc[df2['cont']==i]
                 temp.sort_values(by='time')
@@ -3284,15 +3250,13 @@ class ScanDataFrame():
                
                 count = 0
                 
-                #KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc = [0], [0], [0], [0], [0]
-                #reagent_conc = [KBR_conc, UNSURE_conc, AGNO3_conc, H2O2_conc, NABH4_conc]
-                
+               
                 for chem in chems_unique:
                     chem_info[chem] = [0]
                 
                 
                 for chem in temp.chem.tolist():
-                    print(chem, 'yeyey')
+                  
                     if 'water' in chem.lower():
                         for i in chems_unique:
                             chem_info[i].append(chem_info[i][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
@@ -3304,40 +3268,12 @@ class ScanDataFrame():
                                 
                                 chem_info[x].append(chem_info[x][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
                    
-                   
-                    
-                   
-                    
-                   
-                    
-                   # flag = False
-                   #  for reagent in reagents:
-                   #      if reagent in chem:
-                   #          flag = True
-                  
-                   #  if (chem in reagents) or (flag):
-                   #      for reagent in reagents:
-                           
-                   #          if reagent in chem:
-                               
-                   #              reagent_conc[reagents.index(reagent)].append(float(volumes[count])*float(concentrations[count])/float(sum_volumes[count]))
-                   #              for x in reagents:
-                   #                  if x != reagent:
-                                        
-                   #                      reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
-                           
-                   #  elif 'water' in chem.lower():
-                       
-                   #      for x in reagents:
-                   #          reagent_conc[reagents.index(x)].append(reagent_conc[reagents.index(x)][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
-                   
+                 
                     count += 1
             
                 
                 for i in chem_info:
-                    print(i)
-                    print(chem_info[i][1:])
-                    print()
+                   
                     temp[i] = chem_info[i][1:]
              
                 base = pd.concat([base, temp])
@@ -3353,21 +3289,11 @@ class ScanDataFrame():
         scans = list(set(df['Scan ID'].tolist()))
         reactions = list(set((df['Well Name'].tolist())))
 
-
-        kbr_conc_list = []
-        unsure_conc_list = []
-        agno3_conc_list = []
-        h202_conc_list = []
-        nabh4_conc_list = []
-
         #more lists
         another_dict = {}
         for x in chems_unique:
             another_dict[x] = []
             
-
-
-
 
         df.set_index('Scan ID',inplace = True)
 
@@ -3382,15 +3308,13 @@ class ScanDataFrame():
             for react in df.loc[scan]['Well Name']:
                 transfers_before_scans = []
                 react = str(react)
-                #print(react)
-                #if 'blank' in react:fsdfsdfsdfsdfsdf
-                    #react = 'control'
+                
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
                 
-          
+         
                 for transfer_time in transfer_times:
                     if transfer_time <= time:
-                        #print('heyeyeyyeye', transfer_time)
+                       
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
