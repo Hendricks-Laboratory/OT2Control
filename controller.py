@@ -3146,6 +3146,7 @@ class ScanDataFrame():
             x = ''
             #Turn A01 into A1
             well = str(well_with_zeros_in_name)
+            print(well_with_zeros_in_name)
             well = "{}{}".format(well[0], int(well[2:]))
            
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
