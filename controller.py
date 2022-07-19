@@ -3125,19 +3125,6 @@ class ScanDataFrame():
         
         df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
 
-        self.df = self.df.reset_index()
-
-        wavelengths = list(self.df.iloc[0][self.df.columns.get_loc("Time")+1:])
-        for i in range(1,len(wavelengths)+1):
-          self.df = self.df.rename({str(i):wavelengths[i-1] }, axis='columns')
-        self.df = self.df.rename({"Unnamed: 0":"Scan_Number" }, axis='columns')
-
-          
-        wells = list(set(self.df.loc[1:,"Well"]))
-        scans = list(set(self.df.loc[1:,"Scan ID"]))
-        self.df.drop('index', inplace=True, axis=1)
-        self.df = self.df.set_index(["Scan ID", "Well"]).sort_index()
-
         col_list  = self.df.index.get_level_values('Well').tolist()
 
         well_names = []
