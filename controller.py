@@ -3031,12 +3031,16 @@ class ScanDataFrame():
         
     '''
     
-    def __init__(self, data_path, experiment_name, eve_files_path):
+ 
+    def __init__(self, data_path, header_data, eve_files_path):
         self.df = pd.DataFrame()
         self.data_path = data_path
-        self.experiment_name = experiment_name
         self.eve_files_path = eve_files_path
+        #self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
+        self.experiment_name = header_data
         self.isFirst = True
+        self.isFirst1 = True
+        self.add = True
         
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
@@ -3045,8 +3049,8 @@ class ScanDataFrame():
         
         temp_file = os.path.join(self.data_path,file_name)
     
-        #Extracts and stores data/time metadata for the time column
-        print(self.data_path)
+ #Extracts and stores data/time metadata for the time column
+
         
         df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
         am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
@@ -3056,76 +3060,57 @@ class ScanDataFrame():
         if num_cycles != 1:
             raise Exception('Error due to Bad Scan Protocol: too many cycles')
         
-        #Extracts and stores wavelength metadata
+#Extracts and stores wavelength metadata
 
         df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
         wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
         wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
         wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
 
-        #Extracts and stores temp metadata for the temp column
+#Extracts and stores temp metadata for the temp column
         df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    
         temp = float(df_read_data_3[0][2].split(" ")[-1])
         
     
-        #Extracts and stores absorbance data 
+#Extracts and stores absorbance data 
         
         data_df = pd.read_csv(temp_file,skiprows=48,header=None,na_values=["       -"],encoding = 'latin1',)
         
         g=data_df.iloc[:,0]
         g = [x.rstrip(':') for x in g]
-        print(g)
         data_df = data_df.drop(data_df.columns[0], axis=1)
         wavvelengths = []
         for x in range (wavelength_blue,wavelength_red+1, wavelength_steps):
             wavvelengths = wavvelengths + [x]
-        data_df.columns = wavvelengths
+    
         
         #Combines metadata with absorbance data
+        data_df.columns = wavvelengths
+        
+        
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0,"Temp",temp)
         data_df.insert(0, 'Well', g)
         data_df.insert(0,"Scan ID",file_name.rstrip('.csv'))
-    
-        
-        if self.isFirst:
-            self.df = data_df
-            self.isFirst = False
-        else:
-            full_df = data_df
-            self.df = pd.concat([self.df,full_df])
-        
-#Reorders columns in df
-        one= self.df.pop('Scan ID')
-        two= self.df.pop('Well')
-        three= self.df.pop('Time')
-        four = self.df.pop('Temp')
-        
-        self.df.insert(0, 'Time', three)
-        self.df.insert(0, 'Temp', four)
-        self.df.insert(0, 'Well', two)
-        self.df.insert(0, 'Scan ID', one)
-        
-#Prints export values    
-        print(" \n \nUseful Parameters:")
-        print("Number of cycles")
-        print(num_cycles)
-        print("Date Time")
-        print(date_time)  
-        print("wavelength_blue")
-        print(wavelength_blue)    
-        print("wavelength_red")
-        print(wavelength_red)    
-        print("wavelength_steps")
-        print(wavelength_steps)
-        print("Temperature")
-        print(temp)
-        print("Scan ID")
-        print(file_name)
+        data_df = data_df.set_index(['Scan ID','Well'])
         
         df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
+        #df = pd.read_csv('CNH_008_full_df1.csv')
 
-        col_list  = self.df.index.get_level_values('Well').tolist()
+        # self.df = self.df.reset_index()
+
+        # wavelengths = list(self.df.iloc[0][self.df.columns.get_loc("Time")+1:])
+        # for i in range(1,len(wavelengths)+1):
+        #   self.df = self.df.rename({str(i):wavelengths[i-1] }, axis='columns')
+        # self.df = self.df.rename({"Unnamed: 0":"Scan_Number" }, axis='columns')
+
+          
+        # wells = list(set(self.df.loc[1:,"Well"]))
+        # scans = list(set(self.df.loc[1:,"Scan ID"]))
+        # self.df.drop('index', inplace=True, axis=1)
+        # self.df = self.df.set_index(["Scan ID", "Well"]).sort_index()
+
+        col_list  = data_df.index.get_level_values('Well').tolist()
 
         well_names = []
 
@@ -3133,22 +3118,43 @@ class ScanDataFrame():
             x = ''
             #Turn A01 into A1
             well = str(well_with_zeros_in_name)
-            print(well_with_zeros_in_name)
+            #print(well)
             well = "{}{}".format(well[0], int(well[2:]))
            
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
             for i in y:
-                if self.experiment_name in i:
+                if str(self.experiment_name) in i:
                     x=i
                 if ('control' in i.lower()):
                         x = 'control'
                 if ('blank' in i.lower()):
                         x = 'blank'
+                #print(x)
             
             well_names.append(x)
 
-        self.df.insert(0, 'Well Name', well_names)
+        data_df.insert(0, 'Well Name', well_names)
+
         
+        
+        
+        #data_df.to_csv(file_name+'{}'.format('yayaaa.csv'))
+        #self.df.to_csv(file_name+'{}'.format('computer.csv'))
+        
+        
+        if self.isFirst:
+            self.df = data_df
+            #full_df = pd.concat([wavvelength_df,data_df])
+            self.isFirst = False
+            
+        else:
+            full_df = data_df
+        
+            self.df = pd.concat([full_df,self.df])
+        
+        #self.df = self.df.sort_values(by=['Scan ID', 'Well'])
+        self.df = self.df.sort_values(['Time', 'Well'])
+    
 
     def AddReagentInfo(self):
         
