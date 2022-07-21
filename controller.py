@@ -3386,7 +3386,29 @@ class ScanDataFrame():
             df.drop('index', axis=1,inplace=True)
         if 'water' in df.columns:
             df.drop('water', axis=1,inplace=True)
-        df.sort_values(by=['time', 'well name'])
+        
+        wellnames = df['well name'].tolist()
+        wellnamenumbers = []
+        for i in wellnames:
+            print(i,'you')
+            a = i.lower()
+            if 'blank' not in i and 'control' not in i:
+                
+                l_index = re.search('rxn', a).end()
+                r_index = a.rfind('c')
+                wellnamenumber = int(a[l_index:r_index])
+               
+                wellnamenumbers.append(wellnamenumber)
+            else:
+                wellnamenumbers.append(0)
+            #print(l)
+        
+        df['wellnameorder'] = wellnamenumbers
+        
+        df.sort_values(by=['time', 'wellnameorder'], inplace = True)
+        
+        df.drop('wellnameorder', axis=1,inplace=True)
+        
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
         
