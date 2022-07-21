@@ -3031,7 +3031,6 @@ class ScanDataFrame():
         
     '''
     
- 
     def __init__(self, data_path, experiment_name, eve_files_path):
         self.df = pd.DataFrame()
         self.data_path = data_path
@@ -3043,21 +3042,29 @@ class ScanDataFrame():
             os.makedirs(self.data_path)
         
     def AddToDF(self, file_name):
-        
         temp_file = os.path.join(self.data_path,file_name)
     
         #Extracts and stores data/time metadata for the time column
 
         df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
         am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
-        hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0]) + 12 if am_pm == "PM" else int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+        
+        
+        if am_pm == "PM":
+            temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            hour = temphour if temphour == 12  else temphour +12
+        elif am_pm == "AM":
+            hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+        
+        
+        
         date_time = datetime.datetime(int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[2]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[0]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[1]), hour, int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[1]), int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[2]))
         num_cycles = int(df_read_data_1.iloc[4][0][15:])
         if num_cycles != 1:
             raise Exception('Error due to Bad Scan Protocol: too many cycles')
         
         #Extracts and stores wavelength metadata
-
+        
         df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
         wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
         wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
@@ -3086,24 +3093,12 @@ class ScanDataFrame():
         data_df.insert(0,"Time",date_time) 
         data_df.insert(0,"Temp",temp)
         data_df.insert(0, 'Well', g)
-        data_df.insert(0,"Scan ID",file_name.rstrip('.csv'))
+        
+        data_df.insert(0,"Scan ID",file_name.replace(".csv", ""))
         data_df = data_df.set_index(['Scan ID','Well'])
         
         df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
-        #df = pd.read_csv('CNH_008_full_df1.csv')
-
-        # self.df = self.df.reset_index()
-
-        # wavelengths = list(self.df.iloc[0][self.df.columns.get_loc("Time")+1:])
-        # for i in range(1,len(wavelengths)+1):
-        #   self.df = self.df.rename({str(i):wavelengths[i-1] }, axis='columns')
-        # self.df = self.df.rename({"Unnamed: 0":"Scan_Number" }, axis='columns')
-
-          
-        # wells = list(set(self.df.loc[1:,"Well"]))
-        # scans = list(set(self.df.loc[1:,"Scan ID"]))
-        # self.df.drop('index', inplace=True, axis=1)
-        # self.df = self.df.set_index(["Scan ID", "Well"]).sort_index()
+        
 
         col_list  = data_df.index.get_level_values('Well').tolist()
 
@@ -3113,7 +3108,7 @@ class ScanDataFrame():
             x = ''
             #Turn A01 into A1
             well = str(well_with_zeros_in_name)
-            #print(well)
+           
             well = "{}{}".format(well[0], int(well[2:]))
            
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
@@ -3188,8 +3183,13 @@ class ScanDataFrame():
 
         for index in vols:
             chemical = well_hist_df["chemical"].iloc[index]
-            head, sep, tail = chemical[3:].partition('C')
-            chemical = str(chemical[:3] + head)
+            
+            chem_c_index = chemical.rfind('C')
+            head = chemical[:chem_c_index]
+            sep = chemical[chem_c_index]
+            tail = chemical[chem_c_index+1:]
+            
+            chemical =  head
             chems.append(chemical)
             
             concentration = tail
@@ -3198,9 +3198,15 @@ class ScanDataFrame():
             times.append(timestamp)
             volume = well_hist_df["vol"].iloc[index]
             volumes.append(volume)
+            
             container = well_hist_df["container"].iloc[index]
-            head, sep, tail = container[3:].partition('C')
-            container = str(container[:3] + head +sep+tail)
+            
+            cont_c_index = container.rfind('C')
+            head = container[:cont_c_index]
+            sep = container[cont_c_index]
+            tail = container[cont_c_index+1:]
+            
+            container = head +sep + tail
             containers.append(container)
                   
         
@@ -3296,23 +3302,25 @@ class ScanDataFrame():
             
 
         df.set_index('Scan ID',inplace = True)
-
-
-        for scan in df.index.get_level_values('Scan ID').unique():
-         
-
-            for time in df.loc[scan]['Time']:
+        scan_list=df.index.get_level_values('Scan ID').unique()
+        df.reset_index(inplace = True)
+      
+        for scan in scan_list:
+     
+            
+            
+            
+            for time in df.loc[df['Scan ID']==scan, 'Time']:
                 time = time
 
 
-            for react in df.loc[scan]['Well Name']:
+            for react in df.loc[df['Scan ID']==scan, 'Well Name']:
                 transfers_before_scans = []
                 react = str(react)
-                
-                transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()
-                
+                transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()             
          
                 for transfer_time in transfer_times:
+                 
                     if transfer_time <= time:
                        
                         transfers_before_scans.append(transfer_time)
@@ -3331,8 +3339,34 @@ class ScanDataFrame():
                 
                    
                 weird.append(latest_transfer_time)
-                last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
-                #print(last_reagent_added)
+                
+               
+                
+               
+                
+                if "water" in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                    stillWater = True
+                    while stillWater:
+                        if len(transfers_before_scans)>1:
+                            transfers_before_scans.remove(transfers_before_scans.index(latest_transfer_time))
+                            latest_transfer_time = max(transfers_before_scans)
+                        elif len(transfers_before_scans) ==1:
+                            latest_transfer_time = transfers_before_scans[0]
+                            if "water" in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                                stillWater = False
+                                last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                        if "water" not in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                            stillWater = False
+                            last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                            
+                    
+                    
+                else:
+                    last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                    
+                    
+                    
+                
                 last_reagent.append(last_reagent_added)
                 
 
@@ -3348,7 +3382,11 @@ class ScanDataFrame():
         right_list = [c for c in df if c not in ['Scan ID', 'Well', 'Well Name']+[i for i in another_dict if 'water' not in i.lower()]+['time of last reagent added','last reagent added', 'Temp', 'Time']]
         df = df[left_list + right_list]
         df= df.rename(columns=str.lower)
-                    
+        if 'index' in df.columns:
+            df.drop('index', axis=1,inplace=True)
+        if 'water' in df.columns:
+            df.drop('water', axis=1,inplace=True)
+        df.sort_values(by=['time', 'well name'])
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
         
