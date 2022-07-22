@@ -1154,6 +1154,7 @@ class Controller(ABC):
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
         '''
+        self.save()
         #1)
         self.portal.send_pack('home')
         #2)
@@ -1172,7 +1173,6 @@ class Controller(ABC):
         self.pr.exec_macro('PlateIn')
         self.pr.run_protocol(row['scan_protocol'], row['scan_filename'], layout=well_locs)
         self.pr.exec_macro('PlateOut')
-        self.save()
 
     def _update_cached_locs(self, wellnames):
         '''
