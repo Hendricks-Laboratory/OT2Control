@@ -1154,7 +1154,7 @@ class Controller(ABC):
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
         '''
-        self.save()
+        
         #1)
         self.portal.send_pack('home')
         #2)
@@ -1394,6 +1394,8 @@ class Controller(ABC):
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
+        
+        self.save()
 
     def _send_callback(self, callback, product, callback_num, row, i):
         '''
