@@ -3150,7 +3150,7 @@ class ScanDataFrame():
         
         reaction = self.experiment_name
 
-        well_hist_df = pd.read_csv(os.path.join(self.eve_files_path,'well_history.tsv'), sep='\t')
+        well_hist_df = pd.read_csv(os.path.join('/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Eve_Out/Logs','well_history.tsv'), sep='\t')
 
         timess = well_hist_df.timestamp.values.tolist()
         for time in timess:
