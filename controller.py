@@ -3106,10 +3106,16 @@ class ScanDataFrame():
 
         for well_with_zeros_in_name in col_list:
             x = ''
-            #Turn A01 into A1
-            well = str(well_with_zeros_in_name)
-           
-            well = "{}{}".format(well[0], int(well[2:]))
+            
+            if well_with_zeros_in_name[1] == '0':
+                #print('yes')
+                #Turn A01 into A1 if A9 or less
+                well = str(well_with_zeros_in_name)
+                well = "{}{}".format(well[0], int(well[2:]))
+            
+            else:
+                #Leave A10 and greater alone
+                well = str(well_with_zeros_in_name)
            
             y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
             for i in y:
