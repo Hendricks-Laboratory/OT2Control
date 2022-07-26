@@ -718,19 +718,239 @@ class NeuralNet(MLModel):
     
     #NEW TRAIN
     
-    def training(self, df,input_user,r, n_epochs=30, ml_past=False):
+    def training(self, df,input_user,r, n_epochs=30, ml_past=False, explo= False):
         
 
-        # type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
+        #type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
         # while True:
         #     if type_net == "1" or type_net=="2" or type_net=="3":
         #         break
         #     else:
         #         print("Try again")
         #         type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
-
+        # type_net = input("exploration? yes/y no/n")
+        # while True:
+        #     if type_net == "y" or "yes" or "no" or "n":
+        #         break
+        #     else:
+        #         print("Try again")
+        #         type_net= input("exploration? yes/y no/n")
         # print(type_net)
-            #if type_net == "1":
+        if explo==True:
+        
+            train_size= math.floor(len(df)*(80/100))
+            val_size= int((len(df)-train_size)/2)
+            test_size= int(len(df)-train_size-val_size)
+
+            train_pre =[]
+            for rto in range(train_size):
+                train_pre.append((df["Wavelength"][:train_size][rto],df["Observance"][:train_size][rto]))
+        
+            val_pre =[]
+            for ret in range(train_size,train_size+val_size):
+                val_pre.append((df["Wavelength"][train_size:train_size+val_size][ret],df["Observance"][train_size:train_size+val_size][ret]))
+        
+            test_pre =[]
+            for retr in range(train_size+val_size,train_size+val_size+test_size):
+                test_pre.append((df["Wavelength"][train_size+val_size:train_size+val_size+test_size][retr],df["Observance"][train_size+val_size:train_size+val_size+test_size][retr]))
+
+            train_label_pre =[]
+            for ee in range(train_size):
+                train_label_pre.append([df["[Cit]"][:train_size][ee],df["[Ag]"][:train_size][ee],df["[KBr]"][:train_size][ee]])
+
+            val_label_pre =[]
+            for eer in range(train_size,train_size+val_size):
+                val_label_pre.append([df["[Cit]"][train_size:train_size+val_size][eer],df["[Ag]"][train_size:train_size+val_size][eer],df["[KBr]"][train_size:train_size+val_size][eer]])
+
+            test_label_pre =[]
+            for eerr in range(train_size+val_size,train_size+val_size+test_size):
+                test_label_pre.append([df["[Cit]"][train_size+val_size:train_size+val_size+test_size][eerr],df["[Ag]"][train_size+val_size:train_size+val_size+test_size][eerr],df["[KBr]"][train_size+val_size:train_size+val_size+test_size][eerr]])
+
+
+
+            Train_input = np.array(train_pre)
+            Train_label = np.array(train_label_pre)
+
+            Val_input   = np.array(val_pre)
+            Val_label   = np.array(val_label_pre)
+            
+            Test_input  = np.array(test_pre)
+            Test_label  = np.array(test_label_pre)
+
+
+            
+
+            upper_bound_Cit = 8.125
+            lower_bound_Cit = 0.3125
+            
+            #Boundary for Ag
+            
+            upper_bound_Ag = 0.24375
+            lower_bound_Ag = 0.0094
+            
+            #Boundary for KBr
+            upper_bound_KBr = 0.0005
+            lower_bound_KBr = 0.00025
+
+            def bounded_output_Cit(x):
+                scale = upper_bound_Cit - lower_bound_Cit
+                return scale * tf.nn.sigmoid(x) + lower_bound_Cit
+
+            def bounded_output_Ag(x):
+                scale = upper_bound_Ag - lower_bound_Ag
+                return scale * tf.nn.sigmoid(x) + lower_bound_Ag
+
+            def bounded_output_KBr(x):
+                scale = upper_bound_KBr - lower_bound_KBr
+                return scale * tf.nn.sigmoid(x) + lower_bound_KBr
+            
+
+            from keras.utils.generic_utils import get_custom_objects
+
+            get_custom_objects().update({'bounded_output_Cit': Activation(bounded_output_Cit)})
+            get_custom_objects().update({'bounded_output_Ag': Activation(bounded_output_Ag)})
+            get_custom_objects().update({'bounded_output_KBr': Activation(bounded_output_KBr)})
+
+            #Model
+            A1 = Input(shape=(3,),name='A1')
+            A2 = Dense(32, activation='relu',name='A2')(A1)
+            A3 = Dense(16, activation='relu',name='A3')(A2)
+            #Little change adding three outputs
+            A4_1 = Dense(1,activation="relu")(A3)
+            A4_2 = Dense(1,activation="relu")(A3)
+            #A4_3 = Dense(1,activation="bounded_output_KBr")(A3)
+
+            out = Concatenate()([A4_1,A4_2])
+            A4 = Dense(2,name='A4')(out)
+
+            #B1 = Input(shape=(1,),name='B1')
+            B1 = Dense(2, activation='relu',name='B1')(A4)
+            B2 = Dense(16, activation='relu',name='B2')(B1)
+            B3 = Dense(32, activation='relu',name='B3')(B2)
+
+            B4_1 = Dense(1,activation="bounded_output_Cit")(B3)
+            B4_2 = Dense(1,activation="bounded_output_Ag")(B3)
+            B4_3 = Dense(1,activation="bounded_output_KBr")(B3)
+
+            outB = Concatenate()([B4_1,B4_2,B4_3])
+            B4 = Dense(3,name='B4')(outB)
+
+            ##MODEL
+            ML0 = Model(inputs=[A1], outputs=[A4])
+            plot_model(ML0,to_file='ML0.png',show_shapes=True)
+
+            ML2 = Model(inputs=[A1], outputs=[B4])
+            plot_model(ML2,to_file='ML2.png',show_shapes=True)
+
+            ##COMPILE
+
+            ML0.compile(
+                optimizer='adam',
+                loss='mean_squared_error',
+                metrics=['mse','mae'])
+            #ML1.compile(
+            #    optimizer='adam',
+            #    loss='mean_squared_error',
+            #    metrics=['mse','mae'])
+            ML2.compile(
+                optimizer='RMSprop',
+                loss='mean_squared_error',
+                metrics=['mse','mae'])
+
+
+
+            ##HISTORY
+
+
+            logdir0= "logs0/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback0 = keras.callbacks.TensorBoard(log_dir=logdir0)
+
+            #logdir1= "logs1/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            #tensorboard_callback1 = keras.callbacks.TensorBoard(log_dir=logdir1)
+
+            logdir2= "logs2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback2 = keras.callbacks.TensorBoard(log_dir=logdir2)
+
+            logdirNew= "logsNew/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callbackNew = keras.callbacks.TensorBoard(log_dir=logdirNew)
+
+            logdirNew_2= "logsNew_2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callbackNew_2 = keras.callbacks.TensorBoard(log_dir=logdirNew_2)
+
+            logdir11= "logs11/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback11 = keras.callbacks.TensorBoard(log_dir=logdir11)
+
+            logdir11_2= "logs11_2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
+            tensorboard_callback11_2 = keras.callbacks.TensorBoard(log_dir=logdir11_2)
+
+            historyML0= ML0.fit(
+                Train_label,
+                Train_input, 
+                batch_size=10,
+                epochs=200, 
+                callbacks=[tensorboard_callback0],
+                validation_data=(Val_label, Val_input),
+                verbose = 0,
+            )
+
+            #historyML1= ML1.fit(
+                
+            #    Train_input,
+            #    Train_label,
+            #    batch_size=2,
+            #    epochs=200, 
+            #    callbacks=[tensorboard_callback1],
+            #    validation_data=(Val_input, Val_label),
+            #)
+
+            historyML2= ML2.fit(
+                Train_label,
+                Train_label, 
+                batch_size=2,
+                epochs=200, 
+                callbacks=[tensorboard_callback2],
+                validation_data=(Val_label, Val_label),
+
+                verbose = 0,
+
+            )
+    
+
+            model_partion = ML2  # include here your original model
+
+            layer_name_input = "A4"
+            layer_name_output = "B4"
+            ML_new = Model(inputs=model_partion.get_layer(layer_name_input).input,
+                                            outputs=model_partion.get_layer(layer_name_output).output)
+
+            plot_model(ML_new,to_file='New_model.png',show_shapes=True)
+
+
+            ML_new_2.compile(
+                optimizer='adam',
+                loss='mean_squared_error',
+                metrics=['mse','mae'])
+            historyML_new_2= ML_new_2.fit(
+                
+                Train_input,
+                Train_label,
+                batch_size=2,
+                epochs=200, 
+                validation_data=(Val_input, Val_label),
+                callbacks=[tensorboard_callbackNew_2],
+                verbose = 0,
+            )
+
+
+            print("ML_new_2")
+            resultsMl_new_2 = ML_new_2.evaluate(Test_input, Test_label, batch_size=5)
+            print("%s: %.2f%%" % (ML_new_2.metrics_names[1], resultsMl_new_2[1]*100))
+            print("test loss, test acc:", resultsMl_new_2)
+            predicted_by_model= ML_new_2.predict(input_user)
+            return input_user, predicted_by_model  #, 0 , 0, 0 , ml_past, Ngen_net, mod
+
+        
+        else:
             print("Which pass?",r)
             #Data
             train_size= math.floor(len(df)*(80/100))
@@ -1302,8 +1522,9 @@ class NeuralNet(MLModel):
             predicted_by_model[0][2] =out2
             print("")       
             print("predicted_by_model",predicted_by_model)
+            mod=ML_new_2
             # time.sleep(50)
-            return input_user, predicted_by_model, 0 , 0, 0 , ml_past
+            return input_user, predicted_by_model, 0 , 0, 0 , ml_past, Ngen_net, mod
 
 
 
