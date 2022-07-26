@@ -8956,7 +8956,7 @@ class AutoContr(Controller):
                 
                 
                 
-                input_user_secondExp, prediction2 = model.training(self, df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_secondExp, prediction2 = model.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_secondExp) 
