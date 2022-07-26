@@ -8302,7 +8302,7 @@ class AutoContr(Controller):
 
 
                 ### Exploration phase
-                def grillPlot(input_point):
+                def grillPlot(input_point,nm):
                     X = []
                     Y = []
                     for r in range(len(input_point)):
@@ -8319,6 +8319,7 @@ class AutoContr(Controller):
                     plt.scatter(df["Wavelength"], df["Observance"],s=300)
                     plt.plot(X, Y, marker="o", markersize=18, markeredgecolor="red", markerfacecolor="green")
                     plt.grid()
+                    plt.savefig("environ"+nm+".png")
                     plt.show()
                 #First box
                 dataPoint1X = random.uniform(300,400)
@@ -8599,7 +8600,7 @@ class AutoContr(Controller):
                 for mrrw in range(len(choosenPoints)):
                     toExplore.append(possiblePoints[str(choosenPoints[mrrw])])
                     
-                grillPlot(toExplore)
+                grillPlot(toExplore,"1")
 
 
 
