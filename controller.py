@@ -155,7 +155,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
     
     print("Welcome .....")
-    print("Which model would you like to use? [ Linear Model (linear) ] [ Neural Network (neural) ]")
+    print("Choose: [ Linear Model (linear) ] [ Neural Network (neural) ] [ Exploration with Neural Network (exploration) ]")
     input_model_user = input()
     input_model_user = input_model_user.lower()
     print("You selected", input_model_user)
