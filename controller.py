@@ -171,7 +171,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         elif input_model_user == "exploration":
           
             ml_model = NeuralNet(model, final_spectra, y_shape=1, max_iters=5,duplication = 10)
-        
+            break
         else :
             print("Try to choose again")
             print("Choose: [ Linear Model (linear) ] [ Neural Network (neural) ] [ Exploration with Neural Network (exploration) ]")
