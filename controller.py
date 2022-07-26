@@ -8604,7 +8604,7 @@ class AutoContr(Controller):
 
 
                 ##Sending to the robot
-                prediction1= mod.predict(np.array(toExplore[0]))
+                prediction1= mod.predict(np.array([toExplore[0]]))
 
                 #checking overflow for prediction1 
                 #prediction1= overfl(prediction1)
@@ -8955,7 +8955,7 @@ class AutoContr(Controller):
                 
                 
                 
-                input_user_secondExp, prediction2 = model.training(self, df,np.array(toExplore[1]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_secondExp, prediction2 = model.training(self, df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_secondExp) 
@@ -9252,7 +9252,7 @@ class AutoContr(Controller):
 
                 ####PREDICTION3
 
-                input_user_3Exp, prediction3 = model.training(self, df,np.array(toExplore[2]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_3Exp) 
@@ -9552,7 +9552,7 @@ class AutoContr(Controller):
 
                 ###PREDICTION4
 
-                input_user_4Exp, prediction4 = model.training(self, df,np.array(toExplore[3]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_4Exp, prediction4 = model.training(self, df,np.array([toExplore[3]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_4Exp) 
@@ -9848,7 +9848,7 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 ##PREDICTION5
-                input_user_5Exp, prediction5 = model.training(self, df,np.array(toExplore[4]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_5Exp, prediction5 = model.training(self, df,np.array([toExplore[4]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_5Exp) 
@@ -10146,7 +10146,7 @@ class AutoContr(Controller):
 
                 ##PREDICTION6
 
-                input_user_6Exp, prediction6 = model.training(self, df,np.array(toExplore[5]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_6Exp, prediction6 = model.training(self, df,np.array([toExplore[5]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_6Exp) 
@@ -10445,7 +10445,7 @@ class AutoContr(Controller):
 
 
                 ###PREDICTION7
-                input_user_7Exp, prediction7 = model.training(self, df,np.array(toExplore[6]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_7Exp, prediction7 = model.training(self, df,np.array([toExplore[6]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_7Exp) 
@@ -10742,7 +10742,7 @@ class AutoContr(Controller):
 
                 ##PREDICTION8
 
-                input_user_8Exp, prediction8 = model.training(self, df,np.array(toExplore[7]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_8Exp, prediction8 = model.training(self, df,np.array([toExplore[7]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_8Exp) 
@@ -11038,7 +11038,7 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 ##PREDICTION9
-                input_user_9Exp, prediction9 = model.training(self, df,np.array(toExplore[8]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_9Exp, prediction9 = model.training(self, df,np.array([toExplore[8]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_9Exp) 
@@ -11338,7 +11338,7 @@ class AutoContr(Controller):
 
 
 
-                input_user_10Exp, prediction10 = model.training(self, df,np.array(toExplore[9]),r, n_epochs=30, ml_past=False,explo=True)
+                input_user_10Exp, prediction10 = model.training(self, df,np.array([toExplore[9]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",input_user_10Exp) 
@@ -11352,7 +11352,7 @@ class AutoContr(Controller):
                 print("---")
                 testing_recipes = [prediction10]
                     
-                    
+        
                 # for r in range(len(testing_recipes[0])):
                 # recipe_unit_test = np.array([[user_concentration]])
                 recipe_unit_test = prediction10
