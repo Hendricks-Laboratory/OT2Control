@@ -920,16 +920,17 @@ class NeuralNet(MLModel):
 
             layer_name_input = "A4"
             layer_name_output = "B4"
-            ML_new = Model(inputs=model_partion.get_layer(layer_name_input).input,
+            ML_new_2 = Model(inputs=model_partion.get_layer(layer_name_input).input,
                                             outputs=model_partion.get_layer(layer_name_output).output)
 
-            plot_model(ML_new,to_file='New_model.png',show_shapes=True)
+            plot_model(ML_new_2,to_file='New_model.png',show_shapes=True)
 
 
             ML_new_2.compile(
                 optimizer='adam',
                 loss='mean_squared_error',
                 metrics=['mse','mae'])
+            
             historyML_new_2= ML_new_2.fit(
                 
                 Train_input,
