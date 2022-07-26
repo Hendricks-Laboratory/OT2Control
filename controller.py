@@ -2235,7 +2235,7 @@ class AutoContr(Controller):
             
             #rest
             modify_Y= our_Y-bl
-            print("Modify",modify_Y)
+            #print("Modify",modify_Y)
             #restricting wavelengths 
             X_axis= X_axis[50:-100]
             our_Y= modify_Y[50:-100]
