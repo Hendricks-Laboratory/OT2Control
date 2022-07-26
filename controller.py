@@ -7764,8 +7764,7 @@ class AutoContr(Controller):
                     print("Epoch", r+1)
                     print("pst",ml_past)
                     # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
-                    input_user_model, user_concentration, train_prediction, W, b , ml_past, mod= model.training(df,input_user_model,r,ml_past)#550, 0.0002, 480 , 10000, 20
-                
+                    input_user_model, user_concentration, train_prediction, W, b , ml_past, Ngen_net ,mod= model.training(df,input_user_model,r,ml_past,explo= False)#550, 0.0002, 480 , 10000, 20
 
                     # W_list.append(W)
                     # b_list.append(b)
