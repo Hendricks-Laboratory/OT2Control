@@ -16828,7 +16828,6 @@ class AutoContr(Controller):
                 print(f"Tensorflow listening on {url31}")
                 print("")
 
-
                 # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
                 # label_names = ["Generation 1", "Generation 2", "Generation 3"]
                 # color_names = ["red","orange","blue"]
