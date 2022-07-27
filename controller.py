@@ -16909,7 +16909,6 @@ class AutoContr(Controller):
 
 
 
-
         else:
             print("None")
             self.close_connection()
