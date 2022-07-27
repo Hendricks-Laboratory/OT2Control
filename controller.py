@@ -8138,7 +8138,7 @@ class AutoContr(Controller):
 
                 print("Dt",df)
                 print("LAST M",user_concentrations,wavelengths_progress_test,wave_min_diff_fin_test,new_added_list_test)
-
+                size_training= len(df["Wavelength"])
 
                 ##
 
@@ -8308,12 +8308,14 @@ class AutoContr(Controller):
                     for r in range(len(input_point)):
                         X.append(input_point[r][0])
                         Y.append(input_point[r][1])
-                    x = np.arange(300, 901)
+                    x = np.arange(290, 901)
                     y = np.arange(0, 2., 0.003333)
                     fig2 = plt.figure(figsize=(8, 6), dpi=80)
                     ax2 = fig2.gca()
                     ax2.set_xticks(np.arange(200, 910, 100))
                     ax2.set_yticks(np.arange(0,2.2,  0.25))
+                    ax2.set_ylabel('Observance')
+                    ax2.set_xlabel('Wavelength')
                     plt.xlim(300, 910)
                     plt.ylim(0,1.2)
                     plt.scatter(df["Wavelength"], df["Observance"],s=300)
@@ -8957,10 +8959,10 @@ class AutoContr(Controller):
                             return rested_conc
                 
                 print("df 1",df)
-                prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod1= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
-                prediction2= mod.predict(np.array([toExplore[1]]))
+                prediction2= mod1.predict(np.array([toExplore[1]]))
                 
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
@@ -9258,13 +9260,36 @@ class AutoContr(Controller):
 
                 ####PREDICTION3
                 print("df 2",df)
-
+                def grillPlotAl(df,input_point,size_training,nm):
+                    X = []
+                    Y = []
+                    for r in range(len(input_point)):
+                        X.append(input_point[r][0])
+                        Y.append(input_point[r][1])
+                    x = np.arange(300, 901)
+                    y = np.arange(0, 2., 0.003333)
+                    fig2 = plt.figure(figsize=(8, 6), dpi=80)
+                    ax2 = fig2.gca()
+                    ax2.set_xticks(np.arange(200, 910, 100))
+                    ax2.set_yticks(np.arange(0,2.2,  0.25))
+                    plt.xlim(290, 910)
+                    plt.ylim(0,1.2)
+                    plt.scatter(df["Wavelength"][:size_training], df["Observance"][:size_training],s=300)
+                    plt.plot(X, Y, marker="o", markersize=18, markeredgecolor="green", markerfacecolor="green")
+                    plt.plot(df["Wavelength"][size_training:], df["Observance"][size_training:], marker="o", markersize=18, markeredgecolor="red", markerfacecolor="red")
+                    ax2.set_ylabel('Observance')
+                    ax2.set_xlabel('Wavelength')
+                    plt.grid()
+                    plt.savefig("ComplEnviron"+nm+".png")
+                    plt.show()
+                
+                grillPlotAl(df, toExplore,size_training,"2")
                 #input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
                 
-                prediction1Ovl, prediction_update_2, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[1]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_2, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod2= model.training(df,np.array([toExplore[1]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
-                prediction3= mod.predict(np.array([toExplore[2]]))
+                prediction3= mod2.predict(np.array([toExplore[2]]))
                 
                 
                 #prediction2= mod.predict(np.array(toExplore[0]))
@@ -9569,10 +9594,12 @@ class AutoContr(Controller):
 
                 print("df 3",df)
 
-                prediction1Ovl, prediction_update_3, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[2]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                grillPlotAl(df, toExplore,size_training,"3")
+
+                prediction1Ovl, prediction_update_3, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod3= model.training(df,np.array([toExplore[2]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
-                prediction4= mod.predict(np.array([toExplore[3]]))
+                prediction4= mod3.predict(np.array([toExplore[3]]))
 
                 #input_user_4Exp, prediction4 = model.training(self, df,np.array([toExplore[3]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
@@ -9872,13 +9899,14 @@ class AutoContr(Controller):
 
                 
                 print("df 4",df)
+                grillPlotAl(df, toExplore,size_training,"4")
 
                 ##PREDICTION5
 #                input_user_5Exp, prediction5 = model.training(self, df,np.array([toExplore[4]]),r, n_epochs=30, ml_past=False,explo=True)
                 
-                prediction1Ovl, prediction_update_4, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[3]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_4, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod4= model.training(df,np.array([toExplore[3]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                prediction5= mod.predict(np.array([toExplore[4]]))
+                prediction5= mod4.predict(np.array([toExplore[4]]))
                
                
                 #prediction2= mod.predict(np.array(toExplore[0]))
@@ -10179,11 +10207,12 @@ class AutoContr(Controller):
 
                 ##PREDICTION6
                 print("df 5",df)
+                grillPlotAl(df, toExplore,size_training,"5")
 
                 #input_user_6Exp, prediction6 = model.training(self, df,np.array([toExplore[5]]),r, n_epochs=30, ml_past=False,explo=True)
-                prediction1Ovl, prediction_update_5, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[4]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_5, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod5= model.training(df,np.array([toExplore[4]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                prediction6= mod.predict(np.array([toExplore[5]]))
+                prediction6= mod5.predict(np.array([toExplore[5]]))
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 #print("input_user_secondExp",input_user_6Exp) 
@@ -10484,12 +10513,13 @@ class AutoContr(Controller):
 
                 ###PREDICTION7
                 print("df 6",df)
+                grillPlotAl(df, toExplore,size_training,"6")
 
                 #input_user_7Exp, prediction7 = model.training(self, df,np.array([toExplore[6]]),r, n_epochs=30, ml_past=False,explo=True)
                 
-                prediction1Ovl, prediction_update_6, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[5]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_6, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod6= model.training(df,np.array([toExplore[5]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                prediction7= mod.predict(np.array([toExplore[6]]))
+                prediction7= mod6.predict(np.array([toExplore[6]]))
 
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
@@ -10788,12 +10818,13 @@ class AutoContr(Controller):
 
                 ##PREDICTION8
                 print("df 7",df)
+                grillPlotAl(df, toExplore,size_training,"7")
 
-                prediction1Ovl, prediction_update_7, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[6]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_7, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod7= model.training(df,np.array([toExplore[6]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
                 
                 #input_user_8Exp, prediction8 = model.training(self, df,np.array([toExplore[7]]),r, n_epochs=30, ml_past=False,explo=True)
 
-                prediction8= mod.predict(np.array([toExplore[7]]))
+                prediction8= mod7.predict(np.array([toExplore[7]]))
                 
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
@@ -11092,13 +11123,14 @@ class AutoContr(Controller):
 
                 ##PREDICTION9
                 print("df 8",df)
+                grillPlotAl(df, toExplore,size_training,"8")
 
                 #input_user_9Exp, prediction9 = model.training(self, df,np.array([toExplore[8]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                prediction1Ovl, prediction_update_8, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[7]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_8, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod8= model.training(df,np.array([toExplore[7]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                prediction9= mod.predict(np.array([toExplore[8]]))
+                prediction9= mod8.predict(np.array([toExplore[8]]))
                 #print("input_user_secondExp",input_user_9Exp) 
                 prediction9= overfl(prediction9)
 
@@ -11397,13 +11429,14 @@ class AutoContr(Controller):
 
 
                 print("df 9",df)
+                grillPlotAl(df, toExplore,size_training,"9")
 
                 #input_user_10Exp, prediction10 = model.training(self, df,np.array([toExplore[9]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                prediction1Ovl, prediction_update_9, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[8]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_9, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod9= model.training(df,np.array([toExplore[8]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                prediction10= mod.predict(np.array([toExplore[9]]))
+                prediction10= mod9.predict(np.array([toExplore[9]]))
                 # print("input_user_secondExp",input_user_10Exp) 
                 prediction10= overfl(prediction10)
 
@@ -11697,16 +11730,19 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 print("df 10",df)
+                grillPlotAl(df, toExplore,size_training,"10")
 
                 print("PREDICTION BEFORE TRAINING",prediction1,prediction2,prediction3,prediction4,prediction5,prediction6,prediction7,prediction8 ,prediction9, prediction10)
 
 
-                prediction1Ovl, prediction_update_10, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[9]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
+                prediction1Ovl, prediction_update_10, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod10= model.training(df,np.array([toExplore[9]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 
                 print("PREDICTION AFTER TRAINING",prediction_update_1, prediction_update_2,prediction_update_3,prediction_update_4,prediction_update_5,prediction_update_6,prediction_update_7,prediction_update_8,prediction_update_9,prediction_update_10)
 
-
+            
+                
+                # grillPlotAl(toExplore,size_training,"11")
 
 
 
