@@ -8625,6 +8625,7 @@ class AutoContr(Controller):
                 # recipe_unit_test = np.array([[user_concentration]])
                 recipe_unit_test = prediction1
                 recipe_unit_test = np.repeat(prediction1, 3, axis=0)
+                user_concentration= prediction1
                 print("Recipes Test",recipe_unit_test)
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -8982,6 +8983,8 @@ class AutoContr(Controller):
                 # recipe_unit_test = np.array([[user_concentration]])
                 recipe_unit_test = prediction2
                 recipe_unit_test = np.repeat(prediction2, 3, axis=0)
+                user_concentration= prediction2
+
                 print("Recipes Test",recipe_unit_test)
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -9312,6 +9315,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction3
                 recipe_unit_test = np.repeat(prediction3, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction3
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -9622,6 +9627,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction4
                 recipe_unit_test = np.repeat(prediction4, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction4
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -9929,6 +9936,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction5
                 recipe_unit_test = np.repeat(prediction5, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction5
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -10233,6 +10242,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction6
                 recipe_unit_test = np.repeat(prediction6, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction6
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -10541,6 +10552,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction7
                 recipe_unit_test = np.repeat(prediction7, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction7
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -10846,6 +10859,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction8
                 recipe_unit_test = np.repeat(prediction8, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction8
+
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -11149,6 +11164,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction9
                 recipe_unit_test = np.repeat(prediction9, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction9
+           
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
@@ -11454,6 +11471,8 @@ class AutoContr(Controller):
                 recipe_unit_test = prediction10
                 recipe_unit_test = np.repeat(prediction10, 3, axis=0)
                 print("Recipes Test",recipe_unit_test)
+                user_concentration= prediction10
+        
                 #do the first one
                 #print('<<controller>> executing batch {}'.format(self.batch_num))
                 print('<<controller>> executing batch {} for testing'.format(1))
