@@ -7759,12 +7759,12 @@ class AutoContr(Controller):
 
                 
                 ml_past = False
-                
+                ml_past_v = False
                 for r in range(5):
                     print("Epoch", r+1)
                     print("pst",ml_past)
                     # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
-                    input_user_model, user_concentration, train_prediction, W, b , ml_past, Ngen_net ,mod= model.training(df,input_user_model,r,ml_past,explo= False)#550, 0.0002, 480 , 10000, 20
+                    input_user_model, user_concentration, train_prediction, W, b , ml_past_v, Ngen_net ,mod= model.training(df,input_user_model,r,ml_past=ml_past_v,explo= False)#550, 0.0002, 480 , 10000, 20
 
                     # W_list.append(W)
                     # b_list.append(b)
@@ -8956,7 +8956,7 @@ class AutoContr(Controller):
                             print("rested_conc",rested_conc)
                             return rested_conc
                 
-                
+                print("df 1",df)
                 prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
@@ -9257,6 +9257,7 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 ####PREDICTION3
+                print("df 2",df)
 
                 #input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
                 
@@ -9566,7 +9567,8 @@ class AutoContr(Controller):
 
                 ###PREDICTION4
 
-                
+                print("df 3",df)
+
                 prediction1Ovl, prediction_update_3, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[2]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
@@ -9867,6 +9869,9 @@ class AutoContr(Controller):
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
+
+                
+                print("df 4",df)
 
                 ##PREDICTION5
 #                input_user_5Exp, prediction5 = model.training(self, df,np.array([toExplore[4]]),r, n_epochs=30, ml_past=False,explo=True)
@@ -10173,6 +10178,7 @@ class AutoContr(Controller):
 
 
                 ##PREDICTION6
+                print("df 5",df)
 
                 #input_user_6Exp, prediction6 = model.training(self, df,np.array([toExplore[5]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction1Ovl, prediction_update_5, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[4]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
@@ -10477,6 +10483,8 @@ class AutoContr(Controller):
 
 
                 ###PREDICTION7
+                print("df 6",df)
+
                 #input_user_7Exp, prediction7 = model.training(self, df,np.array([toExplore[6]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_6, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[5]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
@@ -10779,6 +10787,7 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 ##PREDICTION8
+                print("df 7",df)
 
                 prediction1Ovl, prediction_update_7, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[6]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
                 
@@ -11082,6 +11091,8 @@ class AutoContr(Controller):
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
                 ##PREDICTION9
+                print("df 8",df)
+
                 #input_user_9Exp, prediction9 = model.training(self, df,np.array([toExplore[8]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
@@ -11385,6 +11396,7 @@ class AutoContr(Controller):
                 ##PREDICTION10
 
 
+                print("df 9",df)
 
                 #input_user_10Exp, prediction10 = model.training(self, df,np.array([toExplore[9]]),r, n_epochs=30, ml_past=False,explo=True)
                 #prediction2= mod.predict(np.array(toExplore[0]))
@@ -11684,6 +11696,7 @@ class AutoContr(Controller):
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
+                print("df 10",df)
 
                 print("PREDICTION BEFORE TRAINING",prediction1,prediction2,prediction3,prediction4,prediction5,prediction6,prediction7,prediction8 ,prediction9, prediction10)
 
