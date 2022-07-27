@@ -8960,6 +8960,30 @@ class AutoContr(Controller):
                             return rested_conc
                 
                 print("df 1",df)
+                def grillPlotAl(df,input_point,size_training,nm):
+                    X = []
+                    Y = []
+                    for r in range(len(input_point)):
+                        X.append(input_point[r][0])
+                        Y.append(input_point[r][1])
+                    x = np.arange(300, 901)
+                    y = np.arange(0, 2., 0.003333)
+                    fig2 = plt.figure(figsize=(8, 6), dpi=80)
+                    ax2 = fig2.gca()
+                    ax2.set_xticks(np.arange(200, 910, 100))
+                    ax2.set_yticks(np.arange(0,2.2,  0.25))
+                    plt.xlim(290, 910)
+                    plt.ylim(0,1.2)
+                    plt.scatter(df["Wavelength"][:size_training], df["Observance"][:size_training],s=300)
+                    plt.plot(X, Y, marker="o", markersize=18, markeredgecolor="green", markerfacecolor="green")
+                    plt.plot(df["Wavelength"][size_training:], df["Observance"][size_training:], marker="o", markersize=18, markeredgecolor="red", markerfacecolor="red")
+                    ax2.set_ylabel('Observance')
+                    ax2.set_xlabel('Wavelength')
+                    plt.grid()
+                    plt.savefig("ComplEnviron"+nm+".png")
+                    plt.show()
+                
+                grillPlotAl(df, toExplore,size_training,"1")
                 prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod1= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
@@ -9263,28 +9287,7 @@ class AutoContr(Controller):
 
                 ####PREDICTION3
                 print("df 2",df)
-                def grillPlotAl(df,input_point,size_training,nm):
-                    X = []
-                    Y = []
-                    for r in range(len(input_point)):
-                        X.append(input_point[r][0])
-                        Y.append(input_point[r][1])
-                    x = np.arange(300, 901)
-                    y = np.arange(0, 2., 0.003333)
-                    fig2 = plt.figure(figsize=(8, 6), dpi=80)
-                    ax2 = fig2.gca()
-                    ax2.set_xticks(np.arange(200, 910, 100))
-                    ax2.set_yticks(np.arange(0,2.2,  0.25))
-                    plt.xlim(290, 910)
-                    plt.ylim(0,1.2)
-                    plt.scatter(df["Wavelength"][:size_training], df["Observance"][:size_training],s=300)
-                    plt.plot(X, Y, marker="o", markersize=18, markeredgecolor="green", markerfacecolor="green")
-                    plt.plot(df["Wavelength"][size_training:], df["Observance"][size_training:], marker="o", markersize=18, markeredgecolor="red", markerfacecolor="red")
-                    ax2.set_ylabel('Observance')
-                    ax2.set_xlabel('Wavelength')
-                    plt.grid()
-                    plt.savefig("ComplEnviron"+nm+".png")
-                    plt.show()
+            
                 
                 grillPlotAl(df, toExplore,size_training,"2")
                 #input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
