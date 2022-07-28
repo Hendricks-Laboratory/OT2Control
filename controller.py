@@ -16875,7 +16875,6 @@ class AutoContr(Controller):
                 # fig_last.savefig('Input-Recipes.png')
 
 
-
                 # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
                 # print("Pppppppp",pattt)
                 # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
