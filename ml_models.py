@@ -36,13 +36,6 @@ from tensorflow.keras.layers import Input, Dense, Activation, Concatenate
 from tensorflow.keras.models import Model
 from keras import backend as K
 
-
-
-
-
-
-
-#i
 class MLModel():
     '''
     This is the base class of any machine learning model.  
@@ -158,8 +151,7 @@ class MLModel():
 
 
 
-    # @abstractmethod
-    # def training(self):
+
     def Train(self,df, input_user,r):
         
         '''
@@ -306,20 +298,7 @@ class LinearRegress(MLModel):
         print("predicted NH", y_pred)
         
   
-        # def predictLinearModel(X, W, b):
-        #     #Overcome Overflow dtype=np.uint32
-        #     X= np.array([[X]],dtype=float)
-        #     W= np.array([W],dtype=float)
-        #     b= np.array([b],dtype=float)
-        #     print("predicting",X)
-        #     print("predictor W",W)
-        #     print("predictor W",b)
-            
-        #     Y_hat = X * W + b
-        #     return Y_hat
-
         def predictLinearModelInverse(Y_wt, W, b):
-            #Overcome Overflow dtype=np.uint32
             Y_wt= np.array([[Y_wt]],dtype=float)
             W= np.array([W],dtype=float)
             b= np.array([b],dtype=float)
@@ -337,41 +316,29 @@ class LinearRegress(MLModel):
             print(len(model["cacheErrorAvg"]))
             min_index=np.min(model["cacheErrorAvg"])
             max_index=np.max(model["cacheErrorAvg"])
-            print("NNNNNNNNN",model["cacheErrorAvg"])
-            print(min_index)
             errorsSca=[]
             for i in range(len(model["cacheErrorAvg"])):
                 errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
-            print("AAAAAAAAA",errorsSca)
             plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
             plt.show()
             
-            return plt.show()# for saving
-            #plt.savefig('pic.png')
+            return plt.show()
 
         
-        print("b predict",modelCall)
-        #print(",",modelCall["cacheErrorAvg"])
         plots_error_avg(modelCall)
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
-            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             print("Predicted concentration [] given a wavelenght", prediction)
-            #ADDING DELETE IF NO PROB
             breakpoint()
 
             return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
         else:
-            
-            #ADDING DELETE IF NO PROB
             breakpoint()
-            
             return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
-        #return np.repeat(y_pred, self.duplication, axis=0);
     
     
     #NEW TRAIN
@@ -410,7 +377,6 @@ class LinearRegress(MLModel):
             train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
             #User input for Wavelength wanted
 
-
             #conputing the inverse --> from Wavelength to Concentration
             input_user= input_user
             while True:
@@ -421,8 +387,6 @@ class LinearRegress(MLModel):
                     input_user= input("Please ENTER the desire Wavelength: ")
                     input_user= float(input_user)
                     
-                    #user_concentration = (input_user- b) / W
-
                 else:
 
                     break
@@ -472,12 +436,9 @@ class LinearRegress(MLModel):
             print("--------")
             print('<<ML>> training')
 
-            # ml_model_trained = MainModel(self,10,3,0.05,X,y)
-
             print('<<ML>> done training')
 
-            return 0 #MainModel(self, X,y)
-
+            return 0 
 
 
 ###########################
@@ -522,7 +483,7 @@ class NeuralNet(MLModel):
         '''
 
        
-                #Boundary for Cit
+        #Boundary for Cit
         
         upper_bound_Cit = 8.125
         lower_bound_Cit = 0.3125
@@ -547,7 +508,6 @@ class NeuralNet(MLModel):
         con_Ag  = np.random.random_sample(size= (3,))  * (upper_bound_Ag- lower_bound_Ag) + (lower_bound_Ag)
         
         
-        ##print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T,type(con_Ag))
         print("Concen (T)",con_Cit.T,con_Ag.T,con_KBr.T)
 
         Nextt= False
@@ -583,7 +543,7 @@ class NeuralNet(MLModel):
             elif Nextt == False:
                 break
                 
-        print("N",Ngen)
+        print("Nunber of degradations",Ngen)
         print("Concen after checking (T)",con_Cit.T,con_Ag.T,con_KBr.T)
         print("")
 
@@ -627,7 +587,6 @@ class NeuralNet(MLModel):
         res_3 = np.concatenate((res_3, res_3, res_3), axis=0)
 
 
-        #print("llllll",res_1,res_2,res_3)
         recipe_l= np.concatenate((res_1, res_2,res_3), axis=0)
         print(recipe_l)
         return recipe_l
@@ -648,43 +607,11 @@ class NeuralNet(MLModel):
         with self.model_lock:
             y_pred = self.FINAL_SPECTRA
         print("predicted NH", y_pred)
-        
-
-        # # def predictLinearModelInverse(Y_wt, W, b):
-        # #     #Overcome Overflow dtype=np.uint32
-        # #     Y_wt= np.array([[Y_wt]],dtype=float)
-        # #     W= np.array([W],dtype=float)
-        # #     b= np.array([b],dtype=float)
-        # #     print("predicting",Y_wt)
-        # #     print("predictor W",W)
-        # #     print("predictor W",b)
-            
-        # #     X_predicted = (Y_wt -b) /W
-        # #     return X_predicted
-
-
-
-
-        # # def plots_error_avg(model):
-        # #     print(len(model["cacheErrorAvg"]))
-        # #     min_index=np.min(model["cacheErrorAvg"])
-        # #     max_index=np.max(model["cacheErrorAvg"])
-        # #     print("NNNNNNNNN",model["cacheErrorAvg"])
-        # #     print(min_index)
-        # #     errorsSca=[]
-        # #     for i in range(len(model["cacheErrorAvg"])):
-        # #         errorsSca.append((model["cacheErrorAvg"][i]-min_index)/(max_index- min_index))
-        # #     print("AAAAAAAAA",errorsSca)
-        # #     plt.plot([i for i in range(1,model["break_epoch"]+1)],errorsSca)
-        # #     plt.show()
-            
-        # #     return plt.show()# for saving
-        # #     #plt.savefig('pic.png')
+    
 
         
         print("b predict",Test_input)
-        #print(",",modelCall["cacheErrorAvg"])
-        #plots_error_avg(modelCall)
+
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
@@ -696,23 +623,13 @@ class NeuralNet(MLModel):
             print("predictions:",y_pred)
             return y_pred
     
-            #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-            print("Predicted concentration [] given a wavelenght", prediction)
-            #ADDING DELETE IF NO PROB
-            breakpoint()
 
-            return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
-        
         else:
             
-            #ADDING DELETE IF NO PROB
             breakpoint()
             
             return {"prediction":0}
-            # return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
-        
-        #return np.repeat(y_pred, self.duplication, axis=0);
+            
 
 
     
@@ -721,21 +638,7 @@ class NeuralNet(MLModel):
     def training(self, df,input_user,r, n_epochs=30, ml_past=False, explo= False):
         
 
-        #type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
-        # while True:
-        #     if type_net == "1" or type_net=="2" or type_net=="3":
-        #         break
-        #     else:
-        #         print("Try again")
-        #         type_net = input("Which would you like to use [W-O-->Concent (1)][Concent-->W-O (2)][Concent-->W-->Concent (3)]")
-        # type_net = input("exploration? yes/y no/n")
-        # while True:
-        #     if type_net == "y" or "yes" or "no" or "n":
-        #         break
-        #     else:
-        #         print("Try again")
-        #         type_net= input("exploration? yes/y no/n")
-        # print(type_net)
+
         if explo==True:
         
             train_size= math.floor(len(df)*(80/100))
@@ -848,10 +751,7 @@ class NeuralNet(MLModel):
                 optimizer='adam',
                 loss='mean_squared_error',
                 metrics=['mse','mae'])
-            #ML1.compile(
-            #    optimizer='adam',
-            #    loss='mean_squared_error',
-            #    metrics=['mse','mae'])
+
             ML2.compile(
                 optimizer='RMSprop',
                 loss='mean_squared_error',
@@ -864,9 +764,6 @@ class NeuralNet(MLModel):
 
             logdir0= "logs0/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             tensorboard_callback0 = keras.callbacks.TensorBoard(log_dir=logdir0)
-
-            #logdir1= "logs1/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
-            #tensorboard_callback1 = keras.callbacks.TensorBoard(log_dir=logdir1)
 
             logdir2= "logs2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             tensorboard_callback2 = keras.callbacks.TensorBoard(log_dir=logdir2)
@@ -893,16 +790,6 @@ class NeuralNet(MLModel):
                 verbose = 0,
             )
 
-            #historyML1= ML1.fit(
-                
-            #    Train_input,
-            #    Train_label,
-            #    batch_size=2,
-            #    epochs=200, 
-            #    callbacks=[tensorboard_callback1],
-            #    validation_data=(Val_input, Val_label),
-            #)
-
             historyML2= ML2.fit(
                 Train_label,
                 Train_label, 
@@ -916,8 +803,7 @@ class NeuralNet(MLModel):
             )
     
 
-            model_partion = ML2  # include here your original model
-
+            model_partion = ML2  
             layer_name_input = "A4"
             layer_name_output = "B4"
             ML_new_2 = Model(inputs=model_partion.get_layer(layer_name_input).input,
@@ -948,10 +834,11 @@ class NeuralNet(MLModel):
             print("%s: %.2f%%" % (ML_new_2.metrics_names[1], resultsMl_new_2[1]*100))
             print("test loss, test acc:", resultsMl_new_2)
             predicted_by_model= ML_new_2.predict(input_user)
-            return input_user, predicted_by_model  #, 0 , 0, 0 , ml_past, Ngen_net, mod
+            return input_user, predicted_by_model  
 
         
         else:
+            
             print("Which pass?",r)
             #Data
             train_size= math.floor(len(df)*(80/100))
@@ -1064,10 +951,7 @@ class NeuralNet(MLModel):
                 optimizer='adam',
                 loss='mean_squared_error',
                 metrics=['mse','mae'])
-            #ML1.compile(
-            #    optimizer='adam',
-            #    loss='mean_squared_error',
-            #    metrics=['mse','mae'])
+
             ML2.compile(
                 optimizer='RMSprop',
                 loss='mean_squared_error',
@@ -1080,9 +964,6 @@ class NeuralNet(MLModel):
 
             logdir0= "logs0/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             tensorboard_callback0 = keras.callbacks.TensorBoard(log_dir=logdir0)
-
-            #logdir1= "logs1/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
-            #tensorboard_callback1 = keras.callbacks.TensorBoard(log_dir=logdir1)
 
             logdir2= "logs2/fit/" + datetime.now().strftime("%Y/%m/%d;%H:%M:%S")
             tensorboard_callback2 = keras.callbacks.TensorBoard(log_dir=logdir2)
@@ -1108,16 +989,6 @@ class NeuralNet(MLModel):
                 validation_data=(Val_label, Val_input),
                 verbose = 0,
             )
-
-            #historyML1= ML1.fit(
-                
-            #    Train_input,
-            #    Train_label,
-            #    batch_size=2,
-            #    epochs=200, 
-            #    callbacks=[tensorboard_callback1],
-            #    validation_data=(Val_input, Val_label),
-            #)
 
             historyML2= ML2.fit(
                 Train_label,
@@ -1268,7 +1139,7 @@ class NeuralNet(MLModel):
             ML_new_2_pr= ML_new_2.predict(predictions0)
             print("ML_new_2_pr",ML_new_2_pr)
 
-            ML11_pr = ML11.predict(predictions0 )#Test_input)
+            ML11_pr = ML11.predict(predictions0 )
             print("ML11_pr",ML11_pr)
 
             ML11_2_pr=ML11_2.predict(predictions0)
@@ -1292,7 +1163,7 @@ class NeuralNet(MLModel):
             ML_new_2_tr= ML_new_2.predict(Train_input)
             print("ML_new_2_pr",ML_new_2_tr)
 
-            ML11_tr = ML11.predict(Train_input )#Test_input)
+            ML11_tr = ML11.predict(Train_input )
             print("ML11_pr",ML11_tr)
 
             ML11_2_tr=ML11_2.predict(Train_input)
@@ -1354,7 +1225,7 @@ class NeuralNet(MLModel):
                     if choosg == "Yes" or choosg=="y":
                         while True:
 
-                            choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
+                            choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2 :")
                             if choosg_ml == "ML_new":
                                 predicted_by_model = ML_new.predict(input_user)
                                 break
@@ -1370,7 +1241,6 @@ class NeuralNet(MLModel):
 
                             else:
                                 print("Type again")
-                                # choosg_ml = input("Choose ML_new/ ML_new_2/ ML11/ ML11_2")
 
 
                     elif choosg == "No":
@@ -1417,60 +1287,7 @@ class NeuralNet(MLModel):
                 elif ml_to_use == "ML11_2":
                         predicted_by_model = ML11_2.predict(input_user)
             ml_past = True
-            # from tensorboard import program
 
-            # tracking_address = logdir # the path of your log file.
-
-            #if __name__ == "__main__":
-            # tb = program.TensorBoard()
-            # tb1= program.TensorBoard()
-            # tb2= program.TensorBoard()
-            # tb3= program.TensorBoard()
-            # tb4= program.TensorBoard()
-            # tb5= program.TensorBoard()
-
-            # tb.configure(argv=[None, '--logdir', logdir0])
-            # tb1.configure(argv=[None, '--logdir', logdir2])
-            # tb2.configure(argv=[None, '--logdir', logdirNew])
-            # tb3.configure(argv=[None, '--logdir', logdirNew_2])
-            # tb4.configure(argv=[None, '--logdir', logdir11])
-            # tb5.configure(argv=[None, '--logdir', logdir11_2])
-
-            # url = tb.launch()
-            # url1 = tb1.launch()
-            # url2 = tb2.launch()
-            # url3 = tb3.launch()
-            # url4 = tb4.launch()
-            # url5 = tb5.launch()
-
-            # print("ML0")
-            # print(f"Tensorflow listening on {url}")
-            # print("")
-            # print("")
-
-            # print("-------")
-            # print("ML2")
-            # print(f"Tensorflow listening on {url1}")
-            # print("")
-
-            # print("-------")
-            # print("ML_New")
-            # print(f"Tensorflow listening on {url2}")
-            # print("")
-
-            # print("-------")
-            # print("ML_New_2")
-            # print(f"Tensorflow listening on {url3}")
-            # print("")
-
-            # print("-------")
-            # print("ML_11")
-            # print(f"Tensorflow listening on {url4}")
-            # print("")
-
-            # print("-------")
-            # print("ML_11_2")
-            # print(f"Tensorflow listening on {url5}")
 
             upper_bound_Cit = 8.125
             lower_bound_Cit = 0.3125
@@ -1524,84 +1341,7 @@ class NeuralNet(MLModel):
             print("")       
             print("predicted_by_model",predicted_by_model)
             mod=ML_new_2
-            # time.sleep(50)
             return input_user, predicted_by_model, 0 , 0, 0 , ml_past, Ngen_net, mod
-
-
-
-
-
-            # history= modelN.fit(
-            #     Train_input,
-            #     Train_label, 
-            #     batch_size=2,
-            #     epochs=n_epochs, 
-            #     callbacks=[tensorboard_callback],
-            #     validation_data=(Val_input, Val_label),
-            # )
-            
-
-
-            # # history.history
-            # print("Evaluating on test data")
-            # results = modelN.evaluate(Test_input, Test_label, batch_size=5)
-            # print("%s: %.2f%%" % (modelN.metrics_names[1], results[1]*100))
-            # print("test loss, test acc:", results)
-
-            # # save model and architecture to single file
-            # modelN.save("modelN.h5")
-            # print("Saved modelN to disk")        
-            
-            #Tensorboard
-
-
-            # def launchTensorBoard():
-            #     #os.system('reload_ext tensorboard')
-            #     os.system('tensorboard --logdir=' + logdir)
-            #     return
-
-            # import threading
-            # t = threading.Thread(target=launchTensorBoard, args=([]))
-            # t.start()
-
-            
-            
-            
-            # print("b predict",Test_input)
-
-            #print(",",modelCall["cacheErrorAvg"])
-            #plots_error_avg(modelCall)
-            # predictQuestion = input("Do you want to make a prediction: [Yes-y / No ]")
-            
-            # if predictQuestion == "Yes" or predictQuestion=="y":
-            #     prediction_user_input = input("Please enter W-O:")
-
-            print("Generate predictions for 3 samples")
-            # y_pred = modelN.predict(np.array(Test_input))#Test_input)
-            # y_pred = modelN.predict(Test_input)
-            print("Input_us",input_user)
-            y_pred = modelN.predict(input_user)
-            print("predictions shape:", y_pred.shape)
-            print("predictions:",y_pred)
-            return input_user, y_pred, 0 , 0, 0
-
-        
-                # #prediction = predictLinearModel(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-                # prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
-                # print("Predicted concentration [] given a wavelenght", prediction)
-                # #ADDING DELETE IF NO PROB
-                # breakpoint()
-
-                # return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
-            
-            # else:
-                
-            #     #ADDING DELETE IF NO PROB
-            #     sys.exit()
-            #     breakpoint()
-                
-            #     
-            return 0, 0, 0 , 0, 0
         
         
 
@@ -1705,66 +1445,14 @@ class NeuralNet(MLModel):
             print("--------")
             print('<<ML>> training')
 
-            # ml_model_trained = MainModel(self,10,3,0.05,X,y)
 
             print('<<ML>> done training')
 
-            return 0 #MainModel(self, X,y)
+            return 0 
 
 
 
 #####################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ##########################################################################
 class LinReg(MLModel):
     '''
