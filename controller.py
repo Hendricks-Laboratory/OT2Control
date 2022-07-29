@@ -7134,14 +7134,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -7156,9 +7153,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -7194,7 +7189,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -7215,10 +7209,8 @@ class AutoContr(Controller):
 
                     
 
-                    #print("We get the following wavelengths",clean_wave_test)
                     print("We get the following wavelengths",new_added_list_test)
-                    # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                    # print("The average is ", average_of_wave_test)
+
                     Wave_pre =0
                     Obs_pre =0
                     for tpl in range(len(last_obs_test)):
@@ -7230,11 +7222,7 @@ class AutoContr(Controller):
       
                     print("The average is ", Wave_pre,Obs_pre)
 
-                    #Robot_answer=wavelengths_prediction_test[0]
-                    #print("Y_TEST_ROBOT", Y_testing)
-                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
-                    #Here we change 
                     print("sending len",len(last_obs_test))
 
                     print("Robot send back a wavelenght of", Robot_answer)
@@ -7242,35 +7230,6 @@ class AutoContr(Controller):
                     test_error= Robot_answer - input_user_model
                     print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                     if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is trained----")
@@ -7294,12 +7253,6 @@ class AutoContr(Controller):
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
 
-                
-                
-                
-                
-                
-                
                 
                 
                 
@@ -7380,27 +7333,21 @@ class AutoContr(Controller):
                 #####
                 figWave_conce = plt.figure()
                 figWave_conce = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
 
                 # defining all 3 axes
-                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-2]        #df['[Cit]'] 
-                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-2]        #df['[Ag]']
-                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-2]       #df["[KBr]"]
-                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-2]  #df["Wavelength"]
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-2]        
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-2]        
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-2]       
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-2]  
                     
                 # plotting
                 img = ax.scatter(Cit_x, Ag_y, WaV, c=WaV, cmap="winter", s= 120)
                 figWave_conce.colorbar(img)
 
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
                 ax.set_title("Cit-Ag-Wavelength")
                 plt.savefig("Cit-Ag-Wavelength.png")
                 plt.show()
@@ -7411,18 +7358,11 @@ class AutoContr(Controller):
                 ######
 
 
-
                 figConcen_Wave = plt.figure()
                 figConcen_Wave = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
-
-                # plotting
                 img = ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter", s= 120)
                 figConcen_Wave.colorbar(img)
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
@@ -7437,25 +7377,10 @@ class AutoContr(Controller):
 
                 figConcen_obs = plt.figure()
                 figConcen_obs = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
-
-                # defining all 3 axes
-
                 Obs_pl=  df["Observance"].loc[:len(df["Observance"])-2]
-
-
-
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="winter",s= 120)
-
                 figConcen_obs.colorbar(img)
-
-
-
-
-                # plotting
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
@@ -7471,9 +7396,6 @@ class AutoContr(Controller):
                 import matplotlib
 
 
-
-
-                # convert to 2d matrices
                 Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])   
                 X, Y = np.meshgrid(Cit_x, Ag_y)    
 
@@ -7798,8 +7720,7 @@ class AutoContr(Controller):
                 used_boxs_train_unique
                 toChoose = possiblePoints_index.copy()
                 choosenPoints=[]
-                #print(toChoose.remove(toChoose[2]))
-                #print(toChoose)
+ 
                 ###eliminating the used points in training
                 for tww in range(len(used_boxs_train_unique)):
                     print(used_boxs_train_unique[tww])
@@ -7807,7 +7728,7 @@ class AutoContr(Controller):
 
                 print("upt",toChoose)
                 #Choosing a data point
-                #print(2 in toChoose)
+
                 for rep in range(10):
                     
 
@@ -7815,14 +7736,12 @@ class AutoContr(Controller):
                         pointChoose= random.choice(toChoose)
                         print("Point Choosen",pointChoose)
                         
-                        #print(pointChoose in choosenPoints)
                         if pointChoose in choosenPoints == True:
                             print("Choosing another point")
                             pointChoose= random.choice(toChoose)
                             print("Point Choosen",pointChoose)
                             break
                         else:
-                            #print(toChoose.index(pointChoose))
                             new_position_tol= toChoose.index(pointChoose)
                             toChoose.remove(toChoose[new_position_tol])
                             choosenPoints.append(pointChoose)
@@ -7843,10 +7762,6 @@ class AutoContr(Controller):
 
                 ##Sending to the robot
                 prediction1= mod.predict(np.array([toExplore[0]]))
-                #prediction1Ovl, prediction1, train_prediction, W, b , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[0]]),r,ml_past,explo= False)#550, 0.0002, 480 , 10000, 20
-
-                #checking overflow for prediction1 
-                #prediction1= overfl(prediction1)
 
                 ##Testing
                 print("-------------")
@@ -7943,9 +7858,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -8001,9 +7914,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -8039,7 +7950,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -8058,10 +7968,7 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -8073,10 +7980,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -8085,45 +7988,15 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
-
+            
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
-                        #break
                 else:
                         print("Model would try to reduce the error")
                         if r == 8:
@@ -8131,7 +8004,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -8221,10 +8093,8 @@ class AutoContr(Controller):
                 grillPlotAl(df, toExplore,size_training,"1")
                 prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod1= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction2= mod1.predict(np.array([toExplore[1]]))
                 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",np.array([prediction2])) 
                 prediction2= overfl(prediction2)
@@ -8384,9 +8254,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -8422,7 +8290,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -8441,10 +8308,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -8456,9 +8321,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -8468,45 +8330,14 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
-                        #break
                 else:
                         print("Model would try to reduce the error")
                         if r == 8:
@@ -8514,7 +8345,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -8525,11 +8355,9 @@ class AutoContr(Controller):
             
                 
                 grillPlotAl(df, toExplore,size_training,"2")
-                #input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_2, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod2= model.training(df,np.array([toExplore[1]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction3= mod2.predict(np.array([toExplore[2]]))
                 
                 
@@ -8636,10 +8464,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
+                          
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -8694,9 +8519,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -8751,10 +8574,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -8766,9 +8587,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+     
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -8778,45 +8597,17 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
+            
+            
                 
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
-
+ 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
-                        #break
                 else:
                         print("Model would try to reduce the error")
                         if r == 8:
@@ -8824,7 +8615,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -8841,13 +8631,9 @@ class AutoContr(Controller):
 
                 prediction1Ovl, prediction_update_3, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod3= model.training(df,np.array([toExplore[2]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction4= mod3.predict(np.array([toExplore[3]]))
 
-                #input_user_4Exp, prediction4 = model.training(self, df,np.array([toExplore[3]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_4Exp) 
                 prediction4= overfl(prediction4)
 
 
@@ -8883,7 +8669,6 @@ class AutoContr(Controller):
                 #TODO filenames is empty. dunno why
                 last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
                 scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
                     
@@ -8948,9 +8733,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                           
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -8984,14 +8767,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -9006,9 +8786,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -9044,7 +8822,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -9063,10 +8840,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -9078,10 +8853,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -9089,46 +8860,15 @@ class AutoContr(Controller):
                 print("User input was ", input_user_model, input_user)
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
-                    
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+               
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
                             Avg_test.append(sum(new_added_list_test)/len(new_added_list_test))
-                        #break
                 else:
                         print("Model would try to reduce the error")
                         if r == 8:
@@ -9136,7 +8876,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -9147,16 +8886,13 @@ class AutoContr(Controller):
                 grillPlotAl(df, toExplore,size_training,"4")
 
                 ##PREDICTION5
-#                input_user_5Exp, prediction5 = model.training(self, df,np.array([toExplore[4]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_4, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod4= model.training(df,np.array([toExplore[3]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction5= mod4.predict(np.array([toExplore[4]]))
                
                
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_5Exp) 
                 prediction5= overfl(prediction5)
 
 
@@ -9257,9 +8993,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -9293,14 +9027,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -9315,9 +9046,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -9353,7 +9082,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -9372,10 +9100,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -9387,10 +9113,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
+           
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -9399,40 +9122,12 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
                 
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+            
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -9445,7 +9140,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -9456,13 +9150,10 @@ class AutoContr(Controller):
                 print("df 5",df)
                 grillPlotAl(df, toExplore,size_training,"5")
 
-                #input_user_6Exp, prediction6 = model.training(self, df,np.array([toExplore[5]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction1Ovl, prediction_update_5, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod5= model.training(df,np.array([toExplore[4]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction6= mod5.predict(np.array([toExplore[5]]))
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_6Exp) 
                 prediction6= overfl(prediction6)
 
 
@@ -9563,9 +9254,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -9621,9 +9310,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -9659,7 +9346,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -9678,10 +9364,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -9693,10 +9377,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -9705,40 +9385,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+               
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -9751,7 +9402,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -9764,15 +9414,12 @@ class AutoContr(Controller):
                 print("df 6",df)
                 grillPlotAl(df, toExplore,size_training,"6")
 
-                #input_user_7Exp, prediction7 = model.training(self, df,np.array([toExplore[6]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_6, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod6= model.training(df,np.array([toExplore[5]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction7= mod6.predict(np.array([toExplore[6]]))
 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_7Exp) 
                 prediction7= overfl(prediction7)
 
 
@@ -9873,9 +9520,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -9931,9 +9576,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+                            
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -9988,10 +9631,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -10003,9 +9644,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -10015,40 +9654,10 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -10061,7 +9670,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -10073,13 +9681,10 @@ class AutoContr(Controller):
 
                 prediction1Ovl, prediction_update_7, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod7= model.training(df,np.array([toExplore[6]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
                 
-                #input_user_8Exp, prediction8 = model.training(self, df,np.array([toExplore[7]]),r, n_epochs=30, ml_past=False,explo=True)
 
                 prediction8= mod7.predict(np.array([toExplore[7]]))
                 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_8Exp) 
                 prediction8= overfl(prediction8)
 
 
@@ -10180,10 +9785,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
+                            
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -10216,14 +9818,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -10238,9 +9837,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+                            
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -10295,10 +9892,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -10310,10 +9905,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
+ 
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -10322,36 +9914,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
+                
                 
 
 
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
-
+                  
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
@@ -10378,13 +9945,11 @@ class AutoContr(Controller):
                 print("df 8",df)
                 grillPlotAl(df, toExplore,size_training,"8")
 
-                #input_user_9Exp, prediction9 = model.training(self, df,np.array([toExplore[8]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
+
                 #checking overflow for prediction1
                 prediction1Ovl, prediction_update_8, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod8= model.training(df,np.array([toExplore[7]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction9= mod8.predict(np.array([toExplore[8]]))
-                #print("input_user_secondExp",input_user_9Exp) 
                 prediction9= overfl(prediction9)
 
 
@@ -10485,9 +10050,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -10528,7 +10091,6 @@ class AutoContr(Controller):
                             # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -10543,10 +10105,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
-                                
+
                         else:
                             #getting the wavelengths which difference is less than 10
                             wave_min_diff_test=[]
@@ -10581,7 +10140,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -10600,10 +10158,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -10615,10 +10171,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -10627,35 +10179,7 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
@@ -10673,7 +10197,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -10686,13 +10209,10 @@ class AutoContr(Controller):
                 print("df 9",df)
                 grillPlotAl(df, toExplore,size_training,"9")
 
-                #input_user_10Exp, prediction10 = model.training(self, df,np.array([toExplore[9]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 prediction1Ovl, prediction_update_9, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod9= model.training(df,np.array([toExplore[8]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction10= mod9.predict(np.array([toExplore[9]]))
-                # print("input_user_secondExp",input_user_10Exp) 
                 prediction10= overfl(prediction10)
 
 
@@ -10792,9 +10312,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
+                            
 
                             # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
@@ -10835,7 +10353,6 @@ class AutoContr(Controller):
                             # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -10850,10 +10367,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
-                                
+ 
                         else:
                             #getting the wavelengths which difference is less than 10
                             wave_min_diff_test=[]
@@ -10907,10 +10421,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+             
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -10922,10 +10434,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -10934,40 +10442,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+        
 
                 if test_error[0][0]< 200 and test_error[0][0]> -200:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -10980,7 +10459,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -10999,95 +10477,49 @@ class AutoContr(Controller):
 
             
                 
-                # grillPlotAl(toExplore,size_training,"11")
-                import matplotlib
-                import matplotlib.pyplot as plt
-                from mpl_toolkits.mplot3d import Axes3D
-                import numpy as np
-                #X, Y, Z = np.array([x,x]),np.array([y,y]),np.array([z,z])
-                Cit_x = df["[Cit]"]        #df['[Cit]'] 
-                Ag_y = df['[Ag]'] #.loc[:len(df["[Ag]"])-1]        #df['[Ag]']
-                KB_z = df["[KBr]"]#.loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
-                WaV =  df["Wavelength"]#.loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
-                Obs_pl=  df["Observance"]#.loc[:len(df["Observance"])-1]
+                
+                Cit_x = df["[Cit]"]      
+                Ag_y = df['[Ag]'] 
+                KB_z = df["[KBr]"]
+                WaV =  df["Wavelength"]
+                Obs_pl=  df["Observance"]
+                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])    
+                X, Y = np.meshgrid(Cit_x, Ag_y)  
 
-
-                # convert to 2d matrices
-                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])    # 50x50
-                X, Y = np.meshgrid(Cit_x, Ag_y)    # 50x50
-
-                # domains
-                #x = np.logspace(-1.,np.log10(5),50) # [0.1, 5]
-                #y = np.linspace(6,9,50)             # [6, 9]
-                #z = np.linspace(-1,1,50)            # [-1, 1]
-
-                # convert to 2d matrices
-                #Z = np.outer(z.T, z)        # 50x50
-                #X, Y = np.meshgrid(x, y)    # 50x50
-
-                # fourth dimention - colormap
-                # create colormap according to x-value (can use any 50x50 array)
-                color_dimension = X # change to desired fourth dimension
+                color_dimension = X 
                 minn, maxx = color_dimension.min(), color_dimension.max()
                 norm = matplotlib.colors.Normalize(minn, maxx)
                 m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
                 m.set_array([])
                 fcolors = m.to_rgba(color_dimension)
-                # plot
                 figPlaneConExp = plt.figure(figsize=(8, 6),dpi=100)
                 ax = figPlaneConExp.gca(projection='3d')
                 ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.2)
 
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="Dark2",s=100)
-                #print(Cit_x[:-1])
-                #print(Cit_x[-1:],Ag_y[-1:],KB_z[-1:])
-
-
                 figPlaneConExp.colorbar(img)
-
-                #ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:],s=300)
-                #figPlaneCon.colorbar(img22)
-
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #ax.set(xlim=(min(Cit_x[:-1]), max(Cit_x[:-1])), ylim=(min(Ag_y[:-1]), max(Ag_y[:-1])),zlim=(min(KB_z[:-1]),max(KB_z[:-1])))
                 ax.set_title("Exploration-Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
                 plt.savefig("Exploration-Plane-Concentrations[Cit,Ag,KBr].png")
                 plt.show()
 
-                import matplotlib.pyplot as plt
-                # This import registers the 3D projection, but is otherwise unused.
-                from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
-                from mpl_toolkits.mplot3d.axes3d import get_test_data
-                import numpy as np
+                ###
                 figLineConExp, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
                 X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter",s=180)
-
                 figLineConExp.colorbar(img)
-
-
                 C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
                 scamap = plt.cm.ScalarMappable(cmap='inferno')
                 fcolors = scamap.to_rgba(C)
                 ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
                 ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
-
                 obs__pl= ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="hsv",s=50)
-
                 figLineConExp.colorbar(obs__pl)
-                #ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
-
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #figLineCon.legend()
-                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z)-0.000904,max(KB_z)+0.000504))
                 ax.set_title("Exploration-Line-Concentrations[Cit,Ag,KBr]-Wavelength")
                 plt.savefig("Exploration-Line-Concentrations[Cit,Ag,KBr]-Wavelength.png")
                 plt.show()
@@ -11113,77 +10545,6 @@ class AutoContr(Controller):
                 print("")
 
 
-                # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                # label_names = ["Generation 1", "Generation 2", "Generation 3"]
-                # color_names = ["red","orange","blue"]
-                # #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
-                # waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
-                # print("Printtttttttt",waves_1)
-                # for ke in range(len(label_names)):
-                #     #print(label_names_2[r], waves[r])
-                #     for nnm in range(len(waves_1[ke])):
-                #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
-                
-
-                
-                # ##CCCCCC
-                # # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
-                # plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
-                # plt.axhline(y=input_user-5,color='r', linestyle=':')
-                # plt.axhline(y=input_user,color='r', linestyle='-')
-                # plt.axhline(y=input_user+5,color='r', linestyle=':')
-
-
-                # #plt.xlim(0.00001, 0.003)
-                # #plt.xlim(["Generation 1","Generation 2","Generation 3"])
-                # plt.legend(loc="upper right",  prop={"size":6})
-                # plt.show()
-                # fig_changhe_model.savefig('changeInWavesModel.png')
-
-                # #Plot recipes and the input
-
-                # waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
-                # print("Ltp",waves)
-                # # input_user=50
-                # fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                # colors_2= ["red","green","blue"]
-                # label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
-
-                # for k in range(len(label_names_2)):
-                #     #print(label_names_2[r], waves[r])
-                #     for nn in range(len(waves[k])):
-                #         plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
-
-                # plt.axhline(y=input_user-5,color='r', linestyle=':')
-                # plt.axhline(y=input_user,color='r', linestyle='-')
-                # plt.axhline(y=input_user+5,color='r', linestyle=':')
-                # fig_last.savefig('Input-Recipes.png')
-
-
-
-                # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
-                # print("Pppppppp",pattt)
-                # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
-                # patternFoll = patternFoll.reset_index()
-                # print("Pppppppp",patternFoll)
-
-                # # recipesTaken= df.Concentration.unique()
-                # recipesTaken = patternFoll["Concentration"].ravel().tolist()
-                # patternFollowed = patternFoll["Wavelength"].ravel().tolist()
-                # print("RRRR",patternFollowed,recipesTaken)
-                # fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                # #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                # plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
-                # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                # plt.xlabel("[KBr] Concentration (mM)")
-                # plt.ylabel("Wavelength (nm)")
-                # plt.legend(prop={"size":6})
-                # plt.show()
-                # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
-
                 time.sleep(50)
                 self.close_connection()
                 self.pr.shutdown()
@@ -11200,9 +10561,7 @@ class AutoContr(Controller):
                 recipe1 = recipes[:][0:1][0]
                 recipe2 = recipes[:][3:4][0]
                 recipe3 = recipes[:][6:7][0]
-                # print("RRR",recipe1)
-                # print("RRR",recipe2)
-                # print("RRR",recipe3)
+             
 
                 #we would get observance for each recipe:
                 wavelengths=[]
@@ -11237,7 +10596,6 @@ class AutoContr(Controller):
                 for r in range(3):
 
                     
-                    # print(recipes[number_rep_recip+3:number_rep_recip+3][0:])
                     recipe_block = recipes[number_rep_recip:number_rep_recip+3][0:]
                     print("----Start ",str(r+1)," ----")
                     print('recipe block', str(r+1) ,recipe_block)
@@ -11266,10 +10624,7 @@ class AutoContr(Controller):
                     scan_Y_1 = scan_Y[0]
                     scan_Y_2 = scan_Y[1]
                     scan_Y_3 = scan_Y[2]
-
-                    #print("len rp1",len(scan_Y_1),scan_Y_1)
-                    # print("len rp2",len(scan_Y_2),len(scan_Y_2))
-                    # print("len rp3",len(scan_Y_3),len(scan_Y_3))
+        
 
                     maxWave_scan_1, X_scan_1, Y_scan_1, Obs_scan_1 = MaxWaveLength_Obs(scan_Y_1)
                     maxWave_scan_2, X_scan_2, Y_scan_2, Obs_scan_2 = MaxWaveLength_Obs(scan_Y_2)
@@ -11291,10 +10646,6 @@ class AutoContr(Controller):
                     fig_wave_obs.savefig("waves-recipe"+str(r)+".png",dpi=fig_wave_obs.dpi)
 
 
-                    # print("WaveL max 1"+". ", maxWave_scan_1)
-                    # print("WaveL max 2"+". ", maxWave_scan_2)
-                    # print("WaveL max 3"+". ", maxWave_scan_3)
-                    
                     #
                     #Add to the list of wavelengths
                     if r== 0:
@@ -11353,11 +10704,7 @@ class AutoContr(Controller):
                                     print("No stable waves were found, stopping the program")
                                     sys.exit()
                                 print("...Creating one more sample of the recipe")
-                                #insert robot
-                                #waves_recipe1.append(random.randint(500, 600))
-                                #
-
-                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                                
                                 recipe_block_2 = np.array([recipe1])
 
                                 #do the first one
@@ -11378,14 +10725,9 @@ class AutoContr(Controller):
                                 last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
                                 scan_data = self._get_sample_data(wellnames, last_filename)
                                 scan_Y= scan_data.T.to_numpy()
-                                # print("Scan When Distance is > 10", scan_Y)
                                 print("Scan When Distance is > 10")
 
-                                scan_Y_1_second = scan_Y[0]
-                                    
-
-                                # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
-                                    
+                                scan_Y_1_second = scan_Y[0]                                    
 
                                 maxWave_scan_1_sec, X_scan_1_new, Y_scan_1_new,Obs_scan_1_new = MaxWaveLength_Obs(scan_Y_1_second)
                                 print("W-O",maxWave_scan_1_sec,Obs_scan_1_new)
@@ -11397,9 +10739,7 @@ class AutoContr(Controller):
                                 obs_for_recipe_1[maxWave_scan_1_sec]=Obs_scan_1_new
 
                                 print("")
-                                # if len(waves_recipe1_sorted) == 9:
-                                #     print("No stable waves were found, stopping the program")
-                                #     sys.exit()
+                                
                                 
                             else:
                                 #getting the wavelengths which difference is less than 10
@@ -11436,11 +10776,9 @@ class AutoContr(Controller):
                                     last_obs_1.append((new_added_list[rii],obs_for_recipe_1[new_added_list[rii]]))
 
                                 #For ploting
-                                #wavelengths_for_recipe_1 = clean_wave
                                 wavelengths_for_recipe_1 = wave_min_diff_fin 
                                 print("Current list sorted",waves_recipe1_sorted)
-                                #print("--->Waves to use",clean_wave)
-                                #print("--->Waves to use",wave_min_diff_fin)
+                                
                                 print("--->Waves to use",new_added_list)
                                 print("--->Data to use",last_obs_1)
 
@@ -11448,7 +10786,6 @@ class AutoContr(Controller):
                                     #Plot after training
                                     print("Plotting---")
                                     fig_wave_new= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                                    # plt.rc('axes', linewidth = 2)
                                     plt.title("Spectrum recipe 1", fontsize = 16, pad = 20)
                                     plt.plot(X_scan_1,Y_scan_1, color="black") #COLOR?
                                     plt.plot(X_scan_2,Y_scan_2, color="black")
@@ -11516,9 +10853,7 @@ class AutoContr(Controller):
                                     print("No stable waves were found, stopping the program")
                                     sys.exit()
                                 print("...Creating one more sample of the recipe")
-                                #insert robot
-                                #waves_recipe1.append(random.randint(500, 600))
-                                #
+                                
                                 recipe_block_2 = np.array([recipe2])
                                 print("Creating one more sample",recipe_block_2)
                                 #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
@@ -11541,13 +10876,11 @@ class AutoContr(Controller):
 
 
                                 scan_Y= scan_data.T.to_numpy()
-                                    # print("Scan When Distance is > 10", scan_Y)
                                 print("Scan When Distance is > 10")
 
                                 scan_Y_2_second = scan_Y[0]
                                     
 
-                                    # print("len rp1 sec",len(scan_Y_2_second),scan_Y_2_second)
                                     
 
                                 maxWave_scan_2_sec, X_scan_2_new, Y_scan_2_new, Obs_scan_2_new = MaxWaveLength_Obs(scan_Y_2_second)
@@ -11560,9 +10893,6 @@ class AutoContr(Controller):
                                 waves_recipe2_sorted= sorted(waves_recipe2)
                                 obs_for_recipe_2[maxWave_scan_2_sec]=Obs_scan_2_new
                                 print("")
-                                # if len(waves_recipe2_sorted) == 9:
-                                #     print("No stable waves were found, stopping the program")
-                                #     sys.exit()
                                 
                             else:
                                 #getting the wavelengths which difference is less than 10
@@ -11597,7 +10927,6 @@ class AutoContr(Controller):
                                     last_obs_2.append((new_added_list_2[rii],obs_for_recipe_2[new_added_list_2[rii]]))
 
                                 print("Current list sorted",waves_recipe2_sorted)
-                                #print("--->Waves to use",wave_min_diff_fin_2)
                                 print("--->Waves to use",new_added_list_2)
                                 print("--->Data to use", last_obs_2)
 
@@ -11649,10 +10978,7 @@ class AutoContr(Controller):
                         obs_for_recipe_3[maxWave_scan_2] = Obs_scan_2
                         obs_for_recipe_3[maxWave_scan_3] = Obs_scan_3
 
-                        # print("W-O",maxWave_scan_1,Obs_scan_1)
-                        # print("W-O",maxWave_scan_2,Obs_scan_2)                      
-                        # print("W-O",maxWave_scan_3,Obs_scan_3)
-
+                       
                         for l in range(6):
                             print("----------------------------------")
                             print("Comparing", len(waves_recipe3_sorted), "recipes")
@@ -11679,11 +11005,7 @@ class AutoContr(Controller):
                                     print("No stable waves were found, stopping the program")
                                     sys.exit()
                                 print("...Creating one more sample of the recipe")
-                                #insert robot
-                                #waves_recipe1.append(random.randint(500, 600))
-                                #
-
-                                # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                               
                                 recipe_block_2 = np.array([recipe3])
                                 print("Creating one more sample",recipe_block_2)
                                 #do the first one
@@ -11705,12 +11027,9 @@ class AutoContr(Controller):
 
 
                                 scan_Y= scan_data.T.to_numpy()
-                                #print("Scan When Distance is > 10", scan_Y)
                                 print("Scan When Distance is > 10, recipe 3")
                                 scan_Y_3_second = scan_Y[0]                                
-                                
-                                    
-
+                             
                                 maxWave_scan_3_sec, X_scan_3_new, Y_scan_3_new, Obs_scan_3_new = MaxWaveLength_Obs(scan_Y_3_second)
                                     
                                     
@@ -11721,9 +11040,7 @@ class AutoContr(Controller):
                                 waves_recipe3_sorted= sorted(waves_recipe3)
                                 obs_for_recipe_3[maxWave_scan_3_sec] = Obs_scan_3_new
                                 print("")
-                                # if len(waves_recipe3_sorted) == 9:
-                                #     print("No stable waves were found, stopping the program")
-                                #     sys.exit()
+
                             
                             else:
                                 #getting the wavelengths which difference is less than 10
@@ -11759,12 +11076,9 @@ class AutoContr(Controller):
                                 for rii in range(len(new_added_list_3)):
                                     last_obs_3.append((new_added_list_3[rii],obs_for_recipe_3[new_added_list_3[rii]]))
 
-                                # print("Current list sorted",waves_recipe3_sorted)
-                                # print("--->Waves to use",clean_wave_3)
+
                                 # #for ploting
-                                # wavelengths_for_recipe_3 = clean_wave_3
                                 print("Current list sorted",waves_recipe3_sorted)
-                                # print("--->Waves to use",wave_min_diff_fin_3)
                                 print("--->Waves to use",new_added_list_3)
                                 print("--->Data to use",last_obs_3)
 
@@ -11774,7 +11088,6 @@ class AutoContr(Controller):
                                     #Plot after training
                                     print("Plotting---")
                                     fig_wave_new_3= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                                    # plt.rc('axes', linewidth = 2)
                                     plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
                                     plt.title("Spectrum Recipe 3", fontsize = 16, pad = 20)
                                     plt.plot(X_scan_1,Y_scan_1)
@@ -11789,9 +11102,6 @@ class AutoContr(Controller):
                     number_rep_recip += 3
 
                 print("Checking our input (Wavelengths)")
-                # print("wavelength 1",clean_wave)
-                # print("wavelength 3",clean_wave_2)
-                # print("wavelength 3",clean_wave_3)
                 print("wavelength 1",new_added_list)
                 print("wavelength 3",new_added_list_2)
                 print("wavelength 3",new_added_list_3)
@@ -11803,13 +11113,7 @@ class AutoContr(Controller):
                 Avg_3= sum(new_added_list_3)/len(new_added_list_3)
 
                 ##
-                # print("Checking our input: wavelengths")
-                # print("wavelength 1",wavelengths_for_recipe_1)
-                # print("wavelength 3",wavelengths_for_recipe_2)
-                # print("wavelength 3",wavelengths_for_recipe_3)
-                # print("Waves pass 1", clean_list_1)
-                # print("Waves pass 2", clean_list_2)
-                # print("Waves pass ", clean_list_3)
+
                 total_waves_2= wavelengths_for_recipe_1+wavelengths_for_recipe_2+wavelengths_for_recipe_3
                 #Consider duplocates or not
                 #total_waves=  clean_wave+clean_wave_2+clean_wave_3
@@ -11818,8 +11122,7 @@ class AutoContr(Controller):
                 print("Total Waves", total_waves)
                 recipes_plot=[recipe1[0],recipe2[0],recipe3[0]]
                 print("Plot change",type(recipes_plot),recipes_plot)
-                # waves_evol_plot = [waves_evol_1,waves_evol_2,waves_evol_3]
-                # waves_evol_plot = [clean_wave,clean_wave_2,clean_wave_3]
+
                 
                 waves_evol_plot = [new_added_list,new_added_list_2,new_added_list_3]
                 print(type(waves_evol_plot),waves_evol_plot)
@@ -11834,29 +11137,18 @@ class AutoContr(Controller):
                 plt.legend(loc="upper right",frameon = False, prop={"size":6},labelspacing = 0.5)
                 plt.title(str("Generations"), fontsize = 16, pad = 20)
                 for t in range(len(recipes_plot)):
-                            #print(recipes_plot[t]*len(waves_evol_plot[u]))
-                            #print(u)
                             print(recipes_plot[t])
-                            #print(waves_evol_plot[u])
                             plt.scatter([recipes_plot[t]]*len(waves_evol_plot[t]), waves_evol_plot[t], color= color_names[t], label= label_names[t],s=100)
                         
-                # plt.scatter([recipes_plot[0],recipes_plot[0],recipes_plot[0]],[waves_evol_plot[0],waves_evol_plot[0],waves_evol_plot[0]], color= "blue", label= "Recipe 1 ",s=100)
-                # plt.scatter(recipes_plot[1],[waves_evol_plot[1],waves_evol_plot[1],waves_evol_plot[1]], color= "red", label= "Recipe 2",s=100)
-                # plt.scatter(recipes_plot[2],[waves_evol_plot[2],waves_evol_plot[2],waves_evol_plot[2]], color= "red", label= "Recipe 3",s=100)
 
-                #plt.xlim(0.00001, 0.003)
                 plt.legend(loc="upper right",  prop={"size":6})
                 fig_changhe.savefig('changeInWaves.png')
 
 
 
-
-
                 print("Wav ori", total_waves_2)
-                # print("Waves evol", )
                 print("Wav nw Final",total_waves)
-                # Y= np.array([wavelengths])
-                # Y= np.array([total_waves])
+               
                 J = last_obs_1+last_obs_2+last_obs_3
                 Y = np.array([J])
 
@@ -11868,8 +11160,7 @@ class AutoContr(Controller):
                 recipes_2_out = np.repeat(np.array([recipe2]), len(new_added_list_2), axis=0)
                 recipes_3_out = np.repeat(np.array([recipe3]), len(new_added_list_3), axis=0)
 
-                #recipes =  np.random.rand(1,1) * (2.5 - 0.2) + 0.2
-                # print("our recipes", recipes)
+               
                 final_recipes =np.concatenate([recipes_1_out, recipes_2_out, recipes_3_out])
                 #passing to list
                 print("----------------------------")
@@ -11886,26 +11177,18 @@ class AutoContr(Controller):
                 Y_df = [Y[0][m] for m in range(len(Y[0]))]
                 WaveLength_df= [Y_df[m][0] for m in range(len(Y_df))]
                 Obs_df= [Y_df[m][1] for m in range(len(Y_df))]
-                #print(X_df_Cit)
-                #print(X_df_Ag)
-                #print(X_df_KBr)
-                #print(WaveLength_df)
-                #print(Obs_df)  
+             
 
 
                 #Checking that they are list Y_df
-                # print("Checking if X and Y are list now: ", type(X_df),type(Y_df))
                 print("Checking if X and Y are list now: ", type(X_df_Cit),type(Y_df))
 
 
 
                 ##creadting the dataframe
-                # df = pd.DataFrame(list(zip(X_df, Y_df)),columns =['Concentration', 'Wavelength'])
-                # #sorting by Concentration
-                # df = df.sort_values(by=['Concentration'])
+
                 df = pd.DataFrame(list(zip(X_df,X_df_Ag,X_df_KBr, WaveLength_df,Obs_df )),columns =['[Cit]','[Ag]','[KBr]','Wavelength','Observance' ])
-                #sorting by Concentration
-                #df = df.sort_values(by=['Concentration'])
+
                 print("DFrame")
                 print("")
                 print(df)
@@ -11949,13 +11232,9 @@ class AutoContr(Controller):
                 for r in range(5):
                     print("Epoch", r+1)
                     print("pst",ml_past)
-                    # input_user, user_concentration, train_prediction, W, b = model.training(df,input_user,r)#550, 0.0002, 480 , 10000, 20
                     input_user_model, user_concentration, train_prediction, W, b , ml_past_v, Ngen_net ,mod= model.training(df,input_user_model,r,ml_past=ml_past_v,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                    # W_list.append(W)
-                    # b_list.append(b)
-                    ##pas to the robot THE USER_CONCENTRATION
-                    # Robot_answer= 465
+                 
                     ##Testing
                     print("Cont0",input_user_model,user_concentration)
                     print("")
@@ -12049,11 +11328,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                           
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -12085,14 +11360,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -12107,9 +11378,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+                           
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -12145,7 +11414,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -12166,10 +11434,8 @@ class AutoContr(Controller):
 
                     
 
-                    #print("We get the following wavelengths",clean_wave_test)
                     print("We get the following wavelengths",new_added_list_test)
-                    # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                    # print("The average is ", average_of_wave_test)
+                  
                     Wave_pre =0
                     Obs_pre =0
                     for tpl in range(len(last_obs_test)):
@@ -12181,9 +11447,6 @@ class AutoContr(Controller):
       
                     print("The average is ", Wave_pre,Obs_pre)
 
-                    #Robot_answer=wavelengths_prediction_test[0]
-                    #print("Y_TEST_ROBOT", Y_testing)
-                    #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                     #Here we change 
                     print("sending len",len(last_obs_test))
@@ -12193,40 +11456,11 @@ class AutoContr(Controller):
                     test_error= Robot_answer - input_user_model
                     print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                     if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is trained----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -12239,7 +11473,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -12331,27 +11564,19 @@ class AutoContr(Controller):
                 #####
                 figWave_conce = plt.figure()
                 figWave_conce = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
-
-                # defining all 3 axes
-                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-2]        #df['[Cit]'] 
-                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-2]        #df['[Ag]']
-                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-2]       #df["[KBr]"]
-                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-2]  #df["Wavelength"]
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-2]       
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-2]        
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-2]      
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-2]  
                     
                 # plotting
                 img = ax.scatter(Cit_x, Ag_y, WaV, c=WaV, cmap="winter", s= 120)
                 figWave_conce.colorbar(img)
 
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
                 ax.set_title("Cit-Ag-Wavelength")
                 plt.savefig("Cit-Ag-Wavelength.png")
                 plt.show()
@@ -12365,12 +11590,8 @@ class AutoContr(Controller):
 
                 figConcen_Wave = plt.figure()
                 figConcen_Wave = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
 
-                # plotting
                 img = ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter", s= 120)
                 figConcen_Wave.colorbar(img)
 
@@ -12388,17 +11609,8 @@ class AutoContr(Controller):
 
                 figConcen_obs = plt.figure()
                 figConcen_obs = figure(figsize=(8, 6), dpi=100)
-
-
-                # syntax for 3-D projection
                 ax = plt.axes(projection ='3d')
-
-                # defining all 3 axes
-
                 Obs_pl=  df["Observance"].loc[:len(df["Observance"])-2]
-
-
-
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="winter",s= 120)
 
                 figConcen_obs.colorbar(img)
@@ -12417,14 +11629,6 @@ class AutoContr(Controller):
                 ####
                 ####
 
-
-                
-                import matplotlib
-
-
-
-
-                # convert to 2d matrices
                 Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])   
                 X, Y = np.meshgrid(Cit_x, Ag_y)    
 
@@ -12749,8 +11953,7 @@ class AutoContr(Controller):
                 used_boxs_train_unique
                 toChoose = possiblePoints_index.copy()
                 choosenPoints=[]
-                #print(toChoose.remove(toChoose[2]))
-                #print(toChoose)
+            
                 ###eliminating the used points in training
                 for tww in range(len(used_boxs_train_unique)):
                     print(used_boxs_train_unique[tww])
@@ -12758,7 +11961,6 @@ class AutoContr(Controller):
 
                 print("upt",toChoose)
                 #Choosing a data point
-                #print(2 in toChoose)
                 for rep in range(10):
                     
 
@@ -12766,14 +11968,12 @@ class AutoContr(Controller):
                         pointChoose= random.choice(toChoose)
                         print("Point Choosen",pointChoose)
                         
-                        #print(pointChoose in choosenPoints)
                         if pointChoose in choosenPoints == True:
                             print("Choosing another point")
                             pointChoose= random.choice(toChoose)
                             print("Point Choosen",pointChoose)
                             break
                         else:
-                            #print(toChoose.index(pointChoose))
                             new_position_tol= toChoose.index(pointChoose)
                             toChoose.remove(toChoose[new_position_tol])
                             choosenPoints.append(pointChoose)
@@ -12794,10 +11994,9 @@ class AutoContr(Controller):
 
                 ##Sending to the robot
                 prediction1= mod.predict(np.array([toExplore[0]]))
-                #prediction1Ovl, prediction1, train_prediction, W, b , ml_past, Ngen_net ,mod= model.training(df,np.array([toExplore[0]]),r,ml_past,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 #checking overflow for prediction1 
-                #prediction1= overfl(prediction1)
+                prediction1= overfl(prediction1)
 
                 ##Testing
                 print("-------------")
@@ -12894,11 +12093,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                         
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -12930,14 +12125,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
+                     
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -12952,9 +12144,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -12990,7 +12180,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -13024,9 +12213,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -13036,40 +12223,13 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
                 
 
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13082,7 +12242,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13172,10 +12331,8 @@ class AutoContr(Controller):
                 grillPlotAl(df, toExplore,size_training,"1")
                 prediction1Ovl, prediction_update_1, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod1= model.training(df,np.array([toExplore[0]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction2= mod1.predict(np.array([toExplore[1]]))
                 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",np.array([prediction2])) 
                 prediction2= overfl(prediction2)
@@ -13277,11 +12434,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
 
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -13313,14 +12466,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -13335,9 +12484,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -13392,10 +12539,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+                
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -13407,9 +12552,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -13419,40 +12561,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13465,7 +12578,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13476,15 +12588,12 @@ class AutoContr(Controller):
             
                 
                 grillPlotAl(df, toExplore,size_training,"2")
-                #input_user_3Exp, prediction3 = model.training(self, df,np.array([toExplore[2]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_2, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod2= model.training(df,np.array([toExplore[1]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction3= mod2.predict(np.array([toExplore[2]]))
                 
                 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
                 print("input_user_secondExp",np.array([toExplore[2]])) 
                 prediction3= overfl(prediction3)
@@ -13522,7 +12631,6 @@ class AutoContr(Controller):
                 #TODO filenames is empty. dunno why
                 last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
                 scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
                     
@@ -13587,11 +12695,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -13623,14 +12727,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -13645,9 +12745,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -13683,7 +12781,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -13702,10 +12799,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+                
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -13717,9 +12812,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -13729,40 +12821,13 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
+              
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+                  
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13775,7 +12840,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -13792,13 +12856,10 @@ class AutoContr(Controller):
 
                 prediction1Ovl, prediction_update_3, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod3= model.training(df,np.array([toExplore[2]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
-                #input_user_secondExp, prediction2 = mod.training(df,np.array([toExplore[1]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction4= mod3.predict(np.array([toExplore[3]]))
 
-                #input_user_4Exp, prediction4 = model.training(self, df,np.array([toExplore[3]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
+              
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_4Exp) 
                 prediction4= overfl(prediction4)
 
 
@@ -13899,11 +12960,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                          
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -13935,14 +12992,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -13957,9 +13010,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -13995,7 +13046,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -14014,10 +13064,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+              
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -14029,9 +13077,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -14040,41 +13085,11 @@ class AutoContr(Controller):
                 print("User input was ", input_user_model, input_user)
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
-                    
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+              
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14087,7 +13102,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14098,16 +13112,13 @@ class AutoContr(Controller):
                 grillPlotAl(df, toExplore,size_training,"4")
 
                 ##PREDICTION5
-#                input_user_5Exp, prediction5 = model.training(self, df,np.array([toExplore[4]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_4, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod4= model.training(df,np.array([toExplore[3]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction5= mod4.predict(np.array([toExplore[4]]))
                
                
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_5Exp) 
                 prediction5= overfl(prediction5)
 
 
@@ -14208,11 +13219,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -14244,14 +13251,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -14266,9 +13269,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -14304,7 +13305,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -14323,10 +13323,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -14338,10 +13336,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -14350,40 +13344,14 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
 
 
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
+
+             
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14396,7 +13364,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14407,13 +13374,10 @@ class AutoContr(Controller):
                 print("df 5",df)
                 grillPlotAl(df, toExplore,size_training,"5")
 
-                #input_user_6Exp, prediction6 = model.training(self, df,np.array([toExplore[5]]),r, n_epochs=30, ml_past=False,explo=True)
                 prediction1Ovl, prediction_update_5, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod5= model.training(df,np.array([toExplore[4]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction6= mod5.predict(np.array([toExplore[5]]))
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_6Exp) 
                 prediction6= overfl(prediction6)
 
 
@@ -14514,11 +13478,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -14550,14 +13510,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                            
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -14572,9 +13528,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -14610,7 +13564,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -14629,10 +13582,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -14644,9 +13595,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -14656,40 +13604,13 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
+                   
                 
 
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14702,7 +13623,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -14715,15 +13635,13 @@ class AutoContr(Controller):
                 print("df 6",df)
                 grillPlotAl(df, toExplore,size_training,"6")
 
-                #input_user_7Exp, prediction7 = model.training(self, df,np.array([toExplore[6]]),r, n_epochs=30, ml_past=False,explo=True)
                 
                 prediction1Ovl, prediction_update_6, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod6= model.training(df,np.array([toExplore[5]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction7= mod6.predict(np.array([toExplore[6]]))
 
-                #prediction2= mod.predict(np.array(toExplore[0]))
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_7Exp) 
+
                 prediction7= overfl(prediction7)
 
 
@@ -14824,11 +13742,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                            
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -14860,14 +13774,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
-                            scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
+                            scan_Y_rep_1 = scan_Y_test_rep[0]                                    
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -14882,9 +13792,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -14920,7 +13828,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -14939,10 +13846,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+           
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -14954,9 +13859,6 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -14966,40 +13868,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
-
+              
+                  
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15012,7 +13885,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15024,13 +13896,11 @@ class AutoContr(Controller):
 
                 prediction1Ovl, prediction_update_7, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod7= model.training(df,np.array([toExplore[6]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
                 
-                #input_user_8Exp, prediction8 = model.training(self, df,np.array([toExplore[7]]),r, n_epochs=30, ml_past=False,explo=True)
 
                 prediction8= mod7.predict(np.array([toExplore[7]]))
                 
-                #prediction2= mod.predict(np.array(toExplore[0]))
+               
                 #checking overflow for prediction1
-                #print("input_user_secondExp",input_user_8Exp) 
                 prediction8= overfl(prediction8)
 
 
@@ -15131,11 +14001,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
 
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -15167,14 +14033,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -15189,9 +14052,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -15227,7 +14088,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -15246,10 +14106,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -15261,9 +14119,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -15273,40 +14129,12 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
 
 
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15319,7 +14147,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15329,13 +14156,11 @@ class AutoContr(Controller):
                 print("df 8",df)
                 grillPlotAl(df, toExplore,size_training,"8")
 
-                #input_user_9Exp, prediction9 = model.training(self, df,np.array([toExplore[8]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
+
                 #checking overflow for prediction1
                 prediction1Ovl, prediction_update_8, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod8= model.training(df,np.array([toExplore[7]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction9= mod8.predict(np.array([toExplore[8]]))
-                #print("input_user_secondExp",input_user_9Exp) 
                 prediction9= overfl(prediction9)
 
 
@@ -15436,11 +14261,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
 
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -15472,14 +14293,10 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
-                                    
-
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
+                        
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -15494,9 +14311,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -15532,7 +14347,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -15551,10 +14365,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -15566,10 +14378,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
-
+                
                 #Here we change 
                 print("sending len",len(last_obs_test))
 
@@ -15578,40 +14387,11 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
 
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15624,7 +14404,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15637,13 +14416,11 @@ class AutoContr(Controller):
                 print("df 9",df)
                 grillPlotAl(df, toExplore,size_training,"9")
 
-                #input_user_10Exp, prediction10 = model.training(self, df,np.array([toExplore[9]]),r, n_epochs=30, ml_past=False,explo=True)
-                #prediction2= mod.predict(np.array(toExplore[0]))
+             
                 #checking overflow for prediction1
                 prediction1Ovl, prediction_update_9, train_prediction_emp, W_emp, b_emp , ml_past, Ngen_net ,mod9= model.training(df,np.array([toExplore[8]]),r,ml_past=True,explo= False)#550, 0.0002, 480 , 10000, 20
 
                 prediction10= mod9.predict(np.array([toExplore[9]]))
-                # print("input_user_secondExp",input_user_10Exp) 
                 prediction10= overfl(prediction10)
 
 
@@ -15678,7 +14455,6 @@ class AutoContr(Controller):
                 #TODO filenames is empty. dunno why
                 last_filename_testing = filenames_testing.loc[filenames_testing['index'].idxmax(),'scan_filename']
                 scan_data_testing = self._get_sample_data(wellnames_testing, last_filename_testing)   
-                #scan_data = observance
                 #We process scan_data to get lambda
                 scan_Y_testing= scan_data_testing.T.to_numpy()
                     
@@ -15743,11 +14519,7 @@ class AutoContr(Controller):
                                 print("No stable waves were found, stopping the program")
                                 sys.exit()
                             print("...Creating one more sample of the recipe")
-                            #insert robot
-                            #waves_recipe1.append(random.randint(500, 600))
-                            #
-
-                            # recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
+                        
                             # #do the first one
                             # #print('<<controller>> executing batch {}'.format(self.batch_num))
                             # #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -15755,11 +14527,9 @@ class AutoContr(Controller):
                             # #generate new wellnames for next batch
                             
                             recipe_unit_test_rep = user_concentration
-                            # recipe_block_2 = np.array([recipe2])
                             print("Creating one more sample",recipe_unit_test_rep)
                             recipe_unit_test_rep = np.repeat(user_concentration, 1, axis=1)
                             print("Recipes Test again",recipe_unit_test_rep)
-                            #recipe_block_2 = np.array([recipes[0][number_rep_recip:number_rep_recip+1]])
                             #do the first one
                             #print('<<controller>> executing batch {}'.format(self.batch_num))
                             #print('<<controller>> executing batch {}'.format(str(r+1)))
@@ -15779,14 +14549,11 @@ class AutoContr(Controller):
 
 
                             scan_Y_test_rep= scan_data.T.to_numpy()
-                            #print("Scan When Distance is > 10", scan_Y)
                             print("Scan When Distance is > 10 for test")
 
                             scan_Y_rep_1 = scan_Y_test_rep[0]
-                            # scan_Y_rep_2 = scan_Y_test_rep[1]
                                     
 
-                            # print("len rp1 sec",len(scan_Y_1_second),scan_Y_1_second)
                             maxWave_scan_1_sec_test, X_scan_1_new_test, Y_scan_1_new_test, Obs_scan_test_1_new = MaxWaveLength_Obs(scan_Y_rep_1)
                             
                             
@@ -15801,9 +14568,7 @@ class AutoContr(Controller):
                             obs_for_recipe_1_test[maxWave_scan_1_sec_test] = Obs_scan_test_1_new
 
                             print("")
-                            # if len(waves_recipe1_sorted_test) == 9:
-                            #     print("No stable waves were found, stopping the program")
-                            #     sys.exit()
+                       
                                 
                         else:
                             #getting the wavelengths which difference is less than 10
@@ -15839,7 +14604,6 @@ class AutoContr(Controller):
                                 last_obs_test.append((new_added_list_test[riit],obs_for_recipe_1_test[new_added_list_test[riit]]))
 
                             print("Current list sorted",waves_recipe1_sorted_test)
-                            #print("--->Waves to use",clean_wave_test)
                             print("--->Waves to use",new_added_list_test)
                             print("--->Data to use",last_obs_test)
                             
@@ -15858,10 +14622,8 @@ class AutoContr(Controller):
                                 fig_wave_test.savefig("waves-recipe"+str(r)+"more-odel"+".png",dpi=fig_wave_test.dpi)
                             break
 
-                #print("We get the following wavelengths",clean_wave_test)
                 print("We get the following wavelengths",new_added_list_test)
-                # average_of_wave_test = sum(new_added_list_test)/len(new_added_list_test)
-                # print("The average is ", average_of_wave_test)
+
                 Wave_pre =0
                 Obs_pre =0
                 for tpl in range(len(last_obs_test)):
@@ -15873,9 +14635,7 @@ class AutoContr(Controller):
       
                 print("The average is ", Wave_pre,Obs_pre)
 
-                #Robot_answer=wavelengths_prediction_test[0]
-                #print("Y_TEST_ROBOT", Y_testing)
-                #print("Y_TEST_ROBOT2", wavelengths_prediction_test[0])
+
 
                 #Here we change 
                 print("sending len",len(last_obs_test))
@@ -15885,40 +14645,10 @@ class AutoContr(Controller):
                 test_error= Robot_answer - input_user_model
                 print("Our test error is ", test_error)
                     
-                    # ##Plot
-                    # figtest = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                    # plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Linear Model")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest.savefig("predictions-"+str(r)+"png",dpi=figtest.dpi)
-
-                    # #Plot2
-                
-
-
-                    # figtest_2 = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                    # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                    # # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                    # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                    # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                    # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                    # plt.xlabel("[KBr] Concentration (mM)")
-                    # plt.ylabel("Wavelength (nm)")
-                    # plt.legend(prop={"size":6})
-                    # plt.show()
-                    # figtest_2.savefig("predictionsPattern-"+str(r)+"png",dpi=figtest_2.dpi)
 
                 if test_error[0][0]< 10 and test_error[0][0]> -10:
                         print("The model is closed to the point predicted----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15931,7 +14661,6 @@ class AutoContr(Controller):
                         else:
                             print("-----")
                         for sert in range(len(last_obs_test)):
-                            # print("Ln", len(clean_wave_test))
                             print("Insert in", sert)
                             new_data = {'[Cit]': user_concentration[0][0],'[Ag]':user_concentration[0][1], '[KBr]': user_concentration[0][2],'Wavelength': last_obs_test[sert][0],'Observance':last_obs_test[sert][1]}
                             df = df.append(new_data, ignore_index = True)
@@ -15950,35 +14679,17 @@ class AutoContr(Controller):
 
             
                 
-                # grillPlotAl(toExplore,size_training,"11")
-                import matplotlib
-                import matplotlib.pyplot as plt
-                from mpl_toolkits.mplot3d import Axes3D
-                import numpy as np
-                #X, Y, Z = np.array([x,x]),np.array([y,y]),np.array([z,z])
-                Cit_x = df["[Cit]"]        #df['[Cit]'] 
-                Ag_y = df['[Ag]'] #.loc[:len(df["[Ag]"])-1]        #df['[Ag]']
-                KB_z = df["[KBr]"]#.loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
-                WaV =  df["Wavelength"]#.loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
-                Obs_pl=  df["Observance"]#.loc[:len(df["Observance"])-1]
+
+                Cit_x = df["[Cit]"]        
+                Ag_y = df['[Ag]'] 
+                KB_z = df["[KBr]"]
+                WaV =  df["Wavelength"]
+                Obs_pl=  df["Observance"]
 
 
-                # convert to 2d matrices
-                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])    # 50x50
-                X, Y = np.meshgrid(Cit_x, Ag_y)    # 50x50
-
-                # domains
-                #x = np.logspace(-1.,np.log10(5),50) # [0.1, 5]
-                #y = np.linspace(6,9,50)             # [6, 9]
-                #z = np.linspace(-1,1,50)            # [-1, 1]
-
-                # convert to 2d matrices
-                #Z = np.outer(z.T, z)        # 50x50
-                #X, Y = np.meshgrid(x, y)    # 50x50
-
-                # fourth dimention - colormap
-                # create colormap according to x-value (can use any 50x50 array)
-                color_dimension = X # change to desired fourth dimension
+                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z)    * np.array([KB_z])  
+                X, Y = np.meshgrid(Cit_x, Ag_y)                   
+                color_dimension = X 
                 minn, maxx = color_dimension.min(), color_dimension.max()
                 norm = matplotlib.colors.Normalize(minn, maxx)
                 m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
@@ -15988,62 +14699,33 @@ class AutoContr(Controller):
                 figPlaneConExp = plt.figure(figsize=(8, 6),dpi=100)
                 ax = figPlaneConExp.gca(projection='3d')
                 ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.2)
-
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="Dark2",s=100)
-                #print(Cit_x[:-1])
-                #print(Cit_x[-1:],Ag_y[-1:],KB_z[-1:])
-
-
                 figPlaneConExp.colorbar(img)
-
-                #ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:],s=300)
-                #figPlaneCon.colorbar(img22)
-
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #ax.set(xlim=(min(Cit_x[:-1]), max(Cit_x[:-1])), ylim=(min(Ag_y[:-1]), max(Ag_y[:-1])),zlim=(min(KB_z[:-1]),max(KB_z[:-1])))
                 ax.set_title("Exploration-Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
                 plt.savefig("Exploration-Plane-Concentrations[Cit,Ag,KBr].png")
                 plt.show()
 
-                import matplotlib.pyplot as plt
-                # This import registers the 3D projection, but is otherwise unused.
-                from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
-                from mpl_toolkits.mplot3d.axes3d import get_test_data
-                import numpy as np
+                ###
                 figLineConExp, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
                 X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
                 img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter",s=180)
-
                 figLineConExp.colorbar(img)
-
-
                 C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
                 scamap = plt.cm.ScalarMappable(cmap='inferno')
                 fcolors = scamap.to_rgba(C)
                 ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
                 ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
-
                 obs__pl= ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="hsv",s=50)
-
                 figLineConExp.colorbar(obs__pl)
-                #ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
-
-
-
                 ax.set_xlabel('[Cit]')
                 ax.set_ylabel('[Ag]')
                 ax.set_zlabel('[KBr]')
-                #figLineCon.legend()
-                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z)-0.000904,max(KB_z)+0.000504))
                 ax.set_title("Exploration-Line-Concentrations[Cit,Ag,KBr]-Wavelength")
                 plt.savefig("Exploration-Line-Concentrations[Cit,Ag,KBr]-Wavelength.png")
                 plt.show()
-
-
 
 
 
@@ -16063,75 +14745,8 @@ class AutoContr(Controller):
                 print(f"Tensorflow listening on {url31}")
                 print("")
 
-                # fig_changhe_model= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                # label_names = ["Generation 1", "Generation 2", "Generation 3"]
-                # color_names = ["red","orange","blue"]
-                # #waves_1= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]  
-                # waves_1 = [new_added_list, new_added_list_2,new_added_list_3]
-                # print("Printtttttttt",waves_1)
-                # for ke in range(len(label_names)):
-                #     #print(label_names_2[r], waves[r])
-                #     for nnm in range(len(waves_1[ke])):
-                #         plt.scatter(x = label_names[ke], y= waves_1[ke][nnm], color = color_names[ke], label= label_names[ke])# label = 'axvline - full height')
-                
+    
 
-                
-                # ##CCCCCC
-                # # plt.scatter(user_concentrations,df["Wavelength"], color= "green", label= "Model ",s=100)
-                # plt.scatter(df["Concentration"],df["Wavelength"], color= "green", label= "Model ")            
-                # plt.axhline(y=input_user-5,color='r', linestyle=':')
-                # plt.axhline(y=input_user,color='r', linestyle='-')
-                # plt.axhline(y=input_user+5,color='r', linestyle=':')
-
-
-                # #plt.xlim(0.00001, 0.003)
-                # #plt.xlim(["Generation 1","Generation 2","Generation 3"])
-                # plt.legend(loc="upper right",  prop={"size":6})
-                # plt.show()
-                # fig_changhe_model.savefig('changeInWavesModel.png')
-
-                # #Plot recipes and the input
-
-                # waves= [wavelengths_for_recipe_1,wavelengths_for_recipe_2,wavelengths_for_recipe_3]
-                # print("Ltp",waves)
-                # # input_user=50
-                # fig_last= plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k')
-                # colors_2= ["red","green","blue"]
-                # label_names_2 = ["Generation 1", "Generation 2", "Generation 3"]
-
-                # for k in range(len(label_names_2)):
-                #     #print(label_names_2[r], waves[r])
-                #     for nn in range(len(waves[k])):
-                #         plt.scatter(x = label_names_2[k], y= waves[k][nn], color = colors_2[k], label = 'axvline - full height')
-
-                # plt.axhline(y=input_user-5,color='r', linestyle=':')
-                # plt.axhline(y=input_user,color='r', linestyle='-')
-                # plt.axhline(y=input_user+5,color='r', linestyle=':')
-                # fig_last.savefig('Input-Recipes.png')
-
-
-                # pattt= [Avg_1,Avg_2,Avg_3]+Avg_test
-                # print("Pppppppp",pattt)
-                # patternFoll = df.groupby('Concentration')['Wavelength'].mean()
-                # patternFoll = patternFoll.reset_index()
-                # print("Pppppppp",patternFoll)
-
-                # # recipesTaken= df.Concentration.unique()
-                # recipesTaken = patternFoll["Concentration"].ravel().tolist()
-                # patternFollowed = patternFoll["Wavelength"].ravel().tolist()
-                # print("RRRR",patternFollowed,recipesTaken)
-                # fig_tt = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-                # #plt.plot(df['Concentration'], train_prediction, color='red',label="Linear Model")
-                # #plt.plot(df['Concentration'], df['Wavelength'], color='red',label="Followed Pattern by Data Points")                
-                # plt.plot(recipesTaken, patternFollowed, color='red',label="Followed Pattern by Data Points")                
-                # plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-                # plt.scatter(user_concentration,Robot_answer,label="Actual Data Returned by the Robot")
-                # plt.scatter(user_concentration,input_user,label="Predicted Value by the Model")
-                # plt.xlabel("[KBr] Concentration (mM)")
-                # plt.ylabel("Wavelength (nm)")
-                # plt.legend(prop={"size":6})
-                # plt.show()
-                # fig_tt.savefig("AllpredictionsPattern.png",dpi=fig_tt.dpi)
 
                 time.sleep(50)
                 self.close_connection()
