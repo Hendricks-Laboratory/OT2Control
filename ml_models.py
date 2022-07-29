@@ -5,36 +5,46 @@ from abc import abstractmethod
 import threading
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
-import matplotlib.pyplot as plt
-import  pandas as pd
+
+
+
+
+####Added
+##
+import pandas as pd
 import numpy as np
 import random
-import tensorflow as tf
-from tensorflow.keras.utils import plot_model
-import tensorboard
-
-import keras
-
-from datetime import datetime
-import random
-import os
 import math
-import sys
 
+##Plot Libraries
+import matplotlib.pyplot as plt
+
+
+##Deep Learning Libraries-Frameworks
+
+#Tensorflow
 import tensorflow as tf
-from tensorflow.keras.utils import plot_model
-import tensorboard
-
-import keras
-
-import numpy as np
-
-
-from datetime import datetime
-import random
 from tensorflow.keras.layers import Input, Dense, Activation, Concatenate
 from tensorflow.keras.models import Model
+import tensorboard
+from tensorflow.keras.utils import plot_model
+
+#Keras
+import keras
 from keras import backend as K
+
+
+##System
+from datetime import datetime
+import os
+import sys
+
+
+
+
+
+
+
 
 class MLModel():
     '''
@@ -232,25 +242,20 @@ class DummyMLModel(MLModel):
     generate_seed_rxns.n_calls = 0
 
 
-#################################################################
 
 
+# Added
+##########################################################################----Open
 
+
+###########################
+#Linear Univariate Regression Model
 class LinearRegress(MLModel):
     '''
-    params:
-        tuple<int> scan_bounds: size 2. If you wish to ignore aspects of the
-          scan, and only focus
-          on a single peak for learning, you may specify manually the start
-          and stop index of the data you are interested in. Only this data
-          will be used for training.
-        int duplication: This is used to copy the reactions you're running if
-          you are worried about redundancy. the number is the number of times
-          you duplicate each reaction.
+       
     Model to use Linear Regression algorithm
-    model_lock also locks X
-    UNIMPLEMENTED:  
-      only runs for batch size of 1  
+    params: MLModel class
+
     '''
     def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
             scan_bounds=None, duplication=1):
@@ -264,7 +269,9 @@ class LinearRegress(MLModel):
         self.y_shape = y_shape
         self.batch_size = batch_size
         self.duplication = duplication
-
+    
+    
+    #(USED)
     def generate_seed_rxns(self,number_recipes):
         '''
         This method is called before the model is trained to generate a batch of training
@@ -276,29 +283,40 @@ class LinearRegress(MLModel):
         lower_bound = 0.00025/2
         recipes =  np.random.rand(number_recipes,1) * (upper_bound - lower_bound) + lower_bound 
         recipes = np.repeat(recipes, self.duplication, axis=0)
-        # recipes= recipes.T
-        #print("our recipes", recipes)
         return recipes
     
     
-    #NEW PREDICTION
+    ##(NOT USED)
     def prediction(self, modelCall):
 
-        '''
-        This call should wait on the training thread to complete if it is has not been collected
-        yet.  
+        ''' 
+        Method to make predictions using the trained model.
+        (Not used in the experiments)
         params:  
-            int n_predictions: the number of instances to predict  
+            modelCall : instance of a model  
         returns:  
-            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+            prediction: prediction value 
+            par_theta : value of parameter W that make the successful experiment 
+            par_bias  : value of parameter b that make the successful experiment 
+
         '''
         super().prediction()
         with self.model_lock:
             y_pred = self.FINAL_SPECTRA
-        print("predicted NH", y_pred)
         
   
         def predictLinearModelInverse(Y_wt, W, b):
+            '''
+            Inverse the equation to find concentrations giving the peak wavelength
+            params:  
+                Y_wt : user asked (input) peak wavelenght 
+                W    : parameter W value
+                b    : parameter b value
+            returns:  
+                X_predicted  : concentration predicted
+
+            '''
+            
             Y_wt= np.array([[Y_wt]],dtype=float)
             W= np.array([W],dtype=float)
             b= np.array([b],dtype=float)
@@ -313,7 +331,6 @@ class LinearRegress(MLModel):
 
 
         def plots_error_avg(model):
-            print(len(model["cacheErrorAvg"]))
             min_index=np.min(model["cacheErrorAvg"])
             max_index=np.max(model["cacheErrorAvg"])
             errorsSca=[]
@@ -331,21 +348,35 @@ class LinearRegress(MLModel):
             predict = input("Please enter recipe:")
             prediction = predictLinearModelInverse(predict,modelCall["ParamsToUse"]["Theta"], modelCall["ParamsToUse"]["Bias"])
             print("Predicted concentration [] given a wavelenght", prediction)
-            breakpoint()
+            # breakpoint()
 
             return {"inputPredictor":predict, "prediction":prediction , "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
         else:
-            breakpoint()
+            # breakpoint()
             return {"prediction":0, "par_theta":modelCall["ParamsToUse"]["Theta"], "par_bias":modelCall["ParamsToUse"]["Bias"] }
         
     
     
-    #NEW TRAIN
+    #NEW TRAIN (USED)
     def training(self, df,input_user,r):
+            '''
+        
+            Method to train the model.
+            params: 
+                df                 : dataset created on each experiement
+                input_user         : asked peak wavelength (input) 
+                r                  : number of training to produce the correspoing image
 
+            returns:
+                input_user         : same or recomputed asked peak wavelength (input) 
+                user_concentration : predicted concentration for the asked peak wavelength (input)  
+                train_prediction   : predicted peak wavelengths of all data
+                W                  : parameter W value
+                b                  : parameter b value
+
+            '''
             def getting_params(self, concentration,wavelength):
-                print("Parasn", concentration)
                 W = sum(wavelength*(concentration-np.mean(concentration))) / sum((concentration-np.mean(concentration))**2)
                 b = np.mean(wavelength) - W*np.mean(concentration)
                 print("--->", W,b)
@@ -398,7 +429,7 @@ class LinearRegress(MLModel):
             return input_user, user_concentration, train_prediction , W, b
     
 
-    ##OLD TRAIN
+    ##OLD TRAIN(NOT USED)
     def _train(self, X, y):
         '''
         This call should wait on any current training threads to complete  
@@ -444,7 +475,8 @@ class LinearRegress(MLModel):
 ###########################
 
 
-
+###########################
+#Neural Network: Model 2 and Exploration(as agent)
 class NeuralNet(MLModel):
     '''
     params:
@@ -1451,9 +1483,19 @@ class NeuralNet(MLModel):
             return 0 
 
 
+###########################
+##########################################################################----Close
 
-#####################
-##########################################################################
+
+
+
+
+
+
+
+
+
+
 class LinReg(MLModel):
     '''
     params:
