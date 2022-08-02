@@ -530,9 +530,6 @@ class NeuralNet(MLModel):
         lower_bound_KBr = 0.00025
         
         
-        Upper = upper_bound_Ag + upper_bound_Cit + upper_bound_KBr
-        Lower = lower_bound_Ag + lower_bound_Cit + lower_bound_KBr
-        
         #Generating random 
         
         con_KBr = np.random.random_sample(size= (3,)) * (upper_bound_KBr- lower_bound_KBr) + (lower_bound_KBr) 
@@ -587,18 +584,15 @@ class NeuralNet(MLModel):
         recipes2 = np.concatenate((con_Cit, con_Ag,con_KBr), axis=None)
         print(recipes2)
         print("")
-        #for re in range(len(con_Cit)):
         res1=[con_Cit[0],con_Ag[0],con_KBr[0]]
         res2=[con_Cit[1],con_Ag[1],con_KBr[1]]
         res3=[con_Cit[2],con_Ag[2],con_KBr[2]]
-        print("SSS",res1)
         
         
         
         
         recipes = np.concatenate((np.array([res1]), np.array([res2]),np.array([res3])), axis=0)
         recipes = np.repeat(recipes, 1, axis=0)
-        print("rrecipes",recipes)
         
         res_1 = recipes[0]
         res_1 = np.expand_dims(res_1, axis=1)
