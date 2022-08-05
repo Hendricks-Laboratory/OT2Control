@@ -618,16 +618,15 @@ class NeuralNet(MLModel):
         return recipe_l
     
     
-    #NEW PREDICTION
+    #NEW PREDICTION (NOT USED)
     def prediction(self, Test_input):
 
         '''
-        This call should wait on the training thread to complete if it is has not been collected
-        yet.  
+        Prediction given an passed input 
         params:  
             int n_predictions: the number of instances to predict  
         returns:  
-            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+            np.array: shape is n_predictions, y.shape. 
         '''
         super().prediction()
         with self.model_lock:
@@ -641,9 +640,7 @@ class NeuralNet(MLModel):
         predictQuestion = input("Do you want to make a prediction: [Yes / No ]")
         if predictQuestion == "Yes" or predictQuestion=="y":
             predict = input("Please enter recipe:")
-
             print("Generate predictions for 3 samples")
-            print("Self mo",self.model)
             y_pred = self.model.predict(np.array(Test_input))#Test_input)
             print("predictions shape:", y_pred.shape)
             print("predictions:",y_pred)
@@ -659,8 +656,7 @@ class NeuralNet(MLModel):
 
 
     
-    #NEW TRAIN
-    
+    #NEW TRAIN (USED, training and prediction)
     def training(self, df,input_user,r, n_epochs=30, ml_past=False, explo= False):
         
 
@@ -865,8 +861,8 @@ class NeuralNet(MLModel):
         
         else:
             
-            print("Which pass?",r)
-            #Data
+            print("How many training interations?",r)
+            #Data Preprocessing
             train_size= math.floor(len(df)*(80/100))
             val_size= int((len(df)-train_size)/2)
             test_size= int(len(df)-train_size-val_size)
@@ -921,6 +917,8 @@ class NeuralNet(MLModel):
             upper_bound_KBr = 0.0005
             lower_bound_KBr = 0.00025
 
+
+            #Define ranges for our next activation functions outputs
             def bounded_output_Cit(x):
                 scale = upper_bound_Cit - lower_bound_Cit
                 return scale * tf.nn.sigmoid(x) + lower_bound_Cit
@@ -944,15 +942,11 @@ class NeuralNet(MLModel):
             A1 = Input(shape=(3,),name='A1')
             A2 = Dense(32, activation='relu',name='A2')(A1)
             A3 = Dense(16, activation='relu',name='A3')(A2)
-            #Little change adding three outputs
             A4_1 = Dense(1,activation="relu")(A3)
             A4_2 = Dense(1,activation="relu")(A3)
-            #A4_3 = Dense(1,activation="bounded_output_KBr")(A3)
-
             out = Concatenate()([A4_1,A4_2])
             A4 = Dense(2,name='A4')(out)
 
-            #B1 = Input(shape=(1,),name='B1')
             B1 = Dense(2, activation='relu',name='B1')(A4)
             B2 = Dense(16, activation='relu',name='B2')(B1)
             B3 = Dense(32, activation='relu',name='B3')(B2)
@@ -964,7 +958,7 @@ class NeuralNet(MLModel):
             outB = Concatenate()([B4_1,B4_2,B4_3])
             B4 = Dense(3,name='B4')(outB)
 
-            ##MODEL
+            ##MODELS
             ML0 = Model(inputs=[A1], outputs=[A4])
             plot_model(ML0,to_file='ML0.png',show_shapes=True)
 
@@ -982,7 +976,6 @@ class NeuralNet(MLModel):
                 optimizer='RMSprop',
                 loss='mean_squared_error',
                 metrics=['mse','mae'])
-
 
 
             ##HISTORY
@@ -1029,38 +1022,29 @@ class NeuralNet(MLModel):
             )
             
 
-            #Pre-p
-            # Evaluate the model on the test data using `evaluate`
-            print("Evaluate on test data")
+            # Evaluate
+            print("Evaluate")
             results0 = ML0.evaluate(Test_label, Test_input, batch_size=5)
             print("test loss, test acc:", results0)
 
-            # Generate predictions (probabilities -- the output of the last layer)
-            # on new data using `predict`
+            # Predict
             print("Generate predictions for 3 samples")
-            #predictions = model2.predict(np.array([Test_input[1]]))#Test_input)
-            predictions0 = ML0.predict(Train_label)#Test_input)
+            predictions0 = ML0.predict(Train_label)
+            print("Predictions shape:", predictions0.shape)
 
-            print("predictions shape:", predictions0.shape)
-            #predictions0
-
-            # Evaluate the model on the test data using `evaluate`
-            print("Evaluate on test data")
+            # Evaluate 
+            print("Evaluate")
             results2 = ML2.evaluate(Test_label, Test_label, batch_size=5)
             print("test loss, test acc:", results2)
 
-            # Generate predictions (probabilities -- the output of the last layer)
-            # on new data using `predict`
+            #Predictions 
             print("Generate predictions for 3 samples")
-            #predictions = model2.predict(np.array([Test_input[1]]))#Test_input)
-            predictions2 = ML2.predict(Train_label)#Test_input)
-
-            print("predictions shape:", predictions2.shape)
-            # predictions2
+            predictions2 = ML2.predict(Train_label)
+            print("Predictions shape:", predictions2.shape)
 
             ##NEW MODELS
 
-            model_partion = ML2  # include here your original model
+            model_partion = ML2
 
             layer_name_input = "A4"
             layer_name_output = "B4"
@@ -1149,12 +1133,12 @@ class NeuralNet(MLModel):
 
 
 
-            print("weigths Model 11/ Trained", ML11.layers[1].get_weights())
-            print("weigths Model NEW/ Trained",ML_new.layers[1].get_weights())
-            print("weigths Model 11_2/ Trained",ML11_2.layers[1].get_weights())
-            print("weigths Model NEW_2 / Trained",ML_new_2.layers[1].get_weights())
+            # print("weigths Model 11/ Trained", ML11.layers[1].get_weights())
+            # print("weigths Model NEW/ Trained",ML_new.layers[1].get_weights())
+            # print("weigths Model 11_2/ Trained",ML11_2.layers[1].get_weights())
+            # print("weigths Model NEW_2 / Trained",ML_new_2.layers[1].get_weights())
 
-            print("weigths Model TOTAL / Trained",ML2.layers[6].get_weights())
+            # print("weigths Model TOTAL / Trained",ML2.layers[6].get_weights())
 
             ##Prediction
             print("Predicting-----")
@@ -1209,27 +1193,22 @@ class NeuralNet(MLModel):
             print("ML11_2",M11_2_error)
             print("predictions2",np.sum(predictions2-Train_label))
 
-            print("Scores")
-            # print("Evaluating on test data")
-            print("ML_new")
-            resultsMl_new = ML_new.evaluate(Test_input, Test_label, batch_size=5)
-            print("%s: %.2f%%" % (ML_new.metrics_names[1], resultsMl_new[1]*100))
-            print("test loss, test acc:", resultsMl_new)
+            # print("Scores")
+            # print("ML_new")
+            # resultsMl_new = ML_new.evaluate(Test_input, Test_label, batch_size=5)
+            # print("test loss, test acc:", resultsMl_new)
 
-            print("ML_new_2")
-            resultsMl_new_2 = ML_new_2.evaluate(Test_input, Test_label, batch_size=5)
-            print("%s: %.2f%%" % (ML_new_2.metrics_names[1], resultsMl_new_2[1]*100))
-            print("test loss, test acc:", resultsMl_new_2)
+            # print("ML_new_2")
+            # resultsMl_new_2 = ML_new_2.evaluate(Test_input, Test_label, batch_size=5)
+            # print("test loss, test acc:", resultsMl_new_2)
 
-            print("ML11")
-            resultsMl11 = ML11.evaluate(Test_input, Test_label, batch_size=5)
-            print("%s: %.2f%%" % (ML11.metrics_names[1], resultsMl11[1]*100))
-            print("test loss, test acc:", resultsMl11)
+            # print("ML11")
+            # resultsMl11 = ML11.evaluate(Test_input, Test_label, batch_size=5)
+            # print("test loss, test acc:", resultsMl11)
 
-            print("ML11_2")
-            resultsMl11_2 = ML11_2.evaluate(Test_input, Test_label, batch_size=5)
-            print("%s: %.2f%%" % (ML11_2.metrics_names[1], resultsMl11_2[1]*100))
-            print("test loss, test acc:", resultsMl11_2)
+            # print("ML11_2")
+            # resultsMl11_2 = ML11_2.evaluate(Test_input, Test_label, batch_size=5)
+            # print("test loss, test acc:", resultsMl11_2)
 
 
             ml = {"ML_new", 
@@ -1246,6 +1225,8 @@ class NeuralNet(MLModel):
             lest_error = [ML_new_error,ML_new_2_error,ML11_error,M11_2_error]
             ml_to_use= ml_errors[min(lest_error)]
             
+
+            #Choosing the model with less error
             if ml_past == False:
                     choosg= input("Do you want to choose a model? [Yes-y/No]")
                     if choosg == "Yes" or choosg=="y":
@@ -1315,20 +1296,14 @@ class NeuralNet(MLModel):
             ml_past = True
 
 
-            upper_bound_Cit = 8.125
-            lower_bound_Cit = 0.3125
-                    
-            #Boundary for Ag
-                    
-            upper_bound_Ag = 0.24375
-            lower_bound_Ag = 0.0094
-                    
-            #Boundary for KBr
-            upper_bound_KBr = 0.0005
-            lower_bound_KBr = 0.00025
+
+            #Preventing Overflow
+
             out2 = predicted_by_model[0][2]
             out0 = predicted_by_model[0][0]
             out1 = predicted_by_model[0][1]
+
+
 
             Nextt_net= False
             Ngen_net=0
@@ -1358,7 +1333,7 @@ class NeuralNet(MLModel):
                 
 
                             
-            print("N of rep",Ngen_net)
+            print("Nº repetitions for depreciation",Ngen_net)
             print("Concen after checking (T)",out0,out1,out2)
 
             predicted_by_model[0][0] =out0
@@ -1368,113 +1343,7 @@ class NeuralNet(MLModel):
             print("predicted_by_model",predicted_by_model)
             mod=ML_new_2
             return input_user, predicted_by_model, 0 , 0, 0 , ml_past, Ngen_net, mod
-        
-        
 
-    
-    
-    def Oldtraining(self, df,input_user,r):
-
-
-            def getting_params(self, concentration,wavelength):
-                print("Parasn", concentration)
-                W = sum(wavelength*(concentration-np.mean(concentration))) / sum((concentration-np.mean(concentration))**2)
-                b = np.mean(wavelength) - W*np.mean(concentration)
-                print("--->", W,b)
-                return W, b
-            
-            #Training //Computing the parameters
-            print("---->Model training")
-            print("Computing W and b")
-
-            W, b = getting_params(self,df['Concentration'],df['Wavelength']) 
-
-            #making predictions based on our current data to see plot and the error
-            print("making predictions based on our current data to see plot and the error")
-            train_prediction= df['Concentration'] * W + b
-            #our error 
-            training_error= df['Wavelength']-train_prediction
-            print("----")
-            print("Train_prediction:",train_prediction)
-            print("----")
-            print("Error", training_error)
-            #ploting
-            train_fig = plt.figure(num=None, figsize=(4, 4),dpi=300, facecolor='w', edgecolor='k') 
-            plt.plot(df['Concentration'], train_prediction, color='red',label="Predicted Wavelength by Linear Model")
-            plt.scatter(df['Concentration'], df['Wavelength'], label="Training Data")
-            plt.xlabel("[KBr] Concentration (mM)")
-            plt.ylabel("Wavelength (nm)")
-            plt.legend(prop={"size":6})
-            plt.show()
-            train_fig.savefig("training-"+str(r)+"png",dpi=train_fig.dpi)
-            #User input for Wavelength wanted
-
-
-            #conputing the inverse --> from Wavelength to Concentration
-            input_user= input_user
-            while True:
-                user_concentration = (input_user- b) / W
-                print("Model predictied concentration given the wavelength: ",user_concentration)
-                if user_concentration < 0.00025 or user_concentration >0.003:
-                    print("Sorry, the wanted wavelength is not reached given the current concentration of KBr allowed to process")
-                    input_user= input("Please ENTER the desire Wavelength: ")
-                    input_user= float(input_user)
-                    
-                    #user_concentration = (input_user- b) / W
-
-                else:
-
-                    break
-
-
-            print("------------")
-            print("Making prediction")
-            print("passing ", user_concentration, " to robot")
-            return input_user, user_concentration, train_prediction , W, b
-    
-
-    ##OLD TRAIN
-    def _train(self, X, y):
-        '''
-        This call should wait on any current training threads to complete  
-        This call should launch a training thread to retrain the model on the new data
-        training is also where current iteration is updated  
-        params:  
-            np.array X: shape (num_pts, num_features) the recieved data for each new well  
-            np.array y: shape(num_pts, n_classes) the labels to predict  
-        Postconditions:  
-            The model has been trained on the new data
-        '''
-
-        #NOTE we may get fancier in the future here and do more preprocessing
-        # if self.scan_bounds:
-        #     #if you only want to pay attention in bounds, train on those vals
-        #     processedX = X[:, self.scan_bounds[0]:self.scan_bounds[1]]
-        # else:
-        #     processedX = X
-        #update the data with the new scans
-        time.sleep(40)
-        # print('<<ML>> training')
-        with self.model_lock:
-        #     if isinstance(self.X,np.ndarray):
-        #         self.X = np.concatenate((self.X, processedX))
-        #         self.y = np.concatenate((self.y, y))
-        #     else:
-        #         self.X = processedX
-        #         self.y = y
-        #     print("model fitting on X", self.X)
-        #     print("model fitting on y", self.y)
-        #     self.model.fit(self.X, self.y)
-        # print('<<ML>> done training'
-            print("X and Y")
-            print(X,y) 
-            print("--------")
-            print('<<ML>> training')
-
-
-            print('<<ML>> done training')
-
-            return 0 
 
 
 ###########################

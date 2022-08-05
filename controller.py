@@ -125,6 +125,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
+    ##NOT AFFECT THE MODELS, JUST FOLLOWED FROM THE PREVIOUS IMPLEMENTATIONS OF CLASSES 
+    ##CAN BE CHANGE IF DESIRED
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
@@ -132,6 +134,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print("Launch_auto FUNCTION;  Initialize the Model with 3 recipes")
 
     ##DEFAULT?
+    #Parameters can be and are modified inside the class of each model, no necessity to tune the model here.
     ml_model = LinearRegress(model, final_spectra, y_shape=1, max_iters=5,duplication = 3)
     
     print("Welcome .....")
@@ -162,6 +165,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
 
     if not no_sim:
         ml_model_trained= auto.run_simulation(ml_model, no_pr=no_pr, params=None, initial_recipes=None, kind=input_model_user )
+        ##Trained last parameters (Linear Model mainly)
         ml_simulation_W= ml_model_trained["W"]
         ml_simulation_b = ml_model_trained["b"]
         print("Params after simulation",ml_simulation_W,ml_simulation_b)
@@ -2108,15 +2112,15 @@ class AutoContr(Controller):
             #you're simulating with a dummy model.
             print('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
-            self._run(port, simulate, model, no_pr) ##ProbPPP
+            self._run(port, simulate, model, no_pr)
             print('<<controller>> EXITING')
         else:
             if params == None:
-                print("Training in the robot: No trained params")
+                print("Training in the robot: Simulation")
                 self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
                 print('<<controller>> EXITING 1')
             else:
-                print("Online: With Trained params")
+                print("Experiment...")
                 self._run(port, simulate, model, no_pr, params,initial_recipes, kind)
                 print('<<controller>> EXITING 2')
 
@@ -2136,7 +2140,9 @@ class AutoContr(Controller):
 
 
         def MaxWaveLength(scan):
-    
+            '''
+            Get max peak wavelength
+            '''
             now = datetime.now().time() 
 
             X_new=[]
@@ -2165,7 +2171,10 @@ class AutoContr(Controller):
 
         def MaxWaveLength_Obs(scan):
     
-    
+            '''
+            Get max peak wavelength and absorbance after discount the data for water
+
+            '''
             now = datetime.now().time() 
 
             X_new=[]
@@ -2210,8 +2219,12 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         
-        if kind == "linear":
 
+        #Three different models
+
+        if kind == "linear":
+            
+            #params == None --> simulation
             if params == None:
 
                 print("Linear")
@@ -3105,8 +3118,8 @@ class AutoContr(Controller):
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
-            #Graph / Threshold
 
+            #Experiment by robot
             else:
 
                 print("Linear")
@@ -4008,9 +4021,7 @@ class AutoContr(Controller):
         
         elif kind == "neural":
 
-
-
-
+            #Simulation
             if params == None:
 
                 print("Neural")
@@ -5133,6 +5144,541 @@ class AutoContr(Controller):
                 plt.savefig("Line-Concentrations[Cit,Ag,KBr]-Wavelength.png")
                 plt.show()
 
+                
+
+                ###
+
+                figWave_conce2 = plt.figure()
+                figWave_conce2 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img2 = ax.scatter(Cit_x[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figWave_conce2.colorbar(img2)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Wavelength")
+                plt.savefig("Cit-KBr-WavelengthPresWithoutPredict.png")
+                plt.show()
+
+                figWave_conce3 = plt.figure()
+                figWave_conce3 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img3 = ax.scatter(Ag_y[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figWave_conce3.colorbar(img3)
+
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Wavelength")
+                plt.savefig("Ag-KBr-WavelengthPresWithoutPredict.png")
+                plt.show()
+
+                figWave_conce11 = plt.figure()
+                figWave_conce11 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img11 = ax.scatter( Cit_x[:-1], Ag_y[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce11.colorbar(img11)
+
+                img11_1 = ax.scatter(Cit_x[-1:], Ag_y[-1:], WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce11.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-Wavelength")
+                plt.savefig("Cit-Ag-WavelengthPres.png")
+                plt.show()
+
+
+
+
+                figWave_conce22 = plt.figure()
+                figWave_conce22 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img22 = ax.scatter( Cit_x[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce22.colorbar(img22)
+
+                img22_1 = ax.scatter(Cit_x[-1:], KB_z[-1:], WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce22.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Wavelength")
+                plt.savefig("Cit-KBr-WavelengthPres.png")
+                plt.show()
+
+                figWave_conce33 = plt.figure()
+                figWave_conce33 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img33 = ax.scatter( Ag_y[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce33.colorbar(img33)
+
+                img33_1 = ax.scatter(Ag_y[-1:], KB_z[-1:],WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce33.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Wavelength")
+                plt.savefig("Ag-KBr-WavelengthPres.png")
+                plt.show()
+                
+
+                ##Absorbance
+
+                figObs_conce = plt.figure()
+                figObs_conce = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce.colorbar(img)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('AbserBance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-AbserBance")
+                plt.savefig("Cit-Ag-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+                figObs_conce2 = plt.figure()
+                figObs_conce2 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img_obs_2 = ax.scatter(Cit_x[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce2.colorbar(img_obs_2)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-AbserBance")
+                plt.savefig("Cit-KBr-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+
+                figObs_conce3 = plt.figure()
+                figObs_conce3 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img_obs_3 = ax.scatter(Ag_y[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce3.colorbar(img_obs_3)
+
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Abserbance")
+                plt.savefig("Ag-KBr-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+
+                figObs_conce11 = plt.figure()
+                figObs_conce11 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img11_obs = ax.scatter( Cit_x[:-1], Ag_y[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce11.colorbar(img11_obs)
+
+                img11_obs_1 = ax.scatter(Cit_x[-1:], Ag_y[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('Abserbance')
+                figObs_conce11.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-Abserbance")
+                plt.savefig("Cit-Ag-ABSPress.png")
+                plt.show()
+
+
+
+
+                figObs_conce22 = plt.figure()
+                figObs_conce22 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img22_obs = ax.scatter( Cit_x[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce22.colorbar(img22_obs)
+
+                img22_obs_1 = ax.scatter(Cit_x[-1:], KB_z[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                figObs_conce22.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Abserbance")
+                plt.savefig("Cit-KBr-ABSPress.png")
+                plt.show()
+
+
+
+                figObs_conce33 = plt.figure()
+                figObs_conce33 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img33_obs = ax.scatter( Ag_y[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce33.colorbar(img33_obs)
+
+                img33_obs_1 = ax.scatter(Ag_y[-1:], KB_z[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abservance')
+                figObs_conce33.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Abservance")
+                plt.savefig("Ag-KBr-ABSPress.png")
+                plt.show()
+
+
+                figConcen_Wave = plt.figure()
+                figConcen_Wave = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figConcen_Wave.colorbar(img)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-WavelengthPresWithoutPre.png")
+                plt.show() 
+
+
+
+                figConcen_Wave = plt.figure()
+                figConcen_Wave = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figConcen_Wave.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figConcen_Wave.legend()
+
+
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-WavelengthPress.png")
+                plt.show()
+
+
+                figConcen_Obs = plt.figure()
+                figConcen_Obs = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figConcen_Obs.colorbar(img)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Abserbance")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-AbserbancePresWithoutPre.png")
+                plt.show()
+
+
+                figConcen_Obs_2 = plt.figure()
+                figConcen_Obs_2 = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figConcen_Obs_2.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figConcen_Obs_2.legend()
+
+
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Abserbance")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-AbserbancePress.png")
+                plt.show()
+
+                Z = np.outer(KB_z[:-1].T, KB_z[:-1])/np.outer(KB_z[:-1].T, KB_z[:-1]) * np.array([KB_z[:-1]])  
+                X, Y = np.meshgrid(Cit_x[:-1], Ag_y[:-1])  
+                color_dimension = X 
+                minn, maxx = color_dimension.min(), color_dimension.max()
+                norm = matplotlib.colors.Normalize(minn, maxx)
+                m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
+                m.set_array([])
+                fcolors = m.to_rgba(color_dimension)
+                figPlaneCon = plt.figure(figsize=(8, 6),dpi=100)
+                ax = figPlaneCon.gca(projection='3d')
+                ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.2)
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="Dark2",s=100)
+                figPlaneCon.colorbar(img)
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set_title("Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Plane-Concentrations[Cit,Ag,KBr]-WavelengthWithoutPredict.png")
+                plt.show()
+
+
+
+                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z) * np.array([KB_z])   
+                X, Y = np.meshgrid(Cit_x, Ag_y)   
+                color_dimension = X 
+                minn, maxx = color_dimension.min(), color_dimension.max()
+                norm = matplotlib.colors.Normalize(minn, maxx)
+                m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
+                m.set_array([])
+                fcolors = m.to_rgba(color_dimension)
+                figPlaneCon = plt.figure(figsize=(8, 6),dpi=100)
+                ax = figPlaneCon.gca(projection='3d')
+                ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.12)
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="Dark2",s=100)
+                figPlaneCon.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:],cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figPlaneCon.legend()
+                ax.set_title("Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Plane-Concentrations[Cit,Ag,KBr]-WavelengthPres.png")
+                plt.show()
+
+
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x[:-1],Ag_y[:-1],np.array([KB_z[:-1],KB_z[:-1]])
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter",s=180)
+                figLineCon.colorbar(img)
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+                obs__pl= ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="hsv",s=50)
+                figLineCon.colorbar(obs__pl)
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthWithoutPred.png")
+                plt.show()
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
+                img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter",s=180)
+                figLineCon.colorbar(img)
+
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+
+                obs__pl= ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="hsv",s=50)
+
+                figLineCon.colorbar(obs__pl)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z)-0.000904,max(KB_z)+0.000504))
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthPred2.png")
+                plt.show()
+
+
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter",s=180)
+                figLineCon.colorbar(img)
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+                obs__pl= ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="hsv",s=50)
+                figLineCon.colorbar(obs__pl)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figLineCon.legend()
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthPred.png")
+                plt.show()
+
+
+
 
 
        
@@ -5141,8 +5687,7 @@ class AutoContr(Controller):
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
-            #Graph / Threshold
-
+            #Experiment
             else:
                 print("Neural")
                 print("--- Neural Simulation----")
@@ -6301,20 +6846,552 @@ class AutoContr(Controller):
                 plt.savefig("Line-Concentrations[Cit,Ag,KBr]-Wavelength.png")
                 plt.show()
 
-               
+
+
+                ###
+
+
+                figWave_conce2 = plt.figure()
+                figWave_conce2 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img2 = ax.scatter(Cit_x[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figWave_conce2.colorbar(img2)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Wavelength")
+                plt.savefig("Cit-KBr-WavelengthPresWithoutPredict.png")
+                plt.show()
+
+                figWave_conce3 = plt.figure()
+                figWave_conce3 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img3 = ax.scatter(Ag_y[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figWave_conce3.colorbar(img3)
+
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Wavelength")
+                plt.savefig("Ag-KBr-WavelengthPresWithoutPredict.png")
+                plt.show()
+
+                figWave_conce11 = plt.figure()
+                figWave_conce11 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img11 = ax.scatter( Cit_x[:-1], Ag_y[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce11.colorbar(img11)
+
+                img11_1 = ax.scatter(Cit_x[-1:], Ag_y[-1:], WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce11.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-Wavelength")
+                plt.savefig("Cit-Ag-WavelengthPres.png")
+                plt.show()
+
+
+
+
+                figWave_conce22 = plt.figure()
+                figWave_conce22 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img22 = ax.scatter( Cit_x[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce22.colorbar(img22)
+
+                img22_1 = ax.scatter(Cit_x[-1:], KB_z[-1:], WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce22.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Wavelength")
+                plt.savefig("Cit-KBr-WavelengthPres.png")
+                plt.show()
+
+                figWave_conce33 = plt.figure()
+                figWave_conce33 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                    
+                # plotting
+                img33 = ax.scatter( Ag_y[:-1], KB_z[:-1], WaV[:-1], c=WaV[:-1],cmap="winter", s= 120)
+                figWave_conce33.colorbar(img33)
+
+                img33_1 = ax.scatter(Ag_y[-1:], KB_z[-1:],WaV[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Wavelength')
+                figWave_conce33.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Wavelength")
+                plt.savefig("Ag-KBr-WavelengthPres.png")
+                plt.show()
+                
+
+                ##Absorbance
+
+                figObs_conce = plt.figure()
+                figObs_conce = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce.colorbar(img)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('AbserBance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-AbserBance")
+                plt.savefig("Cit-Ag-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+                figObs_conce2 = plt.figure()
+                figObs_conce2 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img_obs_2 = ax.scatter(Cit_x[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce2.colorbar(img_obs_2)
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-AbserBance")
+                plt.savefig("Cit-KBr-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+
+                figObs_conce3 = plt.figure()
+                figObs_conce3 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img_obs_3 = ax.scatter(Ag_y[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figObs_conce3.colorbar(img_obs_3)
+
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Abserbance")
+                plt.savefig("Ag-KBr-ABSPresWithoutPredict.png")
+                plt.show()
+
+
+
+                figObs_conce11 = plt.figure()
+                figObs_conce11 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img11_obs = ax.scatter( Cit_x[:-1], Ag_y[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce11.colorbar(img11_obs)
+
+                img11_obs_1 = ax.scatter(Cit_x[-1:], Ag_y[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('Abserbance')
+                figObs_conce11.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-Ag-Abserbance")
+                plt.savefig("Cit-Ag-ABSPress.png")
+                plt.show()
+
+
+
+
+                figObs_conce22 = plt.figure()
+                figObs_conce22 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img22_obs = ax.scatter( Cit_x[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce22.colorbar(img22_obs)
+
+                img22_obs_1 = ax.scatter(Cit_x[-1:], KB_z[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abserbance')
+                figObs_conce22.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Cit-KBr-Abserbance")
+                plt.savefig("Cit-KBr-ABSPress.png")
+                plt.show()
+
+
+
+                figObs_conce33 = plt.figure()
+                figObs_conce33 = figure(figsize=(8, 6), dpi=100)
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # defining all 3 axes
+                Cit_x = df["[Cit]"].loc[:len(df["[Cit]"])-1]        #df['[Cit]'] 
+                Ag_y = df['[Ag]'].loc[:len(df["[Ag]"])-1]        #df['[Ag]']
+                KB_z = df["[KBr]"].loc[:len(df["[KBr]"])-1]       #df["[KBr]"]
+                WaV =  df["Wavelength"].loc[:len(df["Wavelength"])-1]  #df["Wavelength"]
+                Obs_pl=  df["Observance"].loc[:len(df["Observance"])-1]
+
+
+                # plotting
+                img33_obs = ax.scatter( Ag_y[:-1], KB_z[:-1], Obs_pl[:-1], c=Obs_pl[:-1],cmap="winter", s= 120)
+                figObs_conce33.colorbar(img33_obs)
+
+                img33_obs_1 = ax.scatter(Ag_y[-1:], KB_z[-1:], Obs_pl[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Ag]')
+                ax.set_ylabel('[KBr]')
+                ax.set_zlabel('Abservance')
+                figObs_conce33.legend()
+
+
+                #ax.set(xlim=(min(x)-0.2, max(x)+0.2), ylim=(min(y)-0.2, max(y)+0.2),zlim=(min(z)-0.2,max(z)+0.2))
+                ax.set_title("Ag-KBr-Abservance")
+                plt.savefig("Ag-KBr-ABSPress.png")
+                plt.show()
+
+
+                figConcen_Wave = plt.figure()
+                figConcen_Wave = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figConcen_Wave.colorbar(img)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-WavelengthPresWithoutPre.png")
+                plt.show() 
+
+
+
+                figConcen_Wave = plt.figure()
+                figConcen_Wave = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter", s= 120)
+                figConcen_Wave.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:], cmap="inferno", s= 120, label="Predicted")
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figConcen_Wave.legend()
+
+
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-WavelengthPress.png")
+                plt.show()
+
+
+                figConcen_Obs = plt.figure()
+                figConcen_Obs = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figConcen_Obs.colorbar(img)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Abserbance")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-AbserbancePresWithoutPre.png")
+                plt.show()
+
+
+                figConcen_Obs_2 = plt.figure()
+                figConcen_Obs_2 = figure(figsize=(8, 6), dpi=100)
+
+
+                # syntax for 3-D projection
+                ax = plt.axes(projection ='3d')
+
+                # plotting
+                img = ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="winter", s= 120)
+                figConcen_Obs_2.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figConcen_Obs_2.legend()
+
+
+                #ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z),max(KB_z)))
+                ax.set_title("Concentrations[Cit,Ag,KBr]-Abserbance")
+                plt.savefig("Concentrations[Cit,Ag,KBr]-AbserbancePress.png")
+                plt.show()
+
+                Z = np.outer(KB_z[:-1].T, KB_z[:-1])/np.outer(KB_z[:-1].T, KB_z[:-1]) * np.array([KB_z[:-1]])  
+                X, Y = np.meshgrid(Cit_x[:-1], Ag_y[:-1])  
+                color_dimension = X 
+                minn, maxx = color_dimension.min(), color_dimension.max()
+                norm = matplotlib.colors.Normalize(minn, maxx)
+                m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
+                m.set_array([])
+                fcolors = m.to_rgba(color_dimension)
+                figPlaneCon = plt.figure(figsize=(8, 6),dpi=100)
+                ax = figPlaneCon.gca(projection='3d')
+                ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.2)
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="Dark2",s=100)
+                figPlaneCon.colorbar(img)
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set_title("Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Plane-Concentrations[Cit,Ag,KBr]-WavelengthWithoutPredict.png")
+                plt.show()
+
+
+
+                Z = np.outer(KB_z.T, KB_z)/np.outer(KB_z.T, KB_z) * np.array([KB_z])   
+                X, Y = np.meshgrid(Cit_x, Ag_y)   
+                color_dimension = X 
+                minn, maxx = color_dimension.min(), color_dimension.max()
+                norm = matplotlib.colors.Normalize(minn, maxx)
+                m = plt.cm.ScalarMappable(norm=norm, cmap='jet')
+                m.set_array([])
+                fcolors = m.to_rgba(color_dimension)
+                figPlaneCon = plt.figure(figsize=(8, 6),dpi=100)
+                ax = figPlaneCon.gca(projection='3d')
+                ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False, alpha=0.12)
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="Dark2",s=100)
+                figPlaneCon.colorbar(img)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=WaV[-1:],cmap="inferno", s= 120, label="Predicted")
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figPlaneCon.legend()
+                ax.set_title("Plane-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Plane-Concentrations[Cit,Ag,KBr]-WavelengthPres.png")
+                plt.show()
+
+
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x[:-1],Ag_y[:-1],np.array([KB_z[:-1],KB_z[:-1]])
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter",s=180)
+                figLineCon.colorbar(img)
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+                obs__pl= ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="hsv",s=50)
+                figLineCon.colorbar(obs__pl)
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthWithoutPred.png")
+                plt.show()
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
+                img =ax.scatter(Cit_x, Ag_y, KB_z, c=WaV, cmap="winter",s=180)
+                figLineCon.colorbar(img)
+
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+
+                obs__pl= ax.scatter(Cit_x, Ag_y, KB_z, c=Obs_pl, cmap="hsv",s=50)
+
+                figLineCon.colorbar(obs__pl)
+
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                ax.set(xlim=(min(Cit_x), max(Cit_x)), ylim=(min(Ag_y), max(Ag_y)),zlim=(min(KB_z)-0.000904,max(KB_z)+0.000504))
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthPred2.png")
+                plt.show()
+
+
+
+                figLineCon, ax = plt.subplots(figsize=(10, 6),subplot_kw={'projection': '3d'},dpi=100)
+                X, Y, Z = Cit_x,Ag_y,np.array([KB_z,KB_z])
+                img =ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=WaV[:-1], cmap="winter",s=180)
+                figLineCon.colorbar(img)
+                C = np.linspace(-5, 5, Z.size).reshape(Z.shape)
+                scamap = plt.cm.ScalarMappable(cmap='inferno')
+                fcolors = scamap.to_rgba(C)
+                ax.plot_surface(X, Y, Z, facecolors=fcolors, cmap='inferno')
+                ref = ax.plot_surface(X,Y,Z, rstride=1, cstride=1, facecolors=fcolors, vmin=minn, vmax=maxx, shade=False)
+                obs__pl= ax.scatter(Cit_x[:-1], Ag_y[:-1], KB_z[:-1], c=Obs_pl[:-1], cmap="hsv",s=50)
+                figLineCon.colorbar(obs__pl)
+                ax.scatter(Cit_x[-1:], Ag_y[-1:], KB_z[-1:], c=Obs_pl[-1:], cmap="inferno", s= 120, label="Predicted")
+                ax.set_xlabel('[Cit]')
+                ax.set_ylabel('[Ag]')
+                ax.set_zlabel('[KBr]')
+                figLineCon.legend()
+                ax.set_title("Line-Concentrations[Cit,Ag,KBr]-Wavelength")
+                plt.savefig("Line-Concentrations[Cit,Ag,KBr]-WavelengthPred.png")
+                plt.show()
+
+
 
 
 
                 time.sleep(50)
                 self.close_connection()
                 self.pr.shutdown()
-                return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
+                return {"W":W_list,"b":b_list}
 
         elif kind == "exploration":
 
-
-
-
+            #Simulation
             if params == None:
 
                 print("Exploration with Neural Net.")
@@ -10550,8 +11627,7 @@ class AutoContr(Controller):
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
-            #Graph / Threshold
-
+            #Experiment
             else:
                 print("Exploration with Neural Net.")
                 print("--- Exploration Testing----")
@@ -14753,10 +15829,7 @@ class AutoContr(Controller):
                 self.pr.shutdown()
                 return {"W":W_list,"b":b_list}#{"par_theta": ml_predict["par_theta"], "par_bias": ml_predict["par_bias"],"par_recipes":recipes}
 
-
-
-
-
+        #For adding any new model
         else:
             print("None")
             self.close_connection()
