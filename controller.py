@@ -3161,7 +3161,7 @@ class ScanDataFrame():
             index = timess.index(time)
 
             time = pd.Timestamp(time)
-            given_time = time #- pd.DateOffset(hours=7)
+            given_time = time - pd.DateOffset(hours=7)
             given_time = given_time.strftime('%Y-%m-%d %H:%M:%S:%f')
             timess[index] = given_time
 
