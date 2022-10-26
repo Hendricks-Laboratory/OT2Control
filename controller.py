@@ -1390,7 +1390,12 @@ class Controller(ABC):
             #get the names of all the scan files
             if 'scan' in callbacks:
                 dst = row['scan_filename'] #also the base name for all files to be merged
-                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps))]
+                if len(transfer_steps) <= 25:
+                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                elif len(transfer_steps) > 25:
+                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(26)] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps)-26)]
+                    callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
