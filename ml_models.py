@@ -249,3 +249,26 @@ class LinReg(MLModel):
             print("model fitting on y", self.y)
             self.model.fit(self.X, self.y)
         print('<<ML>> done training')
+
+
+class GradientDescent(MLModel):
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
+                     scan_bounds=None, duplication=1):
+        super().__init__(model, max_iters)  # don't have a model
+        self.scan_bounds = scan_bounds
+
+        if scan_bounds:
+            # if you only want to pay attention in bounds, predict on those vals
+            self.FINAL_SPECTRA = final_spectra[:, scan_bounds[0]:scan_bounds[1]]
+        else:
+            self.FINAL_SPECTRA = final_spectra
+
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+        self.duplication = duplication
+
+    def generate_seed_rxns(self, num_recipies):
+
+    def _train(self, X, y):
+
+    def predict(self):
