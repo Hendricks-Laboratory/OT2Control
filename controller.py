@@ -1384,7 +1384,7 @@ class Controller(ABC):
                 self.portal.send_pack('transfer', src, [transfer_step])
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
-                    self._send_callback(callback, transfer_step[0], callback_num, row, i)
+                    self._\back(callback, transfer_step[0], callback_num, row, i)
 
             #merge all the scans into a single file if there were any scans
             #get the names of all the scan files
@@ -1420,7 +1420,11 @@ class Controller(ABC):
             callback_num must not be larger than 26 (alpha numeric characters are used. If you
               go larger than 26, you'll exceed alpha numeric)
         '''
-        callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        if callback_num <= 25:
+            callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        elif callback_num > 25:
+            callback_num -= 26
+            callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             self._stop(i)
