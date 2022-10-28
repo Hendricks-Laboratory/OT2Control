@@ -1384,7 +1384,7 @@ class Controller(ABC):
                 self.portal.send_pack('transfer', src, [transfer_step])
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
-                    self._\back(callback, transfer_step[0], callback_num, row, i)
+                    self._send_callback(callback, transfer_step[0], callback_num, row, i)
 
             #merge all the scans into a single file if there were any scans
             #get the names of all the scan files
