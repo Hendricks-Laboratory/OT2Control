@@ -279,7 +279,25 @@ class GradientDescent(MLModel):
         pass
 
     def _train(self, X, y):
+        """
+        This call should wait on any current training threads to complete
+        This call should launch a training thread to retrain the model on the new data
+        training is also where current iteration is updated
+        params:
+            np.array X: shape (num_pts, num_features) the recieved data for each new well
+            np.array y: shape(num_pts, n_classes) the labels to predict
+        Postconditions:
+            The model has been trained on the new data
+        Returns
+        """
+
         costs = []
+        """
+        Loop for max_iters:
+            get Y_pred
+            calcualte and record cost at step (for debugging)
+            update coefficients            
+        """
 
         # Choose whether to trim data to within certain bounds
         if self.scan_bounds:
@@ -299,4 +317,6 @@ class GradientDescent(MLModel):
             # update coefficients
             self.biases[0] = self.biases[0] - (alpha * ((1/m) * np.sum(Y_pred - y)))
             self.biases[1] = self.biases[1] - (alpha * ((1/m) * np.sum((Y_pred - y) * X)))
+
+            #
 
