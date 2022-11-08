@@ -4,6 +4,8 @@ from abc import abstractmethod
 import threading
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
+import matplotlib.pyplot as plt
+from scipy import optimize
 
 import numpy as np
 
@@ -257,6 +259,7 @@ class LinReg(MLModel):
         print('<<ML>> done training')
 
 
+# This class is not being used
 class GradientDescent(MLModel):
     def __init__(self, model, final_spectra, y_shape, max_iters, learning_rate, batch_size=1,
                  scan_bounds=None, duplication=1):
@@ -273,7 +276,7 @@ class GradientDescent(MLModel):
         self.y_shape = y_shape
         self.batch_size = batch_size
         self.duplication = duplication
-        self.biases = [0, 0]
+        self.parameters = {"W": 0.0, "b": 0.0}
 
     def predict(self):
         pass
@@ -311,12 +314,112 @@ class GradientDescent(MLModel):
             Y_pred = self.predict()
 
             # Compute and record cost
-            cost = (1 / 2*m) * (np.sum(Y_pred - y)**2)
+            cost = (1 / 2 * m) * (np.sum(Y_pred - y) ** 2)
             costs.append(cost)
 
             # update coefficients
-            self.biases[0] = self.biases[0] - (alpha * ((1/m) * np.sum(Y_pred - y)))
-            self.biases[1] = self.biases[1] - (alpha * ((1/m) * np.sum((Y_pred - y) * X)))
+            self.parameters["W"] = self.parameters["W"] - (alpha * ((1 / m) * np.sum(Y_pred - y)))
+            self.parameters["b"] = self.parameters["b"] - (alpha * ((1 / m) * np.sum((Y_pred - y) * X)))
 
             #
 
+
+class SegmentedLinReg(MLModel):
+    '''
+    params:
+        tuple<int> scan_bounds: size 2. If you wish to ignore aspects of the
+          scan, and only focus
+          on a single peak for learning, you may specify manually the start
+          and stop index of the data you are interested in. Only this data
+          will be used for training.
+        int duplication: This is used to copy the reactions you're running if
+          you are worried about redundancy. the number is the number of times
+          you duplicate each reaction.
+    Model to use Linear Regression algorithm
+    model_lock also locks X
+    UNIMPLEMENTED:
+      only runs for batch size of 1
+    '''
+
+    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
+                 scan_bounds=None, duplication=1):
+        super().__init__(model, max_iters)  # don't have a model
+        self.scan_bounds = scan_bounds
+        if scan_bounds:
+            # if you only want to pay attention in bounds, predict on those vals
+            self.FINAL_SPECTRA = final_spectra[:, scan_bounds[0]:scan_bounds[1]]
+        else:
+            self.FINAL_SPECTRA = final_spectra
+        self.y_shape = y_shape
+        self.batch_size = batch_size
+        self.duplication = duplication
+
+    def generate_seed_rxns(self):
+        """
+        This method is called before the model is trained to generate a batch of training
+        points
+        returns:
+            np.array: (batch_size,n_features)
+        """
+        upper_bound = 2.5
+        lower_bound = 0.25
+        recipes = np.random.rand(self.batch_size, self.y_shape) \
+                  * (upper_bound - lower_bound) + lower_bound
+        print("seed,", recipes)
+        recipes = np.repeat(recipes, self.duplication, axis=0)
+        return recipes
+
+    def predict(self):
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.
+        params:
+            int n_predictions: the number of instances to predict
+        returns:
+            np.array: shape is n_predictions, y.shape. Features are pi e-2
+        '''
+        super().predict()
+        with self.model_lock:
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
+        print("predicted", y_pred)
+        breakpoint()
+        return np.repeat(y_pred, self.duplication, axis=0)
+
+    def training(self, df, target, r_val):
+        '''
+            Method to train the model.
+            params:
+                df                 : dataset created on each experiement
+                target             : asked peak wavelength (input)
+                r_val              : number of training to produce the correspoing image
+            returns:
+                input_user         : same or recomputed asked peak wavelength (input)
+                user_concentration : predicted concentration for the asked peak wavelength (input)
+                train_prediction   : predicted peak wavelengths of all data
+                W                  : parameter W value
+                b                  : parameter b value
+            '''
+
+        def getting_params(concentration, wavelength):
+            W = sum(wavelength * (concentration - np.mean(concentration))) / sum(
+                (concentration - np.mean(concentration)) ** 2)
+            b = np.mean(wavelength) - W * np.mean(concentration)
+            print("--->", W, b)
+            return W, b
+
+        print("-----> Model Training")
+        print("Computing W and b")
+        W, b = getting_params(df['Concentration'], df['Wavelength'])
+
+        initial_predict = df['Concentration'] * W + b
+        initial_error = df['Wavelength'] - initial_predict
+
+        print("----")
+        print("initial_predict:", initial_predict)
+        print("----")
+        print("initial_error", initial_error)
+
+        def piecewise_linear(x, x0, y0, k1, k2):
+            return np.piecewise(x, [x < x0, x >= x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
+
+        optimized_params, covars = optimize.curve_fit(piecewise_linear, df['Concentration'], df['Wavelength'])
