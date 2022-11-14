@@ -9,7 +9,6 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -425,18 +424,19 @@ class SegmentedLinReg(MLModel):
         print("initial_error", initial_error)
 
         def piecewise_linear(x, x0, y0, k1, k2):
-            return np.piecewise(x, [x < x0, x >= x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
+            return np.piecewise(x, [x < x0, x >= x0],
+                                [lambda x: k1 * x + y0 - k1 * x0, lambda x: k2 * x + y0 - k2 * x0])
 
         # optimized_params, covars = optimize.curve_fit(piecewise_linear, df['Concentration'], df['Wavelength'])
 
 
 class PolynomialRegression(MLModel):
-    def __init__(self, model, final_spectra, y_shape, max_iters, max_order, batch_size=1,
-                scan_bounds=None, duplication=1):
+    def __init__(self, model, final_spectra, y_shape, max_iters, max_order, reagents_to_vary,
+                 batch_size=1, scan_bounds=None, duplication=1):
         super().__init__(model, max_iters)  # don't have a model
         self.scan_bounds = scan_bounds
         if scan_bounds:
-        # if you only want to pay attention in bounds, predict on those vals
+            # if you only want to pay attention in bounds, predict on those vals
             self.FINAL_SPECTRA = final_spectra[:, scan_bounds[0]:scan_bounds[1]]
         else:
             self.FINAL_SPECTRA = final_spectra
@@ -445,6 +445,7 @@ class PolynomialRegression(MLModel):
         self.duplication = duplication
         self.max_order = max_order
         self.regresser = None
+        self.reagents_varied = reagents_to_vary
 
     def generate_seed_rxns(self):
         pass
@@ -454,36 +455,38 @@ class PolynomialRegression(MLModel):
             raise Exception("Cannot make a prediction until training has occured at least once")
         pass
 
-
-    # TODO: Figure out optimization with this approach
-    def training(self, df):
-        # Get the two reagents that will be varied in this experiment as x-values
-        # Generate PolyomialFeatures from order 1 to max_order
-        # Record error of each after predicting once
-        # Return fitted model with the best error
+    # TODO: Figure out optimization with this approach, fix dataframe parsing so it's not just a dummy value
+    def training(self, df, r):
+        """
+            Method to train the model.
+            params:
+                df                 : dataset created on each experiment
+                r_val              : number of training to produce the corresponding image
+            returns:
+                minErrorPred       : wavelength prediction made by the optimal model
+                minErrorIndex      : Degree of the polynomial that results in the minimum error
+        """
         reagentConcentrations = pd.DataFrame()
-        wavelengthData = pd.DataFrame()
+        _Y = pd.DataFrame()
 
         accuracyRecord = {}
         polyRecord = {}
         for order in range(1, self.max_order):
             # Generate fitted model
-            poly = PolynomialFeatures(degree=order)
-            poly_values = poly.fit_transform(reagentConcentrations)
-            poly.fit(poly_values, wavelengthData)
+            poly = PolynomialFeatures(degree=order, include_bias=False)
+            _X = poly.fit_transform(reagentConcentrations)
 
             # Do a single regression to get error
             regresser = LinearRegression()
-            regresser.fit(poly_values, wavelengthData)
-            Y_pred = regresser.predict(poly_values)
+            regresser.fit(_X, _Y)
+            Y_pred = regresser.predict(_X)
 
             # Record accuracy
-            accuracyRecord[order] = mean_squared_error(wavelengthData, Y_pred, squared=False)
-            polyRecord[order] = regresser
+            accuracyRecord[order] = mean_squared_error(_Y, Y_pred, squared=False)
+            polyRecord[order] = (regresser, Y_pred)
 
         minErrorIndex = min(accuracyRecord, key=accuracyRecord.get)
-        minErrorModel = polyRecord[minErrorIndex]
+        minErrorModel, minErrorPred = polyRecord[minErrorIndex]
 
         self.regresser = minErrorModel
-
-
+        return minErrorPred, minErrorIndex
