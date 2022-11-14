@@ -35,7 +35,7 @@ import time
 import argparse
 import re
 import functools
-from datetime import datetime
+import datetime
 
 from bidict import bidict
 import gspread
@@ -51,6 +51,8 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib import rcParams
+rcParams.update({'figure.autolayout': True})
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
 
@@ -59,6 +61,7 @@ from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
 from exceptions import ConversionError
+
 
 
 def init_parser():
@@ -205,7 +208,7 @@ class Controller(ABC):
         a run function that creates a portal. The portal is not passed to init because although
         the code must not use more than one portal at a time, the portal may change over the 
         lifetime of the class
-        NOte that pr cannot be initialized until you know if you're simulating or not, so it
+        Note that pr cannot be initialized until you know if you're simulating or not, so it
         is instantiated in run
         '''
         #set according to input
@@ -215,6 +218,7 @@ class Controller(ABC):
         self.my_ip = my_ip
         self.server_ip = server_ip
         self.buff_size = 4
+        self.rxn_sheet_name = rxn_sheet_name
         self.simulate = False #by default will be changed if a simulation is run
         self._cached_reader_locs = {} #maps wellname to loc on platereader
         #this will be gradually filled
@@ -222,9 +226,12 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
+        self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
         rxn_spreadsheet = self._open_sheet(rxn_sheet_name, credentials)
         header_data = self._download_sheet(rxn_spreadsheet,0)
+        self.header_data = header_data
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
@@ -311,10 +318,15 @@ class Controller(ABC):
             print("<<controller>> using cached data for '{}', last updated '{}'".format(
                     metadata['name'],metadata['timestamp']))
         else:
-            metadata = {'timestamp':datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
+            metadata = {'timestamp':datetime.datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
                         'name':rxn_sheet_name}
             with open(os.path.join(self.cache_path, '.metadata.json'), 'w') as file:
                 json.dump(metadata, file)
+
+    def _get_key_wks(self, credentials):
+        gc = gspread.authorize(credentials)
+        name_key_wks = gc.open_by_url('https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0').get_worksheet(0)
+        return name_key_wks
 
     def _get_wks_key_pairs(self, credentials, rxn_sheet_name):
         '''
@@ -362,7 +374,7 @@ class Controller(ABC):
             self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
         else:
             try:
-                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'),simulate)
+                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path, simulate)
             except:
                 print('<<controller>> failed to initialize platereader, initializing dummy reader')
                 self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
@@ -400,7 +412,7 @@ class Controller(ABC):
         out_path = 'Ideally this would be a gdrive path, but for now everything is local'
         if not os.path.exists(out_path):
             #not on the laptop
-            out_path = './Controller_Out'
+            out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs'
         #get the root folder
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
@@ -445,7 +457,7 @@ class Controller(ABC):
             else:  
                 None: this is ok because the wks key will not be used if caching  
         '''
-        name_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
+        name_key_pairs = self.wks_key_pairs
         try:
             i=0
             wks_key = None
@@ -492,10 +504,7 @@ class Controller(ABC):
             excel  
         '''
         header_dict = {row[0]:row[1] for row in header_data[1:]}
-        self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
-        self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
-        if self.robo_params['temp'] != None:
-            assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
+        
         self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
                 float(header_dict['dilution_vol']))
 
@@ -774,6 +783,18 @@ class Controller(ABC):
                 write_file.write(file_bytes)
         self.translate_wellmap()
         
+    def delete_wks_key(self):
+        '''
+        deletes key from the reaction key pair google sheet to prevent accidental
+        runs in the future
+        Postconditions:    
+            if the key pair still exists, the key is deleted 
+        '''
+        wks = self.name_key_wks
+        cell_list = wks.findall(str(self.rxn_sheet_name))
+        for cell in cell_list   : 
+            if cell:
+                wks.batch_clear(['B'+str(cell.row)])
 
     def close_connection(self):
         '''
@@ -782,13 +803,15 @@ class Controller(ABC):
             Log files have been written to self.out_path  
             Connection has been closed  
         '''
+        
         print('<<controller>> initializing breakdown')
         self.save()
         #server should now send a close command
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
-    
+        self.delete_wks_key()
+        
     def translate_wellmap(self):
         '''
         Preconditions:  
@@ -870,7 +893,7 @@ class Controller(ABC):
         cols = make_unique(pd.Series(input_data[0])) 
         rxn_df = pd.DataFrame(input_data[4:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'temperature (c)': 'temp', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
         rxn_df[['pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['pause_time','dilution_conc','conc','max_num_scans']].astype(float)
@@ -1044,8 +1067,16 @@ class Controller(ABC):
                 self._execute_print(row,i)
             elif row['op'] == 'scan_until_complete':
                 self._scan_until_complete(row,i)
+            elif row['op'] == 'temp_on':
+                self._execute_temp_change(row, i)
+            elif row['op'] == 'temp_off':
+                cid = self.portal.send_pack('temp_change')
+            elif row['op'] == 'temp_change':
+                cid = self.portal.send_pack('temp_off',row['temperature (c)'])
+            
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
 
     def _execute_print(self, row, i):
         print(row['message'])
@@ -1128,6 +1159,7 @@ class Controller(ABC):
             pd.Series row: a row of self.rxn_df  
             int i: index of this row  
         '''
+        
         #1)
         self.portal.send_pack('home')
         #2)
@@ -1367,6 +1399,8 @@ class Controller(ABC):
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
+        
+        self.save()
 
     def _send_callback(self, callback, product, callback_num, row, i):
         '''
@@ -2593,12 +2627,13 @@ class AbstractPlateReader(ABC):
     '''
     SPECTRO_ROOT_PATH = "/mnt/c/Program Files/SPECTROstar Nano V5.50/"
     PROTOCOL_PATH = r"C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-    SPECTRO_DATA_PATH = "/mnt/c/Hendricks Lab/Plate Reader Data Backup"
+    SPECTRO_DATA_PATH = "/mnt/c/Users/science_356_lab/Robot_Files/Plate Reader Data"
 
     def __init__(self, data_path):
         self.data_path = data_path
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
+        #self.data = ScanDataFrame(data_path, header_data, eve_files_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2638,6 +2673,7 @@ class AbstractPlateReader(ABC):
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
         '''
+        
         filename = '{}.csv'.format(filename)
         filepath = os.path.join(self.data_path,filename)
         if os.path.exists(filepath):
@@ -2653,6 +2689,8 @@ class AbstractPlateReader(ABC):
                 write_str += ', '.join([str(i) for i in col])
                 write_str += '\n'
                 file.write(write_str)
+        
+
 
     def _rename_scan(self,new_scan_file,old_scan_file):
         """
@@ -2698,6 +2736,9 @@ class AbstractPlateReader(ABC):
         df.rename(columns=loc_to_name, inplace=True)
         df.dropna(inplace=True)
         df = df.astype(float)
+    
+        
+        
         return df, metadata
 
     def _parse_metadata(self, filename):
@@ -2785,14 +2826,16 @@ class PlateReader(AbstractPlateReader):
     This class handles all platereader interactions. Inherits from the interface
     '''
 
-    def __init__(self, data_path, simulate=False):
+    def __init__(self, data_path, header_data, eve_files_path, simulate=False):
         super().__init__(data_path)
+        self.experiment_name = {row[0]:row[1] for row in header_data[1:]}['data_dir']
         self.simulate=simulate
         self._set_config_attr('Configuration','SimulationMode', str(int(simulate)))
         self._set_config_attr('ControlApp','AsDDEserver', 'True')
         self.exec_macro("dummy")
         self.exec_macro("init")
         self.exec_macro('PlateOut')
+        self.data = ScanDataFrame(data_path, self.experiment_name, eve_files_path)
         
     def exec_macro(self, macro, *args):
         '''
@@ -2895,7 +2938,7 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename, layout=None):
+    def run_protocol(self, protocol_name, filename,layout=None):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
@@ -2912,8 +2955,15 @@ class PlateReader(AbstractPlateReader):
         if self.simulate:
             super().run_protocol(protocol_name, filename, layout)
         else:
-            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
+            shutil.copyfile(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
                     os.path.join(self.data_path, "{}.csv".format(filename)))
+        
+       
+            self.data.AddToDF("{}.csv".format(filename))
+
+            self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.experiment_name, 'full_df')))
+            
+            self.data.AddReagentInfo()
         
 
 
@@ -2968,12 +3018,440 @@ class PlateReader(AbstractPlateReader):
         '''
         closes connection. Use this if you're done with this object at cleanup stage
         '''
-        self.exec_macro('PlateIn')
+        #self.exec_macro('PlateIn')
         self.exec_macro('Terminate')
         self._set_config_attr('ControlApp','AsDDEserver','False')
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
-if __name__ == '__main__':
-    SERVERADDR = "10.25.13.81"
-    main(SERVERADDR)
 
+  
+class ScanDataFrame():
+    '''
+    This class handles and saves data 
+    
+    ATTRIBUTES:  
+        df df: Not passed in but created in init. Pandas Dataframe to be used 
+            to store all scans from the run.
+        str data_path: pathname for local platereader data.
+    
+    METHODS:  
+        add_to_df() void: formats data from a scan and adds to the data frame.
+        
+    '''
+    
+    def __init__(self, data_path, experiment_name, eve_files_path):
+        self.df = pd.DataFrame()
+        self.data_path = data_path
+        self.eve_files_path = eve_files_path
+        self.experiment_name = experiment_name
+        self.isFirst = True
+        
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
+        
+    def AddToDF(self, file_name):
+        temp_file = os.path.join(self.data_path,file_name)
+    
+        #Extracts and stores data/time metadata for the time column
+
+        df_read_data_1 = pd.read_csv(temp_file,nrows = 35,skiprows = [7], header=None,na_values=["       -"],encoding = 'latin1')   
+        am_pm = df_read_data_1.iloc[1][0].split(" ")[5]
+        
+        
+        if am_pm == "PM":
+            temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            hour = temphour if temphour == 12  else temphour +12
+        elif am_pm == "AM":
+            hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+        
+        
+        
+        date_time = datetime.datetime(int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[2]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[0]), int(df_read_data_1.iloc[1][0].split(" ")[1].split("/")[1]), hour, int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[1]), int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[2]))
+        num_cycles = int(df_read_data_1.iloc[4][0][15:])
+        if num_cycles != 1:
+            raise Exception('Error due to Bad Scan Protocol: too many cycles')
+        
+        #Extracts and stores wavelength metadata
+        
+        df_read_data_2 = pd.read_csv(temp_file,nrows = 3, skiprows = 43, header=None,na_values=["       -"],encoding = 'latin1')
+        wavelength_blue = int(df_read_data_2[0][0][13:].split("nm", 2)[0])
+        wavelength_red = int(df_read_data_2[0][0][13:].split("nm", 2)[1][3:])
+        wavelength_steps = int(df_read_data_2[1][0].split("nm", 1)[0][1:])
+
+        #Extracts and stores temp metadata for the temp column
+        
+        df_read_data_3 = pd.read_csv(temp_file,nrows = 3, skiprows = 45, header=None,na_values=["       -"],encoding = 'latin1')    
+        temp = float(df_read_data_3[0][2].split(" ")[-1])
+        
+        #Extracts and stores absorbance data 
+        
+        data_df = pd.read_csv(temp_file,skiprows=48,header=None,na_values=["       -"],encoding = 'latin1',)
+        
+        g=data_df.iloc[:,0]
+        g = [x.rstrip(':') for x in g]
+        data_df = data_df.drop(data_df.columns[0], axis=1)
+        wavvelengths = []
+        for x in range (wavelength_blue,wavelength_red+1, wavelength_steps):
+            wavvelengths = wavvelengths + [x]
+    
+        #Combines metadata with absorbance data
+        
+        data_df.columns = wavvelengths
+        
+        data_df.insert(0,"Time",date_time) 
+        data_df.insert(0,"Temp",temp)
+        data_df.insert(0, 'Well', g)
+        
+        data_df.insert(0,"Scan ID",file_name.replace(".csv", ""))
+        data_df = data_df.set_index(['Scan ID','Well'])
+        
+        df1 = pd.read_csv(os.path.join(self.eve_files_path, 'translated_wellmap.tsv'), sep='\t')
+        
+
+        col_list  = data_df.index.get_level_values('Well').tolist()
+
+        well_names = []
+
+        for well_with_zeros_in_name in col_list:
+            x = ''
+            
+            if well_with_zeros_in_name[1] == '0':
+                #print('yes')
+                #Turn A01 into A1 if A9 or less
+                well = str(well_with_zeros_in_name)
+                well = "{}{}".format(well[0], int(well[2:]))
+            
+            else:
+                #Leave A10 and greater alone
+                well = str(well_with_zeros_in_name)
+           
+            y = df1.loc[df1['loc'] == str(well), 'chem_name'].values[:]
+            for i in y:
+                if str(self.experiment_name) in i:
+                    x=i
+                if ('control' in i.lower()):
+                        x = 'control'
+                if ('blank' in i.lower()):
+                        x = 'blank'
+               
+            well_names.append(x)
+
+        data_df.insert(0, 'Well Name', well_names)
+
+    
+        
+        
+        if self.isFirst:
+            self.df = data_df
+            #full_df = pd.concat([wavvelength_df,data_df])
+            self.isFirst = False
+            
+        else:
+            full_df = data_df
+        
+            self.df = pd.concat([full_df,self.df])
+        
+        self.df = self.df.sort_values(['Time', 'Well'])
+    
+
+    def AddReagentInfo(self):
+        
+        reaction = self.experiment_name
+
+        well_hist_df = pd.read_csv(os.path.join(self.eve_files_path,'well_history.tsv'), sep='\t')
+
+        timess = well_hist_df.timestamp.values.tolist()
+        for time in timess:
+          
+            index = timess.index(time)
+
+            time = pd.Timestamp(time)
+            given_time = time #- pd.DateOffset(hours=7)
+            given_time = given_time.strftime('%Y-%m-%d %H:%M:%S:%f')
+            timess[index] = given_time
+
+
+        well_hist_df['timestamp'] = timess
+
+        df = pd.read_csv(os.path.join(self.data_path, reaction+'full_df.csv'))
+
+        containers = []
+        times = []
+        volumes =[]
+        vols = []
+        indices = []
+        cons = []
+        chems = []
+        con_list  = well_hist_df['container'].tolist()
+        for container in con_list:
+            if (reaction in  container) or ('blank' in container) or ('control' in container):
+                volume = well_hist_df.loc[well_hist_df['container'] == container].index.tolist()
+                
+                
+                indices.append(container)
+                indices = list(set(indices))
+
+                vols.extend(volume)
+                vols = list(set(vols))
+
+
+        for index in vols:
+            chemical = well_hist_df["chemical"].iloc[index]
+            
+            chem_c_index = chemical.rfind('C')
+            head = chemical[:chem_c_index]
+            sep = chemical[chem_c_index]
+            tail = chemical[chem_c_index+1:]
+            
+            chemical =  head
+            chems.append(chemical)
+            
+            concentration = tail
+            cons.append(concentration)
+            timestamp = well_hist_df["timestamp"].iloc[index]
+            times.append(timestamp)
+            volume = well_hist_df["vol"].iloc[index]
+            volumes.append(volume)
+            
+            container = well_hist_df["container"].iloc[index]
+            
+            cont_c_index = container.rfind('C')
+            head = container[:cont_c_index]
+            sep = container[cont_c_index]
+            tail = container[cont_c_index+1:]
+            
+            container = head +sep + tail
+            containers.append(container)
+                  
+        
+        chems_unique = list(set(chems))
+    
+        chem_info = {}
+        for chem in chems_unique:
+            chem_info[chem] = [0]
+            
+            
+
+                
+                
+            
+            
+            
+            #concentration = tail
+        pddict = {'time':times, 'vol':volumes, 'cont':containers, 'chem':chems, 'conc': cons} 
+        yay = pd.DataFrame(pddict)
+
+
+        df2 = yay.sort_values(by = ['cont', 'time'], ascending = [True, True])
+
+
+        n = len(pd.unique(df2['cont']))
+
+
+
+
+        base = df2.loc[(df2['cont'].str.contains('blank'))|(df2['cont'].str.contains('control'))]
+       
+        for chem in chems_unique:
+            base[chem] = 0
+        for i in indices: 
+           
+            if 'blank' not in i and 'control' not in i:
+                temp = df2.loc[df2['cont']==i]
+                temp.sort_values(by='time')
+                
+                
+                
+                volumes = temp.vol.values.tolist()
+              
+                sum_volumes = [sum(volumes[0:i[0]+1]) for i in enumerate(volumes)]
+            
+                concentrations = temp.conc.tolist()
+               
+                count = 0
+                
+               
+                for chem in chems_unique:
+                    chem_info[chem] = [0]
+                
+                
+                for chem in temp.chem.tolist():
+                  
+                    if 'water' in chem.lower():
+                        for i in chems_unique:
+                            chem_info[i].append(chem_info[i][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                    else:
+                            
+                        chem_info[chem].append(float(volumes[count])*float(concentrations[count])/float(sum_volumes[count]))
+                        for x in chems_unique:
+                            if x != chem:
+                                
+                                chem_info[x].append(chem_info[x][count]*(float(sum_volumes[count-1]/float(sum_volumes[count]))))
+                   
+                 
+                    count += 1
+            
+                
+                for i in chem_info:
+                   
+                    temp[i] = chem_info[i][1:]
+             
+                base = pd.concat([base, temp])
+            
+        full= base.sort_values(by = ['cont', 'time'], ascending = [True, True])
+
+
+
+        weird = []
+        last_reagent = []
+
+
+        scans = list(set(df['Scan ID'].tolist()))
+        reactions = list(set((df['Well Name'].tolist())))
+
+        #more lists
+        another_dict = {}
+        for x in chems_unique:
+            another_dict[x] = []
+            
+
+        df.set_index('Scan ID',inplace = True)
+        scan_list=df.index.get_level_values('Scan ID').unique()
+        df.reset_index(inplace = True)
+      
+        for scan in scan_list:
+     
+            
+            
+            
+            for time in df.loc[df['Scan ID']==scan, 'Time']:
+                time = time
+
+
+            for react in df.loc[df['Scan ID']==scan, 'Well Name']:
+                transfers_before_scans = []
+                react = str(react)
+                transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()             
+         
+                for transfer_time in transfer_times:
+                 
+                    if transfer_time <= time:
+                       
+                        transfers_before_scans.append(transfer_time)
+                latest_transfer_time = max(transfers_before_scans)
+                
+                
+                
+                
+                
+                for i in chems_unique:
+                    current_chem_conc_list = full[(full['cont'] == react) & (full['time'] == latest_transfer_time)][i].tolist()
+                    if len(current_chem_conc_list)==0:
+                        another_dict[i].append(0)
+                    else:
+                        another_dict[i].append(current_chem_conc_list[0])
+                
+                   
+                weird.append(latest_transfer_time)
+                
+               
+                
+               
+                
+                if "water" in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                    stillWater = True
+                    while stillWater:
+                        if len(transfers_before_scans)>1:
+                            transfers_before_scans.remove(transfers_before_scans.index(latest_transfer_time))
+                            latest_transfer_time = max(transfers_before_scans)
+                        elif len(transfers_before_scans) ==1:
+                            latest_transfer_time = transfers_before_scans[0]
+                            if "water" in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                                stillWater = False
+                                last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                        if "water" not in str(full[full['time']==latest_transfer_time]['chem'].item()).lower():
+                            stillWater = False
+                            last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                            
+                    
+                    
+                else:
+                    last_reagent_added = full[full['time']==latest_transfer_time]['chem'].item()
+                    
+                    
+                    
+                
+                last_reagent.append(last_reagent_added)
+                
+
+        df['time of last reagent added'] = weird
+        df['last reagent added'] = last_reagent
+
+        for x in another_dict:
+            
+            df[x] = another_dict[x]
+     
+        df.reset_index(inplace=True)
+        left_list = ['Scan ID', 'Well', 'Well Name']+[i for i in another_dict if 'water' not in i.lower()]+['time of last reagent added','last reagent added', 'Temp', 'Time']
+        right_list = [c for c in df if c not in ['Scan ID', 'Well', 'Well Name']+[i for i in another_dict if 'water' not in i.lower()]+['time of last reagent added','last reagent added', 'Temp', 'Time']]
+        df = df[left_list + right_list]
+        df= df.rename(columns=str.lower)
+        if 'index' in df.columns:
+            df.drop('index', axis=1,inplace=True)
+        if 'water' in df.columns:
+            df.drop('water', axis=1,inplace=True)
+        
+        wellnames = df['well name'].tolist()
+        wellnamenumbers = []
+        for i in wellnames:
+            print(i,'you')
+            a = i.lower()
+            if 'blank' not in i and 'control' not in i:
+                
+                l_index = re.search('rxn', a).end()
+                r_index = a.rfind('c')
+                wellnamenumber = int(a[l_index:r_index])
+               
+                wellnamenumbers.append(wellnamenumber)
+            else:
+                wellnamenumbers.append(0)
+            #print(l)
+        
+        df['wellnameorder'] = wellnamenumbers
+        
+        df.sort_values(by=['time', 'wellnameorder'], inplace = True)
+        
+        df.drop('wellnameorder', axis=1,inplace=True)
+        
+        df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
+
+        
+    
+class Plotter():
+    '''
+    This class creates and saves plots 
+    
+    ATTRIBUTES:  
+        df df: Not passed in but created in init. Pandas Dataframe to be used 
+            to store all scans from the run.
+        str data_path: pathname for local platereader data.
+    
+    METHODS:  
+        add_to_df() void: formats data from a scan and adds to the data frame.
+    '''
+    
+    def __init__(self, filename):
+        self.filename = filename
+    
+        
+        
+            
+
+        
+
+    
+    
+
+if __name__ == '__main__':
+    SERVERADDR = "169.254.44.249"
+    main(SERVERADDR)
