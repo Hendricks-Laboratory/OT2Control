@@ -455,8 +455,8 @@ class PolynomialRegression(MLModel):
             raise Exception("Cannot make a prediction until training has occured at least once")
         pass
 
-    # TODO: Figure out optimization with this approach, fix dataframe parsing so it's not just a dummy value
-    def training(self, df, r):
+    # TODO: Figure out optimization with this approach
+    def training(self, df, r_val):
         """
             Method to train the model.
             params:
@@ -466,8 +466,8 @@ class PolynomialRegression(MLModel):
                 minErrorPred       : wavelength prediction made by the optimal model
                 minErrorIndex      : Degree of the polynomial that results in the minimum error
         """
-        reagentConcentrations = pd.DataFrame()
-        _Y = pd.DataFrame()
+        reagentConcentrations = df[[s for s in self.reagents_varied]].values
+        _Y = df['Wavelength'].values
 
         accuracyRecord = {}
         polyRecord = {}
