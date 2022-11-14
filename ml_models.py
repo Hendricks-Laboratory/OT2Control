@@ -2,11 +2,16 @@ import time  # TODO delete this debugging only
 from abc import ABC
 from abc import abstractmethod
 import threading
+
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
-import matplotlib.pyplot as plt
-from scipy import optimize
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
 
+
+import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 
 
@@ -422,11 +427,11 @@ class SegmentedLinReg(MLModel):
         def piecewise_linear(x, x0, y0, k1, k2):
             return np.piecewise(x, [x < x0, x >= x0], [lambda x:k1*x + y0-k1*x0, lambda x:k2*x + y0-k2*x0])
 
-        optimized_params, covars = optimize.curve_fit(piecewise_linear, df['Concentration'], df['Wavelength'])
+        # optimized_params, covars = optimize.curve_fit(piecewise_linear, df['Concentration'], df['Wavelength'])
 
 
 class PolynomialRegression(MLModel):
-    def __init__(self, model, final_spectra, y_shape, max_iters, batch_size=1,
+    def __init__(self, model, final_spectra, y_shape, max_iters, max_order, batch_size=1,
                 scan_bounds=None, duplication=1):
         super().__init__(model, max_iters)  # don't have a model
         self.scan_bounds = scan_bounds
@@ -438,3 +443,13 @@ class PolynomialRegression(MLModel):
         self.y_shape = y_shape
         self.batch_size = batch_size
         self.duplication = duplication
+        self.max_order = max_order
+
+    def generate_seed_rxns(self):
+        pass
+
+    def predict(self):
+        pass
+
+    def training(self):
+        pass
