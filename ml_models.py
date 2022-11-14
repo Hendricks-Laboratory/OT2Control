@@ -444,12 +444,46 @@ class PolynomialRegression(MLModel):
         self.batch_size = batch_size
         self.duplication = duplication
         self.max_order = max_order
+        self.regresser = None
 
     def generate_seed_rxns(self):
         pass
 
     def predict(self):
+        if self.regresser is None:
+            raise Exception("Cannot make a prediction until training has occured at least once")
         pass
 
-    def training(self):
-        pass
+
+    # TODO: Figure out optimization with this approach
+    def training(self, df):
+        # Get the two reagents that will be varied in this experiment as x-values
+        # Generate PolyomialFeatures from order 1 to max_order
+        # Record error of each after predicting once
+        # Return fitted model with the best error
+        reagentConcentrations = pd.DataFrame()
+        wavelengthData = pd.DataFrame()
+
+        accuracyRecord = {}
+        polyRecord = {}
+        for order in range(1, self.max_order):
+            # Generate fitted model
+            poly = PolynomialFeatures(degree=order)
+            poly_values = poly.fit_transform(reagentConcentrations)
+            poly.fit(poly_values, wavelengthData)
+
+            # Do a single regression to get error
+            regresser = LinearRegression()
+            regresser.fit(poly_values, wavelengthData)
+            Y_pred = regresser.predict(poly_values)
+
+            # Record accuracy
+            accuracyRecord[order] = mean_squared_error(wavelengthData, Y_pred, squared=False)
+            polyRecord[order] = regresser
+
+        minErrorIndex = min(accuracyRecord, key=accuracyRecord.get)
+        minErrorModel = polyRecord[minErrorIndex]
+
+        self.regresser = minErrorModel
+
+
