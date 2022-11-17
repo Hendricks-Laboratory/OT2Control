@@ -1044,7 +1044,7 @@ class OT2Robot():
             return func
         return echo_func
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
+    def __init__(self, simulate, using_temp_ctrl, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
         '''
         params:  
             bool simulate: if true, the robot will run in simulation mode only  
