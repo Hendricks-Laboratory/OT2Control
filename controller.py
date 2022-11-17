@@ -836,7 +836,7 @@ class Controller(ABC):
         #send robot data to initialize itself
         #note reagent_df can have index with same name so index is reset for transfer
         cid = self.portal.send_pack('init', simulate, 
-                self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
+                self.robo_params['using_temp_ctrl'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
                 self.robo_params['reagent_df'].reset_index().to_dict(), self.my_ip,
                 self.robo_params['dry_containers'].to_dict())
@@ -1073,12 +1073,15 @@ class Controller(ABC):
             elif row['op'] == 'temp_on':
                 self._execute_temp_change(row, i)
             elif row['op'] == 'temp_off':
-                cid = self.portal.send_pack('temp_change')
+                cid = self.portal.send_pack('temp_off')
             elif row['op'] == 'temp_change':
-                cid = self.portal.send_pack('temp_off',row['temp'])
+                cid = self.portal.send_pack('temp_change',row['temp'])
             
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
+
+    def _execute_temp_change(self):
+        cid = self.portal.send_pack('temp_change',row['temp'])
 
 
     def _execute_print(self, row, i):
