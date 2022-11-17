@@ -894,9 +894,12 @@ class Controller(ABC):
         rxn_df = pd.DataFrame(input_data[4:], columns=cols)
         #rename some of the clunkier columns 
         rxn_df.rename({'operation':'op', 'temperature (c)': 'temp', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
+        
+        self.robo_params['using_temp_ctrl'] = rxn_df['op'].apply(lambda x: x in ['temp_on', 'temp_off', 'temp_change']).any()
+
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['pause_time','dilution_conc','conc','max_num_scans']].astype(float)
+        rxn_df[['temp','pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['temp','pause_time','dilution_conc','conc','max_num_scans']].astype(float)
         rxn_df['reagent'] = rxn_df['reagent'].apply(lambda s: s if pd.isna(s) else s.replace(' ', '_'))
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
@@ -1072,7 +1075,7 @@ class Controller(ABC):
             elif row['op'] == 'temp_off':
                 cid = self.portal.send_pack('temp_change')
             elif row['op'] == 'temp_change':
-                cid = self.portal.send_pack('temp_off',row['temperature (c)'])
+                cid = self.portal.send_pack('temp_off',row['temp'])
             
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
