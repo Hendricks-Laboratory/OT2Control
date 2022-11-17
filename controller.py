@@ -1071,7 +1071,7 @@ class Controller(ABC):
             elif row['op'] == 'scan_until_complete':
                 self._scan_until_complete(row,i)
             elif row['op'] == 'temp_on':
-                self._execute_temp_change(row, i)
+                cid = self.portal.send_pack('temp_change',row['temp'])
             elif row['op'] == 'temp_off':
                 cid = self.portal.send_pack('temp_off')
             elif row['op'] == 'temp_change':
@@ -1080,8 +1080,6 @@ class Controller(ABC):
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
-    def _execute_temp_change(self):
-        cid = self.portal.send_pack('temp_change',row['temp'])
 
 
     def _execute_print(self, row, i):
