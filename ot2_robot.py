@@ -1106,7 +1106,7 @@ class OT2Robot():
                 if x else [])
         self._init_params()
         self._init_directories()
-        self._init_labware(labware_df, using_temp_ctrl, temp)
+        self._init_labware(labware_df, using_temp_ctrl)
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
         self._init_reagents(reagent_df)
@@ -1955,11 +1955,11 @@ def launch_eve_server(**kwargs):
     eve = None
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
-        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip, dry_containers_df = args
+        simulate, using_temp_ctrl, labware_df, instruments, reagents_df, controller_ip, dry_containers_df = args
         #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
         #like to be run from a thread
         asyncio.set_event_loop(asyncio.new_event_loop())
-        eve = OT2Robot(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal, dry_containers_df)
+        eve = OT2Robot(simulate, using_temp_ctrl, labware_df, instruments, reagents_df,my_ip, controller_ip, portal, dry_containers_df)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:
