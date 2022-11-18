@@ -467,11 +467,13 @@ class PolynomialRegression(MLModel):
                 minErrorIndex      : Degree of the polynomial that results in the minimum error
         """
         reagentConcentrations = df[[s for s in self.reagents_varied]].values
-        _Y = df['Wavelength'].values
+        # Changed this df name for testing purposes
+        _Y = df['price'].values
+        # _Y = df['Wavelength'].values
 
         accuracyRecord = {}
         polyRecord = {}
-        for order in range(1, self.max_order):
+        for order in range(1, self.max_order+1):
             # Generate fitted model
             poly = PolynomialFeatures(degree=order, include_bias=False)
             _X = poly.fit_transform(reagentConcentrations)
@@ -484,6 +486,14 @@ class PolynomialRegression(MLModel):
             # Record accuracy
             accuracyRecord[order] = mean_squared_error(_Y, Y_pred, squared=False)
             polyRecord[order] = (regresser, Y_pred)
+
+        # Visualize poly degree vs error
+        # x_axis = range(1, self.max_order+1)
+        # plt.scatter(x_axis, accuracyRecord.values(), color="green")
+        # plt.plot(x_axis, accuracyRecord.values(), color="red")
+        # plt.xlabel("Polynomial model degree")
+        # plt.ylabel("Mean squared error")
+        # plt.show()
 
         minErrorIndex = min(accuracyRecord, key=accuracyRecord.get)
         minErrorModel, minErrorPred = polyRecord[minErrorIndex]
