@@ -488,12 +488,12 @@ class PolynomialRegression(MLModel):
             polyRecord[order] = (regresser, Y_pred)
 
         # Visualize poly degree vs error
-        # x_axis = range(1, self.max_order+1)
-        # plt.scatter(x_axis, accuracyRecord.values(), color="green")
-        # plt.plot(x_axis, accuracyRecord.values(), color="red")
-        # plt.xlabel("Polynomial model degree")
-        # plt.ylabel("Mean squared error")
-        # plt.show()
+        x_axis = range(1, self.max_order+1)
+        plt.scatter(x_axis, accuracyRecord.values(), color="green")
+        plt.plot(x_axis, accuracyRecord.values(), color="red")
+        plt.xlabel("Polynomial model degree")
+        plt.ylabel("Mean squared error")
+        plt.show()
 
         minErrorIndex = min(accuracyRecord, key=accuracyRecord.get)
         minErrorModel, minErrorPred = polyRecord[minErrorIndex]
