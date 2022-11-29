@@ -433,7 +433,7 @@ class SegmentedLinReg(MLModel):
 class PolynomialRegression(MLModel):
     def __init__(self, model, final_spectra, y_shape, max_iters, max_order, reagents_to_vary,
                  batch_size=1, scan_bounds=None, duplication=1):
-        super().__init__(model, max_iters)  # don't have a model
+        super().__init__(model, max_iters)  # don't have a model (this comment was present when the JGB team began work, but its meaning is unclear)
         self.scan_bounds = scan_bounds
         if scan_bounds:
             # if you only want to pay attention in bounds, predict on those vals
@@ -500,3 +500,34 @@ class PolynomialRegression(MLModel):
 
         self.regresser = minErrorModel
         return minErrorPred, minErrorIndex
+
+    def generate_seed_rxns(self):
+	"""
+	randomly selects some parameter values from which
+	exploration/training will begin
+	returns:
+		np.array: (batch_size, n_features)
+
+	for now, we have to hard-code in bounds for these params
+	we want to be able to read in those bounds from elsewhere;
+	this functionality will be implemented in a "warm-up" method and this method will be deprecated (hopefully)
+
+	
+	this version of the seed generation method is very similar to the LinReg version;
+	the difference is we need to pass the order of the polynomial (?) the number of parameters we want to vary (?)
+"""
+	upper_bound = 2.5
+	lower_bound = 0.25
+	recipes = np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
+	print("seed, " recipes)
+	recipes = np.repeat(recipes, self.duplication, axis=0)
+	return recipes
+
+
+    def warmup(self):
+	"""
+	this method is an extension of the functionality of generate_seed_rxns(). its purpose is to
+	assign variables and boundaries to the experimental run before training the model, as well
+	as generating seed reactions
+	"""
+	pass
