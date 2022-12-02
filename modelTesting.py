@@ -10,21 +10,11 @@ poly_model = PolynomialRegression(None, None, None, 100, 5, ['bathrooms', 'sqft'
 prediction, predOrder = poly_model.training(df, 1)
 
 # Visualize
-x_cords = np.linspace(df['bathrooms'].min(), df['bathrooms'].max(), len(df['bathrooms']))
-y_cords = np.linspace(df['sqft'].min(), df['sqft'].max(), len(df['sqft']))
-z_cords = np.split(prediction, len(prediction)//2)
-[X, Y, Z] = np.meshgrid(x_cords, y_cords, z_cords)
+df.plot(kind='scatter', x='sqft', y='price', color='red')
+plt.scatter(df['sqft'], prediction, color='green')
+plt.xlim([0, 3000])
 
-# print("x-shape ", x_cords.shape)
-# print("y-shape ", y_cords.shape)
-# print("z-shape ", prediction.shape)
-# print(prediction)
-
-fig, ax = plt.subplots(1, 1)
-ax.contourf(X, Y, Z)
-ax.set_title('Bathrooms & Square Footage vs Price')
-ax.set_xlabel('Bathrooms')
-ax.set_ylabel('Square Footage')
+df.plot(kind='scatter', x='bathrooms', y='price', color='red')
+plt.scatter(df['bathrooms'], prediction, color='green')
+plt.xlim([0, 200])
 plt.show()
-
-
