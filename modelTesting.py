@@ -12,22 +12,17 @@ prediction, predOrder = poly_model.training(df, 1)
 print(prediction.shape)
 
 # Visualize
-x_cords = np.linspace(df['bathrooms'].min(), df['bathrooms'].max(), len(df['bathrooms']))
-y_cords = np.linspace(df['sqft'].min(), df['sqft'].max(), len(df['sqft']))
-[X, Y] = np.meshgrid(x_cords, y_cords)
-print("x-shape ", x_cords.shape)
-print("y-shape ", y_cords.shape)
-print("z-shape ", prediction.shape)
-# print(prediction)
+df.plot(kind='scatter', x='sqft', y='price', color='red')
+plt.scatter(df['sqft'], prediction, color='green')
+plt.xlabel("Square-footage")
+plt.ylabel("Price (in millions)")
+plt.xlim([0, 3000])
+plt.savefig("sqft-vs-price.png")
 
-
-
-fig = plt.figure()
-ax = fig.gca(projection='3d')
-ax.plot_trisurf(x_cords.flatten(), y_cords.flatten(), prediction.flatten())
-ax.set_title('Bathrooms & Square Footage vs Price')
-ax.set_xlabel('Bathrooms')
-ax.set_ylabel('Square Footage')
+df.plot(kind='scatter', x='bathrooms', y='price', color='red')
+plt.scatter(df['bathrooms'], prediction, color='green')
+plt.xlabel("Number of bathrooms in property")
+plt.ylabel("Price (in millions)")
+plt.xlim([0, 200])
+plt.savefig("bathroooms-vs-price.png")
 plt.show()
-
-
