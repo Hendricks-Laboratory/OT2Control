@@ -34,7 +34,7 @@ def csv_to_pdf(file_list):
     for file_name in file_list:
         try:
             with open(file_name, newline='') as file:
-                csv_reader = csv.reader(file)
+                csv_reader = csv.DictReader(file)
 
                 row_index = 0
                 for row in csv_reader:
