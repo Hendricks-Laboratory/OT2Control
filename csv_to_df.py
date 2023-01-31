@@ -21,7 +21,6 @@ ID | reagenent conc.1 | reagenent conc.2 | ... | max absorbancy |
 
 """
 
-absorbancy_column_range = range(300, 1001)
 reagent_column_ids = ["ctab", "trisodium_citrate", "potassium_bromide", "silver_nitrate",
                       "sodium_borohydride", "hydrogen_peroxide", "e_ctab", "ectab"]
 
@@ -47,6 +46,11 @@ def csv_to_pdf(file_list):
                         row_data.append(row[r])
 
                     # find and add max absorbency
+                    lmax = float('-inf')
+                    for wl in range(300, 1001):
+                      wl = str(wl)
+                      lmax = max(lmax, float(row[wl]))
+                    row_data.append(lmax)
 
                     # add row to df
                     df.loc[row_index] = row_data
