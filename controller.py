@@ -3336,11 +3336,12 @@ class ScanDataFrame():
                 transfers_before_scans = []
                 react = str(react)
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()             
-         
+                print("transfer_times list = ", transfer_times)
                 for transfer_time in transfer_times:
-                 
+                    print("transfer_time = ", transfer_time)
+                    print("time = ", time)
                     if transfer_time <= time:
-                       
+                        print("yes, transfer_time<=time")
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
