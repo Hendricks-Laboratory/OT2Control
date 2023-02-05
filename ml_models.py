@@ -169,66 +169,6 @@ class DummyMLModel(MLModel):
     generate_seed_rxns.n_calls = 0
 
 
-class RandomModel(MLModel):
-    '''
-    This is a modellpseudorandom inference mode
-    ML model with the controller  
-    ATTRIBUTES:  
-        list<int> tids: a list of thread ids that this model has (or potentially some form of a
-          thread executor object  
-        bool quit: True indicates MLModel is ready to quit, False indicates MLModel would like
-          to keep going  
-        int curr_iter: formally, this is the number of times the train method has been called
-        int max_iters: the number of iters to execute before quiting  
-    '''
-
-    def __init__(self, y_shape, max_iters=np.inf, batch_size=5):
-        super().__init__(None, max_iters)  # don't have a model
-        self.y_shape = y_shape
-        self.batch_size = batch_size
-
-    def _train(self, X, y):
-        '''
-        This call should wait on any current training threads to complete  
-        This call should launch a training thread to retrain the model on the new data
-        training is also where current iteration is updated  
-        params:  
-            np.array X: shape (num_pts, num_features) the recieved data for each new well  
-            np.array y: shape(num_pts, n_classes) the labels to predict  
-        Postconditions:  
-            The model has been trained on the new data
-        '''
-        with self.model_lock:  # note for dummy this is not necessary, just an example
-            print('<<ML>> training!')
-
-    def predict(self):
-        '''
-        This call should wait on the training thread to complete if it is has not been collected
-        yet.  
-        params:  
-            int n_predictions: the number of instances to predict  
-        returns:  
-            np.array: shape is n_predictions, y.shape. Features are pi e-2  
-        '''
-        with self.model_lock:
-            print('<<ML>> generating preditions')
-        return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
-
-    def generate_seed_rxns(self):
-        '''
-        This method is called before the model is trained to generate a batch of training
-        points  
-        returns:  
-            np.array: (batch_size,n_features) 
-        '''
-        if self.generate_seed_rxns.n_calls == 0:
-            return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
-        else:
-            return np.ones((self.batch_size, self.y_shape)) * 2 * 3.1415e-2
-
-    generate_seed_rxns.n_calls = 0
-
-
 class LinReg(MLModel):
     '''
     params:
@@ -449,7 +389,7 @@ class SegmentedLinReg(MLModel):
         breakpoint()
         return np.repeat(y_pred, self.duplication, axis=0)
 
-    def train(self, df, target, r_val):
+    def training(self, df, target, r_val):
         '''
             Method to train the model.
             params:
@@ -518,7 +458,9 @@ class PolynomialRegression(MLModel):
         pass
 
     # TODO: Figure out optimization with this approach
-    def train(self, df, r_val):
+    # Resources for algorithm:
+    # https://scikit-learn.org/stable/modules/linear_model.html#polynomial-regression-extending-linear-models-with-basis-functions
+    def training(self, df, r_val):
         """
             Method to train the model.
             params:
@@ -580,6 +522,9 @@ class PolynomialRegression(MLModel):
         we want to be able to read in those bounds from elsewhere;
         this functionality will be implemented in a "warm-up" method and this method will be deprecated (hopefully)
 
+
+        this version of the seed generation method is very similar to the LinReg version;
+        the difference is we need to pass the order of the polynomial (?) the number of parameters we want to vary (?)
         """
         upper_bound = 2.5
         lower_bound = 0.25
@@ -594,5 +539,5 @@ class PolynomialRegression(MLModel):
         assign variables and boundaries to the experimental run before training the model, as well
         as generating seed reactions
         """
-	
+
         pass
