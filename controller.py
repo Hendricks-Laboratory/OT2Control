@@ -2155,7 +2155,7 @@ class AutoContr(Controller):
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
-            self._create_samples(wellnames, recipes)
+            self._create_samples(wellnames, recipes)  # why doesn't this method call model.predict()?
             #pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
