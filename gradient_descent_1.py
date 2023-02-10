@@ -5,7 +5,6 @@
 
 import numpy as np
 
-
 def gradient_descent(start, gradient, learn_rate, max_iter, tol=0.01):
     steps = [start]  # history tracking
     x = start

@@ -458,6 +458,8 @@ class PolynomialRegression(MLModel):
         pass
 
     # TODO: Figure out optimization with this approach
+    # Resources for algorithm:
+    # https://scikit-learn.org/stable/modules/linear_model.html#polynomial-regression-extending-linear-models-with-basis-functions
     def training(self, df, r_val):
         """
             Method to train the model.

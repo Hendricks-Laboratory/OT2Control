@@ -59,7 +59,7 @@ from sklearn.linear_model import Lasso
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel, LinReg
+from ml_models import DummyMLModel, LinReg, PolynomialRegression
 from exceptions import ConversionError
 
 
@@ -119,13 +119,14 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
-    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
+    #Changed Linear Regression to Polynomial Regression
+    ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
         auto.run_simulation(ml_model, no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
-        ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
+        ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
                 scan_bounds=(540,560),duplication=2)
         auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
 
@@ -1390,7 +1391,12 @@ class Controller(ABC):
             #get the names of all the scan files
             if 'scan' in callbacks:
                 dst = row['scan_filename'] #also the base name for all files to be merged
-                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps))]
+                if len(transfer_steps) <= 25:
+                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
+                elif len(transfer_steps) > 25:
+                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(26)] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps)-26)]
+                    callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
@@ -1415,7 +1421,11 @@ class Controller(ABC):
             callback_num must not be larger than 26 (alpha numeric characters are used. If you
               go larger than 26, you'll exceed alpha numeric)
         '''
-        callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        if callback_num <= 25:
+            callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
+        elif callback_num > 25:
+            callback_num -= 26
+            callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             self._stop(i)
@@ -2107,6 +2117,7 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
+        
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
         self._init_pr(simulate, no_pr)
@@ -2117,6 +2128,7 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
+        model = 
         recipes = model.generate_seed_rxns()
 
         #do the first one
