@@ -3,6 +3,7 @@ from abc import ABC
 from abc import abstractmethod
 import threading
 
+from sklearn.model_selection import train_test_split
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Lasso
 from sklearn.preprocessing import PolynomialFeatures
@@ -432,7 +433,7 @@ class SegmentedLinReg(MLModel):
 
 class PolynomialRegression(MLModel):
     def __init__(self, model, final_spectra, y_shape, max_iters, max_order, reagents_to_vary,
-                 batch_size=1, scan_bounds=None, duplication=1):
+                 batch_size=1, scan_bounds=None, duplication=1, degree=6):
         super().__init__(model,
                          max_iters)  # don't have a model (this comment was present when the JGB team began work, but its meaning is unclear)
         self.scan_bounds = scan_bounds
@@ -447,6 +448,9 @@ class PolynomialRegression(MLModel):
         self.max_order = max_order
         self.regresser = None
         self.reagents_varied = reagents_to_vary
+        self.poly_degree = degree
+        self.error_record = {}
+        self.train_call = 0
 
     # This code should resemble what's done in the LinearRegression class from Diego's MLA branch
     # The key difference is that we need to use self.regresser instead of a model instance this means
@@ -470,46 +474,31 @@ class PolynomialRegression(MLModel):
                 minErrorPred       : wavelength prediction made by the optimal model
                 minErrorIndex      : Degree of the polynomial that results in the minimum error
         """
-        reagentConcentrations = df[[s for s in self.reagents_varied]].values
+        X = df[[s for s in self.reagents_varied]].values
         # Changed this df name for testing purposes
-        _Y = df['price'].values
+        y = df['price'].values
         # _Y = df['Wavelength'].values
 
-        # print(df.describe())
-        # df.plot(kind='scatter', x='sqft', y='price', xlim=(0, 4000))
-        # plt.show()
-        # plt.plot(sorted(df['bathrooms'], reverse=True), _Y)
-        # plt.show()
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1 / 3, random_state=0)
+        poly_regressor = PolynomialFeatures(degree=self.poly_degree)
+        poly_x_values = poly_regressor.fit_transform(X_train)
+        poly_regressor.fit(poly_x_values, y_train)
 
-        accuracyRecord = {}
-        polyRecord = {}
-        for order in range(1, self.max_order + 1):
-            # Generate fitted model
-            poly = PolynomialFeatures(degree=order, include_bias=False)
-            _X = poly.fit_transform(reagentConcentrations)
+        # first run
+        if self.regresser is None:
+            linear_regressor = LinearRegression()
+            linear_regressor.fit(poly_x_values, y_train)
 
-            # Do a single regression to get error
-            regresser = LinearRegression()
-            regresser.fit(_X, _Y)
-            Y_pred = regresser.predict(_X)
+            self.regresser = linear_regressor
 
-            # Record accuracy
-            accuracyRecord[order] = mean_squared_error(_Y, Y_pred, squared=False)
-            polyRecord[order] = (regresser, Y_pred)
+        else:
+            # second run, simply refit and record error
+            self.regresser.fit(poly_x_values, y_train)
 
-        # Visualize poly degree vs error
-        x_axis = range(1, self.max_order + 1)
-        plt.scatter(x_axis, accuracyRecord.values(), color="green")
-        plt.plot(x_axis, accuracyRecord.values(), color="red")
-        plt.xlabel("Polynomial model degree")
-        plt.ylabel("Mean squared error")
-        plt.show()
-
-        minErrorIndex = min(accuracyRecord, key=accuracyRecord.get)
-        minErrorModel, minErrorPred = polyRecord[minErrorIndex]
-
-        self.regresser = minErrorModel
-        return minErrorPred, minErrorIndex
+        error = mean_squared_error(y_test, self.regresser.predict(X_test), squared=False)
+        self.error_record[self.train_call] = "Iteration {}\nMean Squared Error={}".format(self.train_call, error)
+        print(self.error_record[self.train_call])
+        self.train_call += 1
 
     def generate_seed_rxns(self):
         """
