@@ -464,7 +464,7 @@ class PolynomialRegression(MLModel):
     # TODO: Figure out optimization with this approach
     # Resources for algorithm:
     # https://scikit-learn.org/stable/modules/linear_model.html#polynomial-regression-extending-linear-models-with-basis-functions
-    def training(self, df, r_val):
+    def training(self, df):
         """
             Method to train the model.
             params:
@@ -479,23 +479,22 @@ class PolynomialRegression(MLModel):
         y = df['price'].values
         # _Y = df['Wavelength'].values
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1 / 3, random_state=0)
         poly_regressor = PolynomialFeatures(degree=self.poly_degree)
-        poly_x_values = poly_regressor.fit_transform(X_train)
-        poly_regressor.fit(poly_x_values, y_train)
+        X_poly = poly_regressor.fit_transform(X)
+        poly_regressor.fit(X_poly, y)
 
         # first run
         if self.regresser is None:
             linear_regressor = LinearRegression()
-            linear_regressor.fit(poly_x_values, y_train)
+            linear_regressor.fit(X_poly, y)
 
             self.regresser = linear_regressor
 
         else:
             # second run, simply refit and record error
-            self.regresser.fit(poly_x_values, y_train)
+            self.regresser.fit(X_poly, y)
 
-        error = mean_squared_error(y_test, self.regresser.predict(X_test), squared=False)
+        error = mean_squared_error(y, self.regresser.predict(X_poly), squared=False)
         self.error_record[self.train_call] = "Iteration {}\nMean Squared Error={}".format(self.train_call, error)
         print(self.error_record[self.train_call])
         self.train_call += 1
