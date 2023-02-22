@@ -1,15 +1,21 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import scipy.stats
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.preprocessing import StandardScaler, normalize
 
-dataset = pd.read_csv('TestingDatasets/pr_data/concatenatedData.csv')
+dataset = pd.read_csv('TestingDatasets/subtracted_and_concated.csv').drop(0)
+dataset = dataset.dropna(axis=1)
+
+df = dataset.iloc[:, 7:-1]
+df = df.drop(['time of last reagent added', 'last reagent added', 'temp', 'time'], axis=1)
+df = df[~df['sodium_borohydride'].astype(str).str.startswith('sodium_borohydride')]
 
 lmax_col = []
 absmax_col = []
-lamda_range = dataset.iloc[:, 18:1312].dropna(1)
+lamda_range = df.iloc[:, 4:-1]
 for i in range(lamda_range.shape[0]):
     # This is currently filling lambda_max with absorbance values
     # if the index == 0 then it is the actual wavelength of max absorbancy
@@ -17,26 +23,20 @@ for i in range(lamda_range.shape[0]):
     lmax_col.append(max_col[0])
     absmax_col.append(max_col[1])
 
-df = dataset.iloc[:, 6:14]
-df = df.assign(lambda_max=lmax_col, max_absorbance=absmax_col).dropna()
-print(df.head(3))
+df = df.iloc[:, 0:4]
+df_final = df.assign(lambda_max=lmax_col, max_absorb=absmax_col)
 
-# plt.matshow(df.corr())
-# plt.title("Correlation Matrix")
-# plt.show()
+corrmat = df_final.corr()
+f, ax = plt.subplots(figsize=(12, 9))
+sns.heatmap(corrmat, vmax=.8, square=True)
+plt.show()
 
-# All values
-vals = df.iloc[:, :-1].values
-
-# # Trying values where lambda_max isnt 300
-# vals = df.loc[df["lambda_max"] != 300]
-
-cols = list(df.columns)
-cols.remove("lambda_max")
-col_data = zip(cols, [vals[:, i] for i in range(8)])
-for cName, cData in col_data:
-    plt.scatter(cData, df["max_absorbance"].values, color='red')
-    plt.xlabel(cName)
-    plt.ylabel("Max Absorbance")
-    plt.title("{} vs Max Absorbance".format(cName))
+names = list(df_final.columns)[0:4]
+for i in range(4):
+    plt.scatter(sorted(df_final.iloc[:, i].values), sorted(df_final['lambda_max']))
+    plt.xlabel(names[i])
+    plt.ylabel("Lambda-max")
+    plt.title("{} vs Lambda-max".format(names[i]))
     plt.show()
+
+
