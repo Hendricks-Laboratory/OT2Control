@@ -169,6 +169,37 @@ class DummyMLModel(MLModel):
 
     generate_seed_rxns.n_calls = 0
 
+    def search_over_reaction_space(self, desiredAbsorption, tolerance, guess1, guess2):
+        '''
+        This method executes a binary search algorithm on reaction space by generating seed values
+        and using the current model to predict the final max absorbence value of a reaction given
+        these concentrations. It generates such seeds until it finds a set of values with predicted
+        max absorbences on either side of the desired value. It then executes a prediction on the
+        midpoint of these sets of values.
+        '''
+        lowAcceptable = desiredAbsorption - tolerance
+        highAcceptable = desiredAbsorption + tolerance 
+        if no guess1:
+            guess1 = self.generate_seed_rxns()
+        if no guess2:
+            guess2 = self.generate_seed_rxns()
+        if  self.predict(guess1) < highAcceptable and self.predict(guess1) > lowAcceptable:
+            return guess1
+        
+        if self.predict(guess1) > highAcceptable:
+            while (self.predict(guess2) > lowAcceptable):
+                guess2 = self.generate_seed_rxns()
+            #find midpoint
+            guess1 = [(e1 + e2) / 2 for e1, e2 in zip(guess1, guess2)]
+            search_over_reaction_space(self, desiredAbsorption, tolerance, guess1, guess2)
+
+
+        if self.predict(guess1) < lowAcceptable:
+            while (self.predict(guess2) < highAcceptable):
+                guess2 = self.generate_seed_rxns()
+            guess2 = [(e1 + e2) / 2 for e1, e2 in zip(guess1, guess2)]
+            search_over_reaction_space(self, desiredAbsorption, tolerance, guess2, guess1)
+
 
 class LinReg(MLModel):
     '''
@@ -529,3 +560,5 @@ class PolynomialRegression(MLModel):
         """
 
         pass
+
+
