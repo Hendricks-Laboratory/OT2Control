@@ -487,10 +487,11 @@ class PolynomialRegression(MLModel):
     # The key difference is that we need to use self.regresser instead of a model instance this means
     # that we will need to look at the sklearn docs to see what attributes the sklearn.LinearRegression class
     # has and then add new features while needed (i.e. probably some extra caching capability)
-    def predict(self, Y_wt):
+    def predict(self, X):
         if self.regresser is None:
             raise Exception("Cannot make a prediction until training has occured at least once")
-        pass
+        else:
+            return self.regressor.predict(PolynomialFeatures(degree=self.poly_degree).fit_transform(X))
 
     # TODO: Figure out optimization with this approach
     # Resources for algorithm:
