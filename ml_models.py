@@ -179,9 +179,9 @@ class DummyMLModel(MLModel):
         '''
         lowAcceptable = desiredAbsorption - tolerance
         highAcceptable = desiredAbsorption + tolerance 
-        if no guess1:
+        if not guess1:
             guess1 = self.generate_seed_rxns()
-        if no guess2:
+        if not guess2:
             guess2 = self.generate_seed_rxns()
         if  self.predict(guess1) < highAcceptable and self.predict(guess1) > lowAcceptable:
             return guess1
@@ -506,9 +506,9 @@ class PolynomialRegression(MLModel):
                 minErrorPred       : wavelength prediction made by the optimal model
                 minErrorIndex      : Degree of the polynomial that results in the minimum error
         """
-        X = df[[s for s in self.reagents_varied]].values
+        X = df.iloc[:, :].values
         # Changed this df name for testing purposes
-        y = df['price'].values
+        y = df['Wavelength'].values
         # _Y = df['Wavelength'].values
 
         poly_regressor = PolynomialFeatures(degree=self.poly_degree)
@@ -549,7 +549,7 @@ class PolynomialRegression(MLModel):
         upper_bound = 2.5
         lower_bound = 0.25
         recipes = np.random.rand(self.batch_size, self.y_shape) * (upper_bound - lower_bound) + lower_bound
-        print("seed, " + recipes)
+        print("seed, " + np.array_str(recipes))
         recipes = np.repeat(recipes, self.duplication, axis=0)
         return recipes
 
