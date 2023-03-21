@@ -26,6 +26,7 @@ class ConversionError(RuntimeError):
         self.total_vol = total_vol
         self.ratio = ratio
         self.empty_reagents = empty_reagents
+        print(reagent)
 
 #ot2_robot
 class EmptyReagent(RuntimeError):
@@ -41,4 +42,5 @@ class EmptyReagent(RuntimeError):
             str chem_name: the chemical name of this reagent
         '''
         self.chem_name = chem_name
+        print(chem_name)
         super().__init__(message)

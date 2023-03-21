@@ -2167,7 +2167,7 @@ class AutoContr(Controller):
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
-            recipes = model.predict()
+            recipes = model.search_over_reaction_space(0.537, 0.001, recipes[0], recipis[1])
             #threaded train on scans. Will run while the robot is generating new materials
             self.batch_num += 1
         self.close_connection()
@@ -2216,7 +2216,8 @@ class AutoContr(Controller):
                 self._insert_tot_vol_transfer()
                 if self.tot_vols: #has at least one element
                     if (self.rxn_df.loc[0,self._products] < 0).any():
-                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                        print(np.where(self.rxn_df.loc[0, self._products] < 0))
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution" + str(np.where(self.rxn_df.loc[0, self._products] < 0)))
                 successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
