@@ -3415,7 +3415,7 @@ class ScanDataFrame():
                 
                 l_index = re.search('rxn', a).end()
                 r_index = a.rfind('c')
-                wellnamenumber = int(a[l_index:r_index])
+                wellnamenumber = a[l_index:r_index]
                
                 wellnamenumbers.append(wellnamenumber)
             else:
@@ -3424,8 +3424,15 @@ class ScanDataFrame():
         
         df['wellnameorder'] = wellnamenumbers
         
-        df.sort_values(by=['time', 'wellnameorder'], inplace = True)
+        # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
+        df['num'] = df['col'].str.extract('(\d+)').astype(int)
+        df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
         
+         # Sort by 'time', then 'num' and 'alpha'
+        df.sort_values(by=['time', 'alpha', 'num'], inplace = True)
+        
+        # Drop the 'num' and 'alpha' and 'wellnameorder' columns, they are no longer needed
+        df = df.drop(columns=['num', 'alpha'])
         df.drop('wellnameorder', axis=1,inplace=True)
         
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
