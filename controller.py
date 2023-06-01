@@ -3406,34 +3406,34 @@ class ScanDataFrame():
         if 'water' in df.columns:
             df.drop('water', axis=1,inplace=True)
         
-        wellnames = df['well name'].tolist()
-        wellnamenumbers = []
-        for i in wellnames:
-            print(i,'you')
-            a = i.lower()
-            if 'blank' not in i and 'control' not in i:
+#         wellnames = df['well name'].tolist()
+#         wellnamenumbers = []
+#         for i in wellnames:
+#             print(i,'you')
+#             a = i.lower()
+#             if 'blank' not in i and 'control' not in i:
                 
-                l_index = re.search('rxn', a).end()
-                r_index = a.rfind('c')
-                wellnamenumber = a[l_index:r_index]
+#                 l_index = re.search('rxn', a).end()
+#                 r_index = a.rfind('c')
+#                 wellnamenumber = a[l_index:r_index]
                
-                wellnamenumbers.append(wellnamenumber)
-            else:
-                wellnamenumbers.append(0)
-            #print(l)
+#                 wellnamenumbers.append(wellnamenumber)
+#             else:
+#                 wellnamenumbers.append(0)
+#             #print(l)
         
-        df['wellnameorder'] = wellnamenumbers
+#         df['wellnameorder'] = wellnamenumbers
         
-        # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
-        df['num'] = df['col'].str.extract('(\d+)').astype(int)
-        df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
+#         # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
+#         df['num'] = df['col'].str.extract('(\d+)').astype(int)
+#         df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
         
-         # Sort by 'time', then 'num' and 'alpha'
-        df.sort_values(by=['time', 'alpha', 'num'], inplace = True)
+#          # Sort by 'time', then 'num' and 'alpha'
+        df.sort_values(by=['time'], inplace = True)
         
         # Drop the 'num' and 'alpha' and 'wellnameorder' columns, they are no longer needed
-        df = df.drop(columns=['num', 'alpha'])
-        df.drop('wellnameorder', axis=1,inplace=True)
+#         df = df.drop(columns=['num', 'alpha'])
+#         df.drop('wellnameorder', axis=1,inplace=True)
         
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
 
