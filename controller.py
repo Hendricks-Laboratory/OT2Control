@@ -1047,7 +1047,7 @@ class Controller(ABC):
             every step in the protocol has been sent to the robot  
         '''
         for i, row in self.rxn_df.iterrows():
-            print("<<controller>> executing command {} of the protocol df with operation {}.".format(i, row['op']))
+            print("<<controller>> executing command {} of the protocol df with operation {}.".format(i+4, row['op'])) # added 4 to align with order in Gsheets
             if row['op'] == 'transfer':
                 self._send_transfer_command(row,i)
             elif row['op'] == 'pause':
