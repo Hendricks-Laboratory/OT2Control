@@ -1311,7 +1311,7 @@ class OT2Robot():
         offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]
         labware.set_offset(**offset)
 
-     def _init_labware(self, labware_df, using_temp_ctrl):
+    def _init_labware(self, labware_df, using_temp_ctrl):
         '''
         initializes the labware objects in the protocol and pipettes.
         params:  
