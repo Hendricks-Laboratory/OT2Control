@@ -1044,7 +1044,7 @@ class OT2Robot():
             return func
         return echo_func
 
-    def __init__(self, simulate, using_temp_ctrl, temp, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
+    def __init__(self, simulate, using_temp_ctrl, labware_df, instruments, reagent_df, my_ip, controller_ip, portal, dry_containers_df):
         '''
         params:  
             bool simulate: if true, the robot will run in simulation mode only  
@@ -1106,7 +1106,7 @@ class OT2Robot():
                 if x else [])
         self._init_params()
         self._init_directories()
-        self._init_labware(labware_df, using_temp_ctrl, temp)
+        self._init_labware(labware_df, using_temp_ctrl)
         self._init_dry_containers(dry_containers_df)
         self._init_instruments(instruments, labware_df)
         self._init_reagents(reagent_df)
@@ -1240,7 +1240,7 @@ class OT2Robot():
         self.protocol.max_speeds['X'] = 250
         self.protocol.max_speeds['Y'] = 250
 
-    def _init_temp_mod(self, name, using_temp_ctrl, temp, deck_pos, empty_tubes):
+    def _init_temp_mod(self, name, using_temp_ctrl, deck_pos, empty_tubes):
         '''
         initializes the temperature module  
         params:  
@@ -1257,12 +1257,12 @@ class OT2Robot():
         '''
         if using_temp_ctrl:
             self.temp_module = self.protocol.load_module('temperature module gen2', 3)
-            self.temp_module.set_temperature(temp)
+            #self.temp_module.set_temperature(temp)
             opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
             labware = self.temp_module.load_labware(opentrons_name,label=name)
             #this will always be a tube holder
             self._add_to_deck(name, deck_pos, labware, empty_containers=empty_tubes)
-            assert( temp >= 4 and temp <= 95), "invalid temperature defined"
+            #assert( temp >= 4 and temp <= 95), "invalid temperature defined"
     
 
         
@@ -1311,7 +1311,7 @@ class OT2Robot():
         offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]
         labware.set_offset(**offset)
 
-    def _init_labware(self, labware_df, using_temp_ctrl, temp):
+     def _init_labware(self, labware_df, using_temp_ctrl):
         '''
         initializes the labware objects in the protocol and pipettes.
         params:  
@@ -1321,13 +1321,16 @@ class OT2Robot():
         '''
         for deck_pos, name, first_usable, empty_list in labware_df.itertuples(index=False):
             #diff types of labware need diff initializations
-            if self._LABWARE_TYPES[name]['definition_path']:
+            if self._LABWARE_TYPES[name]['definition_path'] and 'temp_mod' not in self._LABWARE_TYPES[name]['groups']:
                 #plate readers (or other custom?)
                 self._init_custom_labware(name, deck_pos, first_well=first_usable)
             elif 'temp_mod' in self._LABWARE_TYPES[name]['groups']:
                 #temperature controlled racks
-                self._init_temp_mod(name, using_temp_ctrl, 
-                        temp, deck_pos, empty_tubes=empty_list)
+                if using_temp_ctrl:
+                    self._init_temp_mod(name, using_temp_ctrl, deck_pos, empty_tubes=empty_list)
+                else:
+                    self._init_custom_labware(name, deck_pos, first_well=first_usable)
+
             else:
                 #everything else
                 opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
@@ -1884,7 +1887,36 @@ class OT2Robot():
         filenames = list(os.listdir(self.logs_p))
         filepaths = [os.path.join(self.logs_p, filename) for filename in filenames]
         self.portal.send_ftp(filepaths)
-        
+
+    @exec_func('temp_change', 1, True, exec_funcs)
+    def _exec_temp_change(self, temp):
+        '''
+        initializes temp module
+        Postconditions:  
+          
+        '''
+        print('<<eve>> initializing breakdown')
+        #shutdown temperature controller
+        if self.temp_module:
+            self.temp_module.set_temperature(temp)
+        else:
+            x=0
+            #init temp
+            #self._init_temp_mod()
+
+    @exec_func('temp_off', 1, True, exec_funcs)
+    def _exec_temp_off(self):
+        '''
+        deactivates the temp controller
+        Postconditions:  
+          tips have been dropped, temp module is off, socket is closed  
+        '''
+
+        #shutdown temperature controller
+        if self.temp_module:
+            self.temp_module.deactivate()
+            print('temperature controller is off')    
+    
     def _error_handler(self, e):
         try:
             print('''<<eve>> ----------------Eve Errror--------------
@@ -1924,11 +1956,11 @@ def launch_eve_server(**kwargs):
     eve = None
     pack_type, cid, args = portal.recv_pack()
     if pack_type == 'init':
-        simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df, controller_ip, dry_containers_df = args
+        simulate, using_temp_ctrl, labware_df, instruments, reagents_df, controller_ip, dry_containers_df = args
         #I don't know why this line is needed, but without it, Opentrons crashes because it doesn't
         #like to be run from a thread
         asyncio.set_event_loop(asyncio.new_event_loop())
-        eve = OT2Robot(simulate, using_temp_ctrl, temp, labware_df, instruments, reagents_df,my_ip, controller_ip, portal, dry_containers_df)
+        eve = OT2Robot(simulate, using_temp_ctrl, labware_df, instruments, reagents_df,my_ip, controller_ip, portal, dry_containers_df)
         portal.send_pack('ready', cid)
     connection_open=True
     while connection_open:
