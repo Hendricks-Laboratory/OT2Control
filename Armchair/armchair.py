@@ -43,7 +43,7 @@ class Armchair():
     '''
 
     FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
-    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F','save':b'\x10','temp_change':b'\x11','temp_off':b'\x12'})
+    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F','save':b'\x10'})
     GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req', 'save','error'] 
     #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible
