@@ -2167,7 +2167,7 @@ class AutoContr(Controller):
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
-            recipes = model.search_over_reaction_space(0.537, 0.001, recipes[0], recipis[1])
+            recipes = model.search_over_reaction_space(0.537, 0.001, recipes[0], recipes[1])
             #threaded train on scans. Will run while the robot is generating new materials
             self.batch_num += 1
         self.close_connection()
