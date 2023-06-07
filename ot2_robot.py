@@ -1698,7 +1698,7 @@ class OT2Robot():
         #now that you're clean, you can pick up new tips
         for arm in drop_list:
             print(self.pipettes[arm])
-            print(self.pipettes[arm]['pipette']
+            print(self.pipettes[arm]['pipette'])
             self.pipettes[arm]['pipette'].pick_up_tip()
             self.pipettes[arm]['last_used'] = 'clean'
         
