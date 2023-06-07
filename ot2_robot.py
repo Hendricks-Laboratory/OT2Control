@@ -1375,6 +1375,7 @@ class OT2Robot():
             pipette.pick_up_tip()
             #update self.pipettes
             self.pipettes[arm_pos] = {'size':float(pipette_size),'last_used':'clean','pipette':pipette}
+            print(self.pipettes[arm_pos])
         return
 
     def _lexo_argmax(self, s):
@@ -1690,13 +1691,18 @@ class OT2Robot():
         #drop first so no sprinkles get on rack while picking up
         ok_list = ['clean','WaterC1.0']
         for arm in self.pipettes.keys():
+            print(self.pipettes[arm]['last_used'])
             if self.pipettes[arm]['last_used'] not in ok_list:
                 self.pipettes[arm]['pipette'].drop_tip()
                 drop_list.append(arm)
         #now that you're clean, you can pick up new tips
         for arm in drop_list:
+            print(self.pipettes[arm])
+            print(self.pipettes[arm]['pipette']
             self.pipettes[arm]['pipette'].pick_up_tip()
             self.pipettes[arm]['last_used'] = 'clean'
+        
+   
 
     def _get_preffered_pipette(self, vol):
         '''
