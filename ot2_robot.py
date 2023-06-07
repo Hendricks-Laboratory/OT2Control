@@ -1375,7 +1375,7 @@ class OT2Robot():
             pipette.pick_up_tip()
             #update self.pipettes
             self.pipettes[arm_pos] = {'size':float(pipette_size),'last_used':'clean','pipette':pipette}
-            print("init info:"
+            print("init info:")
             print(self.pipettes[arm_pos])
             print(self.pipettes[arm_pos]['pipette'].tip_racks)
         return
