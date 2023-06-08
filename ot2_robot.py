@@ -1299,6 +1299,8 @@ class OT2Robot():
         '''
         groups = self._LABWARE_TYPES[name]['groups']
         if 'tube_holder' in groups:
+            if 'temp_mod' in groups:
+                print(kwargs)
             self.lab_deck[deck_pos] = TubeHolder(labware, kwargs['empty_containers'], deck_pos)
         elif 'WellPlate96' in groups:
             self.lab_deck[deck_pos] = WellPlate96(labware, kwargs['first_well'], deck_pos)
