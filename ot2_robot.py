@@ -1374,6 +1374,8 @@ class OT2Robot():
             #get the row with the largest lexographic starting tip e.g. (B1 > A0)
             #and then get the deck position
             #this is the tip rack that has used tips
+            print("this is tip row befor lexo_argmax")
+            print(tip_rows['first_usable'])
             used_rack_row = tip_rows.loc[self._lexo_argmax(tip_rows['first_usable'])]
             #get opentrons object
             used_rack = self.protocol.loaded_labwares[used_rack_row['deck_pos']]
