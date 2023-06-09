@@ -1331,7 +1331,8 @@ class OT2Robot():
                 if using_temp_ctrl:
                     self._init_temp_mod(name, using_temp_ctrl, deck_pos, empty_tubes=empty_list)
                 else:
-                    self._init_custom_labware(name, deck_pos, first_well=first_usable,empty_containers=empty_list)
+                    self._init_custom_labware(name, deck_pos, empty_containers=empty_list)
+                    print('initializing '+self._LABWARE_TYPES[name]['groups']+' as custom labware.')
             else:
                 #everything else
                 opentrons_name = self._LABWARE_TYPES[name]['opentrons_name']
