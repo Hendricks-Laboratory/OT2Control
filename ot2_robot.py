@@ -1699,10 +1699,14 @@ class OT2Robot():
         ok_list = ['clean','WaterC1.0']
         for arm in self.pipettes.keys():
             if self.pipettes[arm]['last_used'] not in ok_list:
+                print(self.pipettes[arm]['pipette'])
+                print('Dropping tip at {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
                 self.pipettes[arm]['pipette'].drop_tip()
                 drop_list.append(arm)
         #now that you're clean, you can pick up new tips
         for arm in drop_list:
+            print(self.pipettes[arm]['pipette'])
+            print('Picking up tip at {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
             self.pipettes[arm]['pipette'].pick_up_tip()
             self.pipettes[arm]['last_used'] = 'clean'
 
