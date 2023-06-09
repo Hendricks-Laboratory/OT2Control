@@ -1369,6 +1369,8 @@ class OT2Robot():
             tip_racks = [self.protocol.loaded_labwares[deck_pos] for deck_pos in tip_rows['deck_pos']]
             #load the pipette
             pipette = self.protocol.load_instrument(opentrons_name,arm_pos,tip_racks=tip_racks)
+            print('{} tip racks include:'.format(pipette_size))
+            print(pipette.tip_racks)
             #get the row with the largest lexographic starting tip e.g. (B1 > A0)
             #and then get the deck position
             #this is the tip rack that has used tips
@@ -1377,6 +1379,7 @@ class OT2Robot():
             used_rack = self.protocol.loaded_labwares[used_rack_row['deck_pos']]
             #set starting tip
             pipette.starting_tip = used_rack.well(used_rack_row['first_usable'])
+            print('First usable {} tip at {}'.format(pipette_size,pipette.starting_tip))
             pipette.pick_up_tip()
             #update self.pipettes
             self.pipettes[arm_pos] = {'size':float(pipette_size),'last_used':'clean','pipette':pipette}
@@ -1686,7 +1689,7 @@ class OT2Robot():
 
     def _get_clean_tips(self):
         '''
-        checks if the both tips to see if they're dirty. Drops anything that's dirty, then picks
+        checks both tips to see if they're dirty. Drops anything that's dirty, then picks
         up clean tips  
         params:  
             str ok_chems: if you're ok reusing the same tip for this chemical, no need to replace  
