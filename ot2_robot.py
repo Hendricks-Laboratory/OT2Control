@@ -1709,6 +1709,8 @@ class OT2Robot():
         for arm in drop_list:
             print(self.pipettes[arm]['pipette'])
             print('Picking up tip at {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
+            print(' ')
+            print('associated tip racks: {}'.format(self.pipettes[arm]['pipette'].tip_racks))
             self.pipettes[arm]['pipette'].pick_up_tip()
             self.pipettes[arm]['last_used'] = 'clean'
 
