@@ -120,7 +120,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     Y_SHAPE = 1 #number of reagents to learn on
     #Changed Linear Regression to Polynomial Regression
-    ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=3, max_order=0, reagents_to_vary=[],
+    #ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=3, max_order=0, reagents_to_vary=[],
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
         auto.run_simulation(ml_model, no_pr=no_pr)
