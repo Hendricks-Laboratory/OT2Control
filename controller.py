@@ -122,8 +122,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     #Changed Linear Regression to Polynomial Regression
     #ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=3, max_order=0, reagents_to_vary=[],
                 #scan_bounds=(540,560), duplication=2)
+    ml_model = None
     if not no_sim:
-        auto.run_simulation(ml_model, no_pr=no_pr)
+        auto.run_simulation(ml_model,no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
         ml_model = PolynomialRegression(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
