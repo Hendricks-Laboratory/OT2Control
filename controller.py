@@ -1389,18 +1389,24 @@ class Controller(ABC):
             #merge all the scans into a single file if there were any scans
             #get the names of all the scan files
             if 'scan' in callbacks:
-                dst = row['scan_filename'] #also the base name for all files to be merged
-                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps))]
-                if len(transfer_steps) <= 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
-                elif len(transfer_steps) > 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(26)] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps)-26)]
-                    callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
+                dst = row['scan_filename']  # also the base name for all files to be merged
+                scan_names = self.generate_scan_names(dst, len(transfer_steps))
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
         
         self.save()
+
+    def generate_scan_names(dst, transfer_steps):
+        alphabet = [chr(i+97) for i in range(26)]
+        scan_names = []
+
+        for i in range(transfer_steps):
+            quotient, remainder = divmod(i, 26)
+            name = '{}-{}'.format(dst, (alphabet[remainder] * (quotient + 1)))
+            scan_names.append(name)
+
+        return scan_names
 
     def _send_callback(self, callback, product, callback_num, row, i):
         '''
