@@ -1095,9 +1095,9 @@ class OT2Robot():
 
         if simulate:
             # define version number and define protocol object
-            self.protocol = opentrons.simulate.get_protocol_api('2.12')
+            self.protocol = opentrons.simulate.get_protocol_api('2.14')
         else:
-            self.protocol = opentrons.execute.get_protocol_api('2.12')
+            self.protocol = opentrons.execute.get_protocol_api('2.14')
             self.protocol.set_rail_lights(on = True)
             self.protocol.rail_lights_on 
         self.protocol.home() # Homes the pipette tip
