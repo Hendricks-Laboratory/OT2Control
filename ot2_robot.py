@@ -883,7 +883,7 @@ class WellPlate(Labware):
         #allow for none initialization
         all_wells = labware.wells()
         self.current_well = 0
-        while self.current_well < len(all_wells) and all_wells[self.current_well]._core._name != first_well:
+        while self.current_well < len(all_wells) and all_wells[self.current_well]._impl._name != first_well:
             self.current_well += 1
         #if you overflowed you'll be correted here
         self.full = self.current_well >= len(labware.wells())
@@ -905,7 +905,7 @@ class WellPlate(Labware):
                 #have a well that works
                 self.current_well += 1
                 self.full = self.current_well >= len(self.labware.wells())
-                return well._core._name
+                return well._impl._name
             else:
                 #requested volume is too large
                 return None
