@@ -674,5 +674,5 @@ class LatinHypercubeMLModel(MLModel):
         latinHyperSample = lhs(self.y_shape, samples=self.batch_size)
         return latinHyperSample
     
-
+#Made changes
     
