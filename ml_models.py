@@ -597,7 +597,8 @@ class BayesianOptMLModel(MLModel):
         train(X, y) None: see base class
         _train(X, y) None: trains the BayesianOptMLModel on the input data X and output data y.
         predict() np.array: makes predictions using the BayesianOptMLModel.
-        generate_seed_rxns() np.array: generates seed reactions for the BayesianOptMLModel.
+        mse() float: Calculates the Mean Squared Error (mse) for the current model configuration.
+        generate_seed_rxns() np.array: generates seed reactions for the BayesianOptMLModel. 
         
     INHERITED METHODS:
         update_quit()
@@ -627,6 +628,27 @@ class BayesianOptMLModel(MLModel):
         with self.model_lock:
             return self.model.predict()
 
+    def mse(self):
+        """
+        Calculates the Mean Squared Error (mse) for the current model configuration.
+        
+        return: float, which represents the mse.
+        """
+        x_train, x_test, y_train, y_test = train_test_split(self.X, self.y, test_size=0.2, random_state=0)
+        self.model.fit(x_train, y_train)
+        # somehow call the predict function to get our target?
+        # predict gives off
+        y_pred = predict()
+        return  mean_squared_error(y_test, y_pred)
+      
+    def _mse(self, y_target, y_pred):
+        """
+        Calculates the Mean Squared Error (mse) for the current model configuration.
+        
+        return: float, which represents the mse.
+        """
+        return  mean_squared_error(y_target, y_pred)
+        
     def generate_seed_rxns(self):
         x_next = self.model.suggest_next_locations()
         return x_next
@@ -673,6 +695,3 @@ class LatinHypercubeMLModel(MLModel):
     def generate_seed_rxns(self):
         latinHyperSample = lhs(self.y_shape, samples=self.batch_size)
         return latinHyperSample
-    
-#Made changes
-    
