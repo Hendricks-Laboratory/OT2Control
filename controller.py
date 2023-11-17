@@ -2271,7 +2271,7 @@ class AutoContr(Controller):
         print("Shapes:")
         print("wellnames:", n_wellnames.shape)
         print("recipes:", recipes.shape[0])
-        print("self.reagent_order:", self.reagent_order)
+        print("self.reagent_order:", self.reagent_order.shape)
 
         print("Contents:")
         print("wellnames:", wellnames)
