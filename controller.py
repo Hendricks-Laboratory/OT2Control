@@ -2268,6 +2268,9 @@ class AutoContr(Controller):
         '''
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         n_wellnames = np.array(wellnames)
+        n_wellnames_reshaped = n_wellnames.reshape(2,1)
+        n_reagent_order = self.reagent_order.reshape(2,1)
+
         print("Shapes:")
         print("wellnames:", n_wellnames.shape)
         print("recipes:", recipes.shape[0])
