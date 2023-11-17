@@ -2267,8 +2267,9 @@ class AutoContr(Controller):
             self.tot_vols has been updated to 
         '''
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        n_wellnames = np.array(wellnames)
         print("Shapes:")
-        print("wellnames:", wellnames)
+        print("wellnames:", n_wellnames.shape)
         print("recipes:", recipes.shape[0])
         print("self.reagent_order:", self.reagent_order)
 
