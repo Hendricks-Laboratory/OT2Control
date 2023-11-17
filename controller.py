@@ -2269,12 +2269,12 @@ class AutoContr(Controller):
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         print("Shapes:")
         print("wellnames:", wellnames)
-        print("recipes:", recipes)
+        print("recipes:", recipes.shape[0])
         print("self.reagent_order:", self.reagent_order)
 
         print("Contents:")
         print("wellnames:", wellnames)
-        print("recipes:", recipes)
+        print("recipes:", recipes.shape)
         print("self.reagent_order:", self.reagent_order)
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         self._update_cached_locs('all')
