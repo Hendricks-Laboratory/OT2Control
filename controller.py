@@ -118,7 +118,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
-    Y_SHAPE = 1 #number of reagents to learn on
+    #number of reagents to learn on
+    print(auto.rxn_df.describe())
+    print(auto.rxn_df.head(20))
+    print(auto.rxn_df)
+    Y_SHAPE = 1
     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
