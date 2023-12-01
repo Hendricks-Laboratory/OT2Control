@@ -2271,7 +2271,21 @@ class AutoContr(Controller):
             self.tot_vols has been updated to 
         '''
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
-        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        n_wellnames = np.array(wellnames)
+        n_wellnames_reshaped = n_wellnames.reshape(2,2)
+        n_reagent_order = self.reagent_order.reshape(2,2)
+        n_recipes = recipes.reshape(2,2)
+
+        print("Shapes:")
+        print("wellnames:", n_wellnames_reshaped.shape)
+        print("recipes:", n_recipes.shape)
+        print("self.reagent_order:", n_reagent_order.shape)
+
+        print("Contents:")
+        print("wellnames:", n_wellnames_reshaped)
+        print("recipes:", n_recipes)
+        print("self.reagent_order:", n_reagent_order)
+        recipe_df = pd.DataFrame(n_recipes, index=n_wellnames_reshaped, columns=n_reagent_order)
         self._update_cached_locs('all')
         def build_product_rows(row):
             '''
