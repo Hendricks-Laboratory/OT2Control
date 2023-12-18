@@ -122,7 +122,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print(auto.rxn_df.describe())
     print(auto.rxn_df.head(20))
     print(auto.rxn_df)
-    Y_SHAPE = 1
+    Y_SHAPE = auto.y_shape# number of reagents to learn on
     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
@@ -2045,11 +2045,15 @@ class AutoContr(Controller):
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
+        self.y_shape = get_y_shape()
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         self._clean_template() #moves template data out of the data for rxn_df
 
+    def get_y_shape(self):
+        transfers= self.rxn_df[self.rxn_df['op']== 'transfer']
+        rxn_df
  
     def run_simulation(self,model=None,no_pr=False):
         '''
@@ -2272,20 +2276,20 @@ class AutoContr(Controller):
         '''
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         n_wellnames = np.array(wellnames)
-        n_wellnames_reshaped = n_wellnames.reshape(2,2)
-        n_reagent_order = self.reagent_order.reshape(2,2)
-        n_recipes = recipes.reshape(2,2)
+        #n_wellnames_reshaped = n_wellnames.reshape(2,2)
+        #n_reagent_order = self.reagent_order.reshape(2,2)
+        #n_recipes = recipes.reshape(2,2)
 
         print("Shapes:")
-        print("wellnames:", n_wellnames_reshaped.shape)
-        print("recipes:", n_recipes.shape)
-        print("self.reagent_order:", n_reagent_order.shape)
+        print("wellnames:", n_wellnames.shape)
+        print("recipes:", recipes.shape)
+        print("self.reagent_order:", self.reagent_order.shape)
 
         print("Contents:")
-        print("wellnames:", n_wellnames_reshaped)
-        print("recipes:", n_recipes)
-        print("self.reagent_order:", n_reagent_order)
-        recipe_df = pd.DataFrame(n_recipes, index=n_wellnames_reshaped, columns=n_reagent_order)
+        print("wellnames:", n_wellnames)
+        print("recipes:", recipes)
+        print("self.reagent_order:", self.reagent_order)
+        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         self._update_cached_locs('all')
         def build_product_rows(row):
             '''
