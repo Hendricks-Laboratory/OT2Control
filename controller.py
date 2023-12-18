@@ -2045,7 +2045,7 @@ class AutoContr(Controller):
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
-        self.y_shape = get_y_shape()
+        self.y_shape = self.get_y_shape()
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
@@ -2053,7 +2053,7 @@ class AutoContr(Controller):
 
     def get_y_shape(self):
         transfers= self.rxn_df[self.rxn_df['op']== 'transfer']
-        rxn_df
+        return transfers['conc'].values
  
     def run_simulation(self,model=None,no_pr=False):
         '''
