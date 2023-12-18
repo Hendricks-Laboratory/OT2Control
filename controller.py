@@ -2052,8 +2052,14 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
 
     def get_y_shape(self):
-        transfers= self.rxn_df[self.rxn_df['op']== 'transfer']
-        return transfers['conc'].values
+        # Filter the DataFrame for rows where 'op' equals 'transfer'
+        transfers = self.rxn_df[self.rxn_df['op'] == 'transfer']
+
+        # Count the number of empty (null or NaN) values in the 'conc' column
+        num_empty_values = transfers['conc'].isnull().sum()
+
+        return num_empty_values
+
  
     def run_simulation(self,model=None,no_pr=False):
         '''
