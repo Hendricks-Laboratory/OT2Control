@@ -2168,7 +2168,12 @@ class AutoContr(Controller):
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #plan and execute a reaction
+            #plan and execute a reaction + multiple instances
+            instance_wellnames_list = self._create_multiple_samples(wellnames, recipes, num_instances=3)
+            # create samples for each of the wellnames (creatin duplicate reactions)
+            for i in instance_wellnames_list:
+                self._create_samples(i, recipes)
+            # Oak TODO: Need to add in the majority aspect to code (choosing the two reactions and leaving out the one that might have air bubbles).
             self._create_samples(wellnames, recipes)
             #pull in the scan data
             filenames = self.rxn_df[
@@ -2184,6 +2189,31 @@ class AutoContr(Controller):
         self.close_connection()
         self.pr.shutdown()
         return
+    
+    def _create_multiple_samples(self, wellnames, recipes, num_duplicate_reactions=3):
+        '''
+        Creates multiple instances of reactions based on the provided recipes and wellnames.
+        params:
+            list<str> wellnames: the names of the wells to be scanned  
+            np.array recipes: shape(n_predicted, n_reagents). Holds ratios of all the reagents
+              you can use for each reaction you want to perform  
+            int num_duplicate reactions: number of duplicate reactions wanting to perform (hardcoded to 3)?
+
+        returns:
+            2D list, where each inner list contains wellnames for a set of instances.
+            Oak note: Ik there are a lot of ways to store this info in some sort of data structure, but I thought a list of lists made the most sense to me?
+        '''
+        # store the names of the wellnames in a list.
+        all_wellnames = []
+
+        # create num_duplicate_reactions number of wellnames and return a list of that.
+        for i in range(num_duplicate_reactions):
+            instance_wellnames = [f"{wellname}_instance{i+1}" for wellname in wellnames]
+            all_wellnames.append(instance_wellnames)
+
+            self._create_samples(instance_wellnames, recipes)
+
+        return all_wellnames
     
     def _get_sample_data(self,wellnames, filename):
         '''
@@ -2474,6 +2504,8 @@ class ProtocolExecutor(Controller):
         self.simulate = stored_simulate
         self._cached_reader_locs = stored_cached_reader_locs
         print('<<controller>> EXITING SIMULATION')
+        # delete later.
+        return True 
     
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''

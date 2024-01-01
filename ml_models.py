@@ -157,6 +157,8 @@ class DummyMLModel(MLModel):
         '''
         with self.model_lock:
             print('<<ML>> generating preditions')
+        
+        # y_shape is currently set to 1: need to restructure somehow.
         return np.ones((self.batch_size, self.y_shape)) * 3.1415e-2
 
     def generate_seed_rxns(self):
