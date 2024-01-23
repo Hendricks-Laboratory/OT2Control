@@ -123,6 +123,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print(auto.rxn_df.head(20))
     print(auto.rxn_df)
     Y_SHAPE = auto.y_shape# number of reagents to learn on
+    print("starting with y_shape:", Y_SHAPE)
     ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
