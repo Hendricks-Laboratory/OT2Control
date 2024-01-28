@@ -103,7 +103,7 @@ class Board:
 
 
 def Close(): 
-    win.destroy() 
+    print("Should be closing")
 
 
 def run():
