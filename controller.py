@@ -2043,13 +2043,25 @@ class AutoContr(Controller):
         self._products = []
         del self.tot_vols['Template']
 
-    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache'):
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.y_shape = self.get_y_shape()
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         self._clean_template() #moves template data out of the data for rxn_df
+        self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result", "GP_Prediction"])
+        self.num_duplicates = num_duplicates
+    
+    # Update experiment_data DataFrame after each batch
+    def _update_experiment_data(self, wellnames, recipes, Experiment_result, GP_Prediction):
+        new_data = pd.DataFrame({
+            'Recipes': recipes,
+            'WellNames': wellnames,
+            'Experiment Result': Experiment_result,
+            'GP Prediction': GP_Prediction
+        })
+        self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)
 
     def get_y_shape(self):
         # Filter the DataFrame for rows where 'op' equals 'transfer'
@@ -2140,15 +2152,19 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
-        recipes = model.generate_seed_rxns()
+        
+        recipes = model.generate_seed_rxns()        
+        
+        # expand recipes: recipes[n-1] holds num_duplicates (default value is 3).
+        recipes = np.vstack([recipes, [self.num_duplicates]])
 
         #do the first one
         print('<<controller>> executing batch {}'.format(self.batch_num))
         #don't have data to train, so, not training
         #generate new wellnames for next batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-        #plan and execute a reaction
-        self._create_samples(wellnames, recipes)
+        #plan and execute a reaction with duplicates.
+        self._create_samples(wellnames, recipes, recipes[2])
         #pull in the scan data
         filenames = self.rxn_df[
                 (self.rxn_df['op'] == 'scan') |
@@ -2157,24 +2173,19 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
-        model.train(scan_data.T.to_numpy(),recipes)
+        model.train(scan_data.T.to_numpy(), recipes)
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
         self.batch_num += 1
 
         #enter iterative while loop now that we have data
         while not model.quit:
-            model.train(scan_data.T.to_numpy(),recipes)
+            experiment_result = model.train(scan_data.T.to_numpy(), recipes)      # temp: added experiment_result.
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #plan and execute a reaction + multiple instances
-            instance_wellnames_list = self._create_multiple_samples(wellnames, recipes, num_instances=3)
-            # create samples for each of the wellnames (creatin duplicate reactions)
-            for i in instance_wellnames_list:
-                self._create_samples(i, recipes)
-            # Oak TODO: Need to add in the majority aspect to code (choosing the two reactions and leaving out the one that might have air bubbles).
-            self._create_samples(wellnames, recipes)
+            #plan and execute a reaction
+            self._create_samples(wellnames, recipes, recipes[2])
             #pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
@@ -2183,9 +2194,12 @@ class AutoContr(Controller):
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename)
             #generate the predictions for the next round
-            recipes = model.predict()
+            gp_prediction = model.predict()     # changed from recipes, used as temp variable; refer to line 2200.
             #threaded train on scans. Will run while the robot is generating new materials
             self.batch_num += 1
+            # update our experiment data TODO.
+            self._update_experiment_data(wellnames, recipes, experiment_result, gp_prediction)
+            recipes = gp_prediction
         self.close_connection()
         self.pr.shutdown()
         return
@@ -2230,7 +2244,7 @@ class AutoContr(Controller):
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-    def _create_samples(self, wellnames, recipes):
+    def _create_samples(self, wellnames, recipes, duplicate_reactions=1):
         '''
         creates the desired reactions on the platereader  
         params:  
@@ -2242,26 +2256,28 @@ class AutoContr(Controller):
               order of recipes
         Postconditions:
         '''
-        self.portal.send_pack('init_containers', pd.DataFrame(
-                {'labware':self.template_meta['labware'],
-                'container':self.template_meta['cont'], 
-                'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
-        #clean and update metadata from last reaction
-        self._clean_meta(wellnames)
-        successful_build = False #Flag True when a self.rxn_df using volumes has been generated
-        #from the concentrations
-        while not successful_build:
-            try:
-                #build new df
-                self.rxn_df = self._build_rxn_df(wellnames, recipes)
-                self._insert_tot_vol_transfer()
-                if self.tot_vols: #has at least one element
-                    if (self.rxn_df.loc[0,self._products] < 0).any():
-                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
-                successful_build = True
-            except ConversionError as e:
-                self._handle_conversion_err(e)
-        self.execute_protocol_df()
+        # incorporating duplciate reactions using a for loop.
+        for _ in range(duplicate_reactions):    
+            self.portal.send_pack('init_containers', pd.DataFrame(
+                    {'labware':self.template_meta['labware'],
+                    'container':self.template_meta['cont'], 
+                    'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
+            #clean and update metadata from last reaction
+            self._clean_meta(wellnames)
+            successful_build = False #Flag True when a self.rxn_df using volumes has been generated
+            #from the concentrations
+            while not successful_build:
+                try:
+                    #build new df
+                    self.rxn_df = self._build_rxn_df(wellnames, recipes)
+                    self._insert_tot_vol_transfer()
+                    if self.tot_vols: #has at least one element
+                        if (self.rxn_df.loc[0,self._products] < 0).any():
+                            raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                    successful_build = True
+                except ConversionError as e:
+                    self._handle_conversion_err(e)
+            self.execute_protocol_df()
 
 
 
