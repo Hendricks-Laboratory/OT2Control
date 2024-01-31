@@ -2157,7 +2157,7 @@ class AutoContr(Controller):
         recipes = model.generate_seed_rxns()        
         
         # expand recipes: recipes[n-1] holds num_duplicates (default value is 3).
-        recipes = np.vstack([recipes, [self.num_duplicates]])
+        # recipes = np.vstack([recipes, [self.num_duplicates]])
 
         #do the first one
         print('<<controller>> executing batch {}'.format(self.batch_num))
@@ -2181,12 +2181,12 @@ class AutoContr(Controller):
 
         #enter iterative while loop now that we have data
         while not model.quit:
-            experiment_result = model.train(scan_data.T.to_numpy(), recipes)      # temp: added experiment_result.
+            model.train(scan_data.T.to_numpy(), recipes)      # temp: added experiment_result.
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            #plan and execute a reaction
-            self._create_samples(wellnames, recipes, recipes[2])
+            # plan and execute a reaction with duplicate reactions.
+            self._create_samples(wellnames, recipes, self.num_duplicates)
             #pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
@@ -2199,7 +2199,7 @@ class AutoContr(Controller):
             #threaded train on scans. Will run while the robot is generating new materials
             self.batch_num += 1
             # update our experiment data TODO.
-            self._update_experiment_data(wellnames, recipes, experiment_result, gp_prediction)
+            self._update_experiment_data(wellnames, recipes, scan_data, gp_prediction)
             recipes = gp_prediction
         self.close_connection()
         self.pr.shutdown()
