@@ -2154,7 +2154,8 @@ class AutoContr(Controller):
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         
-        recipes = model.generate_seed_rxns()        
+        recipes = model.generate_seed_rxns()
+        recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
         
         # expand recipes: recipes[n-1] holds num_duplicates (default value is 3).
         # recipes = np.vstack([recipes, [self.num_duplicates]])
@@ -2165,7 +2166,7 @@ class AutoContr(Controller):
         #generate new wellnames for next batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
         #plan and execute a reaction with duplicates.
-        self._create_samples(wellnames, recipes, recipes[2])
+        self._create_samples(wellnames, recipes)
         #pull in the scan data
         filenames = self.rxn_df[
                 (self.rxn_df['op'] == 'scan') |
@@ -2177,6 +2178,7 @@ class AutoContr(Controller):
         model.train(scan_data.T.to_numpy(), recipes)
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
+        recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
         self.batch_num += 1
 
         #enter iterative while loop now that we have data
@@ -2201,9 +2203,28 @@ class AutoContr(Controller):
             # update our experiment data TODO.
             self._update_experiment_data(wellnames, recipes, scan_data, gp_prediction)
             recipes = gp_prediction
+            recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
+            
         self.close_connection()
         self.pr.shutdown()
         return
+    
+    def duplicate_list_elements(list1, factor):
+        """Duplicates the elements of a list by a factor.
+
+        Args:
+            list1: The list to duplicate the elements of.
+            factor: The factor by which to duplicate the elements.
+
+        Returns:
+            A new list with the elements of list1 duplicated by factor.
+        """
+
+        new_list = []
+        for element in list1:
+            for i in range(factor):
+                new_list.append(element)
+        return new_list
     
     def _get_sample_data(self,wellnames, filename):
         '''
@@ -2220,7 +2241,7 @@ class AutoContr(Controller):
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-    def _create_samples(self, wellnames, recipes, duplicate_reactions=1):
+    def _create_samples(self, wellnames, recipes):
         '''
         creates the desired reactions on the platereader  
         params:  
@@ -2232,28 +2253,28 @@ class AutoContr(Controller):
               order of recipes
         Postconditions:
         '''
-        # incorporating duplciate reactions using a for loop.
-        for _ in range(duplicate_reactions):    
-            self.portal.send_pack('init_containers', pd.DataFrame(
-                    {'labware':self.template_meta['labware'],
-                    'container':self.template_meta['cont'], 
-                    'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
-            #clean and update metadata from last reaction
-            self._clean_meta(wellnames)
-            successful_build = False #Flag True when a self.rxn_df using volumes has been generated
-            #from the concentrations
-            while not successful_build:
-                try:
-                    #build new df
-                    self.rxn_df = self._build_rxn_df(wellnames, recipes)
-                    self._insert_tot_vol_transfer()
-                    if self.tot_vols: #has at least one element
-                        if (self.rxn_df.loc[0,self._products] < 0).any():
-                            raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
-                    successful_build = True
-                except ConversionError as e:
-                    self._handle_conversion_err(e)
-            self.execute_protocol_df()
+     
+
+        self.portal.send_pack('init_containers', pd.DataFrame(
+                {'labware':self.template_meta['labware'],
+                'container':self.template_meta['cont'], 
+                'max_vol':self.template_meta['tot_vol']}, index=wellnames).to_dict())
+        #clean and update metadata from last reaction
+        self._clean_meta(wellnames)
+        successful_build = False #Flag True when a self.rxn_df using volumes has been generated
+        #from the concentrations
+        while not successful_build:
+            try:
+                #build new df
+                self.rxn_df = self._build_rxn_df(wellnames, recipes)
+                self._insert_tot_vol_transfer()
+                if self.tot_vols: #has at least one element
+                    if (self.rxn_df.loc[0,self._products] < 0).any():
+                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                successful_build = True
+            except ConversionError as e:
+                self._handle_conversion_err(e)
+        self.execute_protocol_df()
 
 
 
