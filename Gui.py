@@ -28,7 +28,7 @@ def input1(output,sim,auto):
     #test one
     command="controller.py"
     output=execute_python_file(command,string)
-    T.insert(customtkinter.CTkEnd,output)
+    T.insert(customtkinter.CTkEnd,output) #FIX#
     #real one 
     #command="python controller.py -n "+string
 
