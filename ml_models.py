@@ -721,8 +721,8 @@ class BOGP(BaseModel):
         self.model.updateModel(self.X, self.Y)    
                
     def generate_suggested_recipes(self):
-        suggestions = {}
+        suggestions = []
         for acquisition in ['EI', 'MPI', 'LCB']:
             x_next = self.model.suggest_next_locations(acquisition=acquisition)
-            suggestions[acquisition] = x_next
+            suggestions.append(x_next)
         return suggestions
