@@ -17,6 +17,8 @@ from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
 
 class MLModel():
@@ -697,3 +699,30 @@ class LatinHypercubeMLModel(MLModel):
     def generate_seed_rxns(self):
         latinHyperSample = lhs(self.y_shape, samples=self.batch_size)
         return latinHyperSample
+    
+class BOGP(BaseModel):
+    def __init__(self, bounds, kernel=None):
+        self.bounds = bounds
+        self.kernel = kernel
+        self.X = None  # Stores training inputs
+        self.Y = None  # Stores training outputs
+        self.model = BayesianOptimization(f=None, domain=self.bounds, kernel=self.kernel, model_type='GP')
+       
+    def train(self, X_new, Y_new):
+        if self.X is None or self.Y is None:
+            self.X = X_new
+            self.Y = Y_new
+        else:
+            # Append new data to existing
+            self.X = np.vstack([self.X, X_new])
+            self.Y = np.vstack([self.Y, Y_new])
+       
+        # Update the model with the aggregated data
+        self.model.updateModel(self.X, self.Y)    
+               
+    def generate_suggested_recipes(self):
+        suggestions = {}
+        for acquisition in ['EI', 'MPI', 'LCB']:
+            x_next = self.model.suggest_next_locations(acquisition=acquisition)
+            suggestions[acquisition] = x_next
+        return suggestions
