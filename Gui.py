@@ -18,19 +18,28 @@ def display_text():
    label.configure(text=string)
 
 def run():
-   os.chdir('/home/gabepm100/Hendrix-Lab-Ubuntu-Gui')
-   execute_python_file('deckPositionsGui.py','')
+   os.chdir('/home/gabepm100/OT2Control')
+   execute_python_file('deckPositionsGui.py',entry.get())
 
 def input1(output,sim,auto):
-    global entry
-    string= entry.get()
-    os.chdir('/home/gabepm100/Documents/OT2Control')
-    #test one
-    command="controller.py"
-    output=execute_python_file(command,string)
-    T.insert(tk.END,output)
-    #real one 
-    #command="python controller.py -n "+string
+   global entry
+   ent= " -n " + entry.get()
+   if len(ent)==0:
+      T.insert(tk.END,"need Name Input",'warning')
+   os.chdir('/home/gabepm100/Documents/OT2Control')
+   if sim.get():
+      ent=ent + " --no-sim"
+   if auto.get():
+      ent = ent+ " -m auto"
+   #test one
+   
+   command="controller.py"
+   
+   output=execute_python_file(command,ent)
+   print(output)
+   T.insert(tk.END,output)
+   #real one 
+   #command="python controller.py -n "+string
 
 def execute_python_file(file_Name,argument):
    try:
@@ -71,14 +80,11 @@ auto = tk.IntVar()
 c2 = tk.Checkbutton(win, text='Auto?',variable=auto, onvalue=1, offvalue=0)
 c2.pack()
 output="hello"
+
 #Create a Button to validate Entry Widget
 ttk.Button(win, text= "Execute?",width= 20, command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=20)
 
 ttk.Button(win, text= "Check Deck Positions?",command=run, width=30).pack()
-
-# print("should be")
-# Create text widget and specify size.
-T = Text(win, height = 5, width = 52)
 
 # Create label
 l = Label(win, text = "Output")
@@ -87,8 +93,7 @@ l.pack()
 
 # Create text widget and specify size.
 T = Text(win, height = 5, width = 52)
+T.tag_config('warning',foreground="red")
 T.pack()
-
-
 
 win.mainloop()
