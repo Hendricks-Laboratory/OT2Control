@@ -117,6 +117,12 @@ class Board:
 
 def Close(): 
     print("Should be closing")
+    
+def getorigin(eventorigin):
+      global x,y
+      x = eventorigin.x
+      y = eventorigin.y
+      print(x,y)
 
 
 def run():
@@ -127,6 +133,7 @@ def run():
 
     #Create a canvas object
     c = customtkinter.CTkCanvas(win, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
+    win.bind("<Button-1>", getorigin)
     c.place(x=100,y=50)
     board=Board(c)
     button= customtkinter.CTkButton(win,text="Close",width=200,command=Close)

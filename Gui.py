@@ -10,7 +10,7 @@ import os
 win= Tk()
 
 #Set the geometry of Tkinter frame
-win.geometry("750x350")
+win.geometry("800x400")
 
 def display_text():
    global entry
@@ -23,11 +23,15 @@ def run():
 
 def input1(output,sim,auto):
    global entry
-   ent= " -n " + entry.get()
-   if len(ent)==0:
-      T.insert(tk.END,"need Name Input",'warning')
+   
+   ent=" -n " +entry.get()
+   if len(ent)==4:
+      T.delete("1.0","end")
+      T.insert(tk.END," Need Name Input",'warning')
+      return -1
+      
    os.chdir('/home/gabepm100/Documents/OT2Control')
-   if sim.get():
+   if sim.get()==1:
       ent=ent + " --no-sim"
    if auto.get():
       ent = ent+ " -m auto"
@@ -36,10 +40,9 @@ def input1(output,sim,auto):
    command="controller.py"
    
    output=execute_python_file(command,ent)
-   print(output)
+   T.delete("1.0","end")
    T.insert(tk.END,output)
-   #real one 
-   #command="python controller.py -n "+string
+
 
 def execute_python_file(file_Name,argument):
    try:
@@ -72,7 +75,7 @@ entry.pack()
 #Sim checkbox
 
 sim = tk.IntVar()
-c2 = tk.Checkbutton(win, text='Sim?',variable=sim, onvalue=1, offvalue=0)
+c2 = tk.Checkbutton(win, text='Sim?',variable=sim, onvalue=0, offvalue=1)
 c2.pack()
 
 #Sim checkbox
@@ -91,9 +94,14 @@ l = Label(win, text = "Output")
 l.config(font =("Courier", 14))
 l.pack()
 
+v=Scrollbar(win,orient='vertical')
+v.pack(side=RIGHT, fill='y')
+
 # Create text widget and specify size.
-T = Text(win, height = 5, width = 52)
+T = Text(win, height = 5, width = 70, yscrollcommand=v.set)
 T.tag_config('warning',foreground="red")
-T.pack()
+T.pack(side=LEFT,expand=True,fill=BOTH)
+
+
 
 win.mainloop()
