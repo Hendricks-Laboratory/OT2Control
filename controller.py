@@ -2175,7 +2175,7 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
-        model.train(scan_data.T.to_numpy(), recipes)
+        model.train(recipes, scan_data.T.to_numpy())
         #this is different because we don't want to use untrained model to generate predictions
         recipes = model.generate_seed_rxns()
         recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
@@ -2183,7 +2183,7 @@ class AutoContr(Controller):
 
         #enter iterative while loop now that we have data
         while not model.quit:
-            model.train(scan_data.T.to_numpy(), recipes)      # temp: added experiment_result.
+            model.train(recipes, scan_data.T.to_numpy())      # temp: added experiment_result.
             print('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
