@@ -53,13 +53,11 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.linear_model import Lasso
 
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel, LinReg
+from ml_models import DummyMLModel, BayesianOptMLModel
 from exceptions import ConversionError
 
 
@@ -115,24 +113,18 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
-    model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
     final_spectra = np.loadtxt(
             "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
-    #number of reagents to learn on
     print(auto.rxn_df.describe())
     print(auto.rxn_df.head(20))
     print(auto.rxn_df)
-    Y_SHAPE = auto.y_shape# number of reagents to learn on
-    print("starting with y_shape:", Y_SHAPE)
-    ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=3,
-                scan_bounds=(540,560), duplication=2)
+    y_shape = auto.y_shape# number of reagents to learn on
+    print("starting with y_shape:", y_shape)
+    model = BayesianOptMLModel(final_spectra, y_shape, max_iters=3, duplication=3)
     if not no_sim:
-        auto.run_simulation(ml_model, no_pr=no_pr)
+        auto.run_simulation(model, no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
-        ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
-                scan_bounds=(540,560),duplication=2)
-        auto.run_protocol(simulate=simulate, model=ml_model,no_pr=no_pr)
+        auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
 
 class Controller(ABC):

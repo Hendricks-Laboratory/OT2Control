@@ -700,13 +700,14 @@ class LatinHypercubeMLModel(MLModel):
         latinHyperSample = lhs(self.y_shape, samples=self.batch_size)
         return latinHyperSample
     
-class BOGP(BaseModel):
+
+class BOGP(MLModel):
     def __init__(self, bounds, kernel=None):
         self.bounds = bounds
         self.kernel = kernel
         self.X = None  # Stores training inputs
         self.Y = None  # Stores training outputs
-        self.model = BayesianOptimization(f=None, domain=self.bounds, kernel=self.kernel, model_type='GP')
+        self.model = GPyOpt.methods.BayesianOptimization(f=None, domain=self.bounds, kernel=self.kernel, model_type='GP')
        
     def train(self, X_new, Y_new):
         if self.X is None or self.Y is None:
