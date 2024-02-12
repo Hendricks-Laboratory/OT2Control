@@ -5,7 +5,6 @@ import subprocess
 import threading
 import os
 
-
 #Create an instance of Tkinter frame
 win= Tk()
 
@@ -40,20 +39,21 @@ def input1(output,sim,auto):
    command="controller.py"
    
    output=execute_python_file(command,ent)
+   #output=output.stdout
    T.delete("1.0","end")
    T.insert(tk.END,output)
 
+def input2(eventorigin):
+   print("output")
 
 def execute_python_file(file_Name,argument):
    try:
       completed_process = subprocess.run(['python3',file_Name, argument], capture_output=True)
       if completed_process.returncode == 0:
          print("Execution successful.")
-         print("Output:")
          return completed_process.stdout
       else:
          print(f"Error: Failed to execute.")
-         print("Error output:")
          print(completed_process.stderr)
    except FileNotFoundError:
       print(f"Error: The file does not exist.")
@@ -73,20 +73,19 @@ entry.focus_set()
 entry.pack()
 
 #Sim checkbox
-
 sim = tk.IntVar()
 c2 = tk.Checkbutton(win, text='Sim?',variable=sim, onvalue=0, offvalue=1)
 c2.pack()
 
-#Sim checkbox
+#auto checkbox
 auto = tk.IntVar()
 c2 = tk.Checkbutton(win, text='Auto?',variable=auto, onvalue=1, offvalue=0)
 c2.pack()
 output="hello"
 
-#Create a Button to validate Entry Widget
+#Create a Button to Execute given file name
 ttk.Button(win, text= "Execute?",width= 20, command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=20)
-
+#show deck positions
 ttk.Button(win, text= "Check Deck Positions?",command=run, width=30).pack()
 
 # Create label
@@ -102,6 +101,6 @@ T = Text(win, height = 5, width = 70, yscrollcommand=v.set)
 T.tag_config('warning',foreground="red")
 T.pack(side=LEFT,expand=True,fill=BOTH)
 
-
+#win.bind('<Return>',input2)
 
 win.mainloop()
