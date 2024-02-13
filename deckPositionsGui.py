@@ -108,6 +108,7 @@ def drawBoard(canvas,bor):
     rect=canvas.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
     canvas.tag_bind(rect, '<Button-1>',lambda event: getorigin(event,board=bor))
 
+
 class Board:
     #positions goes row by row
     # board is associated with the position of the same index
@@ -120,7 +121,9 @@ class Board:
         for i in range(len(self.board)):
 
                 # calls the get content function and depending on that it will set up the board to match the values gotten from the excell sheet
+                
                 #self.get_contents()
+                
                 # if that board share is set to 1 it draws the reagents and if it is 2 it draws the pipets
                 if self.board[i][0]==1:
                     drawReagents(canvas,self.positions[i][0],self.positions[i][1],self.board)
@@ -137,12 +140,23 @@ class Board:
         """
         # using the .json in order to ask for permission to get access to the google sheet. 
         # will need to do this again on the lab computer
-        gc = gspread.service_account("C:/Users/gabep/OneDrive/Documents/school/4th year whitman/GuiTeam/OT2Control/deck-position-gui-556e4624293c.json")
+        #gc = gspread.service_account("C:/Users/gabep/OneDrive/Documents/school/4th year whitman/GuiTeam/OT2Control/deck-position-gui-556e4624293c.json")
         # Open Spreadsheet by name
-        spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/124PqDU-h_bPa-WcAnTXrShyv81nVTYWc4jws1f0IWmM/edit#gid=0")
-
+        #spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0")
+        spreadsheet = gspread.open_by_url("https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0")
+        
         #opens the sheet by name. sheet one is the name of the page inside the spreadsheet
         worksheet = spreadsheet.sheet1
+        try:
+            cell = worksheet.find("Dash")
+            url = worksheet.row_values(cell.row)[1]
+            spreadsheet = gspread.open_by_url("https://docs.google.com/spreadsheets/d/"+url)
+        except IndexError:
+            raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
+            and make sure the spreadsheet name is spelled exactly the same as the reaction \
+            spreadsheet.')
+        
+        
         
         # gets the values from the first row of the sheet
         values_list = worksheet.row_values(1)
@@ -154,6 +168,7 @@ class Board:
         for i in range(len(self.board)):
             print(self.board[i])
             
+         
 def createPopUp():
     print("createpopup function")
     
@@ -195,9 +210,7 @@ def get_canvas_items(canvas):
             
             
 
-def Close(): 
-    win.destroy
-    print("Should be closing")
+
     
 def getorigin(eventorigin,board):
     global x,y
@@ -205,23 +218,101 @@ def getorigin(eventorigin,board):
     y = eventorigin.y
     expand(x,y,board)
     print(x,y)
+    
+    
+LARGEFONT =("Verdana", 35)
+  
+class tkinterApp(customtkinter.CTk):
+     
+    # __init__ function for class tkinterApp 
+    def __init__(self, *args, **kwargs): 
+         
+        # __init__ function for class Tk
+        customtkinter.CTk.__init__(self, *args, **kwargs)
+         
+        # creating a container
+        container = customtkinter.CTkFrame(self)  
+        self.geometry("850x800")
+        self.configure(bg="#d9d9d9")
+        self.title("Deck Positions")
 
+        container.pack(side = "top", fill = "both", expand = True) 
+  
+        container.grid_rowconfigure(0, weight = 1)
+        container.grid_columnconfigure(0, weight = 1)
+  
+        # initializing frames to an empty array
+        self.frames = {}  
+  
+        # iterating through a tuple consisting
+        # of the different page layouts
+        for F in (StartPage, Page1):
+  
+            frame = F(container, self)
+  
+            # initializing frame of that object from
+            # startpage, page1, page2 respectively with 
+            # for loop
+            self.frames[F] = frame 
+  
+            frame.grid(row = 0, column = 0, sticky ="nsew")
+  
+        self.show_frame(StartPage)
+  
+    # to display the current frame passed as
+    # parameter
+    def show_frame(self, cont):
+        frame = self.frames[cont]
+        frame.tkraise()
+    def Close(self): 
+        self.destroy
+        print("Should be closing")  
+  
+# first window frame startpage
+  
+class StartPage(customtkinter.CTkFrame):
+    def __init__(self, parent, controller): 
+        customtkinter.CTkFrame.__init__(self, parent)
+         
+        # label of frame Layout 2
+        label = customtkinter.CTkLabel(self, text ="Startpage", font = LARGEFONT)
+         
+        
+        
+        #Create a canvas object
+        c = customtkinter.CTkCanvas(self, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
+        #c.bind("<Button-1>", getorigin)
 
-customtkinter.set_appearance_mode("System")  # Modes: system (default), light, dark
-customtkinter.set_default_color_theme("blue")  # Themes: blue (default), dark-blue, green
-win = customtkinter.CTk()  # create CTk window like you do with the Tk window
-win.geometry("850x800")
-win.configure(bg="#d9d9d9")
+        c.place(x=100,y=50)
+        board=Board(c)
 
-#Create a canvas object
-c = customtkinter.CTkCanvas(win, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
-#c.bind("<Button-1>", getorigin)
-
-c.place(x=100,y=50)
-board=Board(c)
-
-button= customtkinter.CTkButton(win,text="Close",width=200,command=win.destroy)
-button.place(x=300,y=650)
-win.title("Deck Positions")
-win.mainloop()
-
+        button= customtkinter.CTkButton(self,text="Close",width=200,command=parent.destroy)
+        button.place(x=300,y=650)
+  
+  
+          
+  
+  
+# second window frame page1 
+class Page1(customtkinter.CTkFrame):
+     
+    def __init__(self, parent, controller):
+         
+        customtkinter.CTkFrame.__init__(self, parent)
+        label = customtkinter.CTkLabel(self, text ="Page 1", font = LARGEFONT)
+        label.grid(row = 0, column = 4, padx = 10, pady = 10)
+  
+        # button to show frame 2 with text
+        # layout2
+        button1 = customtkinter.CTkButton(self, text ="StartPage",
+                            command = lambda : controller.show_frame(StartPage))
+     
+        # putting the button in its place 
+        # by using grid
+        button1.grid(row = 1, column = 1, padx = 10, pady = 10)
+  
+       
+  
+# Driver Code
+app = tkinterApp()
+app.mainloop()
