@@ -48,8 +48,6 @@ class Board:
             and make sure the spreadsheet name is spelled exactly the same as the reaction \
             spreadsheet.')
         
-        
-        
         # gets the values from the first row of the sheet
         values_list = worksheet.row_values(1)
         print(values_list)
@@ -59,6 +57,8 @@ class Board:
     def print_board(self):
         for i in range(len(self.board)):
             print(self.board[i])
+            
+    
               
 LARGEFONT =("Verdana", 35)
   
@@ -111,6 +111,7 @@ class tkinterApp(customtkinter.CTk):
         print("Should be closing")  
         
     def drawPipets(self,canvas,x,y,bor,controller):
+
         """
         Canvas is the canvas object
         x and y are the x and y cordinates
@@ -127,7 +128,7 @@ class tkinterApp(customtkinter.CTk):
         for i in range(8):
             for j in range(12):
                 oval=canvas.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=Whetherfilled[i+j],width=2)
-                canvas.tag_bind(oval, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+                canvas.tag_bind(oval, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
 
     def drawReagents(self,canvas,x,y,bor,controller):
         
@@ -143,12 +144,8 @@ class tkinterApp(customtkinter.CTk):
         for i in range(4):
             for j in range(6):
                 oval=canvas.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=Whetherfilled[i+j],width=2)
-                canvas.tag_bind(oval, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+                canvas.tag_bind(oval, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
     
-
-
-
-        
     def drawChem(self,canvas,x,y,bor,controller):
         #first column
         Whetherfilled=[1,0,1,0,1,0,0,0,1,0]
@@ -158,28 +155,28 @@ class tkinterApp(customtkinter.CTk):
             else:
                 Whetherfilled[i]="blue"
         a=canvas.create_oval(x+25,y+10,x+55 ,y+40, outline="black", fill=Whetherfilled[0],width=2)
-        canvas.tag_bind(a, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(a, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         b=canvas.create_oval(x+25,y+45,x+55 ,y+75, outline="black", fill=Whetherfilled[1],width=2)
-        canvas.tag_bind(b, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(b, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         c=canvas.create_oval(x+25,y+80,x+55 ,y+110, outline="black", fill=Whetherfilled[2],width=2)
-        canvas.tag_bind(c, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(c, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         #second column
         d=canvas.create_oval(x+60,y+10,x+90 ,y+40, outline="black", fill=Whetherfilled[3],width=2)
-        canvas.tag_bind(d, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(d, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         e=canvas.create_oval(x+60,y+45,x+90 ,y+75, outline="black", fill=Whetherfilled[4],width=2)
-        canvas.tag_bind(e, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(e, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         f=canvas.create_oval(x+60,y+80,x+90 ,y+110, outline="black", fill=Whetherfilled[5],width=2)
-        canvas.tag_bind(f, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(f, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         # third column
         g=canvas.create_oval(x+95,y+20,x+135 ,y+60, outline="black", fill=Whetherfilled[6],width=2)
-        canvas.tag_bind(g, '<Button-1>',lambda event: self.getorigin(event,board=bor))
+        canvas.tag_bind(g, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         h=canvas.create_oval(x+95,y+65,x+135 ,y+105, outline="black", fill=Whetherfilled[7],width=2)
-        canvas.tag_bind(h, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(h, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         #forth column
         i=canvas.create_oval(x+140,y+20,x+180 ,y+60, outline="black", fill=Whetherfilled[8],width=2)
-        canvas.tag_bind(i, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(i, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         j=canvas.create_oval(x+140,y+65,x+180 ,y+105, outline="black", fill=Whetherfilled[9],width=2)
-        canvas.tag_bind(j, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((x,y))])
+        canvas.tag_bind(j, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
         
     def drawBoard(self,canvas,bor,controller):
         """
@@ -187,43 +184,39 @@ class tkinterApp(customtkinter.CTk):
         """
         #column one
         rect=canvas.create_rectangle(0, 75, 200, 200, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((0,75))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(0,75))])
         rect=canvas.create_rectangle(0, 200, 200, 325, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((0,200))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(0,200))])
         rect=canvas.create_rectangle(0, 325, 200, 450, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((0,325))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(0,325))])
         rect=canvas.create_rectangle(0, 450, 200, 575, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((0,450))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(0,450))])
         #column two
         rect=canvas.create_rectangle(200, 75, 400, 200, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((200,75))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(200,75))])
         rect=canvas.create_rectangle(200, 200, 400, 325, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((200,200))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(200,200))])
         rect=canvas.create_rectangle(200, 325, 400, 450, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((200,325))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(200,325))])
         rect=canvas.create_rectangle(200, 450, 400, 575, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((200,450))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(200,450))])
         #column three
         #trash
         rect=canvas.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
         rect=canvas.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
         #rest of column three
         rect=canvas.create_rectangle(400, 200, 600, 325, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((400,200))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(400,200))])
         rect=canvas.create_rectangle(400, 325, 600, 450, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((400,325))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(400,325))])
         rect=canvas.create_rectangle(400, 450, 600, 575, fill="#7A797B",outline="black")
-        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp((400,450))])
+        canvas.tag_bind(rect, '<Button-1>',lambda x: [self.show_frame(Page1),self.showPopUp(bor,(400,450))])
         
-
-
-        
-    def getorigin(self,eventorigin,board):
-        global x,y
-        x = eventorigin.x
-        y = eventorigin.y
-        self.expand(x,y,board)
-        print(x,y)
+    # def getorigin(self,eventorigin,board):
+    #     global x,y
+    #     x = eventorigin.x
+    #     y = eventorigin.y
+    #     print(x,y)
         
     def get_canvas_items(self,canvas):
         item_list = canvas.find_all()
@@ -232,33 +225,31 @@ class tkinterApp(customtkinter.CTk):
             #if item_type=="oval":
                 #print(item_type)
                 
-    def showPopUp(self,xy):
-        
+    def showPopUp(self,board,xy):
         print(xy)
-        
-    def expand(self,x,y,board):
-        if (x>0 and x<200)and (y>75 and y<200):
+        if (xy[0]>0 and xy[0]<200) and (xy[1]>75 and xy[1]<200):
             print("1,1")
-        if (x>0 and x<200)and (y>200 and y<325):
+        if (xy[0]>0 and xy[0]<200) and (xy[1]>200 and xy[1]<325):
             print("1,2")
-        if (x>0 and x<200)and (y>325 and y<450):
+        if (xy[0]>0 and xy[0]<200) and (xy[1]>325 and xy[1]<450):
             print("1,3")
-        if (x>0 and x<200)and (y>450 and y<575):
+        if (xy[0]>0 and xy[0]<200) and (xy[1]>450 and xy[1]<575):
             print("1,4")
-        if (x>200 and x<400)and (y>75 and y<200):
+        if (xy[0]>200 and xy[0]<400) and (xy[1]>75 and xy[1]<200):
             print("2,1")
-        if (x>200 and x<400)and (y>200 and y<325):
+        if (xy[0]>200 and xy[0]<400) and (xy[1]>200 and xy[1]<325):
             print("2,2")
-        if (x>200 and x<400)and (y>325 and y<450):
+        if (xy[0]>200 and xy[0]<400) and (xy[1]>325 and xy[1]<450):
             print("2,3")
-        if (x>200 and x<400)and (y>450 and y<575):
+        if (xy[0]>200 and xy[0]<400) and (xy[1]>450 and xy[1]<575):
             print("2,4")
-        if (x>400 and x<600)and (y>200 and y<325):
+        if (xy[0]>400 and xy[0]<600) and (xy[1]>200 and xy[1]<325):
             print("3,2")
-        if (x>400 and x<600)and (y>325 and y<450):
+        if (xy[0]>400 and xy[0]<600) and (xy[1]>325 and xy[1]<450):
             print("3,3")
-        if (x>400 and x<600)and (y>450 and y<575):
+        if (xy[0]>400 and xy[0]<600) and (xy[1]>450 and xy[1]<575):
             print("3,4")
+        
     
   
 # first window frame startpage
