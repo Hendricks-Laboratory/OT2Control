@@ -8,9 +8,9 @@ import os
 
 #Create an instance of Tkinter frame
 win= tkinter.Tk()
-
 #Set the geometry of Tkinter frame
 win.geometry("750x350")
+win.configure(background= '#404040')
 
 def display_text():
    global entry
@@ -53,7 +53,7 @@ label.pack()
 
 # Name Label
 l = customtkinter.CTkLabel(master= win, text = "What is the name?")
-l.configure(font =("Courier", 14))
+l.configure(font =("Courier", 14), text_color="white")
 l.pack()
 
 #Create an Entry widget to accept User Input
@@ -64,12 +64,14 @@ entry.pack()
 #Sim checkbox
 
 sim = IntVar()
-c2 = tkinter.Checkbutton(win, text='Sim?',variable=sim, onvalue=1, offvalue=0)
-c2.pack()
+c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1, offvalue=0, fg_color= "404040", text_color= "white", border_color = "#A7A6A6")
+c2.configure(border_width= 2)
+c2.pack(padx=20, pady=10)
 
 #Sim checkbox
 auto = IntVar()
-c2 = tkinter.Checkbutton(win, text='Auto?',variable=auto, onvalue=1, offvalue=0)
+c2 = customtkinter.CTkCheckBox(master= win, text='Auto?',variable=auto, onvalue=1, offvalue=0, text_color= "white", border_color = "#A7A6A6")
+c2.configure(border_width= 2)
 c2.pack()
 output="hello"
 #Create a Button to validate Entry Widget
