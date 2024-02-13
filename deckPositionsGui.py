@@ -2,6 +2,7 @@ import customtkinter
 import gspread
 import random
 
+
 class Board:
     #positions goes row by row
     # board is associated with the position of the same index
@@ -116,25 +117,22 @@ class tkinterApp(customtkinter.CTk):
         Canvas is the canvas object
         x and y are the x and y cordinates
         """
+        #just a mess
         Whetherfilled=[0]*32 +[1]*66
         random.shuffle(Whetherfilled)
-        
         for i in range(len(Whetherfilled)):
             if Whetherfilled[i]==0:
                 Whetherfilled[i]="black"
             else:
                 Whetherfilled[i]="blue"
-                
         for i in range(8):
             for j in range(12):
                 oval=canvas.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=Whetherfilled[i+j],width=2)
                 canvas.tag_bind(oval, '<Button-1>',lambda z: [self.show_frame(Page1),self.showPopUp(bor,(x,y))])
 
     def drawReagents(self,canvas,x,y,bor,controller):
-        
         Whetherfilled=[0]*18 +[1]*6
         random.shuffle(Whetherfilled)
-        
         for i in range(len(Whetherfilled)):
             if Whetherfilled[i]==0:
                 Whetherfilled[i]="black"
@@ -251,7 +249,6 @@ class tkinterApp(customtkinter.CTk):
             print("3,4")
         
     
-  
 # first window frame startpage
   
 class StartPage(customtkinter.CTkFrame):
@@ -274,8 +271,6 @@ class StartPage(customtkinter.CTkFrame):
         button.place(x=300,y=650)
   
   
-          
-  
   
 # second window frame page1 
 class Page1(customtkinter.CTkFrame):
@@ -284,8 +279,10 @@ class Page1(customtkinter.CTkFrame):
          
         customtkinter.CTkFrame.__init__(self, parent)
         label = customtkinter.CTkLabel(self, text ="Page 1", font = LARGEFONT)
-        c = customtkinter.CTkCanvas(self, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
-    
+        c = customtkinter.CTkCanvas(self, width=650, height=425, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
+        c.place(x=100,y=50)
+        rect=c.create_rectangle(0, 0, 650, 425, fill="#7A797B",outline="black")
+        self.drawChem(c)
         # button to show frame 2 with text
         # layout2
         button1 = customtkinter.CTkButton(self, text ="StartPage", command = lambda : controller.show_frame(StartPage))
@@ -293,6 +290,61 @@ class Page1(customtkinter.CTkFrame):
         # putting the button in its place 
         # by using grid
         button1.grid(row = 1, column = 1, padx = 10, pady = 10)
+        
+    def drawReagents(self,canvas):
+        Whetherfilled=[0]*18 +[1]*6
+        random.shuffle(Whetherfilled)
+        for i in range(len(Whetherfilled)):
+            if Whetherfilled[i]==0:
+                Whetherfilled[i]="black"
+            else:
+                Whetherfilled[i]="blue"
+                
+        for i in range(4):
+            for j in range(6):
+                oval=canvas.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=Whetherfilled[i+j],width=2)
+                
+    def drawPipets(self,canvas):
+
+        """
+        Canvas is the canvas object
+        x and y are the x and y cordinates
+        """
+        #just a mess
+        Whetherfilled=[0]*32 +[1]*66
+        random.shuffle(Whetherfilled)
+        for i in range(len(Whetherfilled)):
+            if Whetherfilled[i]==0:
+                Whetherfilled[i]="black"
+            else:
+                Whetherfilled[i]="blue"
+        for i in range(8):
+            for j in range(12):
+                oval=canvas.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=Whetherfilled[i+j],width=2)
+    def drawChem(self,canvas):
+        #first column
+        Whetherfilled=[1,0,1,0,1,0,0,0,1,0]
+        for i in range(len(Whetherfilled)):
+            if Whetherfilled[i]==0:
+                Whetherfilled[i]="black"
+            else:
+                Whetherfilled[i]="blue"
+        a=canvas.create_oval(25,25,145 ,145, outline="black", fill=Whetherfilled[0],width=2)
+        b=canvas.create_oval(25,150,145,270, outline="black", fill=Whetherfilled[1],width=2)
+        c=canvas.create_oval(25,275,145,395, outline="black", fill=Whetherfilled[2],width=2)
+        #second column
+        d=canvas.create_oval(155, 25, 275, 145, outline="black", fill=Whetherfilled[3],width=2)
+        e=canvas.create_oval(155, 150, 275, 270, outline="black", fill=Whetherfilled[4],width=2)
+        f=canvas.create_oval(155, 275, 275, 395, outline="black", fill=Whetherfilled[5],width=2)
+        # third column
+        g=canvas.create_oval(280, 140, 440, 300, outline="black", fill=Whetherfilled[6],width=2)
+        h=canvas.create_oval(280, 305, 440, 465, outline="black", fill=Whetherfilled[7],width=2)
+        #forth column
+        i=canvas.create_oval(405,90,410 ,210, outline="black", fill=Whetherfilled[8],width=2)
+        j=canvas.create_oval(405,215,410 ,335, outline="black", fill=Whetherfilled[9],width=2)
+
+
+                
   
        
   
