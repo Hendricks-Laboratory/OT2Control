@@ -77,9 +77,9 @@ c2.configure(border_width= 2, font= ("Inter", 12))
 c2.pack()
 output="hello"
 #Create a Button to validate Entry Widget
-customtkinter.CTkButton(win, text= "Execute?",width= 20, font= ("Inter", 12) ,command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=(20, 13))
+customtkinter.CTkButton(win, text= "Execute",width= 20, font= ("Inter", 12) ,command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=(20, 13))
 
-customtkinter.CTkButton(win, text= "Check Deck Positions?", font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
+customtkinter.CTkButton(win, text= "Check Deck Positions", font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
 
 # print("should be")
 # Create text widget and specify size.
