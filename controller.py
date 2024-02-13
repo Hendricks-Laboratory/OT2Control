@@ -57,7 +57,7 @@ rcParams.update({'figure.autolayout': True})
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel, BayesianOptMLModel
+from ml_models import DummyMLModel, BayesianOptMLModel, OptimizationModel
 from exceptions import ConversionError
 
 
@@ -120,7 +120,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print(auto.rxn_df)
     y_shape = auto.y_shape# number of reagents to learn on
     print("starting with y_shape:", y_shape)
-    model = BayesianOptMLModel(final_spectra, y_shape, max_iters=3, duplication=3)
+    fixed_reagents = auto.robo_params['reagent_df']
+    # Generate bounds for each reagent, assuming concentrations range from 0 to 1
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
+    #TODO get reagent info
+    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':

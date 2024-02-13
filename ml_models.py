@@ -735,13 +735,24 @@ class BOGP(MLModel):
 
 
 class OptimizationModel:
-    def __init__(self, bounds, target_value, initial_design_numdata=15):
+    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, initial_design_numdata=15):
         self.bounds = bounds
         self.target_value = target_value
         self.initial_design_numdata = initial_design_numdata
         self.design = None
         self.optimizer = None
+        self.fixed_reagents = fixed_reagents
+        self.reagent_info = reagent_info
         self._initialize_model()
+
+    def volume_constraint(self, recipe):
+        full_recipe = recipe.append(self.fixed_reagents) # TODO format the fixed reagents (possibly break this up into function that just gets volume needed?)
+        volume_limit = 200  # Total volume limit in μL
+        total_volume = 0
+        for x, y in full_recipe: # TODO adjust loop based on previous decision
+            total_volume += (y*(200/self.reagent_info[x]))
+        return volume_limit - total_volume  # Constraint satisfied if result is >= 0
+
 
     def _initialize_model(self):
         """Initializes the Bayesian Optimization model."""
@@ -749,6 +760,7 @@ class OptimizationModel:
         self.optimizer = GPyOpt.methods.BayesianOptimization(
             f=None,  # Function is evaluated manually
             domain=self.bounds,
+            constraints=[{'constraint': volume_constraint}]
             X=np.array([]).reshape(-1, len(self.bounds)),
             Y=np.array([]).reshape(-1, 1),
             acquisition_type='EI',  # Default acquisition type
@@ -783,26 +795,3 @@ class OptimizationModel:
         self.optimizer.acquisition_type = original_acquisition_type
         
         return x_next
-
-    
-
-
-
-
-# deck = {"r1":50, "r2": .01, "r3":0.375, "r4":6.25, "r5":12.5}
-# conc_list = [("r1", 10),("r2", 6.25),("r3", 0.0),("r4", 0.009),("r5", 0.0)]
-# water_volume = 0
-
-# def bounds_check(conc_list):
-#     total_volume = 200
-#     for x, y in conc_list:
-#         total_volume -= (y*(200/deck[x]))
-#     # invalid case: total volume is greater than 200mL
-#     if total_volume < 0:
-#         print(0)
-    
-#     # valid case: add water to get the 200mL concentration
-#     water_volume = total_volume
-#     return 1
-    
-# bounds_check(conc_list)
