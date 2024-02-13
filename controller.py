@@ -122,7 +122,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print("starting with y_shape:", y_shape)
     model = BayesianOptMLModel(final_spectra, y_shape, max_iters=3, duplication=3)
     if not no_sim:
-        auto.run_simulation(model, no_pr=no_pr)
+        auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
@@ -2038,7 +2038,10 @@ class AutoContr(Controller):
 
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
-        self.y_shape = self.get_y_shape()
+        self.variable_reagents = self.get_variable_reagents()
+        self.y_shape = len(self.variable_reagents)
+        print(f"y-shape is {self.y_shape}")
+        print(self.robo_params['reagent_df'])
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
@@ -2056,14 +2059,36 @@ class AutoContr(Controller):
         })
         self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)
 
-    def get_y_shape(self):
-        # Filter the DataFrame for rows where 'op' equals 'transfer'
-        transfers = self.rxn_df[self.rxn_df['op'] == 'transfer']
+    def get_variable_reagents(self):
 
-        # Count the number of empty (null or NaN) values in the 'conc' column
-        num_empty_values = transfers['conc'].isnull().sum()
+        # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
+        unique_reagents = self.rxn_df.loc[self.rxn_df['conc'].isna() & (self.rxn_df['op'] == 'transfer'), 'reagent'].unique()
 
-        return num_empty_values
+        # Calculate the number of unique reagents
+        num_unique_reagents = len(unique_reagents)
+
+        print(f"Number of unique reagents: {num_unique_reagents}")
+        print(f"List of unique reagent names: {unique_reagents}")
+        return unique_reagents
+
+
+    def check_recipe_bounds(conc_list):
+        total_volume = 200
+        for x, y in conc_list:
+            total_volume -= (y*(200/deck[x]))
+        # invalid case: total volume is greater than 200mL
+        if total_volume < 0:
+            print(0)
+        
+        # valid case: add water to get the 200mL concentration
+        water_volume = total_volume
+        return 1
+
+    deck = {"r1":50, "r2": .01, "r3":0.375, "r4":6.25, "r5":12.5}
+    conc_list = [("r1", 10),("r2", 6.25),("r3", 0.0),("r4", 0.009),("r5", 0.0)]
+    water_volume = 0
+        
+    check_recipe_bounds(conc_list)
 
  
     def run_simulation(self,model=None,no_pr=False):
@@ -2316,6 +2341,7 @@ class AutoContr(Controller):
             self.tot_vols has been updated to 
         '''
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         n_wellnames = np.array(wellnames)
         #n_wellnames_reshaped = n_wellnames.reshape(2,2)
         #n_reagent_order = self.reagent_order.reshape(2,2)
@@ -2330,7 +2356,9 @@ class AutoContr(Controller):
         print("wellnames:", n_wellnames)
         print("recipes:", recipes)
         print("self.reagent_order:", self.reagent_order)
-        recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        
+        
+
         self._update_cached_locs('all')
         def build_product_rows(row):
             '''

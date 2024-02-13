@@ -254,27 +254,27 @@ class LinReg(MLModel):
         recipes = np.repeat(recipes, self.duplication, axis=0)
         return recipes
 
-        def predict(self):
-            '''
-            This call should wait on the training thread to complete if it is has not been collected
-            yet.  
-            params:  
-                int n_predictions: the number of instances to predict  
-            returns:  
-                np.array: shape is n_predictions, y.shape. Features are pi e-2  
-            '''
-            super().predict()
-            
-            with self.model_lock:
-                self.FINAL_SPECTRA = self.FINAL_SPECTRA.reshape(1, -1)  # Reshape if FINAL_SPECTRA is a single sample
-                y_pred = self.model.predict(self.FINAL_SPECTRA)
-            print("predicted", y_pred)
+    def predict(self):
+        '''
+        This call should wait on the training thread to complete if it is has not been collected
+        yet.  
+        params:  
+            int n_predictions: the number of instances to predict  
+        returns:  
+            np.array: shape is n_predictions, y.shape. Features are pi e-2  
+        '''
+        super().predict()
         
-            # Repeat y_pred self.duplication times along both axes
-            y_pred_repeated = np.repeat(y_pred, self.duplication, axis=0)
-            y_pred_repeated = np.repeat(y_pred_repeated, self.duplication, axis=1)
-        
-            return y_pred_repeated
+        with self.model_lock:
+            self.FINAL_SPECTRA = self.FINAL_SPECTRA.reshape(1, -1)  # Reshape if FINAL_SPECTRA is a single sample
+            y_pred = self.model.predict(self.FINAL_SPECTRA)
+        print("predicted", y_pred)
+    
+        # Repeat y_pred self.duplication times along both axes
+        y_pred_repeated = np.repeat(y_pred, self.duplication, axis=0)
+        y_pred_repeated = np.repeat(y_pred_repeated, self.duplication, axis=1)
+    
+        return y_pred_repeated
 
 
 
@@ -707,6 +707,9 @@ class BOGP(MLModel):
         self.kernel = kernel
         self.X = None  # Stores training inputs
         self.Y = None  # Stores training outputs
+        
+        
+    def initialize_model(self):
         self.model = GPyOpt.methods.BayesianOptimization(f=None, domain=self.bounds, kernel=self.kernel, model_type='GP')
        
     def train(self, X_new, Y_new):
@@ -727,3 +730,79 @@ class BOGP(MLModel):
             x_next = self.model.suggest_next_locations(acquisition=acquisition)
             suggestions.append(x_next)
         return suggestions
+
+
+
+
+class OptimizationModel:
+    def __init__(self, bounds, target_value, initial_design_numdata=15):
+        self.bounds = bounds
+        self.target_value = target_value
+        self.initial_design_numdata = initial_design_numdata
+        self.design = None
+        self.optimizer = None
+        self._initialize_model()
+
+    def _initialize_model(self):
+        """Initializes the Bayesian Optimization model."""
+        self.design = GPyOpt.experiment_design.initial_design('latin', self.bounds, self.initial_design_numdata)
+        self.optimizer = GPyOpt.methods.BayesianOptimization(
+            f=None,  # Function is evaluated manually
+            domain=self.bounds,
+            X=np.array([]).reshape(-1, len(self.bounds)),
+            Y=np.array([]).reshape(-1, 1),
+            acquisition_type='EI',  # Default acquisition type
+            normalize_Y=True
+        )
+
+    def get_initial_design(self):
+        """Returns the initial LHS design samples."""
+        return self.design
+
+    def preprocess_data(self, Y_new):
+        return 
+
+    def update_model(self, X_new, Y_new):
+        """Updates the model with new experimental data."""
+        # Calculate the objective as the absolute difference from the target
+        Y_new = self.process_data(Y_new)
+        objective = np.abs(Y_new - self.target_value).reshape(-1, 1)
+        self.optimizer.add_observations(X_new, objective)
+        self.optimizer.run_optimization(max_iter=1, verbosity=False)
+
+    def suggest_next_location(self, acquisition_type='EI'):
+        """Suggests the next location for experimentation using a specified acquisition function."""
+        # Temporarily change the acquisition type
+        original_acquisition_type = self.optimizer.acquisition_type
+        self.optimizer.acquisition_type = acquisition_type
+        
+        # Suggest the next location
+        x_next = self.optimizer.suggest_next_locations()
+        
+        # Revert the acquisition type to its original setting
+        self.optimizer.acquisition_type = original_acquisition_type
+        
+        return x_next
+
+    
+
+
+
+
+# deck = {"r1":50, "r2": .01, "r3":0.375, "r4":6.25, "r5":12.5}
+# conc_list = [("r1", 10),("r2", 6.25),("r3", 0.0),("r4", 0.009),("r5", 0.0)]
+# water_volume = 0
+
+# def bounds_check(conc_list):
+#     total_volume = 200
+#     for x, y in conc_list:
+#         total_volume -= (y*(200/deck[x]))
+#     # invalid case: total volume is greater than 200mL
+#     if total_volume < 0:
+#         print(0)
+    
+#     # valid case: add water to get the 200mL concentration
+#     water_volume = total_volume
+#     return 1
+    
+# bounds_check(conc_list)
