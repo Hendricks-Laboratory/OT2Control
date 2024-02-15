@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "deck-position-gui",
+  "private_key_id": "556e4624293c41d5eefa924fc23b1687e93c380a",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDD0VTryYZ4LxVZ\nIu6Z+zyLFyPnEJWLLV85EvySTVwaM9wLixXQZO2pvd/jvWgpV3yS1PxHhKFYU4O5\noycjjsiE1KJesb6vwzlaZTtKz/BJRrZoIYbqq6Yio4v2bhc5EUDTWz1S8ka5C/bM\nFk1gzctesda1+bOOMGLFX+/d54NKt6S9ZO8FSSX+f/9XJ9QNztHtYKq5mkda6fhj\nzRsW0baFKEnBANhh13wMWG+P6M21PBWqpX/Gunlnrbz9Nnuifj+6GdXidGCYUTsO\nEn/SOrZTzvEbn3g+tOL2ocip0PfgPHsgeXSycSp7MEXDqS3+EDYIWsAkOC1sf1QB\n3NFVmq+FAgMBAAECggEABootdKF6nvVtmFhBET3xh/CqJ4unfuoxQbH3Yvh38L0W\nJoGK5TaVtGNNwKig+657D9lSop3UmKNTZSYEhty8KCmE0bZMeMjDl9gFKqq2qu/U\nZDZob9pzNjlxkXWcS3De0iA8NFK4l3IFmEvPYkIFPoCge9veygsmJVLeqzHR8fMQ\nssyLgtddk+N3/U6LZm2PEh6n7oPfcuf7LXUNdsRBljm3B0j4cDG24ULhIMpREqQv\nleCFhLy6TpATsS27K6NXd3+1oXn9u70yBqIZSJE8AGaZNuSY/jjSBi+yD7DpDq8H\n6PPOtwD9WjYwT65STbcMSiAR/DTKu1188o38+Jq1aQKBgQDpdR6T24WsAsc9xLw1\nxODUmia8qKwBQgAIdXDPI80FLHgMlGHgMGAdukVkYO6Ph1pvjfncXgm8RNxTcPrB\ngc2vy1E+4pyHgQ6sp2DYVyi71PD4Whsa0wUnKGgsJCDGq7tE6NFMcHnGTWsFNkGP\n2qQw/w4K2hDmG82CLZFtxAOGyQKBgQDWucl2kyGcZhfNQ+Bo3aa7ExrP5jRAGYG+\nZ65xOQX/GVF/3ynG52HltOftTyYAqYnIua3X8/aH03GevEjJM6pSXvzbSIVHGH8V\nC02S7z2J53LKwwBFHRwoWGO/ResNqr4jTQGVjR6em1vd8Isli+pWettNA+KwELhV\nOxUHKHq03QKBgQCVNROL8HuoikYJBlo8C06e0r77SNpWG3al8VleKkV4jwlTEOrV\nPFXR6iE7nHAcL6fvMFCHNVsHhwNCGS1Ky8lIF6wfgvoD6MoWMwvEeUBBfEFemUhF\nhqT+d+bMf3KrR0rzKdHLBv/ta8GAnUKdzGGwJvM0oFa4mwBnuPP/sY2HcQKBgQCl\nAMWAmdV1MrrNoIA89T7fePHcmqDCNRePcmsJVHF4M0N+iMW4tCt1cgvbPzwLvDxG\nA/FEBpQGkgQ4n6Uq/8m9XILgGx1XocpeKH5nD/LxGusKRsjZU2JE2o9j912F9hQA\nWneCLZw+81Gn/eVfZ+IerHADAZ5b/602yZ0CECgi/QKBgG5F22t1A1y7AF0jF9tV\nV47A21rmDvVxt1uEw5iRPWNwfcZzyWAzUdxW/pav7I0ioByokWyvclW45D+2z9Ur\n2zHEkU7sn/TbPPAN2h60ok5DTodKv3XJADtFJG6wnPgXq+GTD/fWX23qQmjbodFR\nKhT5f4pZowQ98pBXzHEDSblv\n-----END PRIVATE KEY-----\n",
+  "client_email": "deck-position-gui@deck-position-gui.iam.gserviceaccount.com",
+  "client_id": "109040280928902185522",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/deck-position-gui%40deck-position-gui.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
