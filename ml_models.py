@@ -760,7 +760,7 @@ class OptimizationModel:
         self.optimizer = GPyOpt.methods.BayesianOptimization(
             f=None,  # Function is evaluated manually
             domain=self.bounds,
-            constraints=[{'constraint': volume_constraint}]
+            constraints=[{'constraint': self.volume_constraint}],
             X=np.array([]).reshape(-1, len(self.bounds)),
             Y=np.array([]).reshape(-1, 1),
             acquisition_type='EI',  # Default acquisition type
