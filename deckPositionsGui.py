@@ -279,8 +279,10 @@ class CTkinterApp(customtkinter.CTk):
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,75)), self.show_frame(Page1)])
         rect=self.c1.create_rectangle(0, 200, 200, 325, fill="#7A797B",outline="black")
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,200)), self.show_frame(Page1)])
+        rect=self.c1.create_text(100, 260, text="Plate Reader", fill="white", font=('Helvetica 15 bold'))
         rect=self.c1.create_rectangle(0, 325, 200, 450, fill="#7A797B",outline="black")
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,325)), self.show_frame(Page1)])
+        rect=self.c1.create_text(100, 385, text="Plate Reader", fill="white", font=('Helvetica 15 bold'))
         rect=self.c1.create_rectangle(0, 450, 200, 575, fill="#7A797B",outline="black")
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,450)), self.show_frame(Page1)])
         #column two
@@ -294,8 +296,8 @@ class CTkinterApp(customtkinter.CTk):
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,450)), self.show_frame(Page1)])
         #column three
         #trash
-        rect=self.c1.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
-        rect=self.c1.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
+        self.c1.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
+        self.c1.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
         #rest of column three
         rect=self.c1.create_rectangle(400, 200, 600, 325, fill="#7A797B",outline="black")
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,200)), self.show_frame(Page1)])
