@@ -8,10 +8,11 @@ from oauth2client.service_account import ServiceAccountCredentials
 class Board:
     #positions goes row by row
     # board is associated with the position of the same index
-    board=[(2,[0]),(2,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(3,[0]),(1,[0])]
-    positions=[[0,75],[200,75],[400,75],[0,200],[200,200],[400,200],[0,325],[200,325],[400,400],[0,450],[200,450],[400,450]]
-    singlePosition=(2,[0])
+    
     def __init__(self):
+        self.board=[(0,[0]),(0,[0]),(-1,[0]),(-1,[0]),(0,[0]),(0,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0])]
+        self.positions=[[0,75],[200,75],[400,75],[0,200],[200,200],[400,200],[0,325],[200,325],[400,400],[0,450],[200,450],[400,450]]
+        self.singlePosition=(0,[0])
         #self.get_contents()
         print("initialized")
         """Initiates Board and calls get content on each square of the board"""
@@ -33,7 +34,7 @@ class Board:
     
     def create_single_cell(self,controller):
         print("create_single_cell")
-   
+        print(self.singlePosition)
         
         iposition=None
         for i in range(len(self.positions)):
@@ -42,14 +43,14 @@ class Board:
             if self.singlePosition[0]==self.positions[i][0] and self.singlePosition[1]==self.positions[i][1]:
                 break
         if iposition is not None:
-            if self.board[iposition][0]==0:
+            if self.board[iposition][0]==0 or self.board[iposition][0]==None:
                 controller.draw_cell()
             elif self.board[iposition][0]==1:
-                controller.draw_large_reagents(self)
+                controller.draw_large_reagents()
             elif self.board[iposition][0]==2:
-                controller.draw_large_pipets(self)
+                controller.draw_large_pipets()
             elif self.board[iposition][0]==3:
-                controller.draw_large_chem(self)
+                controller.draw_large_chem()
             
             
     def change_single_position(self,pos):
@@ -76,7 +77,6 @@ class Board:
                 # what i am using for testing
                 if item[0]=='MPH_test8':
                     worksheet=self.find_types(creds,item[1])
-            print(self.board)
         except IndexError:
             raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
             and make sure the spreadsheet name is spelled exactly the same as the reaction \
@@ -124,21 +124,22 @@ class Board:
         return name_key_pairs
     
     def name_to_num(self,name):
+        #change the number swhen we design
         if name=="tip_rack_20uL":
             return 1
-        if name=="tip_rack_300uL":
-            return 2
-        if name=="tip_rack_1000uL":
-            return 3
-        if name=="96_well_plate":
-            return 4
-        if name=="24_well_plate":
-            return 5
-        if name=="tube_holder_10":
+        elif name=="tip_rack_300uL":
+            return 1
+        elif name=="tip_rack_1000uL":
             return 6
-        if name=="temp_mod_24_tube":
+        elif name=="96_well_plate":
+            return 1
+        elif name=="24_well_plate":
+            return 2
+        elif name=="tube_holder_10":
+            return 3
+        elif name=="temp_mod_24_tube":
             return 7
-        if name=="":
+        elif name==None:
             return 0
         
     
@@ -222,7 +223,7 @@ class CTkinterApp(customtkinter.CTk):
         for i in range(8):
             for j in range(12):
                 oval=self.c1.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=Whetherfilled[i+j],width=2)
-                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
 
     def draw_small_reagents(self,x,y,bor):
         Whetherfilled=[0]*18 +[1]*6
@@ -236,7 +237,7 @@ class CTkinterApp(customtkinter.CTk):
         for i in range(4):
             for j in range(6):
                 oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=Whetherfilled[i+j],width=2)
-                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
     
     def draw_small_chem(self,x,y,bor):
         #first column
@@ -247,28 +248,28 @@ class CTkinterApp(customtkinter.CTk):
             else:
                 Whetherfilled[i]="blue"
         a=self.c1.create_oval(x+25,y+10,x+55 ,y+40, outline="black", fill=Whetherfilled[0],width=2)
-        self.c1.tag_bind(a, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(a, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         b=self.c1.create_oval(x+25,y+45,x+55 ,y+75, outline="black", fill=Whetherfilled[1],width=2)
-        self.c1.tag_bind(b, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(b, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         c=self.c1.create_oval(x+25,y+80,x+55 ,y+110, outline="black", fill=Whetherfilled[2],width=2)
-        self.c1.tag_bind(c, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(c, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         #second column
         d=self.c1.create_oval(x+60,y+10,x+90 ,y+40, outline="black", fill=Whetherfilled[3],width=2)
-        self.c1.tag_bind(d, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(d, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         e=self.c1.create_oval(x+60,y+45,x+90 ,y+75, outline="black", fill=Whetherfilled[4],width=2)
-        self.c1.tag_bind(e, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(e, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         f=self.c1.create_oval(x+60,y+80,x+90 ,y+110, outline="black", fill=Whetherfilled[5],width=2)
-        self.c1.tag_bind(f, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(f, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         # third column
         g=self.c1.create_oval(x+95,y+20,x+135 ,y+60, outline="black", fill=Whetherfilled[6],width=2)
-        self.c1.tag_bind(g, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(g, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         h=self.c1.create_oval(x+95,y+65,x+135 ,y+105, outline="black", fill=Whetherfilled[7],width=2)
-        self.c1.tag_bind(h, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(h, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         #forth column
         i=self.c1.create_oval(x+140,y+20,x+180 ,y+60, outline="black", fill=Whetherfilled[8],width=2)
-        self.c1.tag_bind(i, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(i, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         j=self.c1.create_oval(x+140,y+65,x+180 ,y+105, outline="black", fill=Whetherfilled[9],width=2)
-        self.c1.tag_bind(j, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1)])
+        self.c1.tag_bind(j, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         
     def draw_board(self,bor):
         """
@@ -276,35 +277,35 @@ class CTkinterApp(customtkinter.CTk):
         """
         #column one
         rect=self.c1.create_rectangle(0, 75, 200, 200, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,75)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,75)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(0, 200, 200, 325, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,200)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,200)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_text(100, 260, text="Plate Reader", fill="white", font=('Helvetica 15 bold'))
         rect=self.c1.create_rectangle(0, 325, 200, 450, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,325)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,325)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_text(100, 385, text="Plate Reader", fill="white", font=('Helvetica 15 bold'))
         rect=self.c1.create_rectangle(0, 450, 200, 575, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,450)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((0,450)), self.show_frame(Page1),bor.create_single_cell(self)])
         #column two
         rect=self.c1.create_rectangle(200, 75, 400, 200, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,75)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,75)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(200, 200, 400, 325, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,200)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,200)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(200, 325, 400, 450, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,325)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,325)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(200, 450, 400, 575, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,450)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,450)), self.show_frame(Page1),bor.create_single_cell(self)])
         #column three
         #trash
         self.c1.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
         self.c1.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
         #rest of column three
         rect=self.c1.create_rectangle(400, 200, 600, 325, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,200)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,200)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(400, 325, 600, 450, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,325)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,325)), self.show_frame(Page1),bor.create_single_cell(self)])
         rect=self.c1.create_rectangle(400, 450, 600, 575, fill="#7A797B",outline="black")
-        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,450)), self.show_frame(Page1)])
+        self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,450)), self.show_frame(Page1),bor.create_single_cell(self)])
         
     # def getorigin(self,eventorigin,board):
     #     global x,y
@@ -344,7 +345,7 @@ class CTkinterApp(customtkinter.CTk):
         if (xy[0]>400 and xy[0]<600) and (xy[1]>450 and xy[1]<575):
             print("3,4")
             
-    def draw_large_reagents(self,board):
+    def draw_large_reagents(self):
         """_summary_
 
         Args:
@@ -382,7 +383,7 @@ class CTkinterApp(customtkinter.CTk):
             for j in range(12):
                 oval=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=Whetherfilled[i+j],width=2)
 
-    def draw_large_chem(self,board):
+    def draw_large_chem(self):
         self.draw_cell()
         Whetherfilled=[1,0,1,0,1,0,0,0,1,0]
         for i in range(len(Whetherfilled)):
