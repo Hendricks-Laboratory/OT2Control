@@ -19,6 +19,7 @@ def display_text():
    label.configure(text=string)
 
 def run():
+   os.chdir
    os.chdir("/home/fatimakowdan/OT2Control")
    execute_python_file('deckPositionsGui.py',entry.get())
 
@@ -59,10 +60,12 @@ def execute_python_file(file_Name, argument):
       print(f"Error: The file does not exist.")
       
 def execute_command(command):
+   # executes the given command and returns the process
    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
    return process
 
 def read_stdout(process):
+   # reads stdout of the given process line by line and update the output
    while True:
       output = process.stdout.readline().decode('utf-8')
       if not output:
@@ -70,6 +73,7 @@ def read_stdout(process):
       update_output(output)
 
 def read_stderr(process):
+   # reads stderr of the provided process line by line and the output
    while True:
       error = process.stderr.readline().decode('utf-8')
       if not error:
@@ -77,9 +81,9 @@ def read_stderr(process):
       update_output(error)
 
 def update_output(text):
+   # updates the output text
    output_text.insert(tk.END, text)
    output_text.see(tk.END)
-
 
 
 #Initialize a Label to display the User Input
@@ -105,10 +109,13 @@ c2.pack()
 auto = tk.IntVar()
 c2 = tk.Checkbutton(win, text='Auto?',variable=auto, onvalue=1, offvalue=0)
 c2.pack()
-output="hello"
+output="hello" 
 
 #Create a Button to Execute given file name
 ttk.Button(win, text= "Execute?",width= 20, command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=20)  
+
+# Bind the <Return> event to the execute_button's command
+win.bind('<Return>', lambda event: [display_text(), input1(output, sim, auto)])
 
 #show deck positions
 ttk.Button(win, text= "Check Deck Positions?",command=run, width=30).pack()
