@@ -118,20 +118,6 @@ l = Label(win, text = "Output")
 l.config(font =("Courier", 14))
 l.pack()
 
-def run_command():
-   command = entry.get()
-   process = execute_command(command)
-   stdout_thread = threading.Thread(target=read_stdout, args=(process,), daemon=True)
-   stderr_thread = threading.Thread(target=read_stderr, args=(process,), daemon=True)
-   stdout_thread.start()
-   stderr_thread.start()
-
-run_button = Button(win, text="Run Command", command=run_command)
-run_button.pack()
-
-output_text = Text(win, height=20, width=70)
-output_text.pack()
-
 v=Scrollbar(win,orient='vertical')
 v.pack(side=RIGHT, fill='y')
 
