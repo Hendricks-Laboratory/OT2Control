@@ -1,8 +1,6 @@
 import customtkinter
 import gspread
 import random
-import sys
-from oauth2client.service_account import ServiceAccountCredentials
 
 
 class Board:
@@ -16,8 +14,7 @@ class Board:
         #self.get_contents()
         print("initialized")
         """Initiates Board and calls get content on each square of the board"""
-    def create_full_board(self,controller):
-        controller.draw_board(self)
+        controller.drawBoard(canvas,self.board,controller)
         
         for i in range(len(self.board)):
                 # calls the get content function and depending on that it will set up the board to match the values gotten from the excell sheet
@@ -26,9 +23,9 @@ class Board:
                 
                 # if that board share is set to 1 it draws the reagents and if it is 2 it draws the pipets
                 if self.board[i][0]==1:
-                    controller.draw_small_reagents(self.positions[i][0],self.positions[i][1],self)
+                    controller.drawReagents(canvas,self.positions[i][0],self.positions[i][1],self.board,controller)
                 elif self.board[i][0]==2:
-                    controller.draw_small_pipets(self.positions[i][0],self.positions[i][1],self)
+                    controller.drawPipets(canvas,self.positions[i][0],self.positions[i][1],self.board,controller)
                 elif self.board[i][0]==3:
                     controller.draw_small_chem(self.positions[i][0],self.positions[i][1],self)
     
@@ -67,7 +64,11 @@ class Board:
         # will need to do this again on the lab computer
         #gc = gspread.service_account("C:/Users/gabep/OneDrive/Documents/school/4th year whitman/GuiTeam/OT2Control/deck-position-gui-556e4624293c.json")
         # Open Spreadsheet by name
-        creds=self.get_credentials()
+        #spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0")
+        spreadsheet = gspread.open_by_url("https://docs.google.com/spreadsheets/d/1m2Uzk8z-qn2jJ2U1NHkeN7CJ8TQpK3R0Ai19zlAB1Ew/edit#gid=0")
+        
+        #opens the sheet by name. sheet one is the name of the page inside the spreadsheet
+        worksheet = spreadsheet.sheet1
         try:
             spreadsheet = self._get_key_wks(creds)
             for item in spreadsheet:
@@ -83,8 +84,8 @@ class Board:
             spreadsheet.')
         
         # gets the values from the first row of the sheet
-        # values_list = worksheet.row_values(1)
-        # print(values_list)
+        values_list = worksheet.row_values(1)
+        print(values_list)
         return -1
 
     #the next three functions were taken from controler py and are used toget credentials for the google sheet
@@ -144,18 +145,22 @@ class Board:
         
     
 
+    def print_board(self):
+        for i in range(len(self.board)):
+            print(self.board[i])
             
     
               
 LARGEFONT =("Verdana", 35)
   
-class CTkinterApp(customtkinter.CTk):
+class tkinterApp(customtkinter.CTk):
+     
     # __init__ function for class tkinterApp 
-    def __init__(self): 
+    def __init__(self, *args, **kwargs): 
          
         # __init__ function for class Tk
-        customtkinter.CTk.__init__(self)
-        self.position=()
+        customtkinter.CTk.__init__(self, *args, **kwargs)
+         
         # creating a container
         container = customtkinter.CTkFrame(self)  
         self.geometry("850x800")
@@ -163,29 +168,25 @@ class CTkinterApp(customtkinter.CTk):
         self.title("Deck Positions")
 
         container.pack(side = "top", fill = "both", expand = True) 
+  
         container.grid_rowconfigure(0, weight = 1)
         container.grid_columnconfigure(0, weight = 1)
-        self.board=Board()
+  
         # initializing frames to an empty array
         self.frames = {}  
-        self.c1=None
-        self.c2=None
+  
         # iterating through a tuple consisting
         # of the different page layouts
-        i=0
-        frame = Page1(container, self)
-        # initializing frame of that object from
-        # startpage, page1
-        self.frames[Page1] = frame 
-
-        frame.grid(row = 0, column = 0, sticky ="nsew")
-        frame = StartPage(container, self)
-        # initializing frame of that object from
-        # startpage, page1
-        self.frames[StartPage] = frame 
-
-        frame.grid(row = 0, column = 0, sticky ="nsew")
-        
+        for F in (StartPage, Page1):
+  
+            frame = F(container, self)
+  
+            # initializing frame of that object from
+            # startpage, page1, page2 respectively with 
+            # for loop
+            self.frames[F] = frame 
+  
+            frame.grid(row = 0, column = 0, sticky ="nsew")
   
         self.show_frame(StartPage)
   
@@ -194,19 +195,13 @@ class CTkinterApp(customtkinter.CTk):
     def show_frame(self, cont):
         frame = self.frames[cont]
         frame.tkraise()
-  
-    # def show_frame2(self,page1,board,Page1Canvas):
-    #     print("show frame")
-    #     frame = self.frames[page1]
-    #     frame.tkraise()
-    #     board.create_single_cell(,self)
         
         
-    def close(self): 
+    def Close(self): 
         self.destroy
         print("Should be closing")  
         
-    def draw_small_pipets(self,x,y,bor):
+    def drawPipets(self,canvas,x,y,bor,controller):
 
         """
         Canvas is the canvas object
@@ -225,7 +220,7 @@ class CTkinterApp(customtkinter.CTk):
                 oval=self.c1.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=Whetherfilled[i+j],width=2)
                 self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
 
-    def draw_small_reagents(self,x,y,bor):
+    def drawReagents(self,canvas,x,y,bor,controller):
         Whetherfilled=[0]*18 +[1]*6
         random.shuffle(Whetherfilled)
         for i in range(len(Whetherfilled)):
@@ -239,7 +234,7 @@ class CTkinterApp(customtkinter.CTk):
                 oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=Whetherfilled[i+j],width=2)
                 self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
     
-    def draw_small_chem(self,x,y,bor):
+    def drawChem(self,canvas,x,y,bor,controller):
         #first column
         Whetherfilled=[1,0,1,0,1,0,0,0,1,0]
         for i in range(len(Whetherfilled)):
@@ -271,9 +266,9 @@ class CTkinterApp(customtkinter.CTk):
         j=self.c1.create_oval(x+140,y+65,x+180 ,y+105, outline="black", fill=Whetherfilled[9],width=2)
         self.c1.tag_bind(j, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
         
-    def draw_board(self,bor):
+    def drawBoard(self,canvas,bor,controller):
         """
-        bor.change_single_position(pos)
+        
         """
         #column one
         rect=self.c1.create_rectangle(0, 75, 200, 200, fill="#7A797B",outline="black")
@@ -297,8 +292,8 @@ class CTkinterApp(customtkinter.CTk):
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((200,450)), self.show_frame(Page1),bor.create_single_cell(self)])
         #column three
         #trash
-        self.c1.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
-        self.c1.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
+        rect=canvas.create_rectangle(400, 0, 650, 200, fill="#7A797B",outline="black")
+        rect=canvas.create_text(525, 100, text="Trash", fill="white", font=('Helvetica 20 bold'))
         #rest of column three
         rect=self.c1.create_rectangle(400, 200, 600, 325, fill="#7A797B",outline="black")
         self.c1.tag_bind(rect, '<Button-1>',lambda x: [ bor.change_single_position((400,200)), self.show_frame(Page1),bor.create_single_cell(self)])
@@ -313,14 +308,14 @@ class CTkinterApp(customtkinter.CTk):
     #     y = eventorigin.y
     #     print(x,y)
         
-    def get_canvas_items(self):
-        item_list = self.c1.find_all()
+    def get_canvas_items(self,canvas):
+        item_list = canvas.find_all()
         for item in item_list:
-            item_type = self.c1.type(item)   # e.g. "text", "line", etc.
+            item_type = canvas.type(item)   # e.g. "text", "line", etc.
             #if item_type=="oval":
                 #print(item_type)
                 
-    def show_pop_up(self,board,xy):
+    def showPopUp(self,board,xy):
         print(xy)
         if (xy[0]>0 and xy[0]<200) and (xy[1]>75 and xy[1]<200):
             print("1,1")
@@ -346,12 +341,51 @@ class CTkinterApp(customtkinter.CTk):
             print("3,4")
             
     def draw_large_reagents(self):
-        """_summary_
+        print("hello")
+    
+# first window frame startpage
+  
+class StartPage(customtkinter.CTkFrame):
+    def __init__(self, parent, controller): 
+        customtkinter.CTkFrame.__init__(self, parent)
+         
+        # label of frame Layout 2
+        label = customtkinter.CTkLabel(self, text ="Startpage", font = LARGEFONT)
+         
+        
+        
+        #Create a canvas object
+        c = customtkinter.CTkCanvas(self, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
+        
 
-        Args:
-            canvas (_type_): _description_
-        """
-        self.draw_cell()
+        c.place(x=100,y=50)
+        board=Board(c,controller)
+
+        button= customtkinter.CTkButton(self,text="Close",width=200,command=parent.destroy)
+        button.place(x=300,y=650)
+  
+  
+  
+# second window frame page1 
+class Page1(customtkinter.CTkFrame):
+     
+    def __init__(self, parent, controller):
+         
+        customtkinter.CTkFrame.__init__(self, parent)
+        label = customtkinter.CTkLabel(self, text ="Page 1", font = LARGEFONT)
+        c = customtkinter.CTkCanvas(self, width=650, height=425, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
+        c.place(x=100,y=50)
+        rect=c.create_rectangle(0, 0, 650, 425, fill="#7A797B",outline="black")
+        self.drawChem(c)
+        # button to show frame 2 with text
+        # layout2
+        button1 = customtkinter.CTkButton(self, text ="StartPage", command = lambda : controller.show_frame(StartPage))
+     
+        # putting the button in its place 
+        # by using grid
+        button1.grid(row = 1, column = 1, padx = 10, pady = 10)
+        
+    def drawReagents(self,canvas):
         Whetherfilled=[0]*18 +[1]*6
         random.shuffle(Whetherfilled)
         for i in range(len(Whetherfilled)):
@@ -362,15 +396,14 @@ class CTkinterApp(customtkinter.CTk):
                 
         for i in range(4):
             for j in range(6):
-                oval=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=Whetherfilled[i+j],width=2)
+                oval=canvas.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=Whetherfilled[i+j],width=2)
                 
-    def draw_large_pipets(self):
+    def drawPipets(self,canvas):
+
         """
         Canvas is the canvas object
         x and y are the x and y cordinates
         """
-        print("large_pipets")
-        self.draw_cell()
         #just a mess
         Whetherfilled=[0]*32 +[1]*66
         random.shuffle(Whetherfilled)
@@ -391,73 +424,25 @@ class CTkinterApp(customtkinter.CTk):
                 Whetherfilled[i]="black"
             else:
                 Whetherfilled[i]="blue"
-        #first column
-        a=self.c2.create_oval(25,25,145 ,145, outline="black", fill=Whetherfilled[0],width=2)
-        b=self.c2.create_oval(25,150,145,270, outline="black", fill=Whetherfilled[1],width=2)
-        c=self.c2.create_oval(25,275,145,395, outline="black", fill=Whetherfilled[2],width=2)
+        a=canvas.create_oval(25,25,145 ,145, outline="black", fill=Whetherfilled[0],width=2)
+        b=canvas.create_oval(25,150,145,270, outline="black", fill=Whetherfilled[1],width=2)
+        c=canvas.create_oval(25,275,145,395, outline="black", fill=Whetherfilled[2],width=2)
         #second column
-        d=self.c2.create_oval(155, 25, 275, 145, outline="black", fill=Whetherfilled[3],width=2)
-        e=self.c2.create_oval(155, 150, 275, 270, outline="black", fill=Whetherfilled[4],width=2)
-        f=self.c2.create_oval(155, 275, 275, 395, outline="black", fill=Whetherfilled[5],width=2)
+        d=canvas.create_oval(155, 25, 275, 145, outline="black", fill=Whetherfilled[3],width=2)
+        e=canvas.create_oval(155, 150, 275, 270, outline="black", fill=Whetherfilled[4],width=2)
+        f=canvas.create_oval(155, 275, 275, 395, outline="black", fill=Whetherfilled[5],width=2)
         # third column
-        g=self.c2.create_oval(280, 50, 440, 210, outline="black", fill=Whetherfilled[6],width=2)
-        h=self.c2.create_oval(280, 215, 440, 375, outline="black", fill=Whetherfilled[7],width=2)
+        g=canvas.create_oval(280, 140, 440, 300, outline="black", fill=Whetherfilled[6],width=2)
+        h=canvas.create_oval(280, 305, 440, 465, outline="black", fill=Whetherfilled[7],width=2)
         #forth column
-        i=self.c2.create_oval(445,50,605 ,210, outline="black", fill=Whetherfilled[8],width=2)
-        j=self.c2.create_oval(445,215,605 ,375, outline="black", fill=Whetherfilled[9],width=2)
-        
-    def draw_cell(self):
-        print("draw cell")
-        self.c2.delete("all")
-        rect=self.c2.create_rectangle(0, 0, 650, 425, fill="#7A797B",outline="black")
-    
-# first window frame startpage
+        i=canvas.create_oval(405,90,410 ,210, outline="black", fill=Whetherfilled[8],width=2)
+        j=canvas.create_oval(405,215,410 ,335, outline="black", fill=Whetherfilled[9],width=2)
+
+
+                
   
-class StartPage(customtkinter.CTkFrame):
-    StartPageCanvas=None
-    def __init__(self, parent, controller): 
-        customtkinter.CTkFrame.__init__(self, parent)
-         
-        # label of frame Layout 2
-        label = customtkinter.CTkLabel(self, text ="Startpage", font = LARGEFONT)
-        
-        #Create a canvas object
-        controller.c1 = customtkinter.CTkCanvas(self, width=650, height=575, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
-        
-        controller.board.get_contents()
-        
-
-        controller.c1.place(x=100,y=50)
-        print('in start page')
-
-        controller.board.create_full_board(controller)
-
-        button= customtkinter.CTkButton(self,text="Close",width=200,command=parent.destroy)
-        button.place(x=300,y=650)
-
-# second window frame page1 
-class Page1(customtkinter.CTkFrame):
-    Page1Canvas=None
-     
-    def __init__(self, parent, controller):
-        customtkinter.CTkFrame.__init__(self, parent)
-        label = customtkinter.CTkLabel(self, text ="Page 1", font = LARGEFONT)
-        controller.c2 = customtkinter.CTkCanvas(self, width=650, height=425, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
-        print("in page 1")
-
-        controller.c2.place(x=100,y=50)
-        controller.draw_cell()
-
-        controller.board.create_single_cell(controller)
-        # button to show frame 2 with text
-        # layout2
-        button1 = customtkinter.CTkButton(self, text ="StartPage", command = lambda : controller.show_frame(StartPage))
-        
-        # putting the button in its place 
-        # by using grid
-        button1.grid(row = 1, column = 1, padx = 10, pady = 10)
-        
+       
   
 # Driver Code
-app = CTkinterApp()
+app = tkinterApp()
 app.mainloop()
