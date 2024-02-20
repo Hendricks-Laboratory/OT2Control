@@ -1,5 +1,7 @@
 import GPyOpt
 from pyDOE import lhs
+from GPyOpt import Design_space
+
 
 from abc import abstractmethod
 import time  #TODO delete this debugging only
@@ -737,12 +739,14 @@ class BOGP(MLModel):
 class OptimizationModel:
     def __init__(self, bounds, target_value, reagent_info, fixed_reagents, initial_design_numdata=15):
         self.bounds = bounds
+        self.space = Design_space(space=self.bounds)
         self.target_value = target_value
         self.initial_design_numdata = initial_design_numdata
         self.design = None
         self.optimizer = None
         self.fixed_reagents = fixed_reagents
         self.reagent_info = reagent_info
+        self.experiment_data = {'X': [], 'Y': []}  # Initialize experiment data storage
         self._initialize_model()
 
     def volume_constraint(self, recipe):
@@ -756,31 +760,40 @@ class OptimizationModel:
 
     def _initialize_model(self):
         """Initializes the Bayesian Optimization model."""
-        self.design = GPyOpt.experiment_design.initial_design('latin', self.bounds, self.initial_design_numdata)
+
+        # Convert experiment data lists to numpy arrays for GPyOpt
+        X = np.array(self.experiment_data['X']).reshape(-1, len(self.bounds))
+        Y = np.array(self.experiment_data['Y']).reshape(-1, 1)
+
+        self.design = GPyOpt.experiment_design.initial_design('latin', self.space, self.initial_design_numdata)
         self.optimizer = GPyOpt.methods.BayesianOptimization(
             f=None,  # Function is evaluated manually
             domain=self.bounds,
-            constraints=[{'constraint': self.volume_constraint}],
-            X=np.array([]).reshape(-1, len(self.bounds)),
-            Y=np.array([]).reshape(-1, 1),
+            X=X if X.size else None,
+            Y=Y if Y.size else None,
             acquisition_type='EI',  # Default acquisition type
             normalize_Y=True
         )
-
+    
+    
     def get_initial_design(self):
         """Returns the initial LHS design samples."""
         return self.design
 
-    def preprocess_data(self, Y_new):
-        return 
-
     def update_model(self, X_new, Y_new):
         """Updates the model with new experimental data."""
         # Calculate the objective as the absolute difference from the target
-        Y_new = self.process_data(Y_new)
+        # Y_new = self.process_data(Y_new)
         objective = np.abs(Y_new - self.target_value).reshape(-1, 1)
         self.optimizer.add_observations(X_new, objective)
         self.optimizer.run_optimization(max_iter=1, verbosity=False)
+
+    def update_experiment_data(self, new_X, new_Y):
+        """Updates the model with new experimental data."""
+        self.experiment_data['X'].extend(new_X)
+        self.experiment_data['Y'].extend(new_Y)
+        self._initialize_optimizer()  # Reinitialize to update model with new data
+
 
     def suggest_next_location(self, acquisition_type='EI'):
         """Suggests the next location for experimentation using a specified acquisition function."""
