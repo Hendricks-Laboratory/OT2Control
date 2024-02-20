@@ -2,9 +2,7 @@ from tkinter import *
 from tkinter import ttk
 import tkinter as tk
 import subprocess
-import threading
 import os
-import gspread
 
 #Create an instance of Tkinter frame
 win= Tk()
@@ -82,8 +80,8 @@ def read_stderr(process):
 
 def update_output(text):
    # updates the output text
-   output_text.insert(tk.END, text)
-   output_text.see(tk.END)
+   T.insert(tk.END, text)
+   T.see(tk.END)
 
 
 #Initialize a Label to display the User Input
