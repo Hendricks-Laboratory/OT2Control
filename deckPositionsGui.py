@@ -380,23 +380,22 @@ class CTkinterApp(customtkinter.CTk):
         """
         self.draw_cell()
         filled='black'
-        Whetherfilled=[0]*18 +[1]*6
-        random.shuffle(Whetherfilled)
-        for i in range(len(Whetherfilled)):
-            if Whetherfilled[i]==0:
-                Whetherfilled[i]="black"
-            else:
-                Whetherfilled[i]="blue"
+        lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
+        lbl.place(x=0, y=0, anchor="n")
         index=board.positions.index(list(board.singlePosition))
         for i in range(4):
             for j in range(6):
                 strin=chr(i+65)+str(j+1)
-                print(strin)
                 out=[touple for touple in board.board[index][1] if touple[1]==strin]
                 if len(out)!=0:
                     filled='blue'
+                    texttag=out[0][0]
+                else:
+                    filled='black'
+                    texttag="empty"
                 oval=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=filled,width=2)
-                filled='black'
+                self.c2.tag_bind(oval, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*100),50+(j*90)))
+                self.c2.tag_bind(oval, "<Leave>", lambda event: on_leave(event,lbl))
                 
     def draw_large_pipets(self,board):
         """
@@ -406,101 +405,165 @@ class CTkinterApp(customtkinter.CTk):
         print("large_pipets")
         self.draw_cell()
         filled="black"
-        #just a mess
-        Whetherfilled=[0]*32 +[1]*66
-        random.shuffle(Whetherfilled)
-        for i in range(len(Whetherfilled)):
-            if Whetherfilled[i]==0:
-                Whetherfilled[i]="black"
-            else:
-                Whetherfilled[i]="blue"
+        lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
+        lbl.place(x=0, y=0, anchor="n")
         index=board.positions.index(list(board.singlePosition))
         for i in range(8):
             for j in range(12):
                 strin=chr(i+65)+str(j+1)
                 out=[touple for touple in board.board[index][1] if touple[1]==strin]
+                print(out)
                 if len(out)!=0:
                     filled='blue'
-                oval=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2)
-                filled='black'
+                    texttag=out[0][0]
+                else:
+                    filled='black'
+                    texttag="empty"
+                oval=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
+                self.c2.tag_bind(oval, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,80,75))
+                self.c2.tag_bind(oval, "<Leave>", lambda event: on_leave(event,lbl))
+            
                 
                 
     def draw_large_chem(self,board):
-        
-        
         self.draw_cell()
         #lbl = customtkinter.CTkLabel(self.c2)
         filled='black'
         index=board.positions.index(list(board.singlePosition))
+        lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
+        lbl.place(x=0, y=0, anchor="nw")
 
         #first column
         out=[touple for touple in board.board[index][1] if touple[1]=="A1"]
+        print(out)
         if len(out)!=0:
             filled='blue'
-        a=self.c2.create_oval(25,25,145 ,145, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        A=self.c2.create_oval(25,25,145 ,145, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(A, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,80,75))
+        self.c2.tag_bind(A, "<Leave>", lambda event: on_leave(event,lbl))
         out=[touple for touple in board.board[index][1] if touple[1]=="B1"]
         if len(out)!=0:
             filled='blue'
-        b=self.c2.create_oval(25,150,145,270, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        b=self.c2.create_oval(25,150,145,270, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(b, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,80,205))
+        self.c2.tag_bind(b, "<Leave>", lambda event: on_leave(event,lbl))
         out=[touple for touple in board.board[index][1] if touple[1]=="C1"]
         if len(out)!=0:
-            filled='blue'        
-        c=self.c2.create_oval(25,275,145,395, outline="black", fill=filled,width=2)
-        filled="black"
+            filled='blue'
+            texttag=out[0][0]
+        else:
+            texttag="empty"  
+        c=self.c2.create_oval(25,275,145,395, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(c, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,80,330))
+        self.c2.tag_bind(c, "<Leave>", lambda event: on_leave(event,lbl))
         
         #second column
         out=[touple for touple in board.board[index][1] if touple[1]=="A2"]
         if len(out)!=0:
             filled='blue'
-        d=self.c2.create_oval(155, 25, 275, 145, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        d=self.c2.create_oval(155, 25, 275, 145, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(d, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,210,80))
+        self.c2.tag_bind(d, "<Leave>", lambda event: on_leave(event,lbl))
         out=[touple for touple in board.board[index][1] if touple[1]=="B2"]
         if len(out)!=0:
             filled='blue'
-        e=self.c2.create_oval(155, 150, 275, 270, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        e=self.c2.create_oval(155, 150, 275, 270, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(e, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,210,205))
+        self.c2.tag_bind(e, "<Leave>", lambda event: on_leave(event,lbl))
         out=[touple for touple in board.board[index][1] if touple[1]=="C2"]
         if len(out)!=0:
             filled='blue'
-        f=self.c2.create_oval(155, 275, 275, 395, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        f=self.c2.create_oval(155, 275, 275, 395, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(f, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,210,330))
+        self.c2.tag_bind(f, "<Leave>", lambda event: on_leave(event,lbl))
         
         # third column
         out=[touple for touple in board.board[index][1] if touple[1]=="A3"]
         if len(out)!=0:
             filled='blue'
-        g=self.c2.create_oval(280, 50, 440, 210, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        g=self.c2.create_oval(280, 50, 440, 210, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(g, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,350,125))
+        self.c2.tag_bind(g, "<Leave>", lambda event: on_leave(event,lbl))
+        
         out=[touple for touple in board.board[index][1] if touple[1]=="B3"]
         if len(out)!=0:
             filled='blue'
-        h=self.c2.create_oval(280, 215, 440, 375, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        h=self.c2.create_oval(280, 215, 440, 375, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(h, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,350,290))
+        self.c2.tag_bind(h, "<Leave>", lambda event: on_leave(event,lbl))
+        
         
         #forth column
         out=[touple for touple in board.board[index][1] if touple[1]=="A4"]
         if len(out)!=0:
             filled='blue'
-        i=self.c2.create_oval(445,50,605 ,210, outline="black", fill=filled,width=2)
-        filled="black"
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        i=self.c2.create_oval(445,50,605 ,210, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(i, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,525,125))
+        self.c2.tag_bind(i, "<Leave>", lambda event: on_leave(event,lbl))
+    
         out=[touple for touple in board.board[index][1] if touple[1]=="B4"]
         if len(out)!=0:
             filled='blue'
-        j=self.c2.create_oval(445,215,605 ,375, outline="black", fill=filled,width=2)
+            texttag=out[0][0]
+        else:
+            filled='black'
+            texttag="empty"
+        j=self.c2.create_oval(445,215,605 ,375, outline="black", fill=filled,width=2,tag=texttag)
+        self.c2.tag_bind(j, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,525,290))
+        self.c2.tag_bind(j, "<Leave>", lambda event: on_leave(event,lbl))
         
     def draw_cell(self):
         print("draw cell")
         self.c2.delete("all")
         rect=self.c2.create_rectangle(0, 0, 650, 425, fill="#7A797B",outline="black")
         
-def on_enter(canvas,lbl):
+        
+        
+        
+def on_enter(e,canvas,lbl,filled,xaxis,yaxis):
     # find the canvas item below mouse cursor
-    
+    item = canvas.find_withtag("current")
+    # get the tags for the item
+    tags = canvas.gettags(item)
+    lbl.place(x=xaxis,y=yaxis, anchor="n")
     # show it using the label
-    print("in it")
-    lbl.configure(text="hello")
+    lbl.configure(text=tags[0],fg_color=filled)
+def on_leave(e,lbl):
+    # clear the label text
+    lbl.configure(text="")
+    lbl.place(x=0,y=0)
 
 
 
