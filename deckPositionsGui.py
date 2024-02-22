@@ -237,71 +237,118 @@ class CTkinterApp(customtkinter.CTk):
         self.destroy
         print("Should be closing")  
         
-    def draw_small_pipets(self,x,y,bor):
+    def draw_small_pipets(self,x,y,board):
 
         """
         Canvas is the canvas object
         x and y are the x and y cordinates
         """
-        #just a mess
-        Whetherfilled=[0]*32 +[1]*66
-        random.shuffle(Whetherfilled)
-        for i in range(len(Whetherfilled)):
-            if Whetherfilled[i]==0:
-                Whetherfilled[i]="black"
-            else:
-                Whetherfilled[i]="blue"
+        filled="black"
+        index=board.positions.index([x,y])
         for i in range(8):
             for j in range(12):
-                oval=self.c1.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=Whetherfilled[i+j],width=2)
-                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+                strin=chr(i+65)+str(j+1)
+                out=[touple for touple in board.board[index][1] if touple[1]==strin]
+                if len(out)!=0: 
+                    filled='blue' 
+                else:
+                    filled='black'
+                oval=self.c1.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=filled,width=2)
+                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1),board.create_single_cell(self)])
 
-    def draw_small_reagents(self,x,y,bor):
-        Whetherfilled=[0]*18 +[1]*6
-        random.shuffle(Whetherfilled)
-        for i in range(len(Whetherfilled)):
-            if Whetherfilled[i]==0:
-                Whetherfilled[i]="black"
-            else:
-                Whetherfilled[i]="green"
-                
+    def draw_small_reagents(self,x,y,board):
+        filled="black"
+        index=board.positions.index([x,y])
         for i in range(4):
             for j in range(6):
-                oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=Whetherfilled[i+j],width=2)
-                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+                strin=chr(i+65)+str(j+1)
+                out=[touple for touple in board.board[index][1] if touple[1]==strin]
+                if len(out)!=0: 
+                    filled='blue' 
+                else:
+                    filled='black'
+                oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=filled,width=2)
+                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1),board.create_single_cell(self)])
     
-    def draw_small_chem(self,x,y,bor):
+    def draw_small_chem(self,x,y,board):
         #first column
-        Whetherfilled=[1,0,1,0,1,0,0,0,1,0]
-        for i in range(len(Whetherfilled)):
-            if Whetherfilled[i]==0:
-                Whetherfilled[i]="black"
-            else:
-                Whetherfilled[i]="blue"
+        filled="black"
+        index=board.positions.index([x,y])
 
-        a=self.c1.create_oval(x+25,y+10,x+55 ,y+40, outline="black", fill=Whetherfilled[0],width=2)
-        self.c1.tag_bind(a, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        b=self.c1.create_oval(x+25,y+45,x+55 ,y+75, outline="black", fill=Whetherfilled[1],width=2)
-        self.c1.tag_bind(b, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        c=self.c1.create_oval(x+25,y+80,x+55 ,y+110, outline="black", fill=Whetherfilled[2],width=2)
-        self.c1.tag_bind(c, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+        #first column
+        out=[touple for touple in board.board[index][1] if touple[1]=="A1"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        a=self.c1.create_oval(x+25,y+10,x+55 ,y+40, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(a, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="B1"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        b=self.c1.create_oval(x+25,y+45,x+55 ,y+75, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(b, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="C1"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        c=self.c1.create_oval(x+25,y+80,x+55 ,y+110, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(c, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
         #second column
-        d=self.c1.create_oval(x+60,y+10,x+90 ,y+40, outline="black", fill=Whetherfilled[3],width=2)
-        self.c1.tag_bind(d, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        e=self.c1.create_oval(x+60,y+45,x+90 ,y+75, outline="black", fill=Whetherfilled[4],width=2)
-        self.c1.tag_bind(e, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        f=self.c1.create_oval(x+60,y+80,x+90 ,y+110, outline="black", fill=Whetherfilled[5],width=2)
-        self.c1.tag_bind(f, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="A2"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        d=self.c1.create_oval(x+60,y+10,x+90 ,y+40, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(d, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="B2"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        e=self.c1.create_oval(x+60,y+45,x+90 ,y+75, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(e, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="C2"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        f=self.c1.create_oval(x+60,y+80,x+90 ,y+110, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(f, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
         # third column
-        g=self.c1.create_oval(x+95,y+20,x+135 ,y+60, outline="black", fill=Whetherfilled[6],width=2)
-        self.c1.tag_bind(g, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        h=self.c1.create_oval(x+95,y+65,x+135 ,y+105, outline="black", fill=Whetherfilled[7],width=2)
-        self.c1.tag_bind(h, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="A3"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        g=self.c1.create_oval(x+95,y+20,x+135 ,y+60, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(g, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="B3"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        h=self.c1.create_oval(x+95,y+65,x+135 ,y+105, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(h, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
         #forth column
-        i=self.c1.create_oval(x+140,y+20,x+180 ,y+60, outline="black", fill=Whetherfilled[8],width=2)
-        self.c1.tag_bind(i, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
-        j=self.c1.create_oval(x+140,y+65,x+180 ,y+105, outline="black", fill=Whetherfilled[9],width=2)
-        self.c1.tag_bind(j, '<Button-1>',lambda z: [ bor.change_single_position((x,y)), self.show_frame(Page1),bor.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="A4"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        i=self.c1.create_oval(x+140,y+20,x+180 ,y+60, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(i, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
+        out=[touple for touple in board.board[index][1] if touple[1]=="B4"]
+        if len(out)!=0: 
+            filled='blue' 
+        else:
+            filled='black'
+        j=self.c1.create_oval(x+140,y+65,x+180 ,y+105, outline="black", fill=filled,width=2)
+        self.c1.tag_bind(j, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1), board.create_single_cell(self)])
         
     def draw_board(self,bor):
         """
@@ -347,30 +394,6 @@ class CTkinterApp(customtkinter.CTk):
             #if item_type=="oval":
                 #print(item_type)
                 
-    def show_pop_up(self,board,xy):
-        print(xy)
-        if (xy[0]>0 and xy[0]<200) and (xy[1]>75 and xy[1]<200):
-            print("1,1")
-        if (xy[0]>0 and xy[0]<200) and (xy[1]>200 and xy[1]<325):
-            print("1,2")
-        if (xy[0]>0 and xy[0]<200) and (xy[1]>325 and xy[1]<450):
-            print("1,3")
-        if (xy[0]>0 and xy[0]<200) and (xy[1]>450 and xy[1]<575):
-            print("1,4")
-        if (xy[0]>200 and xy[0]<400) and (xy[1]>75 and xy[1]<200):
-            print("2,1")
-        if (xy[0]>200 and xy[0]<400) and (xy[1]>200 and xy[1]<325):
-            print("2,2")
-        if (xy[0]>200 and xy[0]<400) and (xy[1]>325 and xy[1]<450):
-            print("2,3")
-        if (xy[0]>200 and xy[0]<400) and (xy[1]>450 and xy[1]<575):
-            print("2,4")
-        if (xy[0]>400 and xy[0]<600) and (xy[1]>200 and xy[1]<325):
-            print("3,2")
-        if (xy[0]>400 and xy[0]<600) and (xy[1]>325 and xy[1]<450):
-            print("3,3")
-        if (xy[0]>400 and xy[0]<600) and (xy[1]>450 and xy[1]<575):
-            print("3,4")
             
     def draw_large_reagents(self,board):
         """_summary_
@@ -393,9 +416,10 @@ class CTkinterApp(customtkinter.CTk):
                 else:
                     filled='black'
                     texttag="empty"
-                oval=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=filled,width=2)
-                self.c2.tag_bind(oval, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*100),50+(j*90)))
-                self.c2.tag_bind(oval, "<Leave>", lambda event: on_leave(event,lbl))
+                ovalname=str(i)+str(j)
+                ovalname=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=filled,width=2)
+                self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*100),50+(j*90)))
+                self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
                 
     def draw_large_pipets(self,board):
         """
@@ -412,16 +436,17 @@ class CTkinterApp(customtkinter.CTk):
             for j in range(12):
                 strin=chr(i+65)+str(j+1)
                 out=[touple for touple in board.board[index][1] if touple[1]==strin]
-                print(out)
                 if len(out)!=0:
                     filled='blue'
                     texttag=out[0][0]
                 else:
                     filled='black'
                     texttag="empty"
-                oval=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
-                self.c2.tag_bind(oval, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,80,75))
-                self.c2.tag_bind(oval, "<Leave>", lambda event: on_leave(event,lbl))
+                ovalname=str(i)+str(j)
+                
+                ovalname=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
+                self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
+                self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
             
                 
                 
@@ -553,6 +578,8 @@ class CTkinterApp(customtkinter.CTk):
         
         
 def on_enter(e,canvas,lbl,filled,xaxis,yaxis):
+    print(xaxis)
+    print(yaxis)
     # find the canvas item below mouse cursor
     item = canvas.find_withtag("current")
     # get the tags for the item
