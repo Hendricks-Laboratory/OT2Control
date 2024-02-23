@@ -1,15 +1,17 @@
-from tkinter import *
-from tkinter import ttk
-import tkinter as tk
+import tkinter
+import customtkinter
+from customtkinter import IntVar, CHECKBUTTON
 import subprocess
 import os
 
 #Create an instance of Tkinter frame
-win= Tk()
+win= tkinter.Tk()
 win.title("OT2Control")
-
 #Set the geometry of Tkinter frame
-win.geometry("800x400")
+
+win.geometry("750x350")
+win.configure(background= '#303030')
+win.title("OT2Control")
 
 def display_text():
    global entry
@@ -18,7 +20,7 @@ def display_text():
 
 def run():
    os.chdir
-   os.chdir("/home/fatimakowdan/OT2Control")
+   os.chdir("/home/halversm/OT2Control")
    execute_python_file('deckPositionsGui.py',entry.get())
 
 
@@ -27,11 +29,11 @@ def input1(output,sim,auto):
    
    ent=" -n " +entry.get()
    if len(ent)==4:
-      T.delete("1.0",tk.END)
-      T.insert(tk.END, "Need Name Input", 'warning')
+      T.delete("1.0",customtkinter.END)
+      T.insert(customtkinter.END, "Need Name Input", 'warning')
       return -1
       
-   os.chdir("/home/fatimakowdan/OT2Control")
+   os.chdir("/home/halversm/OT2Control")
    if sim.get()==1:
       ent=ent + " --no-sim"
    if auto.get():
@@ -42,8 +44,8 @@ def input1(output,sim,auto):
    
    output=execute_python_file(command,ent)
    #output=output.stdout
-   T.delete("1.0","end")
-   T.insert(tk.END,output)
+   T.delete("1.0",customtkinter.END)
+   T.insert(customtkinter.END,output) #FIX#
 
 def execute_python_file(file_Name, argument):
    try:
@@ -80,57 +82,70 @@ def read_stderr(process):
 
 def update_output(text):
    # updates the output text
-   T.insert(tk.END, text)
-   T.see(tk.END)
+   T.insert(customtkinter.END, text)
+   T.see(customtkinter.END)
 
 
 #Initialize a Label to display the User Input
-label=Label(win, text="", font=("Courier 22 bold"))
+label = customtkinter.CTkLabel(master=win, text="", font=("Inter", 22, "bold"))
+#label=Label(win, text="", font=("Courier 22 bold"))
 label.pack()
 
 # Name Label
-l = Label(win, text = "What is the name?")
-l.config(font =("Courier", 14))
+l = customtkinter.CTkLabel(master= win, text = "What is the name?")
+l.configure(font =("Inter", 16), text_color="white")
 l.pack()
 
 #Create an Entry widget to accept User Input
-entry= Entry(win, width= 40)
+entry= customtkinter.CTkEntry(master=win, width= 400)
+entry.configure(fg_color= "#585858", text_color= "white")
 entry.focus_set()
 entry.pack()
 
 #Sim checkbox
-sim = tk.IntVar()
-c2 = tk.Checkbutton(win, text='Sim?',variable=sim, onvalue=0, offvalue=1)
-c2.pack()
 
-#auto checkbox
-auto = tk.IntVar()
-c2 = tk.Checkbutton(win, text='Auto?',variable=auto, onvalue=1, offvalue=0)
-c2.pack()
-output="hello" 
+sim = IntVar()
+c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1, offvalue=0, fg_color= "303030", text_color= "white", border_color = "#A7A6A6")
+c2.configure(border_width= 2, font= ("Inter", 12))
+c2.pack(padx=20, pady= (15, 10))
 
-#Create a Button to Execute given file name
-ttk.Button(win, text= "Execute?",width= 20, command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=20)  
+#Sim checkbox
+auto = IntVar()
+c2 = customtkinter.CTkCheckBox(master= win, text='Auto?',variable=auto, onvalue=1, offvalue=0, text_color= "white", border_color = "#A7A6A6")
+c2.configure(border_width= 2, font= ("Inter", 12))
+c2.pack()
+output="hello"
+#Create a Button to validate Entry Widget
+customtkinter.CTkButton(win, text= "Execute",width= 20, font= ("Inter", 12) ,command= lambda : [display_text(),input1(output,sim,auto)]).pack(pady=(20, 13))
+
+
+
 
 # Bind the <Return> event to the execute_button's command
 win.bind('<Return>', lambda event: [display_text(), input1(output, sim, auto)])
 
 #show deck positions
-ttk.Button(win, text= "Check Deck Positions?",command=run, width=30).pack()
+customtkinter.CTkButton(win, text= "Check Deck Positions", font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
+
+# print("should be")
+# Create text widget and specify size.
+T = customtkinter.CTkTextbox(win, height = 5, width = 52)
 
 # Create label
-l = Label(win, text = "Output")
-l.config(font =("Courier", 14))
+l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
+l.configure(font =("Inter", 14))
 l.pack()
 
-v=Scrollbar(win,orient='vertical')
-v.pack(side=RIGHT, fill='y')
+v=customtkinter.CTkScrollbar(win,orientation='vertical') 
+v.pack(side="right", fill='y')  
 
 # Create text widget and specify size.
-T = Text(win, height = 5, width = 70, yscrollcommand=v.set)
-T.tag_config('warning',foreground="red")
-T.pack(side=LEFT,expand=True,fill=BOTH)
+T = customtkinter.CTkTextbox(win, height = 50, width = 400)
+T.configure(fg_color= "#585858", text_color= "white")
+#T.tag_config('warning',foreground="red")
+T.focus_set()
+T.pack(side='left',expand=True,fill='both')
 
-#win.bind('<Return>',input2)
+
 
 win.mainloop()
