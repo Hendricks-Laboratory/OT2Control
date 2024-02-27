@@ -223,6 +223,7 @@ class CTkinterApp(customtkinter.CTk):
     # to display the current frame passed as
     # parameter
     def show_frame(self, cont):
+        self.clear_labels()
         frame = self.frames[cont]
         frame.tkraise()
   
