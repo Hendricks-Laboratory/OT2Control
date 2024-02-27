@@ -393,7 +393,11 @@ class CTkinterApp(customtkinter.CTk):
             item_type = self.c1.type(item)   # e.g. "text", "line", etc.
             #if item_type=="oval":
                 #print(item_type)
-                
+    
+    def clear_labels(self):
+        """Clears the labels."""
+        if hasattr(self, 'lbl'):
+            self.lbl.destroy()
             
     def draw_large_reagents(self,board):
         """_summary_
@@ -403,8 +407,10 @@ class CTkinterApp(customtkinter.CTk):
         """
         self.draw_cell()
         filled='black'
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="n")
+        self.lbl = lbl
         index=board.positions.index(list(board.singlePosition))
         for i in range(4):
             for j in range(6):
@@ -429,8 +435,10 @@ class CTkinterApp(customtkinter.CTk):
         print("large_pipets")
         self.draw_cell()
         filled="black"
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="n")
+        self.lbl = lbl
         index=board.positions.index(list(board.singlePosition))
         for i in range(8):
             for j in range(12):
@@ -447,7 +455,8 @@ class CTkinterApp(customtkinter.CTk):
                 ovalname=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
                 self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
                 self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
-            
+
+
                 
                 
     def draw_large_chem(self,board):
@@ -455,8 +464,10 @@ class CTkinterApp(customtkinter.CTk):
         #lbl = customtkinter.CTkLabel(self.c2)
         filled='black'
         index=board.positions.index(list(board.singlePosition))
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="nw")
+        self.lbl = lbl
 
         #first column
         out=[touple for touple in board.board[index][1] if touple[1]=="A1"]
