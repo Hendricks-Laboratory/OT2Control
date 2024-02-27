@@ -137,15 +137,7 @@ c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1,
 c2.configure(border_width= 2, font= ("Inter", 12))
 c2.pack(padx=20, pady= (15, 10))
 
-sim = IntVar()
-c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1, offvalue=0, fg_color= "303030", text_color= "white", border_color = "#A7A6A6")
-c2.configure(border_width= 2, font= ("Inter", 12))
-c2.pack(padx=20, pady= (15, 10))
 
-#Sim checkbox
-auto = IntVar()
-c2 = customtkinter.CTkCheckBox(master= win, text='Auto?',variable=auto, onvalue=1, offvalue=0, text_color= "white", border_color = "#A7A6A6")
-c2.configure(border_width= 2, font= ("Inter", 12))
 #Sim checkbox
 auto = IntVar()
 c2 = customtkinter.CTkCheckBox(master= win, text='Auto?',variable=auto, onvalue=1, offvalue=0, text_color= "white", border_color = "#A7A6A6")
@@ -170,8 +162,7 @@ l.pack()
 
 v=customtkinter.CTkScrollbar(win,orientation='vertical') 
 v.pack(side="right", fill='y')  
-v=customtkinter.CTkScrollbar(win,orientation='vertical') 
-v.pack(side="right", fill='y')  
+
 
 # Create text widget and specify size.
 T = customtkinter.CTkTextbox(win, height = 50, width = 400)
