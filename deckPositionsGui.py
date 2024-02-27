@@ -93,7 +93,7 @@ class Board:
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
         #get login credentials from local file. Your json file here
-        path = '/home/gabepm100/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        path = '/home/halversm/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
     
@@ -578,19 +578,28 @@ class CTkinterApp(customtkinter.CTk):
         
         
 def on_enter(e,canvas,lbl,filled,xaxis,yaxis):
-    print(xaxis)
-    print(yaxis)
+    #print(xaxis)
+    #print(yaxis)
     # find the canvas item below mouse cursor
     item = canvas.find_withtag("current")
     # get the tags for the item
-    tags = canvas.gettags(item)
-    lbl.place(x=xaxis,y=yaxis, anchor="n")
-    # show it using the label
-    lbl.configure(text=tags[0],fg_color=filled)
+    if item :
+        tags = canvas.gettags(item)
+        if tags :
+            lbl.place(x=xaxis,y=yaxis, anchor="n")
+            # show it using the label
+            lbl.configure(text=tags[0],fg_color=filled)
+        else:
+        # clear the label text if no canvas item found
+            lbl.configure(text="")
+    
 def on_leave(e,lbl):
     # clear the label text
-    lbl.configure(text="")
-    lbl.place(x=0,y=0)
+    #lbl.configure(text="")
+    #lbl.place(x=0,y=0)
+    if e.x < 0 or e.y < 0 or e.x > e.widget.winfo_width() or e.y > e.widget.winfo_height():
+        lbl.place_forget()
+    
 
 
 
