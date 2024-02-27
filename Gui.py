@@ -73,16 +73,14 @@ def update_output(text):
    
 def update_pickle(val,combobox):
    global comboboxlist
-   print("update_pickle")
    vals=list(comboboxlist)
    try:
       if isinstance(val,str) and val!='':
          filename='pickle.pk'
          if os.path.isfile(filename):
-            print('file exists')
+
             vals.append(val)
             with open(filename, 'wb') as g:
-               print("combo")
                vals=list(dict.fromkeys(vals))
                if len(vals)>10:
                   vals=vals[1:]
@@ -96,7 +94,6 @@ def update_pickle(val,combobox):
       
 
 def read_pickle():
-   print("read_pickle")
    try:
       with open('pickle.pk', 'rb') as fi:
          loadedval=pickle.load(fi)
@@ -129,7 +126,6 @@ l.pack()
 mynumber = customtkinter.StringVar()
 combobox = customtkinter.CTkComboBox(win, width = 400 , variable = mynumber,fg_color='#3e3e42')
 v=read_pickle()
-print(v)
 combobox.configure(values = v)
 comboboxlist=v
 combobox.pack()
