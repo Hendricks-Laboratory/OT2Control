@@ -10,7 +10,6 @@ class Board:
     # board is associated with the position of the same index
     def __init__(self):
         #self.get_contents()
-        print("initialized")
         
         """Initiates Board and calls get content on each square of the board"""
         self.board=[(0,[0]),(0,[0]),(-1,[0]),(-1,[0]),(0,[0]),(0,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0])]
@@ -33,9 +32,7 @@ class Board:
                     controller.draw_small_chem(self.positions[i][0],self.positions[i][1],self)
     
     def create_single_cell(self,controller):
-        print("create_single_cell")
    
-        
         iposition=None
         for i in range(len(self.positions)):
             iposition=i
@@ -57,7 +54,6 @@ class Board:
         self.singlePosition=pos
         
         
-        #self.print_board()
     def get_contents(self):
         """
         This is the function which will access different parts of the excel sheet based on which square it is looking at at that moment.
@@ -93,7 +89,7 @@ class Board:
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
         #get login credentials from local file. Your json file here
-        path = '/home/halversm/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        path = '/home/gabepm100/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
     
@@ -227,12 +223,6 @@ class CTkinterApp(customtkinter.CTk):
         frame = self.frames[cont]
         frame.tkraise()
   
-    # def show_frame2(self,page1,board,Page1Canvas):
-    #     print("show frame")
-    #     frame = self.frames[page1]
-    #     frame.tkraise()
-    #     board.create_single_cell(,self)
-        
         
     def close(self): 
         self.destroy
@@ -392,8 +382,7 @@ class CTkinterApp(customtkinter.CTk):
         item_list = self.c1.find_all()
         for item in item_list:
             item_type = self.c1.type(item)   # e.g. "text", "line", etc.
-            #if item_type=="oval":
-                #print(item_type)
+            
     
     def clear_labels(self):
         """Clears the labels."""
@@ -433,7 +422,6 @@ class CTkinterApp(customtkinter.CTk):
         Canvas is the canvas object
         x and y are the x and y cordinates
         """
-        print("large_pipets")
         self.draw_cell()
         filled="black"
         self.clear_labels()
@@ -472,7 +460,6 @@ class CTkinterApp(customtkinter.CTk):
 
         #first column
         out=[touple for touple in board.board[index][1] if touple[1]=="A1"]
-        print(out)
         if len(out)!=0:
             filled='blue'
             texttag=out[0][0]
@@ -582,7 +569,7 @@ class CTkinterApp(customtkinter.CTk):
         self.c2.tag_bind(j, "<Leave>", lambda event: on_leave(event,lbl))
         
     def draw_cell(self):
-        print("draw cell")
+
         self.c2.delete("all")
         rect=self.c2.create_rectangle(0, 0, 650, 425, fill="#7A797B",outline="black")
         
@@ -590,8 +577,7 @@ class CTkinterApp(customtkinter.CTk):
         
         
 def on_enter(e,canvas,lbl,filled,xaxis,yaxis):
-    #print(xaxis)
-    #print(yaxis)
+
     # find the canvas item below mouse cursor
     item = canvas.find_withtag("current")
     # get the tags for the item
@@ -634,7 +620,7 @@ class StartPage(customtkinter.CTkFrame):
         
 
         controller.c1.place(x=100,y=50)
-        print('in start page')
+
 
         controller.board.create_full_board(controller)
 
@@ -649,7 +635,7 @@ class Page1(customtkinter.CTkFrame):
         customtkinter.CTkFrame.__init__(self, parent)
         label = customtkinter.CTkLabel(self, text ="Page 1", font = ("Verdana", 35))
         controller.c2 = customtkinter.CTkCanvas(self, width=650, height=425, borderwidth=0, highlightthickness=0,bg ='#d9d9d9')
-        print("in page 1")
+
 
         controller.c2.place(x=100,y=50)
         controller.draw_cell()
