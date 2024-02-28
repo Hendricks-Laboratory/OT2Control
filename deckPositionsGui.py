@@ -432,6 +432,7 @@ class CTkinterApp(customtkinter.CTk):
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="n")
         index=board.positions.index(list(board.singlePosition))
+        d={}
         for i in range(8):
             for j in range(12):
                 strin=chr(i+65)+str(j+1)
@@ -444,9 +445,9 @@ class CTkinterApp(customtkinter.CTk):
                     texttag="empty"
                 ovalname=str(i)+str(j)
                 
-                ovalname=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
-                self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
-                self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
+                d["group"+str(i)+str(j)]=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,lbl))
             
                 
                 
