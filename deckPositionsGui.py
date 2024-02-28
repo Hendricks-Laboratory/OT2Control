@@ -89,7 +89,7 @@ class Board:
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
         #get login credentials from local file. Your json file here
-        path = '/home/gabepm100/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        path = '/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
     
