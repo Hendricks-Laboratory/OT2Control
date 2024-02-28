@@ -93,7 +93,7 @@ class Board:
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
         #get login credentials from local file. Your json file here
-        path = '/home/gabepm100/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
+        path = '/home/halversm/Documents/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
     
@@ -223,6 +223,7 @@ class CTkinterApp(customtkinter.CTk):
     # to display the current frame passed as
     # parameter
     def show_frame(self, cont):
+        self.clear_labels()
         frame = self.frames[cont]
         frame.tkraise()
   
@@ -393,7 +394,11 @@ class CTkinterApp(customtkinter.CTk):
             item_type = self.c1.type(item)   # e.g. "text", "line", etc.
             #if item_type=="oval":
                 #print(item_type)
-                
+    
+    def clear_labels(self):
+        """Clears the labels."""
+        if hasattr(self, 'lbl'):
+            self.lbl.destroy()
             
     def draw_large_reagents(self,board):
         """_summary_
@@ -403,8 +408,10 @@ class CTkinterApp(customtkinter.CTk):
         """
         self.draw_cell()
         filled='black'
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="n")
+        self.lbl = lbl
         index=board.positions.index(list(board.singlePosition))
         for i in range(4):
             for j in range(6):
@@ -429,8 +436,10 @@ class CTkinterApp(customtkinter.CTk):
         print("large_pipets")
         self.draw_cell()
         filled="black"
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="n")
+        self.lbl = lbl
         index=board.positions.index(list(board.singlePosition))
         for i in range(8):
             for j in range(12):
@@ -447,7 +456,8 @@ class CTkinterApp(customtkinter.CTk):
                 ovalname=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
                 self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
                 self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
-            
+
+
                 
                 
     def draw_large_chem(self,board):
@@ -455,8 +465,10 @@ class CTkinterApp(customtkinter.CTk):
         #lbl = customtkinter.CTkLabel(self.c2)
         filled='black'
         index=board.positions.index(list(board.singlePosition))
+        self.clear_labels()
         lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
         lbl.place(x=0, y=0, anchor="nw")
+        self.lbl = lbl
 
         #first column
         out=[touple for touple in board.board[index][1] if touple[1]=="A1"]
@@ -578,19 +590,28 @@ class CTkinterApp(customtkinter.CTk):
         
         
 def on_enter(e,canvas,lbl,filled,xaxis,yaxis):
-    print(xaxis)
-    print(yaxis)
+    #print(xaxis)
+    #print(yaxis)
     # find the canvas item below mouse cursor
     item = canvas.find_withtag("current")
     # get the tags for the item
-    tags = canvas.gettags(item)
-    lbl.place(x=xaxis,y=yaxis, anchor="n")
-    # show it using the label
-    lbl.configure(text=tags[0],fg_color=filled)
+    if item :
+        tags = canvas.gettags(item)
+        if tags :
+            lbl.place(x=xaxis,y=yaxis, anchor="n")
+            # show it using the label
+            lbl.configure(text=tags[0],fg_color=filled)
+        else:
+        # clear the label text if no canvas item found
+            lbl.configure(text="")
+    
 def on_leave(e,lbl):
     # clear the label text
-    lbl.configure(text="")
-    lbl.place(x=0,y=0)
+    #lbl.configure(text="")
+    #lbl.place(x=0,y=0)
+    if e.x < 0 or e.y < 0 or e.x > e.widget.winfo_width() or e.y > e.widget.winfo_height():
+        lbl.place_forget()
+    
 
 
 
