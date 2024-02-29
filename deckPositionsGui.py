@@ -17,20 +17,23 @@ class Board:
         self.singlePosition=(0,[0])
     def create_full_board(self,controller):
         controller.draw_board(self)
-        
+        print(self.board)
         for i in range(len(self.board)):
                 # calls the get content function and depending on that it will set up the board to match the values gotten from the excell sheet
                 
                 #self.get_contents()
-                
+                if self.board[i][0]==-1:
+                    pass
                 # if that board share is set to 1 it draws the reagents and if it is 2 it draws the pipets
-                if self.board[i][0]==1:
+                elif self.board[i][0]=="24_well_plate" or self.board[i][0]=="temp_mod_24_tube":
                     controller.draw_small_reagents(self.positions[i][0],self.positions[i][1],self)
-                elif self.board[i][0]==2:
+                elif self.board[i][0]=="96_well_plate":
                     controller.draw_small_pipets(self.positions[i][0],self.positions[i][1],self)
-                elif self.board[i][0]==3:
+                elif self.board[i][0]=="tube_holder_10":
                     controller.draw_small_chem(self.positions[i][0],self.positions[i][1],self)
-    
+                elif self.board[i][0][:3]=="tip":
+                    controller.draw_small_tiprack(self.positions[i][0],self.positions[i][1],self)
+
     def create_single_cell(self,controller):
    
         iposition=None
@@ -42,13 +45,14 @@ class Board:
         if iposition is not None:
             if self.board[iposition][0]==0 or self.board[iposition][0]==None:
                 controller.draw_cell()
-            elif self.board[iposition][0]==1:
+            elif self.board[iposition][0]=="24_well_plate" or self.board[iposition][0]=="temp_mod_24_tube":
                 controller.draw_large_reagents(self)
-            elif self.board[iposition][0]==2:
+            elif self.board[iposition][0]=="96_well_plate":
                 controller.draw_large_pipets(self)
-            elif self.board[iposition][0]==3:
+            elif self.board[iposition][0]=="tube_holder_10":
                 controller.draw_large_chem(self)
-            
+            elif self.board[iposition][0][:3]=="tip":
+                controller.draw_large_tiprack(self)
             
     def change_single_position(self,pos):
         self.singlePosition=pos
@@ -99,18 +103,47 @@ class Board:
         spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/edit#gid=0')
         worksheet=spreadsheet.get_worksheet(2)
         
-        self.board[0]=(self.name_to_num(worksheet.cell(2, 1).value),[])
-        self.board[1]=(self.name_to_num(worksheet.cell(2, 2).value),[])
+        rackval=worksheet.cell(2, 1).value
         
-        self.board[4]=(self.name_to_num(worksheet.cell(5, 2).value),[])
-        self.board[5]=(self.name_to_num(worksheet.cell(5, 3).value),[])
+        self.board[0]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[0][1].append(worksheet.cell(3,1).value)
+        rackval=worksheet.cell(2, 2).value
+        self.board[1]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[1][1].append(worksheet.cell(3,2).value)
+            
+        rackval=worksheet.cell(5, 2).value
+        self.board[4]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[4][1].append(worksheet.cell(6,2).value)
+        rackval=worksheet.cell(5, 3).value
+        self.board[5]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[5][1].append(worksheet.cell(6,3).value)
+            
+        rackval=worksheet.cell(8, 2).value
+        self.board[7]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[7][1].append(worksheet.cell(9,2).value)
+        rackval=worksheet.cell(8, 3).value
+        self.board[8]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[8][1].append(worksheet.cell(9,3).value)
+        rackval=worksheet.cell(11, 1).value
         
-        self.board[7]=(self.name_to_num(worksheet.cell(8, 2).value),[])
-        self.board[8]=(self.name_to_num(worksheet.cell(8, 3).value),[])
-        
-        self.board[9]=(self.name_to_num(worksheet.cell(11, 1).value),[])
-        self.board[10]=(self.name_to_num(worksheet.cell(11, 2).value),[])
-        self.board[11]=(self.name_to_num(worksheet.cell(11, 3).value),[])
+        self.board[9]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[9][1].append(worksheet.cell(12,1).value)
+        rackval=worksheet.cell(11, 2).value
+        self.board[10]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[10][1].append(worksheet.cell(12,2).value)
+        rackval=worksheet.cell(11, 3).value
+        self.board[11]=(rackval,[])
+        if rackval[0]=='t':
+            self.board[11][1].append(worksheet.cell(12,3).value)
+    
         return worksheet
     
     def get_chemicals(self,credentials,url):
@@ -125,7 +158,7 @@ class Board:
                 spot=self.get_spot(int(row[3]))
                 self.board[spot][1].append((row[0],row[2]))
                 
-        
+
 
 
     def _get_key_wks(self, credentials):
@@ -134,23 +167,7 @@ class Board:
         name_key_pairs = name_key_wks.get_all_values()
         return name_key_pairs
     
-    def name_to_num(self,name):
-        if name=="tip_rack_20uL":
-            return 2
-        elif name=="tip_rack_300uL":
-            return 2
-        elif name=="tip_rack_1000uL":
-            return 2
-        elif name=="96_well_plate":
-            return 2
-        elif name=="24_well_plate":
-            return 1
-        elif name=="tube_holder_10":
-            return 3
-        elif name=="temp_mod_24_tube":
-            return 1
-        elif name=="":
-            return 0
+    
         
         
     def get_spot(self,loc):
@@ -245,8 +262,23 @@ class CTkinterApp(customtkinter.CTk):
                 else:
                     filled='black'
                 oval=self.c1.create_oval(x+10+(j*15) ,y+3+(i*12)+(i*3),x+22+(j*15) ,y+15.66+(i*12)+(i*3), outline="black", fill=filled,width=2)
+                
+                
+    def draw_small_tiprack(self,x,y,board):
+        """
+        Canvas is the canvas object
+        x and y are the x and y cordinates
+        """
+        filled="black"
+        index=board.positions.index([x,y])
+        for i in range(12):
+            for j in range(8):
+                strin=chr(j+65)+str(i+1)
+                if board.board[index][1][0]==strin:
+                    filled='#F5DEB3'
+                oval=self.c1.create_oval(x+10+(i*15) ,y+3+(j*15),x+22+(i*15) ,y+15.66+(j*15), outline="black", fill=filled,width=2)
                 self.c1.tag_bind(oval, '<Button-1>',lambda z: [ board.change_single_position((x,y)), self.show_frame(Page1),board.create_single_cell(self)])
-
+    
     def draw_small_reagents(self,x,y,board):
         filled="black"
         index=board.positions.index([x,y])
@@ -445,6 +477,27 @@ class CTkinterApp(customtkinter.CTk):
                 d["group"+str(i)+str(j)]=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
                 self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
                 self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,lbl))
+                
+    def draw_large_tiprack(self,board):
+        """
+        Canvas is the canvas object
+        x and y are the x and y cordinates
+        """
+        self.draw_cell()
+        filled="black"
+        self.clear_labels()
+        lbl = customtkinter.CTkLabel(self.c2,text='',fg_color="blue",text_color='white')
+        lbl.place(x=0, y=0, anchor="n")
+        self.lbl = lbl
+        index=board.positions.index(list(board.singlePosition))
+        d={}
+        filled='black'
+        for i in range(12):
+            for j in range(8):
+                strin=chr(j+65)+str(i+1)
+                if board.board[index][1][0]==strin:
+                    filled='#F5DEB3'
+                d["group"+str(i)+str(j)]=self.c2.create_oval(30+(i*50), 15+(j*50),75+(i*50) ,60+(j*50), outline="black", fill=filled,width=2)
             
                 
                 
