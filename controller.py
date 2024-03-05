@@ -122,9 +122,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print("starting with y_shape:", y_shape)
     reagent_info = auto.robo_params['reagent_df']
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 100)} for i in range(y_shape)]
     #TODO get reagent info
-    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents)
+    model = OptimizationModel(bounds, final_spectra, reagent_info, auto.fixed_reagents, auto.variable_reagents)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2174,17 +2174,15 @@ class AutoContr(Controller):
         print("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
-        
-        recipes = model.generate_seed_rxns()
-        recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
-        
-        # expand recipes: recipes[n-1] holds num_duplicates (default value is 3).
-        # recipes = np.vstack([recipes, [self.num_duplicates]])
 
-        #do the first one
+        # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
-        #don't have data to train, so, not training
-        #generate new wellnames for next batch
+
+        # Generate initial design and simulate experiments to get initial data
+        X_initial = model.generate_initial_design()
+        recipes =  self.duplicate_list_elements(X_initial, self.num_duplicates)     
+
+        #generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
         #plan and execute a reaction with duplicates.
         self._create_samples(wellnames, recipes)
@@ -2196,35 +2194,60 @@ class AutoContr(Controller):
         #TODO filenames is empty. dunno why
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
-        model.train(recipes, scan_data.T.to_numpy())
-        #this is different because we don't want to use untrained model to generate predictions
-        recipes = model.generate_seed_rxns()
-        recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
+        #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
+        Y_initial = model.calc_obj(scan_data)
         self.batch_num += 1
 
+        print(type(X_initial))
+        print(type(Y_initial))
+
+        # Optimizer update method not yet available so add initial design to records.
+        model.experiment_data['X'] = list(X_initial)
+        model.experiment_data['Y'] = list(Y_initial)
+        # Initialize the optimizer with initial experimental data
+        model.initialize_optimizer(X_initial, Y_initial)
+
+        print(model.optimizer)
+        print(model.acquisition)
+
+        self.batch_num += 1
+        
         #enter iterative while loop now that we have data
         while not model.quit:
-            model.train(recipes, scan_data.T.to_numpy())      # temp: added experiment_result.
-            print('<<controller>> executing batch {}'.format(self.batch_num))
+
+            print(f'<<controller>> executing batch {self.batch_num}, Suggested Locations: {recipes}, Results: {Y_new}')
+    
+            # get new recipes
+            X_new = model.suggest_next_locations()
+            recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
+
+            # do the experiments
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             # plan and execute a reaction with duplicate reactions.
             self._create_samples(wellnames, recipes, self.num_duplicates)
+
             #pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
                     (self.rxn_df['op'] == 'scan_until_complete')
                     ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
-            scan_data = self._get_sample_data(wellnames, last_filename)
-            #generate the predictions for the next round
-            gp_prediction = model.predict()     # changed from recipes, used as temp variable; refer to line 2200.
-            #threaded train on scans. Will run while the robot is generating new materials
+            scan_data = self._get_sample_data(wellnames, last_filename) 
+             #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
+            # update model with data
+            Y_new = model.calc_obj(scan_data)
+            model.update_experiment_data(recipes, Y_new)
+
+            # print results
+            # To get the best observed X values (parameters)
+            X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
+            # To get the best observed Y value (function value)
+            Y_best = np.min(model.optimizer.Y)
+            print(f"Best recipe: {X_best}, ")
+
             self.batch_num += 1
-            # update our experiment data TODO.
-            self._update_experiment_data(wellnames, recipes, scan_data, gp_prediction)
-            recipes = gp_prediction
-            recipes =  self.duplicate_list_elements(recipes, self.num_duplicates)     
+            self._update_experiment_data(wellnames, recipes, scan_data, gp_prediction)     
             
         self.close_connection()
         self.pr.shutdown()
@@ -2246,6 +2269,7 @@ class AutoContr(Controller):
             for i in range(factor):
                 new_list.append(element)
         return new_list
+
     
     def _get_sample_data(self,wellnames, filename):
         '''
