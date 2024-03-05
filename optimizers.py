@@ -15,10 +15,10 @@ import numpy as np
 
 
 class OptimizationModel():
-    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iters=10):
+    def __init__(self, bounds, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iters=10):
         #super().__init__(None, max_iters)  # don't have a model
         self.bounds = bounds
-        self.target_value = target_value
+        self.target_value = self.get_target_wavelength()
         self.reagent_info = reagent_info  # This should include 'a', 'b', 'c' values
         self.fixed_reagents = fixed_reagents  # Additional info, if needed for constraints
         self.space = GPyOpt.Design_space(bounds)
@@ -72,6 +72,11 @@ class OptimizationModel():
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
         #print('last,', self.acquisition)
         #print(self.evaluator)
+    
+    def get_target_wavelength(self):
+        # TODO: something with evaluate_objective() maybe.
+        pass
+
         
     def suggest_next_locations(self):
         """Suggests the next locations for experimentation, updating the acquisition function as needed."""
