@@ -489,6 +489,13 @@ class CTkinterApp(customtkinter.CTk):
                 else:
                     filled='black'
                     texttag="empty"
+<<<<<<< HEAD
+                
+                d["group"+str(i)+str(j)]=(self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag),i,j)
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,self.lbl,filled,50+(d["group"+str(i)+str(j)][1]*50),45+(d["group"+str(i)+str(j)][2]*50)))
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,self.lbl))
+            
+=======
                 self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
                
                 
@@ -507,6 +514,7 @@ class CTkinterApp(customtkinter.CTk):
                 if self.deckPositions.deck[index][1][0]==strin:
                     filled='#F5DEB3'
                 self.c2.create_oval(30+(i*50), 15+(j*50),75+(i*50) ,60+(j*50), outline="black", fill=filled,width=2)
+>>>>>>> 9ce651bfa9064dcbf1b4a1eaac38f32522766460
                 
                 
     def draw_large_tube_holder(self):
