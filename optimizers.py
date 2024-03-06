@@ -53,7 +53,7 @@ class OptimizationModel():
         #super().__init__(None, max_iters)  # don't have a base model
         self.bounds = bounds
         self.target_value = target_value
-        self.reagent_info = reagent_info  
+        self.reagent_info = reagent_info
         self.fixed_reagents = fixed_reagents  # Additional info, if needed for constraints
         self.space = GPyOpt.Design_space(bounds)
         #self.constraints = self.define_constraints()
@@ -137,6 +137,11 @@ class OptimizationModel():
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
         #print('last,', self.acquisition)
         #print(self.evaluator)
+    
+    def get_target_wavelength(self):
+        # TODO: something with evaluate_objective() maybe.
+        pass
+
         
     def suggest_next_locations(self):
         '''

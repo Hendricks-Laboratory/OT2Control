@@ -121,10 +121,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     y_shape = auto.y_shape# number of reagents to learn on
     print("starting with y_shape:", y_shape)
     reagent_info = auto.robo_params['reagent_df']
+    fixed_reagents = AutoContr.get_fixed_reagents()
+    target_value = np.random.randint(1, 200)
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 100)} for i in range(y_shape)]
-    #TODO get reagent info
-    model = OptimizationModel(bounds, final_spectra, reagent_info, auto.fixed_reagents, auto.variable_reagents)
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
+    # final_spectra not used?
+    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iter
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2043,6 +2045,7 @@ class AutoContr(Controller):
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.variable_reagents = self.get_variable_reagents()
+        self.fixed_reagents = self.get_fixed_reagents()
         self.y_shape = len(self.variable_reagents)
         print(f"y-shape is {self.y_shape}")
         print(self.robo_params['reagent_df'])
@@ -2074,6 +2077,16 @@ class AutoContr(Controller):
         print(f"Number of unique reagents: {num_unique_reagents}")
         print(f"List of unique reagent names: {unique_reagents}")
         return unique_reagents
+    
+    def get_fixed_reagents(self):
+        # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
+        fixed_reagents = self.rxn_df.loc[self.rxn_df['conc'].notna() & (self.rxn_df['op'] == 'transfer'), 'reagent'].unique() 
+        # Calculate the number of unique reagents
+        num_unique_reagents = len(fixed_reagents)
+
+        print(f"Number of fixed reagents: {num_unique_reagents}")
+        print(f"List of fixed reagent names: {fixed_reagents}")
+        return fixed_reagents       
 
 
     def check_recipe_bounds(conc_list):
