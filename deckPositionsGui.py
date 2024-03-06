@@ -72,14 +72,13 @@ class Board:
                 if item[0]==sys.argv[1]:
                     worksheet=self.find_types(creds,item[1])
                     self.get_chemicals(creds,item[1])
+                # if item[0]=='MPH_test8':
+                #     self.find_types(creds,item[1])
+                #     self.get_chemicals(creds,item[1])
         except IndexError:
             raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
             and make sure the spreadsheet name is spelled exactly the same as the reaction \
             spreadsheet.')
-        
-        # gets the values from the first row of the sheet
-        # values_list = worksheet.row_values(1)
-        # print(values_list)
         return -1
 
     #the next three functions were taken from controler py and are used toget credentials for the google sheet
@@ -93,9 +92,10 @@ class Board:
     
 
     def find_types(self,credentials,url):
+
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/edit#gid=0')
-        worksheet=spreadsheet.get_worksheet(2)
+        worksheet=spreadsheet.worksheet("deck_positions")
         
         self.board[0]=(self.name_to_num(worksheet.cell(2, 1).value),[])
         self.board[1]=(self.name_to_num(worksheet.cell(2, 2).value),[])
@@ -109,12 +109,13 @@ class Board:
         self.board[9]=(self.name_to_num(worksheet.cell(11, 1).value),[])
         self.board[10]=(self.name_to_num(worksheet.cell(11, 2).value),[])
         self.board[11]=(self.name_to_num(worksheet.cell(11, 3).value),[])
+
         return worksheet
     
     def get_chemicals(self,credentials,url):
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/edit#gid=0')
-        worksheet=spreadsheet.get_worksheet(4)
+        worksheet=spreadsheet.worksheet("reagent_info")
         rows=worksheet.get_all_values()
         for row in rows:
            #self.board= [(0,[0]),(0,[0]),(-1,[0]),(-1,[0]),(0,[0]),(0,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0])]
@@ -122,6 +123,7 @@ class Board:
                 
                 spot=self.get_spot(int(row[3]))
                 self.board[spot][1].append((row[0],row[2]))
+        print(self.board)
                 
         
 
