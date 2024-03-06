@@ -1,19 +1,25 @@
+#!/home/science_356_lab/anaconda3/lib/python3.9/site-packages
+
 import customtkinter
-from customtkinter import IntVar, CHECKBUTTON
+from customtkinter import IntVar
 import subprocess
 import os
 import pickle
 
 def run():
-   os.chdir
-   os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
-   execute_python_file('deckPositionsGui.py',mynumber.get())
+    global mynumber
+    if len(mynumber.get())<1:
+        T.delete("1.0",customtkinter.END)
+        T.insert(customtkinter.END,"Need NameInput",'warning')
+        return -1
+    os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
+    execute_python_file('deckPositionsGui.py',mynumber.get())
 
 
 def input1(sim,auto,combobox):
     global mynumber
     update_pickle(mynumber.get(),combobox)
-    ent=" -n " +mynumber.get()
+    ent="-n " +mynumber.get()
     if len(ent)==4:
         T.delete("1.0",customtkinter.END)
         T.insert(customtkinter.END, "Need Name Input", 'warning')
@@ -34,8 +40,11 @@ def input1(sim,auto,combobox):
     T.insert(customtkinter.END,output) #FIX#
 
 def execute_python_file(file_Name, argument):
+   print(argument)
    try:
+      print(['python3', file_Name, argument])
       completed_process = subprocess.run(['python3', file_Name, argument], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      print(completed_process.stderr)
       if completed_process.returncode == 0:
          print("Execution successful.")
          return completed_process.stdout
@@ -111,7 +120,7 @@ win= customtkinter.CTk()
 win.title("OT2Control")
 #Set the geometry of Tkinter frame
 
-win.geometry("750x450")
+win.geometry("950x550")
 win.configure(fg_color= '#252526')
 win.title("OT2Control")
 
@@ -133,7 +142,7 @@ combobox.pack()
 #Sim checkbox
 
 sim = IntVar()
-c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1, offvalue=0, fg_color= "303030", text_color= "white", border_color = "#A7A6A6")
+c2 = customtkinter.CTkCheckBox(master= win, text='Sim?',variable=sim, onvalue=1, offvalue=0, fg_color= "#303030", text_color= "white", border_color = "#A7A6A6")
 c2.configure(border_width= 2, font= ("Inter", 12))
 c2.pack(padx=20, pady= (15, 10))
 

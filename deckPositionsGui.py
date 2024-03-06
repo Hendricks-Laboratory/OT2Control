@@ -3,6 +3,7 @@ from CTkToolTip import *
 import gspread
 import random
 from oauth2client.service_account import ServiceAccountCredentials
+import sys
 
 
 class Board:
@@ -12,8 +13,8 @@ class Board:
         #self.get_contents()
         
         """Initiates Board and calls get content on each square of the board"""
-        self.board=[(0,[0]),(0,[0]),(-1,[0]),(-1,[0]),(0,[0]),(0,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0])]
-        self.positions=[[0,75],[200,75],[400,75],[0,200],[200,200],[400,200],[0,325],[200,325],[400,400],[0,450],[200,450],[400,450]]
+        self.board=[(0,[0]),(0,[0]),(-1, ),(-1,[0]),(0,[0]),(0,[0]),(-1,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0]),(0,[0])]
+        self.positions=[[0,75],[200,75],[400,75],[0,200],[200,200],[400,200],[0,325],[200,325],[400,325],[0,450],[200,450],[400,450]]
         self.singlePosition=(0,[0])
     def create_full_board(self,controller):
         controller.draw_board(self)
@@ -68,10 +69,7 @@ class Board:
             spreadsheet = self._get_key_wks(creds)
             for item in spreadsheet:
                 #what it should be
-                # if item[0]==sys.argv[1]:
-                #     print(item[1])
-                # what i am using for testing
-                if item[0]=='MPH_test8':
+                if item[0]==sys.argv[1]:
                     worksheet=self.find_types(creds,item[1])
                     self.get_chemicals(creds,item[1])
         except IndexError:
@@ -184,9 +182,9 @@ class CTkinterApp(customtkinter.CTk):
         customtkinter.CTk.__init__(self)
         self.position=()
         # creating a container
-        container = customtkinter.CTkFrame(self)  
+        container = customtkinter.CTkFrame(self,fg_color="#252526")  
         self.geometry("850x800")
-        self.configure(bg="#d9d9d9")
+
         self.title("Deck Positions")
 
         container.pack(side = "top", fill = "both", expand = True) 
@@ -440,11 +438,10 @@ class CTkinterApp(customtkinter.CTk):
                 else:
                     filled='black'
                     texttag="empty"
-                ovalname=str(i)+str(j)
                 
-                d["group"+str(i)+str(j)]=self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
-                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,50+(i*50),45+(j*50)))
-                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,lbl))
+                d["group"+str(i)+str(j)]=(self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag),i,j)
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,self.lbl,filled,50+(d["group"+str(i)+str(j)][1]*50),45+(d["group"+str(i)+str(j)][2]*50)))
+                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,self.lbl))
             
                 
                 
