@@ -35,7 +35,7 @@ class deck:
                 # calls the get content function and depending on that it will set up the deck to match the values gotten from the excell sheet
                 
                 #self.get_contents()
-                if type(self.deck[i][0])==int:
+                if type(self.deck[i][0])==int or self.deck[i][0]==None:
                     pass
                 # if that deck share is set to 1 it draws the reagents and if it is 2 it draws the pipets
                 elif self.deck[i][0]=="24_well_plate" or self.deck[i][0]=="temp_mod_24_tube":
@@ -88,8 +88,6 @@ class deck:
         This is the function which will access different parts of the excel sheet based on which square it is looking at at that moment.
         It will then set that deck place as equal to that so that we can then have a fillout function
         """
-    
-        
         # Open Spreadsheet by name
         creds=self.get_credentials()
         try:
@@ -133,49 +131,58 @@ class deck:
         """
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/edit#gid=0')
-        worksheet=spreadsheet.worksheet("deck_positions")
-        
+        worksheet=spreadsheet.get_worksheet(2)
         rackval=worksheet.cell(2, 1).value
         self.deck[9]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[9][1].append(worksheet.cell(3,1).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[9][1].append(worksheet.cell(3,1).value)
         rackval=worksheet.cell(2, 2).value
         self.deck[10]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[10][1].append(worksheet.cell(3,2).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[10][1].append(worksheet.cell(3,2).value)
             
         rackval=worksheet.cell(5, 2).value
         self.deck[7]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[7][1].append(worksheet.cell(6,2).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[7][1].append(worksheet.cell(6,2).value)
         rackval=worksheet.cell(5, 3).value
         self.deck[8]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[8][1].append(worksheet.cell(6,3).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[8][1].append(worksheet.cell(6,3).value)
             
         rackval=worksheet.cell(8, 2).value
         self.deck[4]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[4][1].append(worksheet.cell(9,2).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[4][1].append(worksheet.cell(9,2).value)
         rackval=worksheet.cell(8, 3).value
         self.deck[5]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[5][1].append(worksheet.cell(9,3).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[5][1].append(worksheet.cell(9,3).value)
             
         rackval=worksheet.cell(11, 1).value
         self.deck[0]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[0][1].append(worksheet.cell(12,1).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[0][1].append(worksheet.cell(12,1).value)
         rackval=worksheet.cell(11, 2).value
         self.deck[1]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[1][1].append(worksheet.cell(12,2).value)
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[1][1].append(worksheet.cell(12,2).value)
         rackval=worksheet.cell(11, 3).value
         self.deck[2]=(rackval,[])
-        if rackval[0]=='t':
-            self.deck[2][1].append(worksheet.cell(12,3).value)
-            
-            
+        if rackval!=None:
+            if rackval[0:3]=='tip':
+                self.deck[2][1].append(worksheet.cell(12,3).value)
+        print(self.deck)
+
+
     def get_chemicals(self,credentials,url):
         """
         Accesses the google sheets and checks through reagents tab of the google sheet. It then takes all of the needed data regarding
@@ -192,7 +199,7 @@ class deck:
         for column in columns:
             if column[3].isnumeric():
                 self.deck[int(column[3])-1][1].append((column[0],column[2]))
-                
+        
     def _get_key_wks(self, credentials):
         """
 
@@ -298,21 +305,23 @@ class CTkinterApp(customtkinter.CTk):
         x and y are the x and y cordinates of where the 24 well plate is placed on the deck
 
         """
-        filled="black"
-        index=self.deckPositions.positions.index([x,y])
-        for i in range(4):
-            for j in range(6):
-                positionString=chr(i+65)+str(j+1)
-                positionalOutput=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==positionString]
-                if len(positionalOutput)!=0: 
-                    filled='blue' 
-                    if positionalOutput[0][0]=="empty":
-                        filled="black"
-                else:
-                    filled='black'
-                oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=filled,width=2)
-                self.c1.tag_bind(oval, '<Button-1>',lambda z: [ self.deckPositions.change_single_position((x,y)), self.show_frame(Page1),self.deckPositions.create_single_cell(self)])
-    
+        try:
+            filled="black"
+            index=self.deckPositions.positions.index([x,y])
+            for i in range(4):
+                for j in range(6):
+                    positionString=chr(i+65)+str(j+1)
+                    positionalOutput=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==positionString]
+                    if len(positionalOutput)!=0: 
+                        filled='blue' 
+                        if positionalOutput[0][0]=="empty":
+                            filled="black"
+                    else:
+                        filled='black'
+                    oval=self.c1.create_oval(x+10+(j*32) ,y+6+(i*30),x+30+(j*32) ,y+26+(i*30), outline="black", fill=filled,width=2)
+                    self.c1.tag_bind(oval, '<Button-1>',lambda z: [ self.deckPositions.change_single_position((x,y)), self.show_frame(Page1),self.deckPositions.create_single_cell(self)])
+        except TypeError:
+            pass
     def draw_small_tube_holder(self,x,y):
         """
         x and y are the x and y cordinates of where the tube holder is placed on the deck
@@ -348,13 +357,16 @@ class CTkinterApp(customtkinter.CTk):
             y2 (int): oval coordinate y2
             spot (string): location on physical deck
         """
-        out=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==spot]
-        if len(out)!=0: 
-            filled='blue' 
-        else:
-            filled='black'
-        j=self.c1.create_oval(x+x1,y+y1,x+x2 ,y+y2, outline="black", fill=filled,width=2)
-        self.c1.tag_bind(j, '<Button-1>',lambda z: [ self.deckPositions.change_single_position((x,y)), self.show_frame(Page1), self.deckPositions.create_single_cell(self)])
+        try:
+            out=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==spot]
+            if len(out)!=0: 
+                filled='blue' 
+            else:
+                filled='black'
+            j=self.c1.create_oval(x+x1,y+y1,x+x2 ,y+y2, outline="black", fill=filled,width=2)
+            self.c1.tag_bind(j, '<Button-1>',lambda z: [ self.deckPositions.change_single_position((x,y)), self.show_frame(Page1), self.deckPositions.create_single_cell(self)])
+        except TypeError:
+            pass
         
     def draw_deck(self):
         """
@@ -449,22 +461,23 @@ class CTkinterApp(customtkinter.CTk):
             i (int): x offset
             j (int): y offset
         """
-        
-        positionString=chr(i+65)+str(j+1)
-        positionalOutput=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==positionString]
-        if len(positionalOutput)!=0:
-            filled='blue'
-            texttag=positionalOutput[0][0]
-            if positionalOutput[0][0]=="empty":
-                        filled="black"
-        else:
-            filled='black'
-            texttag="empty"
-        ovalname=str(i)+str(j)
-        ovalname=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=filled,width=2,tag=texttag)
-        self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,75+(j*100),50+(i*90)))
-        self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
-                
+        try:
+            positionString=chr(i+65)+str(j+1)
+            positionalOutput=[touple for touple in self.deckPositions.deck[index][1] if touple[1]==positionString]
+            if len(positionalOutput)!=0:
+                filled='blue'
+                texttag=positionalOutput[0][0]
+                if positionalOutput[0][0]=="empty":
+                            filled="black"
+            else:
+                filled='black'
+                texttag="empty"
+            ovalname=str(i)+str(j)
+            ovalname=self.c2.create_oval(30+(j*100) ,25+(i*90),120+(j*100) ,105+(i*90), outline="black", fill=filled,width=2,tag=texttag)
+            self.c2.tag_bind(ovalname, "<Enter>", lambda event: on_enter(event,self.c2,lbl,filled,75+(j*100),50+(i*90)))
+            self.c2.tag_bind(ovalname, "<Leave>", lambda event: on_leave(event,lbl))
+        except: 
+            pass    
     def draw_large_96_well_plate(self):
         """
         draws the close up 96 well plate
@@ -489,13 +502,6 @@ class CTkinterApp(customtkinter.CTk):
                 else:
                     filled='black'
                     texttag="empty"
-<<<<<<< HEAD
-                
-                d["group"+str(i)+str(j)]=(self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag),i,j)
-                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Enter>", lambda event: on_enter(event,self.c2,self.lbl,filled,50+(d["group"+str(i)+str(j)][1]*50),45+(d["group"+str(i)+str(j)][2]*50)))
-                self.c2.tag_bind(d["group"+str(i)+str(j)], "<Leave>", lambda event: on_leave(event,self.lbl))
-            
-=======
                 self.c2.create_oval(30+(j*50), 15+(i*50),75+(j*50) ,60+(i*50), outline="black", fill=filled,width=2,tag=texttag)
                
                 
@@ -514,7 +520,6 @@ class CTkinterApp(customtkinter.CTk):
                 if self.deckPositions.deck[index][1][0]==strin:
                     filled='#F5DEB3'
                 self.c2.create_oval(30+(i*50), 15+(j*50),75+(i*50) ,60+(j*50), outline="black", fill=filled,width=2)
->>>>>>> 9ce651bfa9064dcbf1b4a1eaac38f32522766460
                 
                 
     def draw_large_tube_holder(self):
