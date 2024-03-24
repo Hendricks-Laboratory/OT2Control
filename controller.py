@@ -2258,7 +2258,7 @@ class AutoContr(Controller):
         self.pr.shutdown()
         return
     
-    def duplicate_list_elements(list1, factor):
+    def duplicate_list_elements(self, list1, factor):
         """Duplicates the elements of a list by a factor.
 
         Args:
