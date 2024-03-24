@@ -2177,18 +2177,26 @@ class AutoContr(Controller):
 
         # Generate initial design and simulate experiments to get initial data
         X_initial = model.generate_initial_design()
-        recipes =  self.duplicate_list_elements(X_initial, self.num_duplicates)     
+        recipes =  self.duplicate_list_elements(X_initial, self.num_duplicates)    
+
+        print(f'Initial seeds as follows: {recipes}') 
 
         #generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
         #plan and execute a reaction with duplicates.
+        print(f'creating samples at wellnames: {wellnames}')
+
         self._create_samples(wellnames, recipes)
+
+        print('samples created')
         #pull in the scan data
         filenames = self.rxn_df[
                 (self.rxn_df['op'] == 'scan') |
                 (self.rxn_df['op'] == 'scan_until_complete')
                 ].reset_index()
         #TODO filenames is empty. dunno why
+
+        print(f'filenames: {filenames}')
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
         #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
