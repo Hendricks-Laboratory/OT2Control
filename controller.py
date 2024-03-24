@@ -126,13 +126,13 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iter
+    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iter=10)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
-def create_connection():
+def create_connection(self, simulate, no_pr, port):
     self.batch_num = 0 #used internally for unique filenames
     self.well_count = 0 #used internally for unique wellnames
     self._init_pr(simulate, no_pr)
@@ -143,8 +143,6 @@ def create_connection():
     print("<<controller>> connected")
     self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
     self.init_robot(simulate)
-
-
 
 class Controller(ABC):
     '''
@@ -2190,7 +2188,7 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
-        create_connection()
+        create_connection(simulate, no_pr, port)
         # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
@@ -2612,7 +2610,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        create_connection()
+        create_connection(simulate, no_pr, port)
         successful_build = False
         while not successful_build:
             try:
