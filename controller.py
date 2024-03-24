@@ -2225,7 +2225,6 @@ class AutoContr(Controller):
             # get new recipes
             X_new = model.suggest_next_locations()
             recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
-
             # do the experiments
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2273,7 +2272,7 @@ class AutoContr(Controller):
         for element in list1:
             for i in range(factor):
                 new_list.append(element)
-        return new_list
+        return np.array(new_list)
 
     
     def _get_sample_data(self,wellnames, filename):
