@@ -4,6 +4,7 @@ import gspread
 import random
 from oauth2client.service_account import ServiceAccountCredentials
 import sys
+#os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
 
 
 class deck:
@@ -130,7 +131,7 @@ class deck:
             url (_type_): _description_
         """
         gc = gspread.authorize(credentials)
-        spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/edit#gid=0')
+        spreadsheet = gc.open_by_url('https://docs.google.com/spreadsheets/d/'+url+'/')
         worksheet=spreadsheet.get_worksheet(2)
         rackval=worksheet.cell(2, 1).value
         self.deck[9]=(rackval,[])

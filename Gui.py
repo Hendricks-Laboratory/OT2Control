@@ -1,71 +1,84 @@
-#!/home/science_356_lab/anaconda3/lib/python3.9/site-packages
-
 import customtkinter
-from customtkinter import IntVar
+from customtkinter import IntVar, CHECKBUTTON
 import subprocess
+from subprocess import check_output
+import io
 import os
 import pickle
+import threading
+import json 
+import pty
 
 def run():
-    global mynumber
-    if len(mynumber.get())<1:
-        T.delete("1.0",customtkinter.END)
-        T.insert(customtkinter.END,"Need NameInput",'warning')
-        return -1
-    os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
-    execute_python_file('deckPositionsGui.py',mynumber.get())
+   os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
+   execute_python_file('deckPositionsGui.py',mynumber.get(),T)
 
 
 def input1(sim,auto,combobox):
-    global mynumber
-    update_pickle(mynumber.get(),combobox)
-    ent="-n " +mynumber.get()
-    if len(ent)==4:
-        T.delete("1.0",customtkinter.END)
-        T.insert(customtkinter.END, "Need Name Input", 'warning')
-        return -1
+   global mynumber
+   update_pickle(mynumber.get(),combobox)
+   ent=mynumber.get()
+   if len(ent)==4:
+      T.delete("1.0",customtkinter.END)
+      T.insert(customtkinter.END, "Need Name Input", 'warning')
+      return -1
         
-    os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
-    if sim.get()==1:
-        ent=ent + " --no-sim"
-    if auto.get():
-        ent = ent+ " -m auto"
+   os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
+   if sim.get()==1:
+      ent=ent + " --no-sim"
+   if auto.get():
+      ent = ent+ " -m auto"
     #test one
     
-    command="controller.py"
+   command="controller.py"
     
-    output=execute_python_file(command,ent)
-    #output=output.stdout
-    T.delete("1.0",customtkinter.END)
-    T.insert(customtkinter.END,output) #FIX#
+   execute_python_file(command,ent,T)
+   #output=output.stdout
+   # T.delete("1.0",customtkinter.END)
+   # T.insert(customtkinter.END,output) #FIX#
 
-def execute_python_file(file_Name, argument):
-   print(argument)
+def execute_python_file(file_name, argument,Textbox):
    try:
-      print(['python3', file_Name, argument])
-      completed_process = subprocess.run(['python3', file_Name, argument], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      print(completed_process.stderr)
-      if completed_process.returncode == 0:
-         print("Execution successful.")
-         return completed_process.stdout
-      else:
-         print(f"Error: Failed to execute.")
-         return completed_process.stderr
+      process = start_subprocess(["python3", file_name,'-n',argument], Textbox)
    except FileNotFoundError:
-      print(f"Error: The file does not exist.")
+      print("Error: The file does not exist.")
       
-def execute_command(command):
-   # executes the given command and returns the process
-   process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-   return process
+def read_output(process, textbox):
+    for line in iter(process.stdout.readline, b''):
+        textbox.insert(customtkinter.END, line)
+    process.stdout.close()
 
-def read_stdout(process):
-   # reads stdout of the given process line by line and update the output
-   while True:
-      output = process.stdout.readline().decode('utf-8')
-      if not output:
-         break
-      update_output(output)
+def send_input(process, entry):
+    process.stdin.write((entry.get() + '\n').encode('utf-8'))
+    process.stdin.flush()
+    entry.delete(0, customtkinter.END)
+
+def start_subprocess(command, textbox):
+    try:
+        master_fd, slave_fd = pty.openpty()
+        process = subprocess.Popen(command, stdout=slave_fd, stderr=subprocess.STDOUT, stdin=slave_fd, universal_newlines=True)
+        os.close(slave_fd)
+        threading.Thread(target=read_output, args=(master_fd, textbox), daemon=True).start()
+    except Exception as e:
+        print(f"Error starting subprocess: {e}")
+        update_output("Error starting subprocess: " + str(e), textbox)
+        return None
+    return process
+
+def write_stdin(process):
+   process.stdin.write()
+   
+def read_output(master_fd, textbox):
+    try:
+        while True:
+            output = os.read(master_fd, 1024)
+            if not output:
+                break
+            textbox.insert(customtkinter.END, output)
+    except Exception as e:
+        print(f"Error reading output from subprocess: {e}")
+        update_output("Error reading output from subprocess: " + str(e), textbox)
+
 
 def read_stderr(process):
    # reads stderr of the provided process line by line and the output
@@ -75,11 +88,13 @@ def read_stderr(process):
          break
       update_output(error)
 
-def update_output(text):
-   # updates the output text
-   T.insert(customtkinter.END, text)
-   T.see(customtkinter.END)
-   
+def update_output(text,Textbox):
+   print("in update")
+   Textbox.configure(state="normal") # Make the state normal
+
+   Textbox.insert(customtkinter.END, text)
+   Textbox.configure(state="disabled") # Make the state disabled again
+   print("out of update")
 def update_pickle(val,combobox):
    global comboboxlist
    vals=list(comboboxlist)
@@ -120,7 +135,7 @@ win= customtkinter.CTk()
 win.title("OT2Control")
 #Set the geometry of Tkinter frame
 
-win.geometry("950x550")
+win.geometry("750x450")
 win.configure(fg_color= '#252526')
 win.title("OT2Control")
 
@@ -137,6 +152,7 @@ combobox = customtkinter.CTkComboBox(win, width = 400 , variable = mynumber,fg_c
 v=read_pickle()
 combobox.configure(values = v)
 comboboxlist=v
+combobox.focus_set()
 combobox.pack()
 
 #Sim checkbox
@@ -160,8 +176,7 @@ win.bind('<Return>', lambda event: [input1(sim, auto,combobox)])
 
 #show deck positions
 customtkinter.CTkButton(win, text= "Check Deck Positions",fg_color='#007acc', font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
-# Create text widget and specify size.
-T = customtkinter.CTkTextbox(win, height = 5, width = 52)
+
 # Create label
 l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
 l.configure(font =("Inter", 14))
@@ -176,8 +191,8 @@ v.pack(side="right", fill='y')
 # Create text widget and specify size.
 T = customtkinter.CTkTextbox(win, height = 50, width = 400)
 T.configure(fg_color= "#3e3e42", text_color= "white")
-T.focus_set()
 T.pack(side='left',expand=True,fill='both')
+
 
 
 

@@ -578,7 +578,7 @@ class Controller(ABC):
             If filename is not supplied, name is kin_subplots
         '''
         if not filename:
-            filename=kin_subplots
+            filename="kin_subplots"
         x_vals = list(range(300,1001))
         colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
         fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
