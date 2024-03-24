@@ -126,7 +126,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iters=10)
+    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=5, batch_size=3, max_iters=10)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2314,9 +2314,16 @@ class AutoContr(Controller):
         #from the concentrations
         while not successful_build:
             try:
+
+
                 #build new df
                 self.rxn_df = self._build_rxn_df(wellnames, recipes)
                 self._insert_tot_vol_transfer()
+
+                print('trying to build df.')
+                print(f'products list:{self._products}')
+                print(f'rxn_df: {self.rxn_df}')
+
                 if self.tot_vols: #has at least one element
                     if (self.rxn_df.loc[0,self._products] < 0).any():
                         raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
