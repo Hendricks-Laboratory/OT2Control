@@ -121,7 +121,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     y_shape = auto.y_shape# number of reagents to learn on
     print("starting with y_shape:", y_shape)
     reagent_info = auto.robo_params['reagent_df']
-    fixed_reagents = AutoContr.get_fixed_reagents()
+    fixed_reagents = auto.get_fixed_reagents()
     target_value = np.random.randint(1, 200)
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
