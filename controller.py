@@ -57,7 +57,7 @@ rcParams.update({'figure.autolayout': True})
 from Armchair.armchair import Armchair
 from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
-from ml_models import DummyMLModel, BayesianOptMLModel, OptimizationModel
+from optimizers import OptimizationModel
 from exceptions import ConversionError
 
 
@@ -132,17 +132,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
-def create_connection(self, simulate, no_pr, port):
-    self.batch_num = 0 #used internally for unique filenames
-    self.well_count = 0 #used internally for unique wellnames
-    self._init_pr(simulate, no_pr)
-    #create a connection
-    sock = socket.socket(socket.AF_INET)
-    sock.connect((self.server_ip, port))
-    buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
-    print("<<controller>> connected")
-    self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
-    self.init_robot(simulate)
+
 
 class Controller(ABC):
     '''
@@ -2021,6 +2011,16 @@ class Controller(ABC):
                     found_errors = max(found_errors, 2)
         return found_errors
 
+    def create_connection(self, simulate, no_pr, port):
+        self._init_pr(simulate, no_pr)
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
+        print("<<controller>> connected")
+        self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
+        self.init_robot(simulate)
+
 class AutoContr(Controller):
     '''
     This is a completely automated controller. It takes as input a layout sheet, and then does
@@ -2188,7 +2188,9 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
-        create_connection(simulate, no_pr, port)
+        self.batch_num = 0 #used internally for unique filenames
+        self.well_count = 0 #used internally for unique wellnames
+        self.create_connection(simulate, no_pr, port)
         # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
@@ -2610,7 +2612,7 @@ class ProtocolExecutor(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
-        create_connection(simulate, no_pr, port)
+        self.create_connection(simulate, no_pr, port)
         successful_build = False
         while not successful_build:
             try:
