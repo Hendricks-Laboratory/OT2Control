@@ -2098,26 +2098,6 @@ class AutoContr(Controller):
         print(f"Number of fixed reagents: {num_unique_reagents}")
         print(f"List of fixed reagent names: {fixed_reagents}")
         return fixed_reagents       
-
-
-    def check_recipe_bounds(conc_list):
-        total_volume = 200
-        for x, y in conc_list:
-            total_volume -= (y*(200/deck[x]))
-        # invalid case: total volume is greater than 200mL
-        if total_volume < 0:
-            print(0)
-        
-        # valid case: add water to get the 200mL concentration
-        water_volume = total_volume
-        return 1
-
-    deck = {"r1":50, "r2": .01, "r3":0.375, "r4":6.25, "r5":12.5}
-    conc_list = [("r1", 10),("r2", 6.25),("r3", 0.0),("r4", 0.009),("r5", 0.0)]
-    water_volume = 0
-        
-    check_recipe_bounds(conc_list)
-
  
     def run_simulation(self,model=None,no_pr=False):
         '''
