@@ -106,6 +106,10 @@ class OptimizationModel():
         initial_design = GPyOpt.experiment_design.initial_design('latin', self.space, self.initial_design_numdata)
         # Here, you might want to filter or adjust initial_design based on constraints
         # This is a placeholder; actual implementation may require validating each point
+
+        for recipe in initial_design:
+            if not self.check_bounds(recipe):
+                initial_design = np.delete(initial_design, np.where(initial_design == recipe))
         return initial_design
 
     def initialize_optimizer(self, X_init, Y_init):
