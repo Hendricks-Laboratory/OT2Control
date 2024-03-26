@@ -78,7 +78,9 @@ class OptimizationModel():
         returns:
         bool: True if the suggestion is within bounds, False otherwise.
         '''
-
+        print("------checking bounds-------")
+        print(f'reagent info: {self.reagent_info}')
+        print(f'suggestion is: ')
         #  M1V1 = M1V2
         deck = self.reagent_info
         recipe = suggestion
