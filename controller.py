@@ -122,11 +122,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     print("starting with y_shape:", y_shape)
     reagent_info = auto.robo_params['reagent_df']
     fixed_reagents = auto.get_fixed_reagents()
+    variable_reagents = auto.get_variable_reagents()
     target_value = np.random.randint(1, 200)
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, initial_design_numdata=5, batch_size=3, max_iters=10)
+    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=5, batch_size=3, max_iters=10)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2056,6 +2057,7 @@ class AutoContr(Controller):
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.variable_reagents = self.get_variable_reagents()
+        print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
         self.y_shape = len(self.variable_reagents)
         print(f"y-shape is {self.y_shape}")
@@ -2063,6 +2065,7 @@ class AutoContr(Controller):
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
+        print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
         self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result", "GP_Prediction"])
         self.num_duplicates = num_duplicates
@@ -2085,8 +2088,8 @@ class AutoContr(Controller):
         # Calculate the number of unique reagents
         num_unique_reagents = len(unique_reagents)
 
-        print(f"Number of unique reagents: {num_unique_reagents}")
-        print(f"List of unique reagent names: {unique_reagents}")
+        print(f"Number of unique variable reagents: {num_unique_reagents}")
+        print(f"List of unique variable reagent names: {unique_reagents}")
         return unique_reagents
     
     def get_fixed_reagents(self):

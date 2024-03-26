@@ -49,12 +49,13 @@ class OptimizationModel():
     calc_obj(self, x) -> np.ndarray: Calculates the objective function.
     update_quit(self, X_new, Y_new) -> None: Updates the quit parameter based on optimization progress.
     '''
-    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, initial_design_numdata=15, batch_size=3, max_iters=10):
+    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=15, batch_size=3, max_iters=10):
         #super().__init__(None, max_iters)  # don't have a base model
         self.bounds = bounds
         self.target_value = target_value
         self.reagent_info = reagent_info
         self.fixed_reagents = fixed_reagents  # Additional info, if needed for constraints
+        self.variable_reagents = variable_reagents
         self.space = GPyOpt.Design_space(bounds)
         #self.constraints = self.define_constraints()
         self.initial_design_numdata = initial_design_numdata
@@ -80,7 +81,16 @@ class OptimizationModel():
         '''
         print("------checking bounds-------")
         print(f'reagent info: {self.reagent_info}')
-        print(f'suggestion is: ')
+        print(self.reagent_info.columns)
+        print(f'fixed_reagents: {self.fixed_reagents}')
+        print(f'variable_reagents: {self.variable_reagents}')
+        print(f'suggestion is: {suggestion}')
+
+
+
+
+
+
         #  M1V1 = M1V2
         deck = self.reagent_info
         recipe = suggestion
