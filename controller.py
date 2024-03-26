@@ -2382,6 +2382,8 @@ class AutoContr(Controller):
         Postconditions:  
             self.tot_vols has been updated to 
         '''
+
+        print(f'recipes {recipes}')
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
         n_wellnames = np.array(wellnames)

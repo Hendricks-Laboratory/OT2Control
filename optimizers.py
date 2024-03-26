@@ -113,6 +113,7 @@ class OptimizationModel():
             total_volume -= (float(conc)*(200/float(deck[self.variable_reagents[i]])))
             i += 1
         # invalid case: total volume is greater than 200mL
+        
         if total_volume < 0:
             return False
         
