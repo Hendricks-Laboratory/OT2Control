@@ -55,7 +55,7 @@ def send_input(process, entry):
 
 def start_subprocess(command, textbox):
     try:
-        master_fd, slave_fd = pty.openpty()
+        master_fd, slave_fd = pty.openpty() #PseudoTerminal
         process = subprocess.Popen(command, stdout=slave_fd, stderr=subprocess.STDOUT, stdin=slave_fd, universal_newlines=True)
         os.close(slave_fd)
         threading.Thread(target=read_output, args=(master_fd, textbox), daemon=True).start()

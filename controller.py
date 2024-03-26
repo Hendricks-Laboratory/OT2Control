@@ -459,13 +459,18 @@ class Controller(ABC):
         '''
         name_key_pairs = self.wks_key_pairs
         try:
-            i=0
-            wks_key = None
-            while not wks_key and i <= len(name_key_pairs):
-                row = name_key_pairs[i]
-                if row[0] == rxn_sheet_name:
-                    wks_key = row[1]
-                i+=1
+            #i=0
+            #wks_key = None
+            #while not wks_key and i <= len(name_key_pairs):
+                #row = name_key_pairs[i]
+                #if row[0] == rxn_sheet_name:
+                    #wks_key = row[1]
+                #i+=1
+            name_key_pairs = self.wks_key_pairs
+            # Using a more Pythonic way to search for the key
+            for name, wks_key, *_ in name_key_pairs:
+                if name == rxn_sheet_name:
+                    return wks_key
         except IndexError:
             raise Exception('Spreadsheet Name/Key pair was not found. Check the dict spreadsheet \
             and make sure the spreadsheet name is spelled exactly the same as the reaction \
