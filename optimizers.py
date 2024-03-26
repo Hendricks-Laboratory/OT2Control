@@ -12,6 +12,7 @@ import threading
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import re
 
 
 class OptimizationModel():
@@ -87,18 +88,31 @@ class OptimizationModel():
         print(f'suggestion is: {suggestion}')
 
 
+        
+        # Initialize an empty dictionary
+        deck = {}
 
+        # Iterate through the DataFrame index
+        for index_value in self.reagent_info.index:
+            # Use regex to remove "C" and the floating-point number that follows
+            modified_index = re.sub(r'C\d+(\.\d+)?', '', index_value)
+            # Assign the conc value to the corresponding key in the dictionary
+            deck[modified_index] = self.reagent_info.loc[index_value, 'conc']
+
+        print(f'deck: {deck}')
+        # create deck variable holding dict of reagents available and their concs on deck. take out the suffix
 
 
 
         #  M1V1 = M1V2
-        deck = self.reagent_info
-        recipe = suggestion
+        deck = self.reagent_info 
         water_volume = 0
 
         total_volume = 200
-        for x, y in recipe:
-            total_volume -= (y*(200/deck[x]))
+        i = 0
+        for conc in suggestion:
+            total_volume -= (conc*(200/deck[self.variable_reagents[i]]))
+            i += 1
         # invalid case: total volume is greater than 200mL
         if total_volume < 0:
             return False
