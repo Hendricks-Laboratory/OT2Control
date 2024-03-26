@@ -110,7 +110,7 @@ class OptimizationModel():
         total_volume = 200
         i = 0
         for conc in suggestion:
-            total_volume -= (conc*(200/deck[self.variable_reagents[i]]))
+            total_volume -= (float(conc)*(200/float(deck[self.variable_reagents[i]])))
             i += 1
         # invalid case: total volume is greater than 200mL
         if total_volume < 0:
