@@ -104,8 +104,7 @@ class OptimizationModel():
 
 
 
-        #  M1V1 = M1V2
-        deck = self.reagent_info 
+        #  M1V1 = M1V2 
         water_volume = 0
 
         total_volume = 200
