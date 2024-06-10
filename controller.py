@@ -3165,12 +3165,14 @@ class ScanDataFrame():
         well_hist_df = pd.read_csv(os.path.join(self.eve_files_path,'well_history.tsv'), sep='\t')
 
         timess = well_hist_df.timestamp.values.tolist()
+        print(timess)
         for time in timess:
           
             index = timess.index(time)
 
             time = pd.Timestamp(time).strftime('%Y-%m-%d %H:%M:%S:%f')
             timess[index] = time
+        print(timess)
 
 
         well_hist_df['timestamp'] = timess
