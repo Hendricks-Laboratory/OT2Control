@@ -3069,7 +3069,8 @@ class ScanDataFrame():
             temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
             hour = temphour if temphour == 12  else temphour +12
         elif am_pm == "AM":
-            hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            hour = temphour -12 if temphour == 12  else temphour
         
         
         
