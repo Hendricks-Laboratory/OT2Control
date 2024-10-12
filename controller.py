@@ -113,8 +113,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
-    final_spectra = np.loadtxt(
-            "test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+    #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
     print(auto.rxn_df.describe())
     print(auto.rxn_df.head(20))
     print(auto.rxn_df)
@@ -125,9 +124,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     variable_reagents = auto.get_variable_reagents()
     target_value = np.random.randint(1, 200)
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, final_spectra, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=5, batch_size=3, max_iters=10)
+    model = OptimizationModel(bounds, 550, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=1)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2072,6 +2071,12 @@ class AutoContr(Controller):
     
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, wellnames, recipes, Experiment_result, GP_Prediction):
+        
+        print(f"Recipes shape: {np.shape(recipes)}")
+        print(f"WellNames shape: {np.shape(wellnames)}")
+        print(f"Experiment Result shape: {np.shape(Experiment_result)}")
+        print(f"GP Prediction shape: {np.shape(GP_Prediction)}")
+        
         new_data = pd.DataFrame({
             'Recipes': recipes,
             'WellNames': wellnames,
@@ -2203,7 +2208,38 @@ class AutoContr(Controller):
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
         #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
-        Y_initial = model.calc_obj(scan_data)
+
+        def find_max(scan_data):
+            find_max_df = scan_data
+
+
+
+            list_of_scans = find_max_df.columns
+            range_list = [*range(300,1001,1)]
+            find_max_df.index = range_list
+            list_of_blank_data = [0.491,0.45,0.416,0.387,0.364,0.344,0.327,0.311,0.298,0.287,0.277,0.269,0.263,0.258,0.253,0.247,0.242,0.237,0.232,0.227,0.222,0.218,0.213,0.209,0.205,0.201,0.196,0.192,0.191,0.187,0.183,0.179,0.174,0.172,0.168,0.161,0.159,0.156,0.151,0.147,0.145,0.142,0.14,0.137,0.133,0.131,0.13,0.128,0.126,0.123,0.122,0.12,0.117,0.116,0.115,0.112,0.109,0.108,0.105,0.105,0.103,0.1,0.096,0.094,0.093,0.091,0.09,0.087,0.084,0.08,0.077,0.074,0.072,0.068,0.064,0.062,0.059,0.057,0.055,0.053,0.053,0.051,0.05,0.049,0.049,0.047,0.046,0.045,0.045,0.045,0.044,0.044,0.043,0.044,0.043,0.043,0.042,0.042,0.043,0.043,0.042,0.041,0.041,0.041,0.04,0.04,0.04,0.04,0.04,0.04,0.039,0.039,0.039,0.04,0.038,0.039,0.037,0.038,0.038,0.038,0.038,0.037,0.037,0.036,0.037,0.037,0.037,0.037,0.036,0.036,0.037,0.037,0.036,0.036,0.036,0.036,0.035,0.035,0.035,0.035,0.035,0.035,0.036,0.035,0.035,0.035,0.035,0.035,0.035,0.035,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.033,0.034,0.033,0.034,0.034,0.034,0.034,0.034,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.033,0.032,0.032,0.032,0.032,0.032,0.032,0.033,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.032,0.031,0.032,0.032,0.031,0.032,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.032,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.032,0.031,0.031,0.032,0.032,0.032,0.031,0.031,0.032,0.031,0.031,0.032,0.031,0.031,0.032,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.03,0.031,0.031,0.031,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.031,0.031,0.031,0.03,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.031,0.03,0.03,0.03,0.031,0.031,0.031,0.03,0.031,0.031,0.031,0.031,0.031,0.03,0.03,0.031,0.03,0.031,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.031,0.031,0.03,0.03,0.03,0.03,0.03,0.029,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.029,0.029,0.029,0.03,0.03,0.03,0.03,0.03,0.03,0.031,0.03,0.03,0.03,0.029,0.03,0.029,0.03,0.03,0.029,0.03,0.029,0.029,0.029,0.029,0.029,0.029,0.029,0.029,0.03,0.029,0.029,0.029,0.029,0.029,0.029,0.029,0.03,0.029,0.029,0.029,0.029,0.029,0.03,0.028,0.028,0.029,0.029,0.029,0.029,0.028,0.029,0.029,0.029,0.029,0.029,0.029,0.03,0.029,0.029,0.029,0.029,0.029,0.029,0.029,0.03,0.03,0.029,0.029,0.03,0.03,0.029,0.03,0.031,0.029,0.03,0.03,0.031,0.031,0.03,0.031,0.03,0.031,0.031,0.031,0.031,0.031,0.031,0.032,0.031,0.032,0.032,0.032,0.033,0.033,0.033,0.033,0.034,0.034,0.033,0.033,0.034,0.034,0.034,0.034,0.033,0.033,0.035,0.034,0.034,0.035,0.034,0.034,0.034,0.035,0.035,0.034,0.034,0.033,0.035,0.035,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.035,0.035,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.034,0.033,0.033,0.033,0.033,0.033,0.034,0.033,0.033,0.033,0.032,0.032,0.032,0.032,0.032,0.032,0.033,0.032,0.034,0.033,0.033,0.032,0.032,0.033,0.032,0.033,0.032,0.033,0.033,0.033,0.033,0.033,0.033,0.033,0.032,0.032,0.033,0.031,0.031,0.03,0.032,0.032,0.033,0.032,0.033,0.034,0.034,0.036,0.036,0.035,0.035,0.035,0.035,0.036,0.036,0.036,0.036,0.035,0.036,0.037,0.037,0.038,0.038,0.038,0.039,0.038,0.038,0.038,0.038,0.039,0.037,0.039,0.037,0.039,0.039,0.039,0.038,0.04,0.04,0.04,0.04,0.04,0.041,0.041,0.041,0.042,0.043,0.044,0.044,0.044,0.046,0.045,0.045,0.044,0.044,0.044,0.043,0.04,0.041,0.045,0.04,0.04,0.042,0.042,0.041,0.042,0.042,0.041,0.04,0.04,0.04,0.04,0.041,0.041,0.041,0.041,0.041,0.041,0.041,0.041,0.042,0.042,0.042,0.043,0.044,0.044,0.043,0.044,0.045,0.045,0.046,0.045,0.044,0.045,0.047,0.048,0.049,0.049,0.05,0.051,0.053,0.052,0.053,0.055,0.056,0.058,0.059,0.062,0.062,0.064,0.065,0.066,0.068,0.07,0.071,0.074,0.075,0.076,0.079,0.082,0.085,0.086,0.089,0.091,0.095,0.098,0.101,0.103,0.108,0.112,0.116,0.121,0.124,0.126,0.132,0.133,0.136,0.137,0.138,0.138,0.14,0.141,0.141,0.141,0.14,0.142,0.143,0.142,0.142,0.142,0.142,0.142,0.143,0.142,0.142,0.141,0.141,0.141,0.14,0.141,0.14,0.141,0.14,0.139,0.136,0.136,0.135,0.132,0.132,0.131,0.131,0.13,0.13,0.128,0.128,0.127]
+
+            for x in list_of_scans:
+                list_of_data = np.array(find_max_df[x])
+                subtracted_data = np.subtract(list_of_data, list_of_blank_data)
+                
+                find_max_df[x] = subtracted_data
+                del list_of_data, subtracted_data
+
+            find_max_df=find_max_df.T
+
+            lambda_max_wavelengths = []
+            lambda_max_abs = []
+            for x in list_of_scans:
+                lambda_max_wavelengths = lambda_max_wavelengths + [find_max_df.loc[(x),:].idxmax()]
+                lambda_max_abs = lambda_max_abs + [find_max_df.loc[(x),:].max()]
+
+
+            return lambda_max_wavelengths
+
+        lambda_maxes = find_max(scan_data)
+        
+        Y_initial = model.calc_obj(np.array(lambda_maxes))
         self.batch_num += 1
 
         print(type(X_initial))
@@ -2223,16 +2259,15 @@ class AutoContr(Controller):
         #enter iterative while loop now that we have data
         while not model.quit:
 
-            print(f'<<controller>> executing batch {self.batch_num}, Suggested Locations: {recipes}, Results: {Y_new}')
-    
             # get new recipes
-            X_new = model.suggest_next_locations()
+            X_new = model.suggest()
             recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
+            print(f'<<controller>> executing batch {self.batch_num}, Suggested Locations: {recipes}')
             # do the experiments
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             # plan and execute a reaction with duplicate reactions.
-            self._create_samples(wellnames, recipes, self.num_duplicates)
+            self._create_samples(wellnames, recipes)
 
             #pull in the scan data
             filenames = self.rxn_df[
@@ -2241,9 +2276,12 @@ class AutoContr(Controller):
                     ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename) 
-             #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
+            #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
             # update model with data
-            Y_new = model.calc_obj(scan_data)
+
+            lambda_maxes = find_max(scan_data)
+        
+            Y_new = model.calc_obj(np.array(lambda_maxes))
             model.update_experiment_data(recipes, Y_new)
 
             # print results
@@ -2251,11 +2289,13 @@ class AutoContr(Controller):
             X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
             # To get the best observed Y value (function value)
             Y_best = np.min(model.optimizer.Y)
-            print(f"Best recipe: {X_best}, ")
+            print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")
 
             self.batch_num += 1
-            self._update_experiment_data(wellnames, recipes, scan_data, gp_prediction)     
+            #self._update_experiment_data(wellnames, recipes, scan_data, Y_best)     
             
+        print("Success!!!")
+
         self.close_connection()
         self.pr.shutdown()
         return
@@ -3369,7 +3409,7 @@ class ScanDataFrame():
                 
             
             
-            
+        """    
             #concentration = tail
         pddict = {'time':times, 'vol':volumes, 'cont':containers, 'chem':chems, 'conc': cons} 
         yay = pd.DataFrame(pddict)
@@ -3565,7 +3605,7 @@ class ScanDataFrame():
 #         df.drop('wellnameorder', axis=1,inplace=True)
         
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
-
+"""
         
     
 class Plotter():

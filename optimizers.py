@@ -50,7 +50,7 @@ class OptimizationModel():
     calc_obj(self, x) -> np.ndarray: Calculates the objective function.
     update_quit(self, X_new, Y_new) -> None: Updates the quit parameter based on optimization progress.
     '''
-    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=15, batch_size=3, max_iters=10):
+    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=1):
         #super().__init__(None, max_iters)  # don't have a base model
         self.bounds = bounds
         self.target_value = target_value
@@ -150,7 +150,7 @@ class OptimizationModel():
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.model, self.space, None, self.acquisition, self.evaluator, X_init, Y_init)
+            self.model, self.space, None, self.acquisition, self.evaluator, X_init, np.array([Y_init[0]]))
     
     def _update_acquisition(self):
         '''
@@ -172,7 +172,7 @@ class OptimizationModel():
         pass
 
         
-    def suggest_next_locations(self):
+    def suggest(self):
         '''
         Suggests the next locations (parameter sets) for experimentation based on the current acquisition function.
         returns:
@@ -213,7 +213,7 @@ class OptimizationModel():
         returns:
         np.ndarray: The calculated objective function values.
         '''
-        return abs(self.target_value - x).reshape(-1, 1)
+        return abs(x - self.target_value).reshape(-1, 1)
 
     def update_quit(self, X_new, Y_new):
         '''
