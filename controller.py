@@ -126,7 +126,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, 550, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=1)
+    model = OptimizationModel(bounds, 550, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=3)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2240,10 +2240,8 @@ class AutoContr(Controller):
         lambda_maxes = find_max(scan_data)
         
         Y_initial = model.calc_obj(np.array(lambda_maxes))
+        Y_initial = Y_initial[2::3]
         self.batch_num += 1
-
-        print(type(X_initial))
-        print(type(Y_initial))
 
         # Optimizer update method not yet available so add initial design to records.
         model.experiment_data['X'] = list(X_initial)
@@ -2262,7 +2260,7 @@ class AutoContr(Controller):
             # get new recipes
             X_new = model.suggest()
             recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
-            print(f'<<controller>> executing batch {self.batch_num}, Suggested Locations: {recipes}')
+            print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
             # do the experiments
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2282,7 +2280,8 @@ class AutoContr(Controller):
             lambda_maxes = find_max(scan_data)
         
             Y_new = model.calc_obj(np.array(lambda_maxes))
-            model.update_experiment_data(recipes, Y_new)
+            Y_new = Y_new[2::3]
+            model.update_experiment_data(X_new, Y_new)
 
             # print results
             # To get the best observed X values (parameters)

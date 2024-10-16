@@ -50,7 +50,7 @@ class OptimizationModel():
     calc_obj(self, x) -> np.ndarray: Calculates the objective function.
     update_quit(self, X_new, Y_new) -> None: Updates the quit parameter based on optimization progress.
     '''
-    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=1):
+    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata, batch_size, max_iters):
         #super().__init__(None, max_iters)  # don't have a base model
         self.bounds = bounds
         self.target_value = target_value
@@ -150,7 +150,7 @@ class OptimizationModel():
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.model, self.space, None, self.acquisition, self.evaluator, X_init, np.array([Y_init[0]]))
+            self.model, self.space, None, self.acquisition, self.evaluator, X_init, Y_init)
     
     def _update_acquisition(self):
         '''
@@ -224,7 +224,9 @@ class OptimizationModel():
         '''
         if self.curr_iter >= self.max_iters:
             self.quit = True
+            print("Exit due to max_iters")
         else:
             # Check if any of the new results meet the target threshold condition.
             self.quit = any(y < self.threshold for y in Y_new)
+            print("Exit due to meeting target value")
         
