@@ -10,7 +10,7 @@ import json
 import pty
 
 def run():
-   os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
+   os.chdir(os.curdir)
    execute_python_file('deckPositionsGui.py',mynumber.get(),T)
 
 
@@ -23,7 +23,7 @@ def input1(sim,auto,combobox):
       T.insert(customtkinter.END, "Need Name Input", 'warning')
       return -1
         
-   os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
+   os.chdir(os.curdir)
    if sim.get()==1:
       ent=ent + " --no-sim"
    if auto.get():
