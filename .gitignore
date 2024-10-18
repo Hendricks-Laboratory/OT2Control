@@ -10,3 +10,5 @@ Cache/
 Data/
 TODO*.txt
 Controller_Out/
+.venv
+requirements.txt
