@@ -8,21 +8,70 @@ import pickle
 import threading
 import json 
 import pty
+from queue import Queue
+from threading import Thread
+from controller import run_as_thread
 
 def run():
    os.chdir(os.curdir)
    execute_python_file('deckPositionsGui.py',mynumber.get(),T)
 
+def run_controller(sim, auto, sheet_name, combobox):
+   """
+   - controller must be run as a callable python object
+   - the updater thread must begin BEFORE the controller thread initiates
+   - arguements should be passed to controller with minimal disruption of the controller script
+   - both the updater and controller threads mus be able to access the status queue
+   
+   parameters:
+      sim: indicates whether the user selected the sim checkbox
+         - "--no-sim" in the command line arguements
+      auto: indicates whether the use selected the auto checkbox
+         - "-m auto" in the command line arguements
+      mynumber: I have no idea why it is called this, however this is the text entry for user input
+         - currently the controller cannot parse the sheet name because it was not prefixed with "-n"
+         - I dont wanna shit on this code too much but its pretty bad
+      combobox: not sure why this is here but it seems to be the drop down menu that is populated with whatever is in the pickle
+   """
+
+   #idk what this does but is was there in the previous iteration
+   update_pickle(sheet_name.get(),combobox)
+
+
+   # mimic cli args for controller
+   cli_args = []
+
+   if sheet_name.get():
+      cli_args.append(f"-n {sheet_name.get()}")
+   if auto.get():
+      cli_args.append(f"-mauto")
+   if sim.get():
+      cli_args.append(f"--no-sim")
+
+   # shared resource between threads
+   status_queue = Queue()
+
+   update_thread = Thread(target=update_status, args=(status_queue, T))
+   controller_thread = Thread(target=run_as_thread, args=(cli_args, status_queue))
+
+   update_thread.start()
+   controller_thread.start()
+
+def update_status(q, T):
+   while True:
+      T.insert(customtkinter.END, q.get() + "\n")
+
 
 def input1(sim,auto,combobox):
    global mynumber
    update_pickle(mynumber.get(),combobox)
+
    ent=mynumber.get()
    if len(ent)==4:
       T.delete("1.0",customtkinter.END)
       T.insert(customtkinter.END, "Need Name Input", 'warning')
       return -1
-        
+   
    os.chdir(os.curdir)
    if sim.get()==1:
       ent=ent + " --no-sim"
@@ -31,7 +80,7 @@ def input1(sim,auto,combobox):
     #test one
     
    command="controller.py"
-    
+   
    execute_python_file(command,ent,T)
    #output=output.stdout
    # T.delete("1.0",customtkinter.END)
@@ -170,7 +219,7 @@ c2.configure(border_width= 2, font= ("Inter", 12))
 c2.pack()
 output="hello"
 #Create a Button to validate Entry Widget
-customtkinter.CTkButton(win, text= "Execute",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [input1(sim,auto,combobox)]).pack(pady=(20, 13))
+customtkinter.CTkButton(win, text= "Execute",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [run_controller(sim,auto,mynumber,combobox)]).pack(pady=(20, 13))
 # Bind the <Return> event to the execute_button's command
 win.bind('<Return>', lambda event: [input1(sim, auto,combobox)])
 

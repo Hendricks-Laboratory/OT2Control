@@ -75,17 +75,22 @@ def init_parser():
     parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
     return parser
 
-def main(serveraddr):
+def main(serveraddr, gui_args = None):
     '''
     prompts for input and then calls appropriate launcher
     '''
     parser = init_parser()
-    args = parser.parse_args()
+
+    if not gui_args:
+        args = parser.parse_args()
+    else: 
+        args = parser.parse_args(gui_args)
+
     if args.mode == 'protocol':
-        print('launching in protocol mode')
+        write_status('launching in protocol mode')
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
-        print('launching in auto mode')
+        write_status('launching in auto mode')
         launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
@@ -3423,29 +3428,21 @@ class ScanDataFrame():
 #                 wellnamenumbers.append(wellnamenumber)
 #             else:
 #                 wellnamenumbers.append(0)
-#             #print(l)
-        
+#             #print(l)        
 #         df['wellnameorder'] = wellnamenumbers
-        
 #         # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
 #         df['num'] = df['col'].str.extract('(\d+)').astype(int)
-#         df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
-        
+#         df['alpha'] = df['col'].str.extract('([a-zA-Z]+)'
 #          # Sort by 'time', then 'num' and 'alpha'
         df.sort_values(by=['time'], inplace = True)
-        
         # Drop the 'num' and 'alpha' and 'wellnameorder' columns, they are no longer needed
 #         df = df.drop(columns=['num', 'alpha'])
 #         df.drop('wellnameorder', axis=1,inplace=True)
-        
         df.to_csv(os.path.join(self.data_path, reaction + '_full.csv'))
-
-        
-    
 class Plotter():
     '''
     This class creates and saves plots 
-    
+
     ATTRIBUTES:  
         df df: Not passed in but created in init. Pandas Dataframe to be used 
             to store all scans from the run.
@@ -3458,14 +3455,16 @@ class Plotter():
     def __init__(self, filename):
         self.filename = filename
     
-        
-        
-            
+def run_as_thread(args,q):
+    global status_q #there must be a better way to do this, fix later
+    status_q = q
+    write_status("thread successfully created")
+    SERVERADDR = "169.254.44.249"
+    main(SERVERADDR, args)
 
-        
-
-    
-    
+def write_status(msg):
+    print(msg)
+    status_q.put(msg)
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
