@@ -30,7 +30,6 @@ def run_controller(sim, auto, sheet_name, combobox):
          - "-m auto" in the command line arguements
       mynumber: I have no idea why it is called this, however this is the text entry for user input
          - currently the controller cannot parse the sheet name because it was not prefixed with "-n"
-         - I dont wanna shit on this code too much but its pretty bad
       combobox: not sure why this is here but it seems to be the drop down menu that is populated with whatever is in the pickle
    """
 

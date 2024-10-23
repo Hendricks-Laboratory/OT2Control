@@ -62,7 +62,7 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
 from exceptions import ConversionError
 
-
+status_q = None
 
 def init_parser():
     parser = argparse.ArgumentParser()
@@ -3454,9 +3454,9 @@ class Plotter():
     
     def __init__(self, filename):
         self.filename = filename
-    
+
 def run_as_thread(args,q):
-    global status_q #there must be a better way to do this, fix later
+    global status_q
     status_q = q
     write_status("thread successfully created")
     SERVERADDR = "169.254.44.249"
@@ -3464,7 +3464,8 @@ def run_as_thread(args,q):
 
 def write_status(msg):
     print(msg)
-    status_q.put(msg)
+    if status_q:
+        status_q.put(msg)
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
