@@ -2066,22 +2066,21 @@ class AutoContr(Controller):
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
-        self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result", "GP_Prediction"])
+        self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
         self.num_duplicates = num_duplicates
     
     # Update experiment_data DataFrame after each batch
-    def _update_experiment_data(self, wellnames, recipes, Experiment_result, GP_Prediction):
+    def _update_experiment_data(self, wellnames, recipes, Experiment_result):
         
-        print(f"Recipes shape: {np.shape(recipes)}")
+        """print(f"Recipes shape: {np.shape(recipes)}")
         print(f"WellNames shape: {np.shape(wellnames)}")
         print(f"Experiment Result shape: {np.shape(Experiment_result)}")
-        print(f"GP Prediction shape: {np.shape(GP_Prediction)}")
+        print(f"GP Prediction shape: {np.shape(GP_Prediction)}")"""
         
         new_data = pd.DataFrame({
             'Recipes': recipes,
             'WellNames': wellnames,
-            'Experiment Result': Experiment_result,
-            'GP Prediction': GP_Prediction
+            'Experiment Result': Experiment_result
         })
         self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)
 
@@ -2240,14 +2239,14 @@ class AutoContr(Controller):
         lambda_maxes = find_max(scan_data)
         
         Y_initial = model.calc_obj(np.array(lambda_maxes))
-        Y_initial = Y_initial[2::3]
         self.batch_num += 1
 
+        self._update_experiment_data(wellnames, recipes, scan_data, Y_initial)
         # Optimizer update method not yet available so add initial design to records.
-        model.experiment_data['X'] = list(X_initial)
+        model.experiment_data['X'] = list(recipes)
         model.experiment_data['Y'] = list(Y_initial)
         # Initialize the optimizer with initial experimental data
-        model.initialize_optimizer(X_initial, Y_initial)
+        model.initialize_optimizer(recipes, Y_initial)
 
         print(model.optimizer)
         print(model.acquisition)
@@ -2255,7 +2254,7 @@ class AutoContr(Controller):
         self.batch_num += 1
         
         #enter iterative while loop now that we have data
-        while not model.quit:
+        while not model.quit or Y_best < 5:
 
             # get new recipes
             X_new = model.suggest()
@@ -2280,19 +2279,21 @@ class AutoContr(Controller):
             lambda_maxes = find_max(scan_data)
         
             Y_new = model.calc_obj(np.array(lambda_maxes))
-            Y_new = Y_new[2::3]
-            model.update_experiment_data(X_new, Y_new)
+            model.update_experiment_data(recipes, Y_new)
 
             # print results
             # To get the best observed X values (parameters)
             X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
             # To get the best observed Y value (function value)
-            Y_best = np.min(model.optimizer.Y)
+            Y_best = np.min(model.optimizer.Y) # if zero we need to quit?
+            if Y_best < 5:
+                print("Exit due to meeting target")
             print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")
 
             self.batch_num += 1
-            #self._update_experiment_data(wellnames, recipes, scan_data, Y_best)     
+            self._update_experiment_data(wellnames, recipes, scan_data, Y_new)     
             
+        self.experiment_data.to_csv("experiment_data", index=True)
         print("Success!!!")
 
         self.close_connection()
