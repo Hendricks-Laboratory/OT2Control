@@ -62,8 +62,6 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
 from exceptions import ConversionError
 
-status_q = None
-
 def init_parser():
     parser = argparse.ArgumentParser()
     mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
@@ -81,9 +79,9 @@ def main(serveraddr, gui_args = None):
     '''
     parser = init_parser()
 
-    if not gui_args:
+    if not gui_args: 
         args = parser.parse_args()
-    else: 
+    else: # if controller recieves gui_args, parse those instead
         args = parser.parse_args(gui_args)
 
     if args.mode == 'protocol':

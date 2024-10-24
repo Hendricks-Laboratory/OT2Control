@@ -18,22 +18,18 @@ def run():
 
 def run_controller(sim, auto, sheet_name, combobox):
    """
-   - controller must be run as a callable python object
-   - the updater thread must begin BEFORE the controller thread initiates
-   - arguements should be passed to controller with minimal disruption of the controller script
-   - both the updater and controller threads mus be able to access the status queue
-   
+   This function will pass the arguements entered by the use in GUI to controller, and run controller as a thread in paralell with 
+   the update thread. 
    parameters:
-      sim: indicates whether the user selected the sim checkbox
-         - "--no-sim" in the command line arguements
-      auto: indicates whether the use selected the auto checkbox
-         - "-m auto" in the command line arguements
-      mynumber: I have no idea why it is called this, however this is the text entry for user input
-         - currently the controller cannot parse the sheet name because it was not prefixed with "-n"
-      combobox: not sure why this is here but it seems to be the drop down menu that is populated with whatever is in the pickle
+      sim:
+         checkbox user entry for "--no-sim" flag
+      auto:
+         checkbox user entry for "-m" flag 
+      sheet_name:
+         user text entry for sheet name
    """
 
-   #idk what this does but is was there in the previous iteration
+   
    update_pickle(sheet_name.get(),combobox)
 
 
@@ -57,6 +53,9 @@ def run_controller(sim, auto, sheet_name, combobox):
    controller_thread.start()
 
 def update_status(q, T):
+   """
+   update text box with test from queue: q
+   """
    while True:
       T.insert(customtkinter.END, q.get() + "\n")
 
@@ -143,6 +142,7 @@ def update_output(text,Textbox):
    Textbox.insert(customtkinter.END, text)
    Textbox.configure(state="disabled") # Make the state disabled again
    print("out of update")
+
 def update_pickle(val,combobox):
    global comboboxlist
    vals=list(comboboxlist)
@@ -150,7 +150,6 @@ def update_pickle(val,combobox):
       if isinstance(val,str) and val!='':
          filename='pickle.pk'
          if os.path.isfile(filename):
-
             vals.append(val)
             with open(filename, 'wb') as g:
                vals=list(dict.fromkeys(vals))
