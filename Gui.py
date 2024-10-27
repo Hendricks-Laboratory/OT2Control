@@ -37,7 +37,7 @@ def run_controller(sim, auto, sheet_name, combobox):
    cli_args = []
 
    if sheet_name.get():
-      cli_args.append(f"-n {sheet_name.get()}")
+      cli_args.append(f"-n{sheet_name.get().strip()}")
    if auto.get():
       cli_args.append(f"-mauto")
    if sim.get():
@@ -187,8 +187,8 @@ win.configure(fg_color= '#252526')
 win.title("OT2Control")
 
 # Name Label
-l = customtkinter.CTkLabel(master= win, text = "What is the name?")
-l.configure(font =("Inter", 16), text_color="white")
+# l = customtkinter.CTkLabel(master= win, text = "What is the name?")
+# l.configure(font =("Inter", 16), text_color="white")
 l = customtkinter.CTkLabel(master= win, text = "What is the name?")
 l.configure(font =("Inter", 16), text_color="white")
 l.pack()
@@ -225,8 +225,8 @@ win.bind('<Return>', lambda event: [input1(sim, auto,combobox)])
 customtkinter.CTkButton(win, text= "Check Deck Positions",fg_color='#007acc', font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
 
 # Create label
-l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
-l.configure(font =("Inter", 14))
+# l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
+# l.configure(font =("Inter", 14))
 l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
 l.configure(font =("Inter", 14))
 l.pack()
