@@ -2687,6 +2687,18 @@ class ProtocolExecutor(Controller):
             except ConversionError as e:
                 self._handle_conversion_err(e)        
         self.execute_protocol_df()
+
+        try:
+            data = plate(os.path.join(self.data_path, f"{self.experiment_name}full_df.csv"),
+                        len(self._products),  # Use number of products instead of well_count
+                        550)  # target is hardcoded for now. needs to be configurable
+            plt.figure()
+            heat_map(data)
+            plt.savefig(os.path.join(self.data_path, f"{self.experiment_name}_heatmap.png"))
+            plt.close()
+        except Exception as e:
+            print(f"<<controller>> Failed to generate heatmap: {str(e)}")
+        
         self.close_connection()
         self.pr.shutdown()
 
