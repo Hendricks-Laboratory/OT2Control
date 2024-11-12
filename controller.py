@@ -124,9 +124,9 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     variable_reagents = auto.get_variable_reagents()
     target_value = np.random.randint(1, 200)
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.002)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, 550, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=1, batch_size=1, max_iters=3)
+    model = OptimizationModel(bounds, 450, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=5, batch_size=1, max_iters=10)
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2072,13 +2072,8 @@ class AutoContr(Controller):
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, wellnames, recipes, Experiment_result):
         
-        """print(f"Recipes shape: {np.shape(recipes)}")
-        print(f"WellNames shape: {np.shape(wellnames)}")
-        print(f"Experiment Result shape: {np.shape(Experiment_result)}")
-        print(f"GP Prediction shape: {np.shape(GP_Prediction)}")"""
-        
         new_data = pd.DataFrame({
-            'Recipes': recipes,
+            'Recipes': recipes.reshape(1,-1).tolist()[0],
             'WellNames': wellnames,
             'Experiment Result': Experiment_result
         })
@@ -2237,24 +2232,26 @@ class AutoContr(Controller):
             return lambda_max_wavelengths
 
         lambda_maxes = find_max(scan_data)
-        
+        print(lambda_maxes)
         Y_initial = model.calc_obj(np.array(lambda_maxes))
         self.batch_num += 1
 
-        self._update_experiment_data(wellnames, recipes, scan_data, Y_initial)
+        self._update_experiment_data(wellnames, recipes, lambda_maxes)
         # Optimizer update method not yet available so add initial design to records.
         model.experiment_data['X'] = list(recipes)
         model.experiment_data['Y'] = list(Y_initial)
         # Initialize the optimizer with initial experimental data
-        model.initialize_optimizer(recipes, Y_initial)
+        model.initialize_optimizer(recipes, np.array(lambda_maxes).reshape(-1,1))
 
         print(model.optimizer)
         print(model.acquisition)
 
         self.batch_num += 1
+
+        Y_best = np.min(model.optimizer.Y)
         
         #enter iterative while loop now that we have data
-        while not model.quit or Y_best < 5:
+        while not model.quit:
 
             # get new recipes
             X_new = model.suggest()
@@ -2277,9 +2274,9 @@ class AutoContr(Controller):
             # update model with data
 
             lambda_maxes = find_max(scan_data)
-        
+            print(lambda_maxes)
             Y_new = model.calc_obj(np.array(lambda_maxes))
-            model.update_experiment_data(recipes, Y_new)
+            model.update_experiment_data(recipes, np.array(lambda_maxes).reshape(-1,1))
 
             # print results
             # To get the best observed X values (parameters)
@@ -2291,9 +2288,9 @@ class AutoContr(Controller):
             print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")
 
             self.batch_num += 1
-            self._update_experiment_data(wellnames, recipes, scan_data, Y_new)     
+            self._update_experiment_data(wellnames, recipes, lambda_maxes)     
             
-        self.experiment_data.to_csv("experiment_data", index=True)
+        self.experiment_data.to_csv("experiment_data.csv", index=True)
         print("Success!!!")
 
         self.close_connection()
