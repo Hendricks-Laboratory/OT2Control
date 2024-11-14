@@ -1,6 +1,7 @@
 import GPyOpt
 from pyDOE import lhs
 from GPyOpt import Design_space
+import GPy
 
 
 from abc import abstractmethod
@@ -145,9 +146,11 @@ class OptimizationModel():
         np.ndarray Y_init: The initial objective function values corresponding to X_init.
         '''
         def f(x):
-            return abs(x-self.target_value)
+            return abs(sum(x)-(self.target_value*3))
+
         
-        self.model = GPyOpt.models.GPModel(optimize_restarts=5, verbose=False)
+        kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
+        self.model = GPyOpt.models.GPModel(kernel)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
         self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
