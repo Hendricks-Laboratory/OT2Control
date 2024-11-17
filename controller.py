@@ -60,6 +60,8 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from optimizers import OptimizationModel
 from exceptions import ConversionError
 
+from .heatmap import plate, heat_map
+
 
 
 def init_parser():
@@ -2202,6 +2204,8 @@ class AutoContr(Controller):
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
         #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
+        
+
 
         def find_max(scan_data):
             find_max_df = scan_data
@@ -2293,8 +2297,24 @@ class AutoContr(Controller):
         self.experiment_data.to_csv("experiment_data.csv", index=True)
         print("Success!!!")
 
+        print(self.well_count) # for heatmap debugging
+
+        # Add plotting before closing connections
+        try:
+                    #plate(file, num_wells, target)
+            data = plate(os.path.join(self.data_path, f"{self.experiment_name}full_df.csv"),  
+                        self.well_count, 
+                        550)  # target is hardcoded for now
+            plt.figure()
+            heat_map(data)
+            plt.savefig(os.path.join(self.data_path, f"{self.experiment_name}_heatmap.png"))
+            plt.close()
+        except Exception as e:
+            print(f"<<controller>> Failed to generate heatmap: {str(e)}")
+        
         self.close_connection()
         self.pr.shutdown()
+            
         return
     
     def duplicate_list_elements(self, list1, factor):
@@ -2664,6 +2684,18 @@ class ProtocolExecutor(Controller):
             except ConversionError as e:
                 self._handle_conversion_err(e)        
         self.execute_protocol_df()
+
+        try:
+            data = plate(os.path.join(self.data_path, f"{self.experiment_name}full_df.csv"),
+                        len(self._products),  # Use number of products instead of well_count
+                        550)  # target is hardcoded for now. needs to be configurable
+            plt.figure()
+            heat_map(data)
+            plt.savefig(os.path.join(self.data_path, f"{self.experiment_name}_heatmap.png"))
+            plt.close()
+        except Exception as e:
+            print(f"<<controller>> Failed to generate heatmap: {str(e)}")
+        
         self.close_connection()
         self.pr.shutdown()
 
