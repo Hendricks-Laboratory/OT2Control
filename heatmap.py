@@ -53,4 +53,3 @@ def heat_map(data):
     plt.colorbar()
     plt.show()
 
-heat_map(plate("KAT_014full_df.csv",39, 550))
