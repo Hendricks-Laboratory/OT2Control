@@ -79,22 +79,28 @@ def main(serveraddr, gui_args = None):
     '''
     parser = init_parser()
 
+
+
     if not gui_args: 
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those instead
         args = parser.parse_args(gui_args)
 
-    write_status(args.name)
+    # status(args.name)
 
     if args.mode == 'protocol':
-        write_status('launching in protocol mode')
+        status('launching in protocol mode')
+        
+        if status('step?', input_mode=True):
+            status('input given')
+
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
-        write_status('launching in auto mode')
+        status('launching in auto mode')
         launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     else:
-        write_status("invalid argument to mode, '{}'".format(args.mode))
-        parser.write_status_help()
+        status("invalid argument to mode, '{}'".format(args.mode))
+        parser.print_help()
 
 def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
@@ -310,7 +316,7 @@ class Controller(ABC):
             If use_cache is true:
                 reads .metadata.txt
                 asserts that the rxn_sheet_name matches the name in sheet
-                write_statuss the timestamp that the cache was last written
+                statuss the timestamp that the cache was last written
             If use_cache is false:
                 writes .metadata.txt with the sheet name and a timestamp
         '''
@@ -320,7 +326,7 @@ class Controller(ABC):
             with open(os.path.join(self.cache_path, '.metadata.json'), 'r') as file:
                 metadata = json.load(file)
             assert (metadata['name'] == rxn_sheet_name), "desired sheet was, '{}', but cached data is for '{}'".format(rxn_sheet_name, metadata['name'])
-            write_status("<<controller>> using cached data for '{}', last updated '{}'".format(
+            status("<<controller>> using cached data for '{}', last updated '{}'".format(
                     metadata['name'],metadata['timestamp']))
         else:
             metadata = {'timestamp':datetime.datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'),
@@ -381,7 +387,7 @@ class Controller(ABC):
             try:
                 self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path, simulate)
             except:
-                write_status('<<controller>> failed to initialize platereader, initializing dummy reader')
+                status('<<controller>> failed to initialize platereader, initializing dummy reader')
                 self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
 
     def _download_sheet(self, rxn_spreadsheet, index):
@@ -427,7 +433,7 @@ class Controller(ABC):
         self.debug_path = os.path.join(self.out_path, 'Debug')
         self.plot_path = os.path.join(self.out_path, 'Plots')
         paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
-        write_status(paths)
+        status(paths)
         for path in paths:
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -818,11 +824,11 @@ class Controller(ABC):
             Connection has been closed  
         '''
         
-        write_status('<<controller>> initializing breakdown')
+        status('<<controller>> initializing breakdown')
         self.save()
         #server should now send a close command
         self.portal.send_pack('close')
-        write_status('<<controller>> shutting down')
+        status('<<controller>> shutting down')
         self.portal.close()
         self.delete_wks_key()
         
@@ -873,7 +879,7 @@ class Controller(ABC):
             #Armchair recieved an error packet, so eve had a problem
             try:
                 eve_error = self.portal.error_payload[0]
-                write_status('''<<controller>>----------------Eve Error----------------
+                status('''<<controller>>----------------Eve Error----------------
                 Eve threw error '{}'
                 Attempting to save state on exit
                 '''.format(eve_error))
@@ -884,12 +890,12 @@ class Controller(ABC):
                 raise eve_error
         else:
             try:
-                write_status('''<<controller>> ----------------Controller Error----------------
+                status('''<<controller>> ----------------Controller Error----------------
                 <<controller>> Attempting to save state on exit''')
                 self.close_connection()
                 self.pr.shutdown()
             finally:
-                time.sleep(.5) #this is just for write_statusing format. Not critical
+                time.sleep(.5) #this is just for statusing format. Not critical
                 raise e
 
     def _load_rxn_df(self, input_data):
@@ -1058,7 +1064,7 @@ class Controller(ABC):
             every step in the protocol has been sent to the robot  
         '''
         for i, row in self.rxn_df.iterrows():
-            write_status("<<controller>> executing command {} of the protocol df with operation {}.".format(i+4, row['op'])) # added 4 to align with order in Gsheets
+            status("<<controller>> executing command {} of the protocol df with operation {}.".format(i+4, row['op'])) # added 4 to align with order in Gsheets
             if row['op'] == 'transfer':
                 self._send_transfer_command(row,i)
             elif row['op'] == 'pause':
@@ -1077,15 +1083,15 @@ class Controller(ABC):
                 self.save()
             elif row['op'] == 'plot':
                 self._create_plot(row, i)
-            elif row['op'] == 'write_status':
-                self._execute_write_status(row,i)
+            elif row['op'] == 'status':
+                self._execute_status(row,i)
             elif row['op'] == 'scan_until_complete':
                 self._scan_until_complete(row,i)
             else:
                 raise Exception('invalid operation {}'.format(row['op']))
 
-    def _execute_write_status(self, row, i):
-        write_status(row['message'])
+    def _execute_status(self, row, i):
+        status(row['message'])
 
     def _create_plot(self, row, i):
         '''
@@ -1509,17 +1515,17 @@ class Controller(ABC):
         for i, r in self.robo_params['labware_df'].iterrows():
             #check that everything has afirst well if it's not a tube
             if not 'tube' in r['name'] and not r['first_usable']:
-                write_status('<<controller>> specified labware {} on deck_pos {}, but did not specify first usable tip/well.'.format(r['name'], r['deck_pos']))
+                status('<<controller>> specified labware {} on deck_pos {}, but did not specify first usable tip/well.'.format(r['name'], r['deck_pos']))
                 found_errors = max(found_errors,2)
             #if you're not a tube and you have an empty_list, that's also bad
             if not 'tube' in r['name'] and r['empty_list']:
-                write_status('<<controller>> An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.'.format(r['name'], r['deck_pos'], r['name']))
+                status('<<controller>> An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.'.format(r['name'], r['deck_pos'], r['name']))
                 found_errors = max(found_errors,2)
             #check for no duplicates in the empty list
             if r['empty_list']:
                 locs = r['empty_list'].replace(' ','').split(',')
                 if len(set(locs)) < len(locs):
-                    write_status('<<controller>> empty list for {} on deck pos {} had duplicates. List was {}'.format(r['name'],r['deck_pos'], r['empty_list']))
+                    status('<<controller>> empty list for {} on deck pos {} had duplicates. List was {}'.format(r['name'],r['deck_pos'], r['empty_list']))
                     found_errors = max(found_errors,2)
         return found_errors 
 
@@ -1547,14 +1553,14 @@ class Controller(ABC):
         loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
         val_counts = loc_deck_pos_pairs.value_counts()
         for i in val_counts.loc[val_counts > 2].index:
-            write_status('<<controller>> location {} on deck position has multiple reagents/empty containers assigned to it')
+            status('<<controller>> location {} on deck position has multiple reagents/empty containers assigned to it')
             found_errors = max(found_errors,2)
         return found_errors
 
     def check_rxn_df(self):
         '''
         Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
-        Advised options are write_statused and if an error code is returned
+        Advised options are statused and if an error code is returned
         Will run through and check all rows, even if errors are found
         returns  
             int found_errors:  
@@ -1565,43 +1571,43 @@ class Controller(ABC):
         '''
         found_errors = 0
         if self.rxn_df.loc[self.rxn_df['op']=='scan']['scan_filename'].duplicated().sum() > 0:
-            write_status("<<controller>> Multiple scans use same filename. It will be overwritten. Do you wish to proceed?")
+            status("<<controller>> Multiple scans use same filename. It will be overwritten. Do you wish to proceed?")
             found_errors = max(found_errors, 1)
         if self.rxn_df.loc[self.rxn_df['op']=='plot']['plot_filename'].duplicated().sum() > 0:
-            write_status("<<controller>> Multiple plots use same filename. They will be overwritten. Do you wish to proceed?")
+            status("<<controller>> Multiple plots use same filename. They will be overwritten. Do you wish to proceed?")
             found_errors = max(found_errors, 1)
         for i, r in self.rxn_df.iterrows():
             r_num = i+1
             #check pauses
             if (not ('pause' in r['op'] or 'pause' in r['callbacks'] or r['op'] == 'scan_until_complete')) == (not pd.isna(r['pause_time'])):
-                write_status("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
+                status("<<controller>> You asked for a pause in row {}, but did not specify the pause_time or vice versa".format(r_num))
                 found_errors = max(found_errors, 2)
             #check that there's always a volume when you transfer
             if (r['op'] == 'transfer' and math.isclose(r[self._products].sum(), 0,abs_tol=1e-9)):
-                write_status("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
+                status("<<controller>> You executed a transfer step in row {}, but you did not transfer any volume.".format(r_num))
                 found_errors = max(found_errors, 1)
             #check that you have a reagent if you're transfering
             if r['op'] == 'transfer' and pd.isna(r['reagent']):
-                write_status('<<controller>> transfer specified without reagent in row {}'.format(r_num))
+                status('<<controller>> transfer specified without reagent in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
             #check that scans have a scan file
             if (r['op'] == 'scan' or 'scan' in r['callbacks']) and pd.isna(r['scan_filename']):
-                write_status('<<controller>> scan without scan filename in row {}'.format(r_num))
+                status('<<controller>> scan without scan filename in row {}'.format(r_num))
                 found_errors = max(found_errors,2)
             #check no multiple scans on one callback
             callbacks = r['callbacks'].replace(' ', '').split(',')
             if 'scan' in callbacks:
                 callbacks.remove('scan')
                 if 'scan' in callbacks:
-                    write_status('<<controller>> multiple scans in a callback on line {}'.format(r_num))
+                    status('<<controller>> multiple scans in a callback on line {}'.format(r_num))
                     found_errors = max(found_errors,2)
             #check that plots have scans
             if r['op'] == 'plot':
                 if pd.isna(r['scan_filename']):
-                    write_status("<<controller>> please specify a scan filename in row '{}'".format(r_num))
+                    status("<<controller>> please specify a scan filename in row '{}'".format(r_num))
                     found_errors = max(found_errors,2)
                 if pd.isna(r['plot_filename']):
-                    write_status("<<controller>> please specify a plot filename in row '{}'".format(r_num))
+                    status("<<controller>> please specify a plot filename in row '{}'".format(r_num))
                     found_errors = max(found_errors,2)
                 rows_above = self.rxn_df.loc[:i,:]
                 scan_rows = rows_above.loc[(rows_above['scan_filename'] == r['scan_filename']) &\
@@ -1609,7 +1615,7 @@ class Controller(ABC):
                 
                 
                 if scan_rows.empty:
-                        write_status("<<controller>> row {} plots using nonexistent scan file\
+                        status("<<controller>> row {} plots using nonexistent scan file\
                                 ".format(r_num))
                         found_errors = max(found_errors, 2)
                 else:
@@ -1620,7 +1626,7 @@ class Controller(ABC):
                     plotted_products = r[self._products]
                     plotted_products = set(plotted_products[plotted_products.astype(bool)])
                     if plotted_products.issubset(scanned_products):
-                        write_status("<<controller>> row {} plots products that have not been scanned\
+                        status("<<controller>> row {} plots products that have not been scanned\
                         ".format(r_num))
                         found_errors = max(found_errors, 2)
         return found_errors
@@ -1641,7 +1647,7 @@ class Controller(ABC):
         for key,val in self.tot_vols.items():
             product_volumes = self.rxn_df[key]
             if val < 0:
-                write_status("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
+                status("<<controller>> Error in total volume row: value " + str(val) + " is negative. We cannot have negative values as input.")
                 found_errors = max(found_errors,2)
             
         #checks for scan errors
@@ -1651,7 +1657,7 @@ class Controller(ABC):
         cols_w_scans = cols_w_scans.loc[cols_w_scans].index #just the cols that are scanned
         for col in cols_w_scans:
             if col not in self.tot_vols:
-                write_status("<<controller>> {} is scanned, but does not have a specified total volume. Will be scanned at whatever volume it has at the time of scan.".format(col))
+                status("<<controller>> {} is scanned, but does not have a specified total volume. Will be scanned at whatever volume it has at the time of scan.".format(col))
                 found_errors = max(found_errors,1)
         #check more scan issues
         first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&check_scan.ne(0)].stack()   
@@ -1667,7 +1673,7 @@ class Controller(ABC):
             scan_index = products[1]
             while (scan_index < len(specific_prod)):
                 if self.rxn_df['op'][scan_index] == 'transfer' and specific_prod[scan_index] != 0:
-                    write_status("<<controller>> Error in product: " +str(products[0]) +" in index: " +str(scan_index) + ", cannot make transfers after scan when total volume column is specified.")
+                    status("<<controller>> Error in product: " +str(products[0]) +" in index: " +str(scan_index) + ", cannot make transfers after scan when total volume column is specified.")
                     found_errors = max(found_errors,2)
                     break
                 else:
@@ -1680,20 +1686,20 @@ class Controller(ABC):
         for prod in self.tot_vols.keys():
             for dil in first_dilutions_i.index:
                 if prod == dil[1]:
-                    write_status("<<controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
+                    status("<<controller>> Error in product: " + str(prod) + " in index: " +str(dil[0]) + ", cannot dilute products that have a given total volume")
                     found_errors = max(found_errors,2)
                     break
         #checks for dilutions in reagent slot--illegal!
         for idx,dil_prod in enumerate(check_dilutions_name):
             if dil_prod in self.tot_vols.keys():
-                write_status("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(dil_prod) + ": cannot have dilutions out of product with total volume specified.")
+                status("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(dil_prod) + ": cannot have dilutions out of product with total volume specified.")
                 found_errors = max(found_errors,2)
                 
         #Checks reagents to see if there is a transfer that transfers a product with tot_vol
         check_transfer = self.rxn_df.loc[(self.rxn_df['op'] == 'transfer'),'chemical_name']
         for idx,trans_prod in enumerate(check_transfer):
             if trans_prod in self.tot_vols.keys():
-                write_status("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(trans_prod) + ": cannot have transfer out of product with total volume specified.")
+                status("<<controller>> Error in reagent row index "+str(idx) +" with product "+  str(trans_prod) + ": cannot have transfer out of product with total volume specified.")
                 found_errors= max(found_errors,2)
         
         return found_errors 
@@ -1900,7 +1906,7 @@ class Controller(ABC):
         row['reagent'] = self._get_reagent(reagent)
         row['Template'] = self.dilution_params.vol
         row.rename({'Template':product},inplace=True)
-        #write_status(row)
+        #status(row)
         #3 call send_dilution
         #here we're appropriating a method that was designed to be run on the dataframe with
         #associated metaparameters (esp _products). We temporarilly overwrite products and restore
@@ -1984,7 +1990,7 @@ class Controller(ABC):
         #Check to make sure water always has a concentration defined
         check_water_conc = (self.rxn_df.loc[(self.rxn_df['reagent']=='Water'),'conc'].isna())
         if check_water_conc.any():
-            write_status("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
+            status("<<controller>> Error in index: "+ str(check_water_conc.loc[check_water_conc].index[0])+ " Water needs to always have a concentration defined.")
             found_errors = max(found_errors,2)
         #Check to make sure you don't transfer a reagent with a concentration into a reagent with a volume
         #boolean list of all concentrations that are nan
@@ -2005,7 +2011,7 @@ class Controller(ABC):
             check_vols = (transfer_dfs.loc[(~check_concs),'reagent'].unique())
             for val in check_nans:
                 if val in check_vols:
-                    write_status("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into the same product with a reagent with concentration.")
+                    status("<<controller>> Error in reagent " + val + ", cannot transfer a reagent without a concentration into the same product with a reagent with concentration.")
         
         #Checks to make sure all reagents with molarity get transferred into products with total volume
         tot_vol_mol = transfer_df.loc[check_conc,self._products]
@@ -2014,7 +2020,7 @@ class Controller(ABC):
             tot_vol_mol = tot_vol_mol.loc[tot_vol_mol].index
             for i in tot_vol_mol:
                 if i not in self.tot_vols.keys():
-                    write_status("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
+                    status("<<controller>> Error in product: " + str(i) + " you can only transfer reagents with molarity into products with total volume specified.")
                     found_errors = max(found_errors, 2)
         return found_errors
 
@@ -2075,9 +2081,9 @@ class AutoContr(Controller):
         self.simulate = True
         if model == None:
             #you're simulating with a dummy model.
-            write_status('<<controller>> running with dummy ml')
+            status('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
-        write_status('<<controller>> ENTERING SIMULATION')
+        status('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
@@ -2093,7 +2099,7 @@ class AutoContr(Controller):
         #restore changed vars
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
-        write_status('<<controller>> EXITING SIMULATION')
+        status('<<controller>> EXITING SIMULATION')
         return True
 
     def run_protocol(self, model=None, simulate=False, port=50000, no_pr=False):
@@ -2108,13 +2114,13 @@ class AutoContr(Controller):
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
-        write_status('<<controller>> RUNNING')
+        status('<<controller>> RUNNING')
         if model == None:
             #you're simulating with a dummy model.
-            write_status('<<controller>> running with dummy ml')
+            status('<<controller>> running with dummy ml')
             model = DummyMLModel(self.reagent_order.shape[0], max_iters=2)
         self._run(port, simulate, model, no_pr)
-        write_status('<<controller>> EXITING')
+        status('<<controller>> EXITING')
 
     def _rename_products(self, rxn_df):
         '''
@@ -2134,13 +2140,13 @@ class AutoContr(Controller):
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
-        write_status("<<controller>> connected")
+        status("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
         self.init_robot(simulate)
         recipes = model.generate_seed_rxns()
 
         #do the first one
-        write_status('<<controller>> executing batch {}'.format(self.batch_num))
+        status('<<controller>> executing batch {}'.format(self.batch_num))
         #don't have data to train, so, not training
         #generate new wellnames for next batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2162,7 +2168,7 @@ class AutoContr(Controller):
         #enter iterative while loop now that we have data
         while not model.quit:
             model.train(scan_data.T.to_numpy(),recipes)
-            write_status('<<controller>> executing batch {}'.format(self.batch_num))
+            status('<<controller>> executing batch {}'.format(self.batch_num))
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             #plan and execute a reaction
@@ -2307,7 +2313,7 @@ class AutoContr(Controller):
         found_errors = super().run_all_checks()
         found_errors = max(found_errors,self.check_conc())
         if found_errors == 0:
-            write_status("<<controller>> All prechecks passed!")
+            status("<<controller>> All prechecks passed!")
             return
         elif found_errors == 1:
             if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key "):
@@ -2330,7 +2336,7 @@ class AutoContr(Controller):
             NotImplementedError: If you ran out of a reagent you probably need to have Mark
               restock (or you could dilute a stock maybe)  
         '''
-        write_status('<<controller>> handling conversion error')
+        status('<<controller>> handling conversion error')
         if e.empty_reagents:
             #You ran out of something
             #query the user
@@ -2356,7 +2362,7 @@ class AutoContr(Controller):
     def check_rxn_df(self):
         '''
         Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
-        Advised options are write_statused and if an error code is returned
+        Advised options are statused and if an error code is returned
         Will run through and check all rows, even if errors are found
         Preconditions:
             self.rxn_df is rxn_df template at this point  
@@ -2374,8 +2380,8 @@ class AutoContr(Controller):
         has_invalid_ratio = reagent_ratios.apply(lambda x: not math.isclose(x, 1.0,
                 abs_tol=1e-9)).any()
         if has_invalid_ratio:
-            write_status('<<controller>> precheck error: invalid ratio of reagents (doesn\'t add to 1)')
-            write_status('  ratios were {}'.format(reagent_ratios))
+            status('<<controller>> precheck error: invalid ratio of reagents (doesn\'t add to 1)')
+            status('  ratios were {}'.format(reagent_ratios))
             found_errors = max(found_errors, 2)
         return found_errors
 
@@ -2399,7 +2405,7 @@ class ProtocolExecutor(Controller):
         execute_protocol_df() void: used to execute a single row of the reaction df  
         run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
           run automatically when you run your simulation  
-        CHECKS: all write_status messages for errors and return error codes  
+        CHECKS: all status messages for errors and return error codes  
         check_rxn_df() int: checks for errors in input.  
         check_labware() int: checks for errors in labware/labware assignments.   
         check_products() int: checks for errors in the product placement.  
@@ -2436,7 +2442,7 @@ class ProtocolExecutor(Controller):
         stored_cached_reader_locs = self._cached_reader_locs
         self.server_ip = '127.0.0.1'
         self.simulate = True
-        write_status('<<controller>> ENTERING SIMULATION')
+        status('<<controller>> ENTERING SIMULATION')
         port = 50000
         #launch an eve server in background for simulation purposes
         b = threading.Barrier(2,timeout=20)
@@ -2456,7 +2462,7 @@ class ProtocolExecutor(Controller):
         self.server_ip = stored_server_ip
         self.simulate = stored_simulate
         self._cached_reader_locs = stored_cached_reader_locs
-        write_status('<<controller>> EXITING SIMULATION')
+        status('<<controller>> EXITING SIMULATION')
     
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''
@@ -2470,9 +2476,9 @@ class ProtocolExecutor(Controller):
           is sent to the robot to tell it to simulate the reaction, but that it all. The other
           simulate changes some things about how code is run from the controller
         '''
-        write_status('<<controller>> RUNNING PROTOCOL')
+        status('<<controller>> RUNNING PROTOCOL')
         self._run(port, simulate=simulate, no_pr=no_pr)
-        write_status('<<controller>> EXITING PROTOCOL')
+        status('<<controller>> EXITING PROTOCOL')
         
     @error_exit
     def _run(self, port, simulate, no_pr):
@@ -2491,7 +2497,7 @@ class ProtocolExecutor(Controller):
         sock = socket.socket(socket.AF_INET)
         sock.connect((self.server_ip, port))
         buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
-        write_status("<<controller>> connected")
+        status("<<controller>> connected")
         self.portal = Armchair(buffered_sock,'controller','Armchair_Logs', buffsize=4)
 
         self.init_robot(simulate)
@@ -2592,7 +2598,7 @@ class ProtocolExecutor(Controller):
         found_errors = super().run_all_checks()
         found_errors = max(found_errors, self.check_products())
         if found_errors == 0:
-            write_status("<<controller>> All prechecks passed!")
+            status("<<controller>> All prechecks passed!")
             return
         elif found_errors == 1:
             if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
@@ -2618,7 +2624,7 @@ class ProtocolExecutor(Controller):
                 ~self.robo_params['product_df']['labware'].astype(bool) & \
                 ~self.robo_params['product_df']['container'].astype(bool)].iterrows():
             found_errors = max(found_errors,1)
-            write_status('<<controller>> {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\'s what you want? '.format(i))
+            status('<<controller>> {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\'s what you want? '.format(i))
         return found_errors
 
     #POST Simulation
@@ -2867,7 +2873,7 @@ class PlateReader(AbstractPlateReader):
         #add arguments
         for arg in args:
             exec_str += " '{}'".format(arg)
-        write_status('<<Reader>> executing: {}'.format(exec_str))
+        status('<<Reader>> executing: {}'.format(exec_str))
         exit_code = os.system(exec_str)
         try:
             assert (exit_code == 0)
@@ -3039,7 +3045,6 @@ class PlateReader(AbstractPlateReader):
         self._set_config_attr('ControlApp', 'DisablePlateCmds','False')
         self._set_config_attr('Configuration','SimulationMode', str(0))
 
-  
 class ScanDataFrame():
     '''
     This class handles and saves data 
@@ -3131,7 +3136,7 @@ class ScanDataFrame():
             x = ''
             
             if well_with_zeros_in_name[1] == '0':
-                #write_status('yes')
+                #status('yes')
                 #Turn A01 into A1 if A9 or less
                 well = str(well_with_zeros_in_name)
                 well = "{}{}".format(well[0], int(well[2:]))
@@ -3345,12 +3350,12 @@ class ScanDataFrame():
                 transfers_before_scans = []
                 react = str(react)
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()             
-                write_status("transfer_times list = ", transfer_times)
+                status("transfer_times list = ", transfer_times)
                 for transfer_time in transfer_times:
-                    write_status("transfer_time = ", transfer_time)
-                    write_status("time = ", time)
+                    status("transfer_time = ", transfer_time)
+                    status("time = ", time)
                     if transfer_time <= time:
-                        write_status("yes, transfer_time<=time")
+                        status("yes, transfer_time<=time")
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
@@ -3418,7 +3423,7 @@ class ScanDataFrame():
 #         wellnames = df['well name'].tolist()
 #         wellnamenumbers = []
 #         for i in wellnames:
-#             write_status(i,'you')
+#             status(i,'you')
 #             a = i.lower()
 #             if 'blank' not in i and 'control' not in i:
                 
@@ -3429,7 +3434,7 @@ class ScanDataFrame():
 #                 wellnamenumbers.append(wellnamenumber)
 #             else:
 #                 wellnamenumbers.append(0)
-#             #write_status(l)        
+#             #status(l)        
 #         df['wellnameorder'] = wellnamenumbers
 #         # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
 #         df['num'] = df['col'].str.extract('(\d+)').astype(int)
@@ -3456,17 +3461,30 @@ class Plotter():
     def __init__(self, filename):
         self.filename = filename
 
-def run_as_thread(args,q):
-    global status_q
+def run_as_thread(args,e,q):
+    global status_q # need to figure out an alternative to keeping status_q as a global variable
+    global read_mode
     status_q = q
-    write_status("thread successfully created")
+    read_mode = e
+    status("thread successfully created")
     SERVERADDR = "169.254.44.249"
     main(SERVERADDR, args)
 
-def write_status(msg):
-    print(msg)
-    if status_q:
-        status_q.put(msg)
+def status(msg, input_mode = False):
+    try:
+        if status_q:
+            if input_mode:
+                status_q.put(msg)
+                read_mode.clear()
+                read_mode.wait()
+                return True
+            else:
+                status_q.put(msg)
+    except NameError:
+        if input_mode:
+            return input(msg)
+        print(msg)
+
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
