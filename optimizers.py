@@ -1,6 +1,7 @@
 import GPyOpt
 from pyDOE import lhs
 from GPyOpt import Design_space
+import GPy
 
 
 from abc import abstractmethod
@@ -144,19 +145,30 @@ class OptimizationModel():
         np.ndarray X_init: The initial parameter values for the experiments.
         np.ndarray Y_init: The initial objective function values corresponding to X_init.
         '''
-        self.model = GPyOpt.models.GPModel(optimize_restarts=5, verbose=False)
+        def f(x):
+            return abs(sum(x)-(self.target_value*3))
+
+        
+        kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
+        self.model = GPyOpt.models.GPModel(kernel)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
         self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.model, self.space, None, self.acquisition, self.evaluator, X_init, Y_init)
+            self.model, self.space, f, self.acquisition, self.evaluator, X_init, Y_init)
     
     def _update_acquisition(self):
         '''
         Updates the acquisition function based on the current index and reinitializes the evaluator with the new acquisition function.
         '''
-        acquisition_type = self.acquisition_functions[self.current_acquisition_index] 
+        """if self.curr_iter < 6:
+            self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer,exploration_weight=8)
+        else:
+            self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer, exploration_weight=0.5)
+        self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
+        """
+        acquisition_type = self.acquisition_functions[1] 
         if acquisition_type == 'EI':
             self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
         elif acquisition_type == 'MPI':
