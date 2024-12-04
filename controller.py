@@ -124,11 +124,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     reagent_info = auto.robo_params['reagent_df']
     fixed_reagents = auto.get_fixed_reagents()
     variable_reagents = auto.get_variable_reagents()
-    target_value = np.random.randint(1, 200)
+    target_value = np.random.randint(1, 200) # not being used? TODO delete 
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, 600, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=3, batch_size=1, max_iters=10)
+    model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["intial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -232,6 +232,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
+        self.drive_service = self._init_google_drive(credentials) # Terence   
         self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -242,6 +243,7 @@ class Controller(ABC):
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
         self._make_out_dirs(header_data)
+        self.reaction_folder_name = None
         self.rxn_df = self._load_rxn_df(input_data) #products init here
         self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
         #to the controller. It may make sense to build a class at some point
@@ -422,6 +424,7 @@ class Controller(ABC):
         #get the root folder
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
+        self.reaction_folder_name = os.path.basename(os.path.dirname(data_dir))
         self.out_path = os.path.join(out_path, data_dir)
         #if the folder doesn't exist yet, make it
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
@@ -450,6 +453,13 @@ class Controller(ABC):
         path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
+
+    def _init_google_drive(self, credentials): 
+        try:
+            drive_service = build('drive', 'v3', credentials=credentials)
+        except HttpError as error:
+            print(f"Google Drive API Error: {error}")
+        return drive_service
 
     def _get_wks_key(self, credentials, rxn_sheet_name):
         '''
@@ -516,6 +526,12 @@ class Controller(ABC):
             assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
         self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
                 float(header_dict['dilution_vol']))
+        self.robo_params['target'] = float(header_dict['target'])
+        self.robo_params['max_iterations'] = float(header_dict['max_iterations'])
+        self.robo_params['initial_data'] = float(header_dict['initial_data'])
+
+    def getModelInfo(self): 
+        return self.robo_params
 
     def _plot_setup_overlay(self,title):
         '''
@@ -788,9 +804,80 @@ class Controller(ABC):
         #server will initiate file transfer
         files = self.portal.recv_ftp()
         for filename, file_bytes in files:
-            with open(os.path.join(self.eve_files_path,filename), 'wb') as write_file:
+            local_path = os.path.join(self.eve_files_path, filename)
+            with open(local_path, 'wb') as write_file:
                 write_file.write(file_bytes)
+
+            #try saving to google drive
+            try:
+                self.save_to_google_drive('Eve_Files', local_path, filename)
+            except Exception as e:
+                print(f"<<controller>> Warning: Failed to save {filename} to Google Drive: {str(e)}")
+    
         self.translate_wellmap()
+    
+
+    def create_google_drive_folder(self, folder_name, parent_folder_id=None):
+        folder_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        if parent_folder_id:
+            folder_metadata['parents'] = [parent_folder_id]
+        folder = self.drive_service.files().create(body=folder_metadata, fields='id').execute()
+        print(f"Created folder: {folder_name} with ID: {folder['id']}")
+        return folder['id']
+
+    def get_google_drive_folder_id(self, folder_name, parent_id=None):
+        if parent_id:
+            query = f"'{folder_name}' in parents and mimeType = 'application/vnd.google-apps.folder' and '{parent_id}' in parents"
+        else:
+            query = f"'{folder_name}' in parents and mimeType = 'application/vnd.google-apps.folder'"
+        response = self.drive_service.files().list(q=query, spaces='drive', fields='nextPageToken, files(id, name)').execute()
+        folders = response.get('files', [])
+        if folders:
+            return folders[0]['id']
+        else:
+            return None
+  
+    def save_to_google_drive(self, folder_name, file_path, filename):
+
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"The file or directory at {file_path} does not exist")
+        
+        try:
+            #get or create folder
+            reaction_folder_id = self.get_google_drive_folder_id(self.reaction_folder_name)
+            folder_id = self.get_google_drive_folder_id(folder_name, parent_id = reaction_folder_id)
+
+            if folder_id is None:
+                parent_folder_id = self.get_google_drive_folder_id(os.path.basename(os.path.dirname(file_path)))
+                folder_id = self.create_google_drive_folder(folder_name, parent_folder_id)
+
+
+            
+            file_metadata = {
+                'name': os.path.basename(filename),
+                'parents': [folder_id]
+            }
+
+            mimetypes = {
+                '.png': 'image/png',
+                '.csv': 'text/csv',
+                '.tsv': 'text/tab-separated-values',
+                '.txt': 'text/plain'
+            }
+            file_type = os.path.splitext(filename)[1].lower()
+            mimetype = mimetypes.get(file_type, 'application/octet-stream') # default to binary if unknown
+
+            media = MediaIoBaseUpload(file_path, mimetype=mimetype)
+            self.drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            print(f"Uploaded file: {filename} to folder with ID: {folder_id}")
+        
+        except Exception as e:
+            print(f"Error uploading file to Google Drive: {e}")
+
         
     def delete_wks_key(self):
         '''
