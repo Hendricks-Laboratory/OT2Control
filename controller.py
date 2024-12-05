@@ -60,7 +60,7 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from optimizers import OptimizationModel
 from exceptions import ConversionError
 
-from .heatmap import plate, heat_map
+from heatmap import plate, heat_map
 
 
 
@@ -126,7 +126,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     variable_reagents = auto.get_variable_reagents()
     target_value = np.random.randint(1, 200) # not being used? TODO delete 
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.002)} for i in range(y_shape)]
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
     # final_spectra not used?
     model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["intial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
     if not no_sim:
