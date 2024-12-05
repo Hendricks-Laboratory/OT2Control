@@ -448,7 +448,8 @@ class Controller(ABC):
             ServiceAccountCredentials: the credentials to access that sheet  
         '''
         scope = ['https://spreadsheets.google.com/feeds',
-                 'https://www.googleapis.com/auth/drive']
+                 'https://www.googleapis.com/auth/drive', 
+                 'https://www.googleapis.com/auth/drive.file']
         #get login credentials from local file. Your json file here
         path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
@@ -457,9 +458,10 @@ class Controller(ABC):
     def _init_google_drive(self, credentials): 
         try:
             drive_service = build('drive', 'v3', credentials=credentials)
+            return drive_service
         except HttpError as error:
             print(f"Google Drive API Error: {error}")
-        return drive_service
+            return None
 
     def _get_wks_key(self, credentials, rxn_sheet_name):
         '''
@@ -842,6 +844,10 @@ class Controller(ABC):
   
     def save_to_google_drive(self, folder_name, file_path, filename):
 
+        if not self.drive_service:
+            print("<<controller.save_to_google_drive>> warning: Google Drive service not initialized. Skipping upload.")
+            return
+
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"The file or directory at {file_path} does not exist")
@@ -876,7 +882,7 @@ class Controller(ABC):
             print(f"Uploaded file: {filename} to folder with ID: {folder_id}")
         
         except Exception as e:
-            print(f"Error uploading file to Google Drive: {e}")
+            print(f"<<controller.save_to_google_drive>> warning: Error uploading file to Google Drive: {e}")
 
         
     def delete_wks_key(self):
@@ -1717,7 +1723,7 @@ class Controller(ABC):
                 1: Some Errors, but could run  
                 2: Critical. Abort  
         '''        
-        found_errors = 0;
+        found_errors = 0
         
         #checks for negative input in tot_vol rows
         for key,val in self.tot_vols.items():
