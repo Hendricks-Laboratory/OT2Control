@@ -61,6 +61,8 @@ from optimizers import OptimizationModel
 from exceptions import ConversionError
 
 from heatmap import plate, heat_map
+from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
 
 
 
@@ -128,7 +130,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.00025, 0.001)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["intial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
+    model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
+    print(auto.getModelInfo()["target"])
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -528,7 +531,7 @@ class Controller(ABC):
                 float(header_dict['dilution_vol']))
         self.robo_params['target'] = float(header_dict['target'])
         self.robo_params['max_iterations'] = float(header_dict['max_iterations'])
-        self.robo_params['initial_data'] = float(header_dict['initial_data'])
+        self.robo_params['initial_data'] = int(header_dict['initial_data'])
 
     def getModelInfo(self): 
         return self.robo_params
