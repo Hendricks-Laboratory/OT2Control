@@ -4,8 +4,6 @@ tmux
 
 tmux kill-session -t run
 
-cd OT2Control/
-
 tmux attach -t run
 
 git checkout main
