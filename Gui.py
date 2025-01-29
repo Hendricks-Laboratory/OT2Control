@@ -243,7 +243,7 @@ output="hello"
 #Create a Button to validate Entry Widget
 customtkinter.CTkButton(win, text= "Execute",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [run_controller(sim,auto,mynumber,combobox)]).pack(pady=(20, 13))
 # Bind the <Return> event to the execute_button's command
-win.bind('<Return>', lambda event: [run_controller(sim, auto,combobox)])
+win.bind('<Return>', lambda event: [run_controller(sim, auto, mynumber,combobox)])
 
 
 #show deck positions
@@ -271,7 +271,6 @@ T = customtkinter.CTkTextbox(win, height = 50, width = 400)
 T.configure(fg_color= "#3e3e42", text_color= "white")
 T.pack(side='left',expand=True,fill='both')
 
-# def step_controller():
 
 # customtkinter.CTkButton(win, text= "Step",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [step_controller()]).pack(pady=(20, 13))
 win.mainloop()

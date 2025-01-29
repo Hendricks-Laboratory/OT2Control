@@ -91,8 +91,8 @@ def main(serveraddr, gui_args = None):
     if args.mode == 'protocol':
         status('launching in protocol mode')
         
-        if status('step?', input_mode=True):
-            status('input given')
+        if status('Chemist input required, please refer to previous output and press step to continue run', input_mode=True):
+            status('Chemist input recieved, continuing run')
 
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
