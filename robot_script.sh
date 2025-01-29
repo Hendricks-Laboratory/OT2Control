@@ -1,15 +1,7 @@
 #!/bin/sh
 
-tmux 
+tmux kill-session run
 
-tmux kill-session -t run -d
+tmux new-session -s run -d
 
-tmux attach -t run
-
-git checkout main
-
-git pull
-
-python ot2_robot.py
-
-tmux detach
+echo slkdf
