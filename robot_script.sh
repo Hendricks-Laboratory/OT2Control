@@ -1,6 +1,6 @@
 #!/bin/sh
 
-tmux kill-session run
+tmux kill-session -t run
 
 tmux new-session -s run -d
 
