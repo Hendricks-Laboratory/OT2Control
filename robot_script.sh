@@ -2,9 +2,7 @@
 
 tmux 
 
-tmux kill-session -t run
-
-cd OT2Control/
+tmux kill-session -t run -d
 
 tmux attach -t run
 
