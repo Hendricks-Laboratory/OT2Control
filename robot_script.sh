@@ -2,9 +2,9 @@
 
 tmux 
 
-tmux kill-session -s run -d
+tmux kill-session -t run -d
 
-tmux attach -s run
+tmux attach -t run
 
 git checkout main
 
