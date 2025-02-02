@@ -2266,6 +2266,13 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
+        #TODO Normalize Inputs
+        def normalize(x, min_val, max_val):
+           return (x - min_val) / (max_val - min_val)
+
+        def denormalize(x_normalized, min_val, max_val):
+            return x_normalized * (max_val - min_val) + min_val
+        
         self.batch_num = 0 #used internally for unique filenames
         self.well_count = 0 #used internally for unique wellnames
         self.create_connection(simulate, no_pr, port)
@@ -2274,6 +2281,10 @@ class AutoContr(Controller):
 
         # Generate initial design and simulate experiments to get initial data
         X_initial = model.generate_initial_design()
+        print(f"X_initial: {X_initial}")
+        X_Normalized = normalize(X_initial,0,0.002)
+        print(f"X Normalized: {X_Normalized}")
+
         recipes =  self.duplicate_list_elements(X_initial, self.num_duplicates)    
 
         print(f'Initial seeds as follows: {recipes}') 
@@ -2296,9 +2307,6 @@ class AutoContr(Controller):
         print(f'filenames: {filenames}')
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
-        #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
-        
-
 
         def find_max(scan_data):
             find_max_df = scan_data
@@ -2330,7 +2338,8 @@ class AutoContr(Controller):
 
         lambda_maxes = find_max(scan_data)
         print(lambda_maxes)
-        Y_initial = model.calc_obj(np.array(lambda_maxes))
+        
+        Y_initial = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
         self.batch_num += 1
 
         self._update_experiment_data(wellnames, recipes, lambda_maxes)
@@ -2338,15 +2347,15 @@ class AutoContr(Controller):
         model.experiment_data['X'] = list(recipes)
         model.experiment_data['Y'] = list(Y_initial)
         # Initialize the optimizer with initial experimental data
-        model.initialize_optimizer(recipes, np.array(lambda_maxes).reshape(-1,1))
-
-        print(model.optimizer)
-        print(model.acquisition)
+        model.initialize_optimizer(recipes, Y_initial)
 
         self.batch_num += 1
 
-        Y_best = np.min(model.optimizer.Y)
-        
+        Y_best = np.min(abs(denormalize(model.optimizer.Y,300,900) - model.target_value))
+
+        print(f"Model X: {model.optimizer.X}")
+        print(f"Model Y: {model.optimizer.Y}")
+
         #enter iterative while loop now that we have data
         while not model.quit:
 

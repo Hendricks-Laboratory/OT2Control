@@ -150,13 +150,14 @@ class OptimizationModel():
 
         
         kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
-        self.model = GPyOpt.models.GPModel(kernel)
+        self.model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
         self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
+        objective = GPyOpt.core.task.objective.SingleObjective(f)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.model, self.space, f, self.acquisition, self.evaluator, X_init, Y_init)
+            self.model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
     
     def _update_acquisition(self):
         '''
@@ -190,17 +191,40 @@ class OptimizationModel():
         returns:
         np.ndarray: The suggested parameters for the next experiments.
         '''
-        self.current_acquisition_index = (self.current_acquisition_index + 1) % len(self.acquisition_functions)
-        print(self.current_acquisition_index)
-        print(self.acquisition_functions[self.current_acquisition_index])
-        self._update_acquisition()
-        suggestions = self.optimizer.suggest_next_locations()
+        #self.current_acquisition_index = (self.current_acquisition_index + 1) % len(self.acquisition_functions)
+        #print(self.current_acquisition_index)
+        #print(self.acquisition_functions[self.current_acquisition_index])
+        #self._update_acquisition()
+        
+        def normalize(x, min_val, max_val):
+           return (x - min_val) / (max_val - min_val)
+        def denormalize(x_normalized, min_val, max_val):
+            return x_normalized * (max_val - min_val) + min_val
+
+        temp = 0
+        predictions = []
+        stdev = []
+        for i in range(200):
+            pred, std = self.optimizer.predict(np.array([[temp]]))
+            predictions.append(pred)
+            stdev.append(std)
+            temp += 0.005
+        
+        predictions = denormalize(np.array(predictions).flatten(),300, 900)
+        stdev = np.array(stdev).flatten()*(600)
+        linespace = np.linspace(0,0.002,200)
+
+        closest = np.argmin(np.abs(predictions - self.target_value))
+        best = linespace.reshape(-1,1)[closest][0]
+        print(f"{best} uM KBr results in a closeness of {closest} nm")
+
+        #suggestions = self.optimizer.suggest_next_locations()
         
         # loop to check suggestion and get new if out of bounds
 
         #has a call to self.check_bounds()
 
-        return suggestions
+        return normalize(best,0,0.002)
 
     def update_experiment_data(self, X_new, Y_new):
         '''
@@ -209,11 +233,13 @@ class OptimizationModel():
         np.ndarray X_new: The new parameter values from the experiments.
         np.ndarray Y_new: The new objective function values corresponding to X_new.
         '''
-        print(type(X_new))
-        print(type(Y_new))
+        print(f"X_new: {X_new}")
+        print(f"Y_new: {Y_new}")
+        print(f"Experiment Data X: {self.experiment_data["X"]}")
+        self.model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
         self.experiment_data['X'].extend(X_new)
         self.experiment_data['Y'].extend(Y_new)
-        self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
+        #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
         self.curr_iter += 1
         self.update_quit(X_new, Y_new)
     
