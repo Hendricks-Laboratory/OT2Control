@@ -2381,8 +2381,8 @@ class AutoContr(Controller):
 
             lambda_maxes = find_max(scan_data)
             print(lambda_maxes)
-            Y_new = model.calc_obj(np.array(lambda_maxes))
-            model.update_experiment_data(recipes, np.array(lambda_maxes).reshape(-1,1))
+            Y_new = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
+            model.update_experiment_data(recipes, Y_new)
 
             # print results
             # To get the best observed X values (parameters)
