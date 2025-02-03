@@ -1,18 +1,17 @@
 import customtkinter
+from CTkMessagebox import CTkMessagebox
 from customtkinter import IntVar, CHECKBUTTON
 import subprocess
 from subprocess import check_output
-import io
 import os
 import pickle
 import threading
-import json 
 import pty
-from queue import Queue
-from threading import Thread, Event
 from controller import run_as_thread
 
-event = Event()
+from threadManager import ThreadManager, QueueManager
+
+
 
 def run():
    os.chdir(os.curdir)
@@ -48,61 +47,51 @@ def run_controller(sim, auto, sheet_name, combobox):
 
    # shared resource between threads
    # create status obj
-   status_queue = Queue()
-   event.set()
 
+   thread_manager = ThreadManager()
 
-   update_thread = Thread(target=update_status, args=(event, T, status_queue))
-   controller_thread = Thread(target=run_as_thread, args=(cli_args, event, status_queue))
+   thread_manager.start_thread(target=update_status, args=(T,))
+   thread_manager.start_thread(target=listen_input)
+   thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
+   
 
-   update_thread.start()
-   controller_thread.start()
-
-def update_status(e, T, q):
+def update_status(T):
    """
-   status:
-      status control object
-   update text box with test from queue: q
+   status_q: singleto
    """
-
+   status_q = QueueManager.get_status_queue()
    while True:
-      if not e.is_set():
-         T.insert(customtkinter.END, q.get() + "\n")
-         e.wait()
-         e.set()
-      else:
-         T.insert(customtkinter.END, q.get() + "\n")
+      msg = status_q.get()
+      T.insert(customtkinter.END, msg + "\n")
 
 
-def step():
+def listen_input():
+   """
+
+   """
+   input_q = QueueManager.get_input_queue()
+   while True:
+      pass
+
+
+def handle_yn(msg):
+   msgbox = CTkMessagebox(message = msg,
+                 icon="check",
+                 option_1="yes",
+                 option_2="no")
+   response = msgbox.get() 
+   if response == "yes":
+      return True
+   else:
+      return False
+   
+
+def handle_step():
    """
    This un-sets the event indicator, and switches the threads from read to write mode
    """
    event.set()
 
-# def input1(sim,auto,combobox):
-#    global mynumber
-#    update_pickle(mynumber.get(),combobox)
-
-#    ent=mynumber.get()
-#    if len(ent)==4:
-#       T.delete("1.0",customtkinter.END)
-#       T.insert(customtkinter.END, "Need Name Input", 'warning')
-#       return -1
-   
-#    os.chdir(os.curdir)
-#    if sim.get()==1:
-#       ent=ent + " --no-sim"
-#    if auto.get():
-#       ent = ent+ " -m auto"
-#     #test one
-    
-#    command="controller.py"
-   
-#    execute_python_file(command,ent,T)
-#    #output=output.stdout
-#    # T.delete("1.0",customtkinter.END)
-#    # T.insert(customtkinter.END,output) #FIX#
 
 def execute_python_file(file_name, argument,Textbox):
    try:
@@ -110,16 +99,6 @@ def execute_python_file(file_name, argument,Textbox):
    except FileNotFoundError:
       print("Error: The file does not exist.")
       
-# def read_output(process, textbox):
-#     for line in iter(process.stdout.readline, b''):
-#         textbox.insert(customtkinter.END, line)
-#     process.stdout.close()
-
-# def send_input(process, entry):
-#     process.stdin.write((entry.get() + '\n').encode('utf-8'))
-#     process.stdin.flush()
-#     entry.delete(0, customtkinter.END)
-
 def start_subprocess(command, textbox):
     try:
         master_fd, slave_fd = pty.openpty() #PseudoTerminal
@@ -250,7 +229,7 @@ win.bind('<Return>', lambda event: [run_controller(sim, auto, mynumber,combobox)
 customtkinter.CTkButton(win, text= "Check Deck Positions",fg_color='#007acc', font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
 
 
-I = customtkinter.CTkButton(win, text= "Step",fg_color='#007acc', font= ("Inter", 12), command=step, width=30)
+I = customtkinter.CTkButton(win, text= "Step",fg_color='#007acc', font= ("Inter", 12), command=handle_step, width=30)
 I.pack(pady= (0, 17))
 
 
@@ -271,6 +250,8 @@ T = customtkinter.CTkTextbox(win, height = 50, width = 400)
 T.configure(fg_color= "#3e3e42", text_color= "white")
 T.pack(side='left',expand=True,fill='both')
 
+
+# handle_yn("hello there")
 
 # customtkinter.CTkButton(win, text= "Step",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [step_controller()]).pack(pady=(20, 13))
 win.mainloop()
