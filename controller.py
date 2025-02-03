@@ -62,6 +62,8 @@ from df_utils import make_unique, df_popout, wslpath, error_exit
 from ml_models import DummyMLModel, LinReg
 from exceptions import ConversionError
 
+from threadManager import QueueManager
+
 def init_parser():
     parser = argparse.ArgumentParser()
     mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
@@ -73,27 +75,19 @@ def init_parser():
     parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
     return parser
 
-def main(serveraddr, gui_args = None):
+def main(serveraddr,gui_args = None):
     '''
     prompts for input and then calls appropriate launcher
     '''
     parser = init_parser()
-
-
-
+    test_inputs()
     if not gui_args: 
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those instead
         args = parser.parse_args(gui_args)
-
     # status(args.name)
-
     if args.mode == 'protocol':
-        status('launching in protocol mode')
         
-        if status('Chemist input required, please refer to previous output and press step to continue run', input_mode=True):
-            status('Chemist input recieved, continuing run')
-
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         status('launching in auto mode')
@@ -108,13 +102,13 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
     '''
     #instantiate a controller
     if not rxn_sheet_name:
-        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+        rxn_sheet_name = prompt_input("input",'<<controller>> please input the sheet name ')
     my_ip = socket.gethostbyname(socket.gethostname())
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
     if not no_sim:
         controller.run_simulation(no_pr=no_pr)
-    if input('would you like to run the protocol? [yn] ').lower() == 'y':
+    if prompt_input('yesno','would you like to run the protocol?'):
         controller.run_protocol(simulate, no_pr)
 
 def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
@@ -122,7 +116,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     main function to launch an auto scientist that designs it's own experiments
     '''
     if not rxn_sheet_name:
-        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+        rxn_sheet_name = prompt_input('input','<<controller>> please input the sheet name')
     my_ip = socket.gethostbyname(socket.gethostname())
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
@@ -134,7 +128,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
                 scan_bounds=(540,560), duplication=2)
     if not no_sim:
         auto.run_simulation(ml_model, no_pr=no_pr)
-    if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+    if prompt_input('yesnot','would you like to run on robot and pr? [yn] '):
         model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e4)))
         ml_model = LinReg(model, final_spectra, y_shape=Y_SHAPE, max_iters=24, 
                 scan_bounds=(540,560),duplication=2)
@@ -1134,7 +1128,7 @@ class Controller(ABC):
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
                 reagent_info = dill.load(reagent_info_cache)
         else:
-            input("<<controller>> please press enter when you've completed the reagent sheet")
+            prompt_input("continue","<<controller>> please press enter when you've completed the reagent sheet")
             #pull down from the cloud
             reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
                 row_names = True, credentials=credentials).drop(columns=['comments'])
@@ -1376,7 +1370,7 @@ class Controller(ABC):
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'stopped'), "sent stop command and expected to recieve stopped, but instead got {}".format(pack_type)
         if not self.simulate:
-            input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
+            prompt_input("continue","stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
     def _send_transfer_command(self, row, i):
@@ -2316,7 +2310,7 @@ class AutoContr(Controller):
             status("<<controller>> All prechecks passed!")
             return
         elif found_errors == 1:
-            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key "):
+            if prompt_input("continue", "<<controller>> Please check the above errors and if you would like to ignore them"):
                 return
             else:
                 raise Exception('Aborting base on user input')
@@ -2601,7 +2595,7 @@ class ProtocolExecutor(Controller):
             status("<<controller>> All prechecks passed!")
             return
         elif found_errors == 1:
-            if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
+            if prompt_input("continue","<<controller>> Please check the above errors and if you would like to ignore them"):
                 return
             else:
                 raise Exception('Aborting base on user input')
@@ -3461,30 +3455,35 @@ class Plotter():
     def __init__(self, filename):
         self.filename = filename
 
-def run_as_thread(args,e,q):
-    global status_q # need to figure out an alternative to keeping status_q as a global variable
-    global read_mode
-    status_q = q
-    read_mode = e
-    status("thread successfully created")
+def run_as_thread(args):
+    """ 
+    oq: output queue (for status updates)
+    iq: input queue (for user responses)
+    """
+    status("Thread successfully created")
     SERVERADDR = "169.254.44.249"
-    main(SERVERADDR, args)
+    main(SERVERADDR,gui_args=args)
 
-def status(msg, input_mode = False):
-    try:
-        if status_q:
-            if input_mode:
-                status_q.put(msg)
-                read_mode.clear()
-                read_mode.wait()
-                return True
-            else:
-                status_q.put(msg)
-    except NameError:
-        if input_mode:
-            return input(msg)
-        print(msg)
+def status(msg):
+    """ Send status messages to the GUI """
+    status_queue = QueueManager.get_status_queue()
+    status_queue.put(msg)
 
+def prompt_input(type, msg):
+    """ Handle user input requests (Yes/No or Continue or text) """
+    input_queue = QueueManager.get_input_queue()
+    response_queue = QueueManager.get_response_queue()
+    input_queue.put((type, msg))
+    response = response_queue.get()
+    print(response)
+    return response
+
+def test_inputs():
+    """test each input type"""
+    prompt_input("continue", "testing continue")
+    prompt_input("yesno", "testing yes/no")
+    prompt_input("input", "testing text input")
+    status("test complete")
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
