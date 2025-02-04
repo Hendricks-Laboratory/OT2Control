@@ -69,7 +69,7 @@ class OptimizationModel():
         self.current_acquisition_index = 0
         self.curr_iter = 0
         self.max_iters = max_iters
-        self.model = None
+        self.gp_model = None
         self.acquisition = None
         self.optimizer = None
 
@@ -133,9 +133,9 @@ class OptimizationModel():
         # Here, you might want to filter or adjust initial_design based on constraints
         # This is a placeholder; actual implementation may require validating each point
 
-        for recipe in initial_design:
+        """for recipe in initial_design:
             if not self.check_bounds(recipe):
-                initial_design = np.delete(initial_design, np.where(initial_design == recipe))
+                initial_design = np.delete(initial_design, np.where(initial_design == recipe))"""
         return initial_design
 
     def initialize_optimizer(self, X_init, Y_init):
@@ -150,14 +150,14 @@ class OptimizationModel():
 
         
         kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
-        self.model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
+        self.gp_model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
-        self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
+        self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.gp_model, self.space, self.acq_optimizer)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
         objective = GPyOpt.core.task.objective.SingleObjective(f)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
+            self.gp_model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
     
     def _update_acquisition(self):
         '''
@@ -204,8 +204,12 @@ class OptimizationModel():
         temp = 0
         predictions = []
         stdev = []
+
+        print(f"SModel: {self.gp_model}")
+        print(f"SOptimizer: {self.optimizer}")
+
         for i in range(200):
-            pred, std = self.optimizer.predict(np.array([[temp]]))
+            pred, std = self.gp_model.predict(np.array([[temp]]))
             predictions.append(pred)
             stdev.append(std)
             temp += 0.005
@@ -224,7 +228,7 @@ class OptimizationModel():
 
         #has a call to self.check_bounds()
 
-        return normalize(best,0,0.002)
+        return best
 
     def update_experiment_data(self, X_new, Y_new):
         '''
@@ -235,8 +239,8 @@ class OptimizationModel():
         '''
         print(f"X_new: {X_new}")
         print(f"Y_new: {Y_new}")
-        print(f"Experiment Data X: {self.experiment_data["X"]}")
-        self.model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
+        #print(f"Experiment Data X: {self.experiment_data["X"]}")
+        self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
         self.experiment_data['X'].extend(X_new)
         self.experiment_data['Y'].extend(Y_new)
         #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
