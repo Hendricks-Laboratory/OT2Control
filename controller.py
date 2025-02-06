@@ -412,31 +412,57 @@ class Controller(ABC):
 
     def _make_out_dirs(self, header_data):
         '''
+        Creates output directories both locally and in Google Drive
         params:  
             list<list<str>> header_data: data from the header  
         Postconditions:  
-            All paths used by this class have been initialized if they were not before
-            They are not overwritten if they already exist. paths variables of this class
-            have also been initialized
+            All paths used by this class have been initialized locally and in Google Drive
+            They are not overwritten if they already exist
         '''
-
-        out_path = 'Ideally this would be a gdrive path, but for now everything is local'
-        if not os.path.exists(out_path):
-            #not on the laptop
-            out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs'
-        #get the root folder
+        # Create local directories first (keep this for local caching/temporary storage)
+        local_out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs'
+        
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
         self.reaction_folder_name = os.path.basename(os.path.dirname(data_dir))
-        self.out_path = os.path.join(out_path, data_dir)
-        #if the folder doesn't exist yet, make it
+        
+        # Set up local paths
+        self.out_path = os.path.join(local_out_path, data_dir)
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
         self.debug_path = os.path.join(self.out_path, 'Debug')
         self.plot_path = os.path.join(self.out_path, 'Plots')
-        paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
-        for path in paths:
+        
+        # Create local directories
+        local_paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
+        for path in local_paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+                
+        # folders in Google Drive if drive service is available
+        if self.drive_service:
+            try:
+                # Create or get main reaction folder
+                reaction_folder_parent_id = self.get_google_drive_folder_id("Protocol_Outputs")
+                reaction_folder_id = self.get_google_drive_folder_id(self.reaction_folder_name, parent_id=reaction_folder_parent_id)
+                if not reaction_folder_id:
+                    reaction_folder_id = self.create_google_drive_folder(self.reaction_folder_name)
+                
+                # Create or get data directory folder
+                data_folder_id = self.get_google_drive_folder_id(data_dir, parent_id=reaction_folder_id)
+                if not data_folder_id:
+                    data_folder_id = self.create_google_drive_folder(data_dir, parent_id=reaction_folder_id)
+                
+                # Create subfolders
+                subfolder_names = ['Eve_Files', 'Debug', 'Plots']
+                for folder_name in subfolder_names:
+                    subfolder_id = self.get_google_drive_folder_id(folder_name, parent_id=data_folder_id)
+                    if not subfolder_id:
+                        self.create_google_drive_folder(folder_name, parent_id=data_folder_id)
+                        
+                print(f"<<controller>> Created Google Drive folders for {data_dir}")
+                
+            except Exception as e:
+                print(f"<<controller>> Warning: Failed to create Google Drive folders: {str(e)}")
 
     def _make_cache(self):
         if not os.path.exists(self.cache_path):
@@ -812,12 +838,6 @@ class Controller(ABC):
             local_path = os.path.join(self.eve_files_path, filename)
             with open(local_path, 'wb') as write_file:
                 write_file.write(file_bytes)
-
-            #try saving to google drive
-            try:
-                self.save_to_google_drive('Eve_Files', local_path, filename)
-            except Exception as e:
-                print(f"<<controller>> Warning: Failed to save {filename} to Google Drive: {str(e)}")
     
         self.translate_wellmap()
     
@@ -846,46 +866,75 @@ class Controller(ABC):
             return None
   
     def save_to_google_drive(self, folder_name, file_path, filename):
-
+        """
+        Upload a file to Google Drive in the appropriate folder structure.
+        
+        Args:
+            folder_name (str): Name of the folder to store the file in (e.g. 'Eve_Files')
+            file_path (str): Full path to the local file
+            filename (str): Name of the file to save
+        """
         if not self.drive_service:
             print("<<controller.save_to_google_drive>> warning: Google Drive service not initialized. Skipping upload.")
             return
-
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"The file or directory at {file_path} does not exist")
         
         try:
-            #get or create folder
+            # Get or create the main reaction folder
             reaction_folder_id = self.get_google_drive_folder_id(self.reaction_folder_name)
-            folder_id = self.get_google_drive_folder_id(folder_name, parent_id = reaction_folder_id)
+            if not reaction_folder_id:
+                reaction_folder_id = self.create_google_drive_folder(self.reaction_folder_name)
+                
+            # Get or create the subfolder (Eve_Files, Debug, etc)
+            folder_id = self.get_google_drive_folder_id(folder_name, parent_id=reaction_folder_id)
+            if not folder_id:
+                folder_id = self.create_google_drive_folder(folder_name, parent_id=reaction_folder_id)
 
-            if folder_id is None:
-                parent_folder_id = self.get_google_drive_folder_id(os.path.basename(os.path.dirname(file_path)))
-                folder_id = self.create_google_drive_folder(folder_name, parent_folder_id)
-
-
-            
+            # Prepare file metadata
             file_metadata = {
                 'name': os.path.basename(filename),
                 'parents': [folder_id]
             }
 
+            # Determine mimetype
             mimetypes = {
                 '.png': 'image/png',
-                '.csv': 'text/csv',
+                '.csv': 'text/csv', 
                 '.tsv': 'text/tab-separated-values',
-                '.txt': 'text/plain'
+                '.txt': 'text/plain',
+                '.json': 'application/json',
+                '.pkl': 'application/octet-stream'
             }
             file_type = os.path.splitext(filename)[1].lower()
-            mimetype = mimetypes.get(file_type, 'application/octet-stream') # default to binary if unknown
+            mimetype = mimetypes.get(file_type, 'application/octet-stream')
 
-            media = MediaIoBaseUpload(file_path, mimetype=mimetype)
-            self.drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            print(f"Uploaded file: {filename} to folder with ID: {folder_id}")
-        
+            # Create media upload object from the actual file
+            with open(file_path, 'rb') as file:
+                media = MediaIoBaseUpload(
+                    file,
+                    mimetype=mimetype,
+                    resumable=True  # Enable resumable uploads for large files
+                )
+                
+                # Upload the file with progress tracking for large files
+                request = self.drive_service.files().create(
+                    body=file_metadata,
+                    media_body=media,
+                    fields='id'
+                )
+                
+                response = None
+                while response is None:
+                    status, response = request.next_chunk()
+                    if status:
+                        print(f"Uploaded {int(status.progress() * 100)}%")
+
+            print(f"<<controller.save_to_google_drive>> Successfully uploaded {filename} to folder '{folder_name}'")
+            
         except Exception as e:
-            print(f"<<controller.save_to_google_drive>> warning: Error uploading file to Google Drive: {e}")
+            print(f"<<controller.save_to_google_drive>> warning: Error uploading file to Google Drive: {str(e)}")
 
         
     def delete_wks_key(self):
@@ -903,20 +952,50 @@ class Controller(ABC):
 
     def close_connection(self):
         '''
-        runs through closing procedure with robot    
-        Postconditions:    
-            Log files have been written to self.out_path  
-            Connection has been closed  
-        '''
+        Runs through closing procedure with robot and uploads all data to Google Drive
         
+        Postconditions:    
+            - Log files have been written to self.out_path
+            - All data has been uploaded to Google Drive
+            - Connection has been closed  
+        '''
         print('<<controller>> initializing breakdown')
         self.save()
-        #server should now send a close command
+        
+        # Upload all data to Google Drive before closing
+        if self.drive_service:
+            try:
+                print('<<controller>> uploading data to Google Drive...')
+                
+                # Define folders to upload and their corresponding Google Drive folder names
+                folders_to_upload = {
+                    'Eve_Files': self.eve_files_path,
+                    'Debug': self.debug_path,
+                    'Plots': self.plot_path
+                }
+                
+                # Upload each folder's contents
+                for folder_name, local_path in folders_to_upload.items():
+                    if os.path.exists(local_path):
+                        for filename in os.listdir(local_path):
+                            file_path = os.path.join(local_path, filename)
+                            if os.path.isfile(file_path):
+                                try:
+                                    self.save_to_google_drive(folder_name, file_path, filename)
+                                except Exception as e:
+                                    print(f"<<controller>> warning: Failed to upload {filename}: {str(e)}")
+                
+                print('<<controller>> finished uploading to Google Drive')
+                
+            except Exception as e:
+                print(f"<<controller>> warning: Error during Google Drive upload: {str(e)}")
+        
+        # Server should now send a close command
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
         self.delete_wks_key()
-        
+
     def translate_wellmap(self):
         '''
         Preconditions:  
