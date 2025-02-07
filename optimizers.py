@@ -151,6 +151,7 @@ class OptimizationModel():
         
         kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
         self.gp_model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
+        self.gp_model.updateModel(X_init, Y_init, None, None)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
         self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.gp_model, self.space, self.acq_optimizer)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
@@ -219,14 +220,16 @@ class OptimizationModel():
         linespace = np.linspace(0,0.002,200)
 
         closest = np.argmin(np.abs(predictions - self.target_value))
-        best = linespace.reshape(-1,1)[closest][0]
+        best = linespace.reshape(-1,1)[closest]
         print(f"{best} uM KBr results in a closeness of {closest} nm")
-
+        print(type(best))
         #suggestions = self.optimizer.suggest_next_locations()
         
         # loop to check suggestion and get new if out of bounds
 
         #has a call to self.check_bounds()
+
+        #TODO plot the model and save it after every iteration here 
 
         return best
 

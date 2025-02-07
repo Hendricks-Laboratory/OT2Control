@@ -2436,9 +2436,7 @@ class AutoContr(Controller):
 
         print(f"Model X: {model.optimizer.X}")
         print(f"Model Y: {model.optimizer.Y}")
-        print(f"Model: {model}")
-        print(f"Optimizer: {model.optimizer}")
-        print(f"GP Model: {model.optimizer.model}")
+
         
         #enter iterative while loop now that we have data
         while not model.quit:
