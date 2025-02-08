@@ -10,6 +10,7 @@ import pickle
 from controller import run_as_thread
 
 from threadManager import ThreadManager, QueueManager
+from emailNotif import EmailNotifier
 
 class PickleManager():
     """This class manages the saving and retrieving of data from pickle"""
@@ -82,7 +83,35 @@ class GUIApp(customtkinter.CTk):
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
         self.thread_manager.start_thread(target=self.listen_input)
 
-
+    def ask_email(self):
+        """prompt user for email, returns email as a string or None
+        """
+        popup = customtkinter.CTkToplevel(self)
+        popup.title("Enter Email for Notification")
+        popup.geometry("350x200")
+        popup.transient(self)
+        popup.grab_set()
+        
+        label = customtkinter.CTkLabel(popup, text="Enter you email for completion notification:", font=("Inter", 14))
+        label.pack(pady=10)
+        
+        email_var = customtkinter.StringVar()
+        email_entry = customtkinter.CTkEntry(popup, textvariable=email_var, width=250)
+        email_entry.pack(pady=10)
+        
+        result = {"email": None} #object
+        
+        def submit_email():
+            result["email"] = email_var.get().strip()
+            popup.grab_release()
+            popup.destroy()
+        
+        submit_button = customtkinter.CTkButton(popup, text="Submit", command=submit_email)
+        submit_button.pack(pady=10)
+        
+        self.wait_window(popup)
+        return result["email"]
+        
     def create_interface(self):
         self.sheet_label = customtkinter.CTkLabel(self, text="Sheetname", font=("Inter", 16), text_color="white")
         self.sheet_label.pack()
@@ -160,6 +189,14 @@ class GUIApp(customtkinter.CTk):
             cli_args.append("--no-sim")
 
         self.pickle.add_entry(self.sheet_name.get())
+        
+        self.chemist_email = self.ask_email()
+        
+        if self.chemist_email:
+            self.notifier = EmailNotifier(self.chemist_email)
+            print(f"Email notifier started for {self.chemist_email}")
+        else:
+            print("No email entered. Notifications disabled.")
 
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
 
