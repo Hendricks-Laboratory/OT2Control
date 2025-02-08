@@ -206,9 +206,6 @@ class OptimizationModel():
         predictions = []
         stdev = []
 
-        print(f"SModel: {self.gp_model}")
-        print(f"SOptimizer: {self.optimizer}")
-
         for i in range(200):
             pred, std = self.gp_model.predict(np.array([[temp]]))
             predictions.append(pred)
@@ -220,9 +217,9 @@ class OptimizationModel():
         linespace = np.linspace(0,0.002,200)
 
         closest = np.argmin(np.abs(predictions - self.target_value))
-        best = linespace.reshape(-1,1)[closest]
-        print(f"{best} uM KBr results in a closeness of {closest} nm")
-        print(type(best))
+        best_lambda = predictions[closest]
+        best = linespace[closest]
+        print(f"{best} uM KBr results in a lambda max of {closest} nm")
         #suggestions = self.optimizer.suggest_next_locations()
         
         # loop to check suggestion and get new if out of bounds
@@ -242,11 +239,19 @@ class OptimizationModel():
         '''
         print(f"X_new: {X_new}")
         print(f"Y_new: {Y_new}")
+
+        print(f"X_all Before Update: {self.optimizer.X}")
+        print(f"Y_all Before Update: {self.optimizer.Y}")
+
         #print(f"Experiment Data X: {self.experiment_data["X"]}")
         self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
         self.experiment_data['X'].extend(X_new)
         self.experiment_data['Y'].extend(Y_new)
         #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
+        
+        print(f"X_all After Update: {self.optimizer.X}")
+        print(f"Y_all After Update: {self.optimizer.Y}")
+        
         self.curr_iter += 1
         self.update_quit(X_new, Y_new)
     
