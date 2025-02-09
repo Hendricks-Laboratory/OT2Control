@@ -219,7 +219,7 @@ class OptimizationModel():
         closest = np.argmin(np.abs(predictions - self.target_value))
         best_lambda = predictions[closest]
         best = linespace[closest]
-        print(f"{best} uM KBr results in a lambda max of {closest} nm")
+        print(f"{best} uM KBr results in a lambda max of {best_lambda} nm")
         #suggestions = self.optimizer.suggest_next_locations()
         
         # loop to check suggestion and get new if out of bounds

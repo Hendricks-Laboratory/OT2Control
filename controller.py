@@ -126,12 +126,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     reagent_info = auto.robo_params['reagent_df']
     fixed_reagents = auto.get_fixed_reagents()
     variable_reagents = auto.get_variable_reagents()
-    target_value = np.random.randint(1, 200) # not being used? TODO delete 
+    target_value = auto.getModelInfo()["target"] 
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.1, 1)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
-    print(f"Target: {auto.getModelInfo()["target"]}")
+    model = OptimizationModel(bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
+    print(f"Target: {target_value}")
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -2447,7 +2447,7 @@ class AutoContr(Controller):
             X_new = model.suggest()
             print(f"Suggestion {X_new}")
 
-            recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
+            recipes =  self.duplicate_list_elements(np.array([X_new]), self.num_duplicates)
 
             print(f"Batch recipes: {recipes}")
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
