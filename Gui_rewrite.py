@@ -1,13 +1,13 @@
 import customtkinter
 from customtkinter import IntVar, CHECKBUTTON
-from subprocess import check_output
-import subprocess
-import threading
-import pty
+# from subprocess import check_output
+# import subprocess
+# import threading
+# import pty
 import os
 import pickle
 from controller import run_as_thread
-from deckPositionsGui import CTkinterApp
+# from deckPositionsGui import CTkinterApp
 from threadManager import ThreadManager, QueueManager
 
 class PickleManager():
