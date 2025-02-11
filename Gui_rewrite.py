@@ -8,12 +8,12 @@ import pty
 import os
 import pickle
 from controller import run_as_thread
-
+from deckPositionsGui import CTkinterApp
 from threadManager import ThreadManager, QueueManager
 
 class PickleManager():
     """This class manages the saving and retrieving of data from pickle"""
-    def __init__(self, filename = "pickle.pk"):
+    def __init__(self, filename="pickle.pk"):
         self.filename = filename
         self.default_data = []
         self.data = self._load_or_create()
@@ -61,6 +61,7 @@ class GUIApp(customtkinter.CTk):
     This class represents the main gui app
     """
     def __init__(self):
+        """initializes the GUI window, and variables associated with the inputs"""
         super().__init__()
         self.title("OT2Control") # create main window
         self.geometry("750x450")
@@ -71,6 +72,7 @@ class GUIApp(customtkinter.CTk):
         self.response_queue = QueueManager.get_response_queue()
         self.pickle = PickleManager()
         self.thread_manager = ThreadManager()
+        # self.deck_positions = CTkinterApp()
 
         self.sheet_list = [] # variables for widgets in window
         self.sim = customtkinter.IntVar()
@@ -82,8 +84,8 @@ class GUIApp(customtkinter.CTk):
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
         self.thread_manager.start_thread(target=self.listen_input)
 
-
     def create_interface(self):
+        """Create elements within the window"""
         self.sheet_label = customtkinter.CTkLabel(self, text="Sheetname", font=("Inter", 16), text_color="white")
         self.sheet_label.pack()
 
@@ -106,6 +108,19 @@ class GUIApp(customtkinter.CTk):
         self.deck_pos.pack(pady= (0, 17))
 
     def show_popup(self, type, msg):
+        """
+        Create a popup of three predefined types
+        type = yesno:
+            creates a popup window including msg, which has options for yes or no
+        type = continue:
+            creates a popup window which prompts to continue, includes msg
+        type = input:
+            creates a popup that takes text input, returns text input to initial call for input
+        
+        The return values of this function will differ depending on the type and user input, keep this in mind when using 
+        return values from this method.
+
+        """
         popup = customtkinter.CTkToplevel(self)
         popup.title("User Input")
         popup.geometry("300x150")
@@ -150,6 +165,9 @@ class GUIApp(customtkinter.CTk):
         check_popup()
 
     def run_controller(self):
+        """
+        initializes arguements and calls controller as a thread
+        """
         cli_args = []
 
         if self.sheet_name.get():
@@ -164,11 +182,17 @@ class GUIApp(customtkinter.CTk):
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
 
     def update_run_status(self):
+        """
+        listen for status messages from the status queue
+        """
         while True:
             msg = self.status_queue.get()
             self.output_text.insert(customtkinter.END, msg + "\n")
     
     def listen_input(self):
+        """
+        listen for messages from the input queue
+        """
         while True:
             if not self.input_queue.empty():
                 type, msg = self.input_queue.get()
@@ -176,25 +200,28 @@ class GUIApp(customtkinter.CTk):
 
     #not gonna deal with this rn
     def run_deckpos(self):
-        def execute_python_file(file_name, argument,Textbox):
-            try:
-                process = start_subprocess(["python3", file_name,'-n',argument], Textbox)
-            except FileNotFoundError:
-                print("Error: The file does not exist.")
+        # self.thread_manager.start_thread(self.deck_pos.mainloop())
+        # def execute_python_file(file_name, argument,Textbox):
+        #     try:
+        #         process = start_subprocess(["python3", file_name,'-n',argument], Textbox)
+        #     except FileNotFoundError:
+        #         print("Error: The file does not exist.")
                 
-        def start_subprocess(command, textbox):
-            try:
-                master_fd, slave_fd = pty.openpty() #PseudoTerminal
-                process = subprocess.Popen(command, stdout=slave_fd, stderr=subprocess.STDOUT, stdin=slave_fd, universal_newlines=True)
-                os.close(slave_fd)
-                # threading.Thread(target=read_output, args=(master_fd, textbox), daemon=True).start()
-            except Exception as e:
-                print(f"Error starting subprocess: {e}")
-                # update_output("Error starting subprocess: " + str(e), textbox)
-                return None
-            return process
+        # def start_subprocess(command, textbox):
+        #     try:
+        #         master_fd, slave_fd = pty.openpty() #PseudoTerminal
+        #         process = subprocess.Popen(command, stdout=slave_fd, stderr=subprocess.STDOUT, stdin=slave_fd, universal_newlines=True)
+        #         os.close(slave_fd)
+        #         # threading.Thread(target=read_output, args=(master_fd, textbox), daemon=True).start()
+        #     except Exception as e:
+        #         print(f"Error starting subprocess: {e}")
+        #         # update_output("Error starting subprocess: " + str(e), textbox)
+        #         return None
+        #     return process
         
-        execute_python_file('deckPositionsGui.py',self.sheet_name.get(),self.output_text)
+        # execute_python_file('deckPositionsGui.py',self.sheet_name.get(),self.output_text)
+        pass
+    
     
 window = GUIApp()
 window.mainloop()

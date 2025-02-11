@@ -8,10 +8,7 @@ import pickle
 import threading
 import pty
 from controller import run_as_thread
-
 from threadManager import ThreadManager, QueueManager
-
-
 
 def run():
    os.chdir(os.curdir)

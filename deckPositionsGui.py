@@ -8,12 +8,10 @@ import sys
 
 
 class deck:
-    
     def __init__(self):
         #self.get_contents()
-        
         """
-        Initiates Booard
+        Initiates Board
             Includes a deck array, positions array, and single positions touple.
             when populated the deck arry takes on the form of:
             [(type of deck,[(Chemical,Postiotion),(Chemical,Position)]),(type of deck,[(Chemical,Postiotion),(Chemical,Position)])...]
