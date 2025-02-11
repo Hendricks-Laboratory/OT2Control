@@ -17,22 +17,22 @@ class PickleManager():
         self.default_data = []
         self.data = self._load_or_create()
         self.status_queue = QueueManager.get_status_queue()
-        print(self.data)
+        # print(self.data)
 
     def _load_or_create(self):
         """loads pickle data or creates a new file if it doesn't exist."""
         if not os.path.isfile(self.filename):  
-            self.status_queue.put(f"File {self.filename} does not exist. Creating a new one...")
+            # self.status_queue.put(f"File {self.filename} does not exist. Creating a new one...")
             return self._save(self.default_data)
         try:
             with open(self.filename, 'rb') as file:
                 return pickle.load(file)
             
         except (EOFError, pickle.UnpicklingError):
-            self.status_queue.put(f"Error: {self.filename} is empty or corrupted. Resetting file.")
+            # self.status_queue.put(f"Error: {self.filename} is empty or corrupted. Resetting file.")
             return self._save(self.default_data)
         except Exception as e:
-            self.status_queue.put(f"Unexpected error reading {self.filename}: {e}")
+            # self.status_queue.put(f"Unexpected error reading {self.filename}: {e}")
             return self.default_data
 
     def _save(self, data):
