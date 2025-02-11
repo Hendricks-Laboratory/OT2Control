@@ -1,7 +1,4 @@
 #!/bin/sh
 
-tmux kill-session -t run
+python ot2_robot.py
 
-tmux new-session -s run -d 'python robot_script.py'
-
-echo slkdf
