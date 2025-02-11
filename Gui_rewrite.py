@@ -1,5 +1,4 @@
 import customtkinter
-from CTkMessagebox import CTkMessagebox
 from customtkinter import IntVar, CHECKBUTTON
 from subprocess import check_output
 import subprocess
