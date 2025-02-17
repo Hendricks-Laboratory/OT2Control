@@ -413,53 +413,29 @@ class Controller(ABC):
         params:  
             list<list<str>> header_data: data from the header  
         Postconditions:  
-            All paths used by this class have been initialized locally and in Google Drive
+            All paths used by this class have been initialized locally.
             They are not overwritten if they already exist
         '''
-        # Create local directories first (keep this for local caching/temporary storage)
+
         local_out_path = '/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs'
         
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
         self.reaction_folder_name = os.path.basename(os.path.dirname(data_dir))
         
-        # Set up local paths
+        
         self.out_path = os.path.join(local_out_path, data_dir)
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
         self.debug_path = os.path.join(self.out_path, 'Debug')
         self.plot_path = os.path.join(self.out_path, 'Plots')
         
-        # Create local directories
+       
         local_paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
         for path in local_paths:
             if not os.path.exists(path):
                 os.makedirs(path)
                 
-        # folders in Google Drive if drive service is available
-        if self.drive_service:
-            try:
-                # Create or get main reaction folder
-                reaction_folder_parent_id = self.get_google_drive_folder_id("Protocol_Outputs")
-                reaction_folder_id = self.get_google_drive_folder_id(self.reaction_folder_name, parent_id=reaction_folder_parent_id)
-                if not reaction_folder_id:
-                    reaction_folder_id = self.create_google_drive_folder(self.reaction_folder_name)
-                
-                # Create or get data directory folder
-                data_folder_id = self.get_google_drive_folder_id(data_dir, parent_id=reaction_folder_id)
-                if not data_folder_id:
-                    data_folder_id = self.create_google_drive_folder(data_dir, parent_id=reaction_folder_id)
-                
-                # Create subfolders
-                subfolder_names = ['Eve_Files', 'Debug', 'Plots']
-                for folder_name in subfolder_names:
-                    subfolder_id = self.get_google_drive_folder_id(folder_name, parent_id=data_folder_id)
-                    if not subfolder_id:
-                        self.create_google_drive_folder(folder_name, parent_id=data_folder_id)
-                        
-                print(f"<<controller>> Created Google Drive folders for {data_dir}")
-                
-            except Exception as e:
-                print(f"<<controller>> Warning: Failed to create Google Drive folders: {str(e)}")
+       
 
     def _make_cache(self):
         if not os.path.exists(self.cache_path):
@@ -476,18 +452,12 @@ class Controller(ABC):
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive', 
                  'https://www.googleapis.com/auth/drive.file']
-        #get login credentials from local file. Your json file here
+        
         path = 'Credentials/hendricks-lab-jupyter-sheets-5363dda1a7e0.json'
         credentials = ServiceAccountCredentials.from_json_keyfile_name(path, scope) 
         return credentials
 
-    def _init_google_drive(self, credentials): 
-        try:
-            drive_service = build('drive', 'v3', credentials=credentials)
-            return drive_service
-        except HttpError as error:
-            print(f"Google Drive API Error: {error}")
-            return None
+    
 
     def _get_wks_key(self, credentials, rxn_sheet_name):
         '''
@@ -839,100 +809,7 @@ class Controller(ABC):
         self.translate_wellmap()
     
 
-    def create_google_drive_folder(self, folder_name, parent_folder_id=None):
-        folder_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder'
-        }
-        if parent_folder_id:
-            folder_metadata['parents'] = [parent_folder_id]
-        folder = self.drive_service.files().create(body=folder_metadata, fields='id').execute()
-        print(f"Created folder: {folder_name} with ID: {folder['id']}")
-        return folder['id']
-
-    def get_google_drive_folder_id(self, folder_name, parent_id=None):
-        if parent_id:
-            query = f"'{folder_name}' in parents and mimeType = 'application/vnd.google-apps.folder' and '{parent_id}' in parents"
-        else:
-            query = f"'{folder_name}' in parents and mimeType = 'application/vnd.google-apps.folder'"
-        response = self.drive_service.files().list(q=query, spaces='drive', fields='nextPageToken, files(id, name)').execute()
-        folders = response.get('files', [])
-        if folders:
-            return folders[0]['id']
-        else:
-            return None
-  
-    def save_to_google_drive(self, folder_name, file_path, filename):
-        """
-        Upload a file to Google Drive in the appropriate folder structure.
-        
-        Args:
-            folder_name (str): Name of the folder to store the file in (e.g. 'Eve_Files')
-            file_path (str): Full path to the local file
-            filename (str): Name of the file to save
-        """
-        if not self.drive_service:
-            print("<<controller.save_to_google_drive>> warning: Google Drive service not initialized. Skipping upload.")
-            return
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"The file or directory at {file_path} does not exist")
-        
-        try:
-            # Get or create the main reaction folder
-            reaction_folder_id = self.get_google_drive_folder_id(self.reaction_folder_name)
-            if not reaction_folder_id:
-                reaction_folder_id = self.create_google_drive_folder(self.reaction_folder_name)
-                
-            # Get or create the subfolder (Eve_Files, Debug, etc)
-            folder_id = self.get_google_drive_folder_id(folder_name, parent_id=reaction_folder_id)
-            if not folder_id:
-                folder_id = self.create_google_drive_folder(folder_name, parent_id=reaction_folder_id)
-
-            # Prepare file metadata
-            file_metadata = {
-                'name': os.path.basename(filename),
-                'parents': [folder_id]
-            }
-
-            # Determine mimetype
-            mimetypes = {
-                '.png': 'image/png',
-                '.csv': 'text/csv', 
-                '.tsv': 'text/tab-separated-values',
-                '.txt': 'text/plain',
-                '.json': 'application/json',
-                '.pkl': 'application/octet-stream'
-            }
-            file_type = os.path.splitext(filename)[1].lower()
-            mimetype = mimetypes.get(file_type, 'application/octet-stream')
-
-            # Create media upload object from the actual file
-            with open(file_path, 'rb') as file:
-                media = MediaIoBaseUpload(
-                    file,
-                    mimetype=mimetype,
-                    resumable=True  # Enable resumable uploads for large files
-                )
-                
-                # Upload the file with progress tracking for large files
-                request = self.drive_service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields='id'
-                )
-                
-                response = None
-                while response is None:
-                    status, response = request.next_chunk()
-                    if status:
-                        print(f"Uploaded {int(status.progress() * 100)}%")
-
-            print(f"<<controller.save_to_google_drive>> Successfully uploaded {filename} to folder '{folder_name}'")
-            
-        except Exception as e:
-            print(f"<<controller.save_to_google_drive>> warning: Error uploading file to Google Drive: {str(e)}")
-
+    
         
     def delete_wks_key(self):
         '''
@@ -953,41 +830,11 @@ class Controller(ABC):
         
         Postconditions:    
             - Log files have been written to self.out_path
-            - All data has been uploaded to Google Drive
             - Connection has been closed  
         '''
-        print('<<controller>> initializing breakdown')
         self.save()
         
-        # Upload all data to Google Drive before closing
-        if self.drive_service:
-            try:
-                print('<<controller>> uploading data to Google Drive...')
-                
-                # Define folders to upload and their corresponding Google Drive folder names
-                folders_to_upload = {
-                    'Eve_Files': self.eve_files_path,
-                    'Debug': self.debug_path,
-                    'Plots': self.plot_path
-                }
-                
-                # Upload each folder's contents
-                for folder_name, local_path in folders_to_upload.items():
-                    if os.path.exists(local_path):
-                        for filename in os.listdir(local_path):
-                            file_path = os.path.join(local_path, filename)
-                            if os.path.isfile(file_path):
-                                try:
-                                    self.save_to_google_drive(folder_name, file_path, filename)
-                                except Exception as e:
-                                    print(f"<<controller>> warning: Failed to upload {filename}: {str(e)}")
-                
-                print('<<controller>> finished uploading to Google Drive')
-                
-            except Exception as e:
-                print(f"<<controller>> warning: Error during Google Drive upload: {str(e)}")
         
-        # Server should now send a close command
         self.portal.send_pack('close')
         print('<<controller>> shutting down')
         self.portal.close()
