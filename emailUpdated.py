@@ -32,7 +32,7 @@ class EmailNotifier:
 
             try:
                 print("Calling send_email()")
-                self.thread_manager.start_thread(self.send_email, daemon=True)
+                self.send_email()
             except Exception as e:
                 print("Error in watch_event():", e)
 
