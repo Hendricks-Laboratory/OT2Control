@@ -1,76 +1,106 @@
-import smtplib
-import ssl
+import os
+import base64
+import logging
 from email.mime.text import MIMEText
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 from threadManager import QueueManager, ThreadManager
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Scopes required for sending emails
+SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 class EmailNotifier:
     """
-    Sends an email to the user when the robot reaction is complete.
-    Completion is triggered by `completion_event` being set on shutdown in `controller.py`.
+    Sends an email when the robot reaction is complete.
+    The completion event triggers this action automatically.
     """
-
-    smtp_server = "smtp.gmail.com"
-    smtp_port = 465  # SSL port
-
-    sender_email = ""
-    sender_password = ""
 
     def __init__(self, recipient_email):
         self.recipient_email = recipient_email
         self.completion_event = QueueManager.get_completion_event()
         self.thread_manager = ThreadManager()
+        self.running = True  # Flag to control the thread loop
 
-        # Start monitoring event
+        # Authenticate Gmail API
+        self.service = self.authenticate_gmail()
+
+        # Start monitoring event in a separate thread
         self.thread_manager.start_thread(self.watch_event, daemon=True)
+
+    def authenticate_gmail(self):
+        """Authenticates and returns the Gmail API service instance."""
+        creds = None
+        token_file = "token.json"
+        credentials_file = "credentials.json"  # Ensure this file is downloaded from Google Cloud Console
+
+        # Load existing token if available
+        if os.path.exists(token_file):
+            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+
+        # If no valid credentials, go through OAuth flow
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
+                creds = flow.run_local_server(port=0)
+            # Save new credentials for future use
+            with open(token_file, "w") as token:
+                token.write(creds.to_json())
+
+        return build("gmail", "v1", credentials=creds)
 
     def watch_event(self):
         """Waits for the completion event and sends an email notification."""
-        print("EmailNotifier: Waiting for completion event...")
-        while True:
+        logging.info("EmailNotifier: Waiting for completion event...")
+
+        while self.running:
             self.completion_event.wait()  # Blocks until `set()` is called
-            print("EmailNotifier: Event detected! Sending email.")
+            if not self.running:  # Stop loop if shutdown
+                break
+
+            logging.info("EmailNotifier: Event detected! Sending email.")
 
             try:
-                print("Calling send_email()")
                 self.thread_manager.start_thread(self.send_email, daemon=True)
             except Exception as e:
-                print("Error in watch_event():", e)
+                logging.error("Error in watch_event(): %s", e)
 
-            self.completion_event.clear()
+            self.completion_event.clear()  # Reset event for future triggers
 
     def send_email(self):
-        """Sends an email notification."""
+        """Sends an email notification using Gmail API."""
         if not self.recipient_email:
-            print("No recipient email provided. Skipping notification.")
+            logging.warning("No recipient email provided. Skipping notification.")
             return
-        
-        print(f"send_email() was called for {self.recipient_email}")
 
-        msg = MIMEText("Your reaction is complete! You can now check your results.")
-        msg["Subject"] = "Reaction Complete Notification"
-        msg["From"] = self.sender_email
-        msg["To"] = self.recipient_email
+        logging.info(f"send_email() triggered for {self.recipient_email}")
+
+        # Create email message
+        message = MIMEText("Your reaction is complete! You can now check your results.")
+        message["to"] = self.recipient_email
+        message["subject"] = "Reaction Complete Notification"
+
+        # Encode message for Gmail API
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
         try:
-            print(f"Attempting to send email to {self.recipient_email}...")
-            print(f"Connecting to SMTP server {self.smtp_server} on port {self.smtp_port}...")
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context) as server:
-                print("Connected to SMTP server!")
-                print("Logging in to SMTP server...")
-                server.login(self.sender_email, self.sender_password)
-                print("Login successful!")
-                print("Sending email...")
-                server.sendmail(self.sender_email, self.recipient_email, msg.as_string())
-                print(f"Email successfully sent to {self.recipient_email}!")
-
-        except smtplib.SMTPAuthenticationError as e:
-            print("SMTP Authentication Error: Check email & app password.")
-            print("Error details:", e)
-        except smtplib.SMTPConnectError as e:
-            print("SMTP Connection Error: Could not connect to email server.")
-            print("Error details:", e)
-        except smtplib.SMTPException as e:
-            print("General SMTP Error:", e)
+            logging.info(f"Sending email to {self.recipient_email} via Gmail API...")
+            send_message = {"raw": raw_message}
+            self.service.users().messages().send(userId="me", body=send_message).execute()
+            logging.info(f"Email successfully sent to {self.recipient_email}!")
         except Exception as e:
-            print("General Error:", e)
+            logging.error("Failed to send email via Gmail API: %s", e)
+
+    def stop(self):
+        """Stops the event watcher and cleans up threads."""
+        logging.info("Shutting down EmailNotifier...")
+        self.running = False
+        self.completion_event.set()  # Unblock the wait loop
+        self.thread_manager.stop_all_threads()
+        logging.info("EmailNotifier shutdown complete.")

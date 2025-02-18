@@ -2,7 +2,7 @@ import threading
 import smtplib
 import ssl
 from email.mime.text import MIMEText
-from threadManager import QueueManager
+from threadManager import QueueManager, ThreadManager
 
 class EmailNotifier:
     """
@@ -13,8 +13,9 @@ class EmailNotifier:
     smtp_server = "smtp.gmail.com"
     smtp_port = 465  # SSL port
     
-    sender_email = ""
-    sender_password = ""
+    sender_email = "mocke@whitman.edu"
+ 
+    sender_password = "rxcanflfmzyjgdpi"
 
     def __init__(self, recipient_email):
         self.recipient_email = recipient_email
