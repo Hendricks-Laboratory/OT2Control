@@ -80,8 +80,7 @@ class GUIApp(customtkinter.CTk):
         self.create_interface()
 
         self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
-        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
-        self.thread_manager.start_thread(target=self.listen_input)
+
 
     def create_interface(self):
         """Create elements within the window"""
@@ -177,7 +176,8 @@ class GUIApp(customtkinter.CTk):
             cli_args.append("--no-sim")
 
         self.pickle.add_entry(self.sheet_name.get())
-
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+        self.thread_manager.start_thread(target=self.listen_input)
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
 
     def update_run_status(self):
