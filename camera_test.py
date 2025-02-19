@@ -1,23 +1,25 @@
 import time 
-from camera import CameraManager
-from threadManager import ThreadManager, QueueManager
+from camera_manager import CameraManager
+from threadManager import QueueManager
 
-thread_manager = ThreadManager()
 camera_manager = CameraManager()
 
-thread_manager.start_camera_manager(camera_manager)
-
-time.sleep(2)
-print("test 1: capture 1 pic")
-QueueManager.get_camera_queue().put("capture_photo")
 
 time.sleep(2)
 
-print("test 2: starting timelapse")
-QueueManager.get_camera_queue().put("start_timelapse")
+print("capturing single photo")
+camera_manager.capture_photo()
 
-print("test 3: stopping timelpase")
-QueueManager.get_camera_queue().put("stop_timelapse")
+time.sleep(3)
+
+print("starting timelapse")
+camera_manager.start_timelapse(3)
+
+
+time.sleep(10)
+
+print("stopping time lapse using completion event")
+QueueManager.get_completion_event().set()
 
 time.sleep(2)
 

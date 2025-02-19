@@ -4,7 +4,7 @@ from threadManager import QueueManager, ThreadManager
 
 class CameraManager:
     def _init_(self):
-        self.camera_index = 1 # USB ccamera index
+        self.camera_index = 0 #setting to 0 to test on mac
         self.thread_manger = ThreadManger()
         self.camera_queue = QueueManger.get_camera_queue()
         self.status_queue = QueueManger.get_camera_queue()
@@ -12,21 +12,21 @@ class CameraManager:
         self.timelapse_running = False
         self.timelapse_thread = None
 
-    # These two functions allows the GUI to set a logging function so messages can be displayed in the application insead of the terminal
+    # set logs
     def set_log_callback(self, callback):
         self.log_callback = callback
      
     
     # displays messages in gui textbox    
-    def log_message(self, message): #Logs message to GUI if available, otherwise prints to terminal.
+    def log_message(self, message): 
         if self.log_callback:
             self.log_callback(message)
         else:
-            print(message)  # Fallback to terminal output
+            print(message)  
             self.status_queue.put(message) # Send status messages to the queue so the GUI can display them
 
 
-    # This function task is just to capture a single photo using the USB -connected camera and saves it as jpg.
+    # take photo, svae a jpeg
     def capture_photo(self):
         try:
             camera = cv2.VideoCapture(self.camera_index)  # since we are using USB
@@ -47,7 +47,7 @@ class CameraManager:
             self.log_message(f"Error capturing photo: {e}")
 
 
-#This function handels timelapse with a specified interval (in seconds)
+    #This function handels timelapse with a specified interval (in seconds)
     def start_timelapse(self,interval):
         if self.timelapse_running:
             self.log_message("Timelapse is already running.")

@@ -19,7 +19,6 @@ class QueueManager:
                 cls._instance.input_queue = Queue()
                 cls._instance.response_queue = Queue()
                 cls._instance.completion_event = threading.Event()
-                cls._instance.camera_queue = Queue()
         return cls._instance
 
     @staticmethod
@@ -38,9 +37,6 @@ class QueueManager:
     def get_completion_event():
         return QueueManager()._instance.completion_event
     
-    @staticmethod
-    def get_camera_queue():
-        return QueueManager()._instance.camera_queue
 
 class ThreadManager:
     """
@@ -62,7 +58,3 @@ class ThreadManager:
         for thread in self.threads:
             if thread.is_alive():
                 thread.join(timeout=1)  # Give some time to stop
-
-    def start_camera_manager(self, camera_manager):
-        self.camera_manager = camera_manager
-        self.start_thread(target=self.camera_manager.process_camera_tasks)
