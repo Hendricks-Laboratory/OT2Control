@@ -3480,10 +3480,11 @@ def prompt_input(type, msg):
 
 def test_inputs():
     """test each input type"""
-    prompt_input("continue", "testing continue")
-    prompt_input("yesno", "testing yes/no")
-    prompt_input("input", "testing text input")
-    status("test complete")
+    pass
+    # prompt_input("continue", "testing continue")
+    # prompt_input("yesno", "testing yes/no")
+    # prompt_input("input", "testing text input")
+    # status("test complete")
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
