@@ -235,7 +235,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
-        self.drive_service = self._init_google_drive(credentials) # Terence   
+        #self.drive_service = self._init_google_drive(credentials) # Terence   
         self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
