@@ -127,6 +127,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     fixed_reagents = auto.get_fixed_reagents()
     variable_reagents = auto.get_variable_reagents()
     target_value = np.random.randint(1, 200) # not being used? TODO delete 
+    try:
+        max_conc = auto.get_max_conc()
+        print(f'max_conc for variable reagents: {max_conc}')
+    except Exception as e:
+        print(f'Error getting max_conc: {e}')
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.1, 1)} for i in range(y_shape)]
     # final_spectra not used?
@@ -408,6 +413,52 @@ class Controller(ABC):
             with open(os.path.join(self.cache_path,'wks_data{}.pkl'.format(index)),'wb') as rxn_wks_data_cache:
                 dill.dump(data, rxn_wks_data_cache)
         return data
+
+    def get_max_conc(self):
+    """
+    Gets the volumes of fixed reagents and calculates max concentrations for variable reagents.
+    
+    Returns:
+        dict: Maximum concentrations for each variable reagent
+    """
+    # total volumes for fixed reagents
+    fixed_vols = {}
+    for reagent in self.get_fixed_reagents():
+        if reagent in self.tot_vols:
+            fixed_vols[reagent] = self.tot_vols[reagent]
+    
+    #  max concentrations for variable reagents one at a time
+    max_concs = {}
+    for var_reagent in self.get_variable_reagents():
+        # Get initial concentration of this reagent
+        initial_conc = None
+        for idx, row in self.rxn_df.iterrows():
+            if row['reagent'] == var_reagent and not pd.isna(row['conc']):
+                initial_conc = row['conc']
+                break
+                
+        if initial_conc is None:
+            continue
+            
+        # Calculate remaining volume available for this reagent
+        total_fixed_vol = sum(fixed_vols.values())
+        remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
+        
+        if remaining_vol <= 0:
+            max_concs[var_reagent] = 0
+            continue
+            
+        # Use C1V1 = C2V2 to calculate max concentration
+        # C1 = initial_conc
+        # V1 = remaining_vol 
+        # V2 = 200 (total volume)
+        # Solve for C2 (max concentration)
+        max_conc = (initial_conc * remaining_vol) / 200
+        max_concs[var_reagent] = max_conc
+        
+    return max_concs
+
+
 
 
     def _make_out_dirs(self, header_data):
