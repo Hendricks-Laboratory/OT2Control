@@ -423,15 +423,45 @@ class Controller(ABC):
         """
         # total volumes for fixed reagents
         fixed_vols = {}
+
+        df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
+        print(df_sliced)
+        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))  # Convert to dictionary
+        print(mapping)
+
         for reagent in self.get_fixed_reagents():
-            if reagent in self.tot_vols:
-                fixed_vols[reagent] = self.tot_vols[reagent]
+            if reagent in mapping:
+                fixed_vols[reagent] = mapping[reagent]
         
+        print(f"!!!!{fixed_vols}")
+
+        # Calculate remaining volume available for this reagent
+        total_fixed_vol = sum(fixed_vols.values())
+        print(f"!!!!!{total_fixed_vol}")
+        remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
+
         #  max concentrations for variable reagents one at a time
+        conc = self.robo_params["reagent_df"]
+        reagent_names = conc.index
+
+
+       
         max_concs = {}
         for var_reagent in self.get_variable_reagents():
             # Get initial concentration of this reagent
-            initial_conc = None
+
+            """var_reagent_conc = 
+            print(f"!!!!!{var_reagent_conc}")"""
+            
+            prefix = var_reagent
+            regex = f"^{prefix}.*"
+            # Filter the list using the regex
+            matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
+            var_reagent_conc = self._get_conc(matching_chemicals[0])
+            print(f"!!!!!{var_reagent_conc}")
+
+            
+            """initial_conc = None
             for idx, row in self.rxn_df.iterrows():
                 if row['reagent'] == var_reagent and not pd.isna(row['conc']):
                     initial_conc = row['conc']
@@ -440,20 +470,18 @@ class Controller(ABC):
             if initial_conc is None:
                 continue
                 
-            # Calculate remaining volume available for this reagent
-            total_fixed_vol = sum(fixed_vols.values())
-            remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
+            
             
             if remaining_vol <= 0:
                 max_concs[var_reagent] = 0
-                continue
+                continue"""
                 
             # Use C1V1 = C2V2 to calculate max concentration
             # C1 = initial_conc
             # V1 = remaining_vol 
             # V2 = 200 (total volume)
             # Solve for C2 (max concentration)
-            max_conc = (initial_conc * remaining_vol) / 200
+            max_conc = (var_reagent_conc * remaining_vol) / 200
             max_concs[var_reagent] = max_conc
             
         return max_concs
