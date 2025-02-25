@@ -482,7 +482,7 @@ class Controller(ABC):
             # V2 = 200 (total volume)
             # Solve for C2 (max concentration)
             max_conc = (var_reagent_conc * remaining_vol) / 200
-            max_concs[var_reagent] = max_conc
+            max_concs[var_reagent] = max_conc / len(self.variable_reagents)
             
         return max_concs
 
