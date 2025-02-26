@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, simpledialog
 import os
 import pickle
-import threading
 from queue import Queue
-
+from threadManager import QueueManager, ThreadManager
+from controller import run_as_thread
 class PickleManager:
     def __init__(self, filename="pickle.pk"):
         self.filename = filename
@@ -45,9 +45,10 @@ class GUIApp(tk.Tk):
         self.geometry("750x450")
         self.configure(bg='#252526')
 
-        self.input_queue = Queue()
-        self.status_queue = Queue()
+        self.input_queue = QueueManager().get_input_queue()
+        self.status_queue = QueueManager().get_status_queue()
         self.pickle = PickleManager()
+        self.thread_manager = ThreadManager()
         
         self.sheet_name = tk.StringVar()
         self.sim = tk.IntVar()
@@ -56,8 +57,7 @@ class GUIApp(tk.Tk):
         self.create_interface()
 
         self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
-        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
-        self.thread_manager.start_thread(target=self.listen_input)
+        
 
     def create_interface(self):
         tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
@@ -90,12 +90,11 @@ class GUIApp(tk.Tk):
         if self.sim.get():
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
-<<<<<<< Updated upstream
 
-        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
-=======
-        self.status_queue.put("Controller started with arguments: " + " ".join(cli_args))
->>>>>>> Stashed changes
+        self.thread_manager.start_thread(target=run_as_thread)
+
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+        self.thread_manager.start_thread(target=self.listen_input)
 
     def update_run_status(self):
         while True:
