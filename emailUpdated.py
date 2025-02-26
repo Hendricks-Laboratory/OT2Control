@@ -3,17 +3,19 @@ import ssl
 from email.mime.text import MIMEText
 from threadManager import QueueManager, ThreadManager
 
+
 class EmailNotifier:
     """
     Sends an email to the user when the robot reaction is complete.
     Completion is triggered by `completion_event` being set on shutdown in `controller.py`.
     """
-
+    
     smtp_server = "smtp.gmail.com"
     smtp_port = 465  # SSL port
-
+    
     sender_email = ""
     sender_password = ""
+  
 
     def __init__(self, recipient_email):
         self.recipient_email = recipient_email
