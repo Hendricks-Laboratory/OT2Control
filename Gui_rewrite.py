@@ -90,8 +90,12 @@ class GUIApp(tk.Tk):
         if self.sim.get():
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
+<<<<<<< Updated upstream
 
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
+=======
+        self.status_queue.put("Controller started with arguments: " + " ".join(cli_args))
+>>>>>>> Stashed changes
 
     def update_run_status(self):
         while True:
