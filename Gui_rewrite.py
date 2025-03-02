@@ -5,6 +5,7 @@ import pickle
 from queue import Queue
 from threadManager import QueueManager, ThreadManager
 from controller import run_as_thread
+from deckPositionsGui import run_deckpos
 class PickleManager:
     def __init__(self, filename="pickle.pk"):
         self.filename = filename
@@ -69,7 +70,8 @@ class GUIApp(tk.Tk):
         tk.Checkbutton(self, text="Auto", variable=self.auto, bg="#252526", fg="white").pack(pady=5)
 
         tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
-        
+        tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+
         self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
         self.output_text.pack(expand=True, fill="both", pady=10)
 
@@ -95,6 +97,9 @@ class GUIApp(tk.Tk):
 
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
         self.thread_manager.start_thread(target=self.listen_input)
+
+    def run_deckpos(self):
+        self.thread_manager.start_thread(target=run_deckpos)
 
     def update_run_status(self):
         while True:

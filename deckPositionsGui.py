@@ -215,7 +215,7 @@ class deck:
         return name_key_pairs
 
   
-class CTkinterApp(customtkinter.CTk):
+class deckPosWin(customtkinter.CTk):
     # __init__ function for class tkinterApp 
     def __init__(self): 
          
@@ -652,13 +652,14 @@ class Page1(customtkinter.CTkFrame):
         # button to show frame 2 with text
         # layout2
         button1 = customtkinter.CTkButton(self, text ="StartPage", command = lambda : controller.show_frame(StartPage))
-        tooltip_1 = CTkToolTip(button1, message="50")
+        # tooltip_1 = CTkToolTip(button1, message="50")
         
         # putting the button in its place 
         # by using grid
         button1.grid(row = 1, column = 1, padx = 10, pady = 10)
         
   
+def run_deckpos():
 # Driver Code
-app = CTkinterApp()
-app.mainloop()
+    app = deckPosWin()
+    app.mainloop()
