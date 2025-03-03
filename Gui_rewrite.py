@@ -91,7 +91,7 @@ class GUIApp(tk.Tk):
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
 
-        self.thread_manager.start_thread(target=run_as_thread)
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
 
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
         self.thread_manager.start_thread(target=self.listen_input)
