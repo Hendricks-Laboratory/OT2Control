@@ -80,14 +80,12 @@ def main(serveraddr,gui_args = None):
     prompts for input and then calls appropriate launcher
     '''
     parser = init_parser()
-    test_inputs()
     if not gui_args: 
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those instead
         args = parser.parse_args(gui_args)
-    # status(args.name)
+        status(str(args))
     if args.mode == 'protocol':
-        
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
         status('launching in auto mode')
@@ -1132,6 +1130,7 @@ class Controller(ABC):
             #pull down from the cloud
             reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
                 row_names = True, credentials=credentials).drop(columns=['comments'])
+            print("got reagent info")
             #cache the data
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
@@ -3475,16 +3474,7 @@ def prompt_input(type, msg):
     response_queue = QueueManager.get_response_queue()
     input_queue.put((type, msg))
     response = response_queue.get()
-    print(response)
     return response
-
-def test_inputs():
-    """test each input type"""
-    # pass
-    prompt_input("continue", "testing continue")
-    prompt_input("yesno", "testing yes/no")
-    prompt_input("input", "testing text input")
-    status("test complete")
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"

@@ -89,12 +89,13 @@ class GUIApp(tk.Tk):
             cli_args.append(f"-n{self.sheet_name.get().strip()}")
         if self.auto.get():
             cli_args.append("-mauto")
+        else:
+            cli_args.append("-mprotocol")
         if self.sim.get():
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
 
-        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args,))
-
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
         self.thread_manager.start_thread(target=self.listen_input)
 
@@ -104,7 +105,7 @@ class GUIApp(tk.Tk):
     def update_run_status(self):
         while True:
             msg = self.status_queue.get()
-            self.output_text.insert(tk.END, msg + "\n")
+            self.output_text.insert(tk.END, str(msg) + "\n")
             self.output_text.see(tk.END)
     
     def listen_input(self):
