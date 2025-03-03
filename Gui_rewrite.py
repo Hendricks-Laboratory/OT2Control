@@ -65,8 +65,8 @@ class GUIApp(tk.Tk):
         self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
         self.sheet_input.pack()
         
-        tk.Checkbutton(self, text="Sim", variable=self.sim, bg="#252526", fg="white").pack(pady=5)
-        tk.Checkbutton(self, text="Auto", variable=self.auto, bg="#252526", fg="white").pack(pady=5)
+        ttk.Checkbutton(self, text="Sim", variable=self.sim).pack(pady=5)
+        ttk.Checkbutton(self, text="Auto", variable=self.auto).pack(pady=5)
 
         tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
         
