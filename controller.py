@@ -84,7 +84,6 @@ def main(serveraddr,gui_args = None):
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those instead
         args = parser.parse_args(gui_args)
-        status(str(args))
     if args.mode == 'protocol':
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
     elif args.mode == 'auto':
@@ -116,6 +115,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     if not rxn_sheet_name:
         rxn_sheet_name = prompt_input('input','<<controller>> please input the sheet name')
     my_ip = socket.gethostbyname(socket.gethostname())
+    print(rxn_sheet_name)
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))
@@ -1120,7 +1120,7 @@ class Controller(ABC):
         returns:  
             df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
         '''
-        
+        print(spreadsheet_key)
         if self.use_cache:
             #if you've already seen this don't pull it
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
