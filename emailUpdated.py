@@ -65,9 +65,9 @@ class EmailNotifier:
                 break
 
             logging.info("EmailNotifier: Event detected! Sending email.")
-
-            try:
-                self.thread_manager.start_thread(self.send_email, daemon=True)
+            try:    
+                print("Calling send_email()")
+                self.send_email()
             except Exception as e:
                 logging.error("Error in watch_event(): %s", e)
 
