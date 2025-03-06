@@ -1,9 +1,13 @@
-import base64
-import json
 import os
+import httplib2
+import oauth2client
+from oauth2client import client, tools, file
+import base64
 from email.mime.text import MIMEText
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from email.mime.multipart import MIMEMultipart
+from apiclient import errors, discovery
+from email.mime.base import MIMEBase
+
 from threadManager import QueueManager, ThreadManager
 
 class EmailNotifier:
@@ -13,89 +17,75 @@ class EmailNotifier:
     """
 
     SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+    CLIENT_SECRET_FILE = "hendricks-gmail-api-send-email.json"
+    APP_NAME = "Gmail API Send Email"
 
-    # Path to credentials file (Updated with correct repository structure)
-    REPO_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets script directory
-    SERVICE_ACCOUNT_FILE = os.path.join(REPO_DIR, "Credentials", "hendricks-lab-jupyter-sheets-5363dda1a7e0.json")
+    @staticmethod
+    def get_credentials():
+        home_dir = os.path.expanduser('~')
+        credential_dir = os.path.join(home_dir, '.credentials')
+        if not os.path.exists(credential_dir):
+            os.makedirs(credential_dir)
+        credential_path = os.path.join(credential_dir, "hendricks-gmail-api-send-email.json")
+
+        store = oauth2client.file.Storage(credential_path)
+        credentials = store.get()
+        if not credentials or credentials.invalid:
+            flow = client.flow_from_clientsecrets(EmailNotifier.CLIENT_SECRET_FILE, EmailNotifier.SCOPES)
+            flow.user_agent = EmailNotifier.APP_NAME
+            credentials = tools.run_flow(flow, store)
+            print('Storing credentials to ' + credential_path)
+        return credentials
+
+    def send_message(self, sender, to, subject, msgHtml, msgPlain):
+        credentials = self.get_credentials()
+        http = credentials.authorize(httplib2.Http())
+        service = discovery.build('gmail', 'v1', http=http)
+        message1 = self.create_message_html(sender, to, subject, msgHtml, msgPlain)
+        result = self.send_message_internal(service, "me", message1)
+        return result
+    
+    @staticmethod
+    def send_message_internal(service, user_id, message):
+        try:
+            message = (service.users().messages().send(userId=user_id, body=message).execute())
+            print('Message Id: %s' % message['id'])
+            return message
+        except errors.HttpError as error:
+            print('An error occurred: %s' % error)
+            return "Error"
+    
+    @staticmethod
+    def create_message_html(sender, to, subject, msgHtml, msgPlain):
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = sender
+        msg['To'] = to
+        msg.attach(MIMEText(msgPlain, 'plain'))
+        msg.attach(MIMEText(msgHtml, 'html'))
+        return {'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode()}  # Fix encoding issue
 
     def __init__(self, recipient_email):
         self.recipient_email = recipient_email
         self.completion_event = QueueManager.get_completion_event()
-
-        # Authenticate Gmail API and extract service account email
-        self.service, self.sender_email = self.authenticate_gmail()
-
-        # Start listening for the completion event
-
-    def authenticate_gmail(self):
-        """Authenticate using service account credentials and retrieve sender email."""
-        try:
-            credentials = service_account.Credentials.from_service_account_file(
-                self.SERVICE_ACCOUNT_FILE, scopes=self.SCOPES
-            )
-
-            # Extract service account email dynamically
-            with open(self.SERVICE_ACCOUNT_FILE, "r") as file:
-                credentials_data = json.load(file)
-                sender_email = credentials_data.get("client_email")  # Gets service account email
-
-            # If using a Google Workspace account, delegate credentials
-            delegated_credentials = credentials.with_subject(sender_email)
-            service = build("gmail", "v1", credentials=delegated_credentials)
-
-            print(f"Gmail API authenticated successfully! Using sender: {sender_email}")
-            return service, sender_email
-
-        except Exception as e:
-            print("Error authenticating Gmail API:", e)
-            return None, None
 
     def watch_event(self):
         """Waits for the completion event and sends an email notification."""
         print("EmailNotifier: Waiting for completion event...")
 
         while True:
-            print("checking for event")
-            if self.completion_event.is_set():
-                print("Event detected before wait.")
             self.completion_event.wait()  # Blocks until `set()` is called
-            print("EmailNotifier: Event detected after wait. Sending email.")
+            print("EmailNotifier: Event detected. Sending email.")
 
             try:
-                self.send_email()
-                # print("sending......")
+                self.send_message(
+                    sender="your-email@example.com",
+                    to=self.recipient_email,
+                    subject="Task Completed",
+                    msgHtml="<p>The task has been completed.</p>",
+                    msgPlain="The task has been completed."
+                )
             except Exception as e:
                 print("Error in watch_event():", e)
+            
             self.completion_event.clear()
-
-    def send_email(self):
-        """Sends an email notification using Gmail API."""
-        if not self.recipient_email:
-            print("⚠️ No recipient email provided. Skipping notification.")
-            return
-
-        if not self.sender_email:
-            print("Error: Sender email not available from credentials.")
-            return
-
-        print(f"📩 send_email() called for {self.recipient_email}")
-
-        msg = MIMEText("Your reaction is complete! You can now check your results.")
-        msg["Subject"] = "Reaction Complete Notification"
-        msg["From"] = self.sender_email
-        msg["To"] = self.recipient_email
-
-        encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-
-        try:
-            send_message = (
-                self.service.users()
-                .messages()
-                .send(userId="me", body={"raw": encoded_message})
-                .execute()
-            )
-            print(f"Email successfully sent to {self.recipient_email}!")
-            print("Message ID:", send_message["id"])
-
-        except Exception as e:
-            print("Error sending email:", e)

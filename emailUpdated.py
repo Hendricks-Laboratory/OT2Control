@@ -13,8 +13,8 @@ class EmailNotifier:
     smtp_server = "smtp.gmail.com"
     smtp_port = 465  # SSL port
     
-    sender_email = ""
-    sender_password = ""
+    sender_email = "science.356.lab@gmail.com"
+    sender_password = "adcqlbxhnmthoybt"
   
 
     def __init__(self, recipient_email):
