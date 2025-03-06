@@ -443,7 +443,6 @@ class Controller(ABC):
         # Calculate remaining volume available for this reagent
         total_fixed_vol = sum(fixed_vols.values())
         remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
-        
         if remaining_vol <= 0:
             max_concs[var_reagent] = 0
             continue
@@ -2241,6 +2240,30 @@ class AutoContr(Controller):
         '''
         pass
 
+    def update_experiment_max_conc(self, X, normalize_flag=True):
+        '''
+        Updates the experiment_data DataFrame with the maximum concentration of each reagent 
+        input: X, a numpy array of the current recipe 
+        returns: None
+        '''
+        
+        max_conc = list(self.get_max_conc().keys()) 
+
+        if normalize_flag:
+            operation = 'multiply'
+        else:
+            operation = 'divide'
+        
+        for row in X:
+            for i in range(len(row)):
+                if operation == 'multiply':
+                    row[i] = max_conc[i] * row[i]
+                else:
+                    row[i] = row[i] / max_conc[i]
+        
+        return X
+
+
     @error_exit
     def _run(self, port, simulate, model, no_pr):
         '''
@@ -2262,7 +2285,7 @@ class AutoContr(Controller):
         # Generate initial design and simulate experiments to get initial data
         X_initial = model.generate_initial_design()
         print(f"X_initial: {X_initial}")
-        X_Denormalized = denormalize(X_initial,0,0.002)
+        X_Denormalized = self.update_experiment_max_conc(X_initial, normalize_flag=False) 
         print(f"X Denormalized: {X_Denormalized}")
 
         recipes =  self.duplicate_list_elements(X_Denormalized, self.num_duplicates)    
@@ -2327,7 +2350,8 @@ class AutoContr(Controller):
         model.experiment_data['X'] = list(recipes)
         model.experiment_data['Y'] = list(Y_initial)
         # Initialize the optimizer with initial experimental data
-        model.initialize_optimizer(normalize(recipes,0,0.002), Y_initial)
+        X_initial_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
+        model.initialize_optimizer(X_initial_normalized, Y_initial)
         self.batch_num += 1
 
         Y_best = np.min(abs(denormalize(model.optimizer.Y,300,900) - model.target_value))
@@ -2340,8 +2364,9 @@ class AutoContr(Controller):
         while not model.quit:
 
             # get new recipes
-            X_new = model.suggest()
+            X_new = model.suggest(len(self.variable_reagents))
             recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
+            recipes = self.update_experiment_max_conc(recipes, normalize_flag=False)
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
             # do the experiments
             #generate new wellnames for next batch
@@ -2362,7 +2387,8 @@ class AutoContr(Controller):
             lambda_maxes = find_max(scan_data)
             print(lambda_maxes)
             Y_new = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
-            model.update_experiment_data(normalize(recipes,0,0.002), Y_new)
+            X_new_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
+            model.update_experiment_data(X_new_normalized, Y_new)
 
             # print results
             # To get the best observed X values (parameters)

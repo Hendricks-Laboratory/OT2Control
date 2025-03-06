@@ -3,6 +3,7 @@ from pyDOE import lhs
 from GPyOpt import Design_space
 import GPy
 
+from itertools import product
 
 from abc import abstractmethod
 import time  #TODO delete this debugging only
@@ -185,12 +186,18 @@ class OptimizationModel():
         # TODO: something with evaluate_objective() maybe.
         pass
 
+    def cartesian_product(*iterables):
+        """""
+        Compute the Cartesian product of input iterables.
+        """
+        return list(product(*iterables))
         
-    def suggest(self):
+    def suggest(self, num_variable_reagents, num_points=100):
         '''
         Suggests the next locations (parameter sets) for experimentation based on the current acquisition function.
         returns:
         np.ndarray: The suggested parameters for the next experiments.
+        max_conc: The maximum concentration of the variable reagents.
         '''
         #self.current_acquisition_index = (self.current_acquisition_index + 1) % len(self.acquisition_functions)
         #print(self.current_acquisition_index)
@@ -209,18 +216,27 @@ class OptimizationModel():
         print(f"SModel: {self.gp_model}")
         print(f"SOptimizer: {self.optimizer}")
 
-        for i in range(200):
-            pred, std = self.gp_model.predict(np.array([[temp]]))
+
+        step_size = 1/num_points
+
+        concentrations = cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
+
+        for i in range(len(concentrations)):
+            pred, std = self.gp_model.predict(np.array([concentrations[i]]))
             predictions.append(pred)
             stdev.append(std)
-            temp += 0.005
+
         
         predictions = denormalize(np.array(predictions).flatten(),300, 900)
-        stdev = np.array(stdev).flatten()*(600)
-        linespace = np.linspace(0,0.002,200)
+        #predictions is a list of lambda values for each conc
+        #stdev = np.array(stdev).flatten()*(600)
+        #linespace = np.linspace(0,max_conc,num_points)
 
+        # closest is an index of the lambda value that is closest to the target value
         closest = np.argmin(np.abs(predictions - self.target_value))
-        best = linespace.reshape(-1,1)[closest]
+       
+       # best is the conc that predicts the lambda value closest to the target value
+        best = concentrations[closest]
         print(f"{best} uM KBr results in a closeness of {closest} nm")
         print(type(best))
         #suggestions = self.optimizer.suggest_next_locations()
