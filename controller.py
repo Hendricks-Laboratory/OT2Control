@@ -1398,14 +1398,16 @@ class Controller(ABC):
 
             #merge all the scans into a single file if there were any scans
             #get the names of all the scan files
+            
+            def getPair(num): 
+                alpha = "abcdefghijklmnopqrstuvwxyz"
+                first = alpha[math.floor(num/26)]
+                second = alpha[num - ((math.floor(num/26))*26)]
+                return first + second
+            
             if 'scan' in callbacks:
                 dst = row['scan_filename'] #also the base name for all files to be merged
-                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps))]
-                if len(transfer_steps) <= 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
-                elif len(transfer_steps) > 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(26)] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps)-26)]
-                    callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
+                scan_names = ['{}-{}'.format(dst, getPair(i)) for i in range(len(transfer_steps))] 
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
@@ -1430,11 +1432,12 @@ class Controller(ABC):
             callback_num must not be larger than 26 (alpha numeric characters are used. If you
               go larger than 26, you'll exceed alpha numeric)
         '''
-        if callback_num <= 25:
-            callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
-        elif callback_num > 25:
-            callback_num -= 26
-            callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
+        def getPair(num): 
+            alpha = "abcdefghijklmnopqrstuvwxyz"
+            first = alpha[math.floor(num/26)]
+            second = alpha[num - ((math.floor(num/26))*26)]
+            return first + second
+        callback_alph = getPair(callback_num) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             self._stop(i)
@@ -3075,7 +3078,8 @@ class ScanDataFrame():
             temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
             hour = temphour if temphour == 12  else temphour +12
         elif am_pm == "AM":
-            hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            hour = temphour -12 if temphour == 12  else temphour
         
         
         
