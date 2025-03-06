@@ -1,3 +1,4 @@
+import math
 import GPyOpt
 from pyDOE import lhs
 from GPyOpt import Design_space
@@ -196,6 +197,9 @@ class OptimizationModel():
         #print(self.current_acquisition_index)
         #print(self.acquisition_functions[self.current_acquisition_index])
         #self._update_acquisition()
+
+        reagent_combinations = 10000
+        num_steps = math.floor(reagent_combinations ** (1 / len(self.variable_reagents)))
         
         def normalize(x, min_val, max_val):
            return (x - min_val) / (max_val - min_val)
