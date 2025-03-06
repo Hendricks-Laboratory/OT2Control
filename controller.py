@@ -118,15 +118,15 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
     #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
-    print(auto.rxn_df.describe())
-    print(auto.rxn_df.head(20))
-    print(auto.rxn_df)
+    #print(auto.rxn_df.describe())
+    #print(auto.rxn_df.head(20))
+    #print(auto.rxn_df)
     y_shape = auto.y_shape# number of reagents to learn on
-    print("starting with y_shape:", y_shape)
+    #print("starting with y_shape:", y_shape)
     reagent_info = auto.robo_params['reagent_df']
     fixed_reagents = auto.get_fixed_reagents()
     variable_reagents = auto.get_variable_reagents()
-    target_value = np.random.randint(1, 200) # not being used? TODO delete 
+    target_value = auto.getModelInfo()["target"] 
     try:
         max_conc = auto.get_max_conc()
         print(f'max_conc for variable reagents: {max_conc}')
@@ -135,8 +135,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.1, 1)} for i in range(y_shape)]
     # final_spectra not used?
-    model = OptimizationModel(bounds, auto.getModelInfo()["target"], reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
-    print(auto.getModelInfo()["target"])
+    model = OptimizationModel(bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
+    print(f"Target: {target_value}")
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
@@ -240,7 +240,7 @@ class Controller(ABC):
         #necessary helper params
         self._check_cache_metadata(rxn_sheet_name)
         credentials = self._init_credentials(rxn_sheet_name)
-        self.drive_service = self._init_google_drive(credentials) # Terence   
+        #self.drive_service = self._init_google_drive(credentials) # Terence   
         self.wks_key_pairs = self._get_wks_key_pairs(credentials, rxn_sheet_name)
         self.name_key_wks = self._get_key_wks(credentials)
         wks_key = self._get_wks_key(credentials, rxn_sheet_name)
@@ -2130,15 +2130,15 @@ class AutoContr(Controller):
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.variable_reagents = self.get_variable_reagents()
-        print(f'variable reagents: {self.variable_reagents}')
+        #print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
         self.y_shape = len(self.variable_reagents)
-        print(f"y-shape is {self.y_shape}")
+        #print(f"y-shape is {self.y_shape}")
         print(self.robo_params['reagent_df'])
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
-        print(f'reagent_order: {self.reagent_order}')
+        #print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
         self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
         self.num_duplicates = num_duplicates
@@ -2290,16 +2290,14 @@ class AutoContr(Controller):
 
         recipes =  self.duplicate_list_elements(X_Denormalized, self.num_duplicates)    
 
-        print(f'Initial seeds as follows: {recipes}') 
-
         #generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
         #plan and execute a reaction with duplicates.
-        print(f'creating samples at wellnames: {wellnames}')
+        #print(f'creating samples at wellnames: {wellnames}')
 
         self._create_samples(wellnames, recipes)
 
-        print('samples created')
+        #print('samples created')
         #pull in the scan data
         filenames = self.rxn_df[
                 (self.rxn_df['op'] == 'scan') |
@@ -2307,7 +2305,7 @@ class AutoContr(Controller):
                 ].reset_index()
         #TODO filenames is empty. dunno why
 
-        print(f'filenames: {filenames}')
+        #print(f'filenames: {filenames}')
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
 
@@ -2340,10 +2338,14 @@ class AutoContr(Controller):
             return lambda_max_wavelengths
 
         lambda_maxes = find_max(scan_data)
-        print(lambda_maxes)
+        print(f"Lambda Maxes: {lambda_maxes}")
         
         Y_initial = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
+        X_initial = normalize(recipes,0,0.002)
         self.batch_num += 1
+
+        print(f"Normalized Lambda Maxes: {Y_initial}")
+        print(f"Normalized recipes: {X_initial}")
 
         self._update_experiment_data(wellnames, recipes, lambda_maxes)
         # Optimizer update method not yet available so add initial design to records.
@@ -2385,19 +2387,19 @@ class AutoContr(Controller):
             # update model with data
 
             lambda_maxes = find_max(scan_data)
-            print(lambda_maxes)
+            print(f"Lambda Maxes: {lambda_maxes}")
             Y_new = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
             X_new_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
             model.update_experiment_data(X_new_normalized, Y_new)
 
             # print results
             # To get the best observed X values (parameters)
-            X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
+            #X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
             # To get the best observed Y value (function value)
-            Y_best = np.min(model.optimizer.Y) # if zero we need to quit?
+            """Y_best = np.min(model.optimizer.Y) # if zero we need to quit?
             if Y_best < 5:
                 print("Exit due to meeting target")
-            print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")
+            print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")"""
 
             self.batch_num += 1
             self._update_experiment_data(wellnames, recipes, lambda_maxes)     
@@ -2488,9 +2490,9 @@ class AutoContr(Controller):
                 self.rxn_df = self._build_rxn_df(wellnames, recipes)
                 self._insert_tot_vol_transfer()
 
-                print('trying to build df.')
-                print(f'products list:{self._products}')
-                print(f'rxn_df: {self.rxn_df}')
+                #print('trying to build df.')
+                #print(f'products list:{self._products}')
+                #print(f'rxn_df: {self.rxn_df}')
 
                 if self.tot_vols: #has at least one element
                     if (self.rxn_df.loc[0,self._products] < 0).any():

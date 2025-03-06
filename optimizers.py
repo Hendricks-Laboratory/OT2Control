@@ -1,3 +1,4 @@
+import math
 import GPyOpt
 from pyDOE import lhs
 from GPyOpt import Design_space
@@ -203,6 +204,9 @@ class OptimizationModel():
         #print(self.current_acquisition_index)
         #print(self.acquisition_functions[self.current_acquisition_index])
         #self._update_acquisition()
+
+        reagent_combinations = 10000
+        num_steps = math.floor(reagent_combinations ** (1 / len(self.variable_reagents)))
         
         def normalize(x, min_val, max_val):
            return (x - min_val) / (max_val - min_val)
@@ -258,11 +262,19 @@ class OptimizationModel():
         '''
         print(f"X_new: {X_new}")
         print(f"Y_new: {Y_new}")
+
+        print(f"X_all Before Update: {self.optimizer.X}")
+        print(f"Y_all Before Update: {self.optimizer.Y}")
+
         #print(f"Experiment Data X: {self.experiment_data["X"]}")
         self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
         self.experiment_data['X'].extend(X_new)
         self.experiment_data['Y'].extend(Y_new)
         #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
+        
+        print(f"X_all After Update: {self.optimizer.X}")
+        print(f"Y_all After Update: {self.optimizer.Y}")
+        
         self.curr_iter += 1
         self.update_quit(X_new, Y_new)
     
