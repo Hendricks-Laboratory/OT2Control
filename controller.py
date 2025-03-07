@@ -130,6 +130,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     try:
         max_conc = auto.get_max_conc()
         print(f'max_conc for variable reagents: {max_conc}')
+        max_conc = list(max_conc.values())
     except Exception as e:
         print(f'Error getting max_conc: {e}')
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
@@ -415,51 +416,80 @@ class Controller(ABC):
         return data
 
     def get_max_conc(self):
-    """
-    Gets the volumes of fixed reagents and calculates max concentrations for variable reagents.
-    
-    Returns:
-        dict: Maximum concentrations for each variable reagent
-    """
-    # total volumes for fixed reagents
-    fixed_vols = {}
-    for reagent in self.get_fixed_reagents():
-        if reagent in self.tot_vols:
-            fixed_vols[reagent] = self.tot_vols[reagent]
-    
-    #  max concentrations for variable reagents one at a time
-    max_concs = {}
-    for var_reagent in self.get_variable_reagents():
-        # Get initial concentration of this reagent
-        initial_conc = None
-        for idx, row in self.rxn_df.iterrows():
-            if row['reagent'] == var_reagent and not pd.isna(row['conc']):
-                initial_conc = row['conc']
-                break
-                
-        if initial_conc is None:
-            continue
-            
+        """
+        Gets the volumes of fixed reagents and calculates max concentrations for variable reagents.
+        
+        Returns:
+            dict: Maximum concentrations for each variable reagent
+        """
+        # total volumes for fixed reagents
+        fixed_vols = {}
+
+        df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
+        print(df_sliced)
+        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))  # Convert to dictionary
+        print(mapping)
+
+        for reagent in self.get_fixed_reagents():
+            if reagent in mapping:
+                fixed_vols[reagent] = mapping[reagent]
+        
+        print(f"!!!!{fixed_vols}")
+
         # Calculate remaining volume available for this reagent
         total_fixed_vol = sum(fixed_vols.values())
+        print(f"!!!!!{total_fixed_vol}")
         remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
-        if remaining_vol <= 0:
-            max_concs[var_reagent] = 0
-            continue
+
+        #  max concentrations for variable reagents one at a time
+        conc = self.robo_params["reagent_df"]
+        reagent_names = conc.index
+
+
+       
+        max_concs = {}
+        for var_reagent in self.get_variable_reagents():
+            # Get initial concentration of this reagent
+
+            """var_reagent_conc = 
+            print(f"!!!!!{var_reagent_conc}")"""
             
-        # Use C1V1 = C2V2 to calculate max concentration
-        # C1 = initial_conc
-        # V1 = remaining_vol 
-        # V2 = 200 (total volume)
-        # Solve for C2 (max concentration)
-        max_conc = (initial_conc * remaining_vol) / 200
-        max_concs[var_reagent] = max_conc
-        
-    return max_concs
+            prefix = var_reagent
+            regex = f"^{prefix}.*"
+            # Filter the list using the regex
+            matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
+            var_reagent_conc = self._get_conc(matching_chemicals[0])
+            print(f"!!!!!{var_reagent_conc}")
+
+            
+            """initial_conc = None
+            for idx, row in self.rxn_df.iterrows():
+                if row['reagent'] == var_reagent and not pd.isna(row['conc']):
+                    initial_conc = row['conc']
+                    break
+                    
+            if initial_conc is None:
+                continue
+                
+            
+            
+            if remaining_vol <= 0:
+                max_concs[var_reagent] = 0
+                continue"""
+                
+            # Use C1V1 = C2V2 to calculate max concentration
+            # C1 = initial_conc
+            # V1 = remaining_vol 
+            # V2 = 200 (total volume)
+            # Solve for C2 (max concentration)
+            max_conc = (var_reagent_conc * remaining_vol) / 200
+            max_concs[var_reagent] = max_conc / len(self.variable_reagents)
+            
+        return max_concs
 
 
-
-
+   
+   
     def _make_out_dirs(self, header_data):
         '''
         Creates output directories both locally and in Google Drive
@@ -2144,11 +2174,12 @@ class AutoContr(Controller):
         self.num_duplicates = num_duplicates
     
     # Update experiment_data DataFrame after each batch
-    def _update_experiment_data(self, wellnames, recipes, Experiment_result):
-        
+    def _update_experiment_data(self, recipes, Experiment_result):
+        print(recipes)
+        print(Experiment_result)
         new_data = pd.DataFrame({
-            'Recipes': recipes.reshape(1,-1).tolist()[0],
-            'WellNames': wellnames,
+            'Silver': recipes[:, 0],
+            'KBr': recipes[:, 1],
             'Experiment Result': Experiment_result
         })
         self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)
@@ -2247,15 +2278,16 @@ class AutoContr(Controller):
         returns: None
         '''
         
-        max_conc = list(self.get_max_conc().keys()) 
+        max_conc = list(self.get_max_conc().values()) 
 
         if normalize_flag:
-            operation = 'multiply'
-        else:
             operation = 'divide'
+        else:
+            operation = 'multiply'
         
         for row in X:
             for i in range(len(row)):
+                print(row)
                 if operation == 'multiply':
                     row[i] = max_conc[i] * row[i]
                 else:
@@ -2341,18 +2373,19 @@ class AutoContr(Controller):
         print(f"Lambda Maxes: {lambda_maxes}")
         
         Y_initial = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
-        X_initial = normalize(recipes,0,0.002)
+        #X_initial = normalize(recipes,0,0.002)
         self.batch_num += 1
 
         print(f"Normalized Lambda Maxes: {Y_initial}")
         print(f"Normalized recipes: {X_initial}")
 
-        self._update_experiment_data(wellnames, recipes, lambda_maxes)
+        self._update_experiment_data(recipes, lambda_maxes)
         # Optimizer update method not yet available so add initial design to records.
         model.experiment_data['X'] = list(recipes)
         model.experiment_data['Y'] = list(Y_initial)
         # Initialize the optimizer with initial experimental data
         X_initial_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
+        print(f"Normalized recipes: {X_initial}")
         model.initialize_optimizer(X_initial_normalized, Y_initial)
         self.batch_num += 1
 
@@ -2402,7 +2435,7 @@ class AutoContr(Controller):
             print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")"""
 
             self.batch_num += 1
-            self._update_experiment_data(wellnames, recipes, lambda_maxes)     
+            self._update_experiment_data(recipes, lambda_maxes)     
             
         self.experiment_data.to_csv("experiment_data.csv", index=True)
         print("Success!!!")
