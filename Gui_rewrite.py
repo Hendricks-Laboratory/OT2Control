@@ -56,7 +56,7 @@ class GUIApp(tk.Tk):
         self.auto = tk.IntVar()
 
         self.create_interface()
-
+        self.listen_input()
         self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
         
 
@@ -81,7 +81,12 @@ class GUIApp(tk.Tk):
         elif type == "continue":
             return messagebox.askokcancel("User Input", msg)
         elif type == "input":
-            return simpledialog.askstring("User Input", msg)
+            #workaround from Stackoverflow
+            newWin = tk.Tk()
+            newWin.withdraw()
+            returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+            newWin.destroy()
+            return returnval
 
     def run_controller(self):
         cli_args = []
@@ -96,9 +101,9 @@ class GUIApp(tk.Tk):
         else:
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
+
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
-        self.thread_manager.start_thread(target=self.listen_input)
 
     def run_deckpos(self):
         self.thread_manager.start_thread(target=run_deckpos)
@@ -110,11 +115,15 @@ class GUIApp(tk.Tk):
             self.output_text.see(tk.END)
     
     def listen_input(self):
-        while True:
-            if not self.input_queue.empty():
-                type, msg = self.input_queue.get()
-                self.show_popup(type, msg)
+        print("called listen input")
+        response_queue = QueueManager.get_response_queue()
+        if not self.input_queue.empty():
+            type, msg = self.input_queue.get()
+            response = self.show_popup(type, msg)
+            response_queue.put(response)
+        self.after(100, self.listen_input)
 
+        
     def on_close(self):
         self.destroy()
 

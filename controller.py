@@ -80,9 +80,10 @@ def main(serveraddr,gui_args = None):
     prompts for input and then calls appropriate launcher
     '''
     parser = init_parser()
+    test_inputs()
     if not gui_args: 
         args = parser.parse_args()
-    else: # if controller recieves gui_args, parse those instead
+    else: # if controller recieves gui_args, parse those in stead
         args = parser.parse_args(gui_args)
     if args.mode == 'protocol':
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
@@ -3479,6 +3480,13 @@ def prompt_input(type, msg):
     input_queue.put((type, msg))
     response = response_queue.get()
     return response
+
+def test_inputs():
+    """test each type of input"""
+    print(prompt_input("yesno", "hi"))
+    print(prompt_input("continue", "hi"))
+    print(prompt_input("input","hi"))
+    status("inputs")
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"
