@@ -101,7 +101,9 @@ def launch_protocol_exec(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim
     #instantiate a controller
     if not rxn_sheet_name:
         rxn_sheet_name = prompt_input("input",'<<controller>> please input the sheet name ')
+    QueueManager.set_sheetname(rxn_sheet_name)
     my_ip = socket.gethostbyname(socket.gethostname())
+
     controller = ProtocolExecutor(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
     if not no_sim:
@@ -115,8 +117,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     if not rxn_sheet_name:
         rxn_sheet_name = prompt_input('input','<<controller>> please input the sheet name')
+    QueueManager.set_sheetname(rxn_sheet_name)
     my_ip = socket.gethostbyname(socket.gethostname())
-    print(rxn_sheet_name)
     auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
     #note shorter iterations for testing
     model = MultiOutputRegressor(Lasso(warm_start=True, max_iter=int(1e1)))

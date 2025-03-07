@@ -1,13 +1,14 @@
 from queue import Queue
 import threading
 
+import threading
+from queue import Queue
+
 class QueueManager:
     """
-    Singleton object for managing the two queues used for inter-thread communication
-    status_queue: queue for sending status text from controller to the GUI
-    input_queue: queue for sending input (yes, no, continue) to controller from GUI
+    Singleton object for managing the queues used for inter-thread communication.
     """
-    
+
     _instance = None
     _lock = threading.Lock()
 
@@ -18,6 +19,8 @@ class QueueManager:
                 cls._instance.status_queue = Queue()
                 cls._instance.input_queue = Queue()
                 cls._instance.response_queue = Queue()
+                cls._instance._sheetname = ""
+                cls._instance._sheetname_lock = threading.Lock()  # Lock for string access
         return cls._instance
 
     @staticmethod
@@ -31,6 +34,17 @@ class QueueManager:
     @staticmethod
     def get_response_queue():
         return QueueManager()._instance.response_queue
+
+    @staticmethod
+    def get_sheetname():
+        with QueueManager()._instance._sheetname_lock:
+            return QueueManager()._instance._sheetname
+
+    @staticmethod
+    def set_sheetname(name):
+        with QueueManager()._instance._sheetname_lock:
+            QueueManager()._instance._sheetname = name
+    
 
 class ThreadManager:
     """

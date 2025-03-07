@@ -4,6 +4,7 @@ import gspread
 import random
 from oauth2client.service_account import ServiceAccountCredentials
 import sys
+from threadManager import QueueManager
 #os.chdir("/mnt/c/Users/science_356_lab/Robot_Files/OT2Control")
 
 
@@ -89,11 +90,12 @@ class deck:
         """
         # Open Spreadsheet by name
         creds=self.get_credentials()
+        sheetname = self.get_sheetname()
         try:
             spreadsheet = self._get_key_wks(creds)
             for item in spreadsheet:
                 #what it should be
-                if item[0]==sys.argv[1]:
+                if item[0]==sheetname:
                     worksheet=self.find_types(creds,item[1])
                     self.get_chemicals(creds,item[1])
                 # if item[0]=='MPH_test8':
@@ -104,6 +106,9 @@ class deck:
             and make sure the spreadsheet name is spelled exactly the same as the reaction \
             spreadsheet.')
         return -1
+    
+    def get_sheetname():
+        return QueueManager.get_sheetname()
 
     #the next three functions were taken from controler py and are used toget credentials for the google sheet
     def get_credentials(self):
