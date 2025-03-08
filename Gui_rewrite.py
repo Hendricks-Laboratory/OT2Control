@@ -106,7 +106,11 @@ class GUIApp(tk.Tk):
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
 
     def run_deckpos(self):
-        self.thread_manager.start_thread(target=run_deckpos)
+        if self.sheet_name.get() == "":
+            self.status_queue.put("no sheetname provided")
+        else:
+            QueueManager().set_sheetname(str(self.sheet_name.get()))
+            self.thread_manager.start_thread(target=run_deckpos)
 
     def update_run_status(self):
         while True:

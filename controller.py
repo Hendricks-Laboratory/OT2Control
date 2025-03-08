@@ -1123,7 +1123,6 @@ class Controller(ABC):
         returns:  
             df reagent_info: dataframe as pulled from gsheets (with comments dropped)  
         '''
-        print(spreadsheet_key)
         if self.use_cache:
             #if you've already seen this don't pull it
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'rb') as reagent_info_cache:
@@ -1133,7 +1132,6 @@ class Controller(ABC):
             #pull down from the cloud
             reagent_info = g2d.download(spreadsheet_key, 'reagent_info', col_names = True, 
                 row_names = True, credentials=credentials).drop(columns=['comments'])
-            print("got reagent info")
             #cache the data
             with open(os.path.join(self.cache_path, 'reagent_info_sheet.pkl'), 'wb') as reagent_info_cache:
                 dill.dump(reagent_info, reagent_info_cache)
@@ -3485,10 +3483,11 @@ def prompt_input(type, msg):
 
 def test_inputs():
     """test each type of input"""
-    print(prompt_input("yesno", "hi"))
-    print(prompt_input("continue", "hi"))
-    print(prompt_input("input","hi"))
-    status("inputs")
+    pass
+    # print(prompt_input("yesno", "hi"))
+    # print(prompt_input("continue", "hi"))
+    # print(prompt_input("input","hi"))
+    # status("inputs")
 
 if __name__ == '__main__':
     SERVERADDR = "169.254.44.249"

@@ -108,7 +108,7 @@ class deck:
         return -1
     
     def get_sheetname():
-        return QueueManager.get_sheetname()
+        return QueueManager().get_sheetname()
 
     #the next three functions were taken from controler py and are used toget credentials for the google sheet
     def get_credentials(self):
