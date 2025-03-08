@@ -115,7 +115,6 @@ class GUIApp(tk.Tk):
             self.output_text.see(tk.END)
     
     def listen_input(self):
-        print("called listen input")
         response_queue = QueueManager.get_response_queue()
         if not self.input_queue.empty():
             type, msg = self.input_queue.get()
