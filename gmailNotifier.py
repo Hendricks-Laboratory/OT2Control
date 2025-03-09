@@ -1,14 +1,10 @@
 import os
-import httplib2
-import oauth2client
-from oauth2client import client, tools, file
 import base64
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from apiclient import errors, discovery
-from email.mime.base import MIMEBase
-
-from threadManager import QueueManager, ThreadManager
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from threadManager import QueueManager, ThreadManager 
 
 class EmailNotifier:
     """
@@ -16,76 +12,63 @@ class EmailNotifier:
     Completion is triggered by `completion_event` being set in `controller.py`.
     """
 
-    SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-    CLIENT_SECRET_FILE = "hendricks-gmail-api-send-email.json"
-    APP_NAME = "Gmail API Send Email"
-
-    @staticmethod
-    def get_credentials():
-        home_dir = os.path.expanduser('~')
-        credential_dir = os.path.join(home_dir, '.credentials')
-        if not os.path.exists(credential_dir):
-            os.makedirs(credential_dir)
-        credential_path = os.path.join(credential_dir, "hendricks-gmail-api-send-email.json")
-
-        store = oauth2client.file.Storage(credential_path)
-        credentials = store.get()
-        if not credentials or credentials.invalid:
-            flow = client.flow_from_clientsecrets(EmailNotifier.CLIENT_SECRET_FILE, EmailNotifier.SCOPES)
-            flow.user_agent = EmailNotifier.APP_NAME
-            credentials = tools.run_flow(flow, store)
-            print('Storing credentials to ' + credential_path)
-        return credentials
-
-    def send_message(self, sender, to, subject, msgHtml, msgPlain):
-        credentials = self.get_credentials()
-        http = credentials.authorize(httplib2.Http())
-        service = discovery.build('gmail', 'v1', http=http)
-        message1 = self.create_message_html(sender, to, subject, msgHtml, msgPlain)
-        result = self.send_message_internal(service, "me", message1)
-        return result
-    
-    @staticmethod
-    def send_message_internal(service, user_id, message):
-        try:
-            message = (service.users().messages().send(userId=user_id, body=message).execute())
-            print('Message Id: %s' % message['id'])
-            return message
-        except errors.HttpError as error:
-            print('An error occurred: %s' % error)
-            return "Error"
-    
-    @staticmethod
-    def create_message_html(sender, to, subject, msgHtml, msgPlain):
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = sender
-        msg['To'] = to
-        msg.attach(MIMEText(msgPlain, 'plain'))
-        msg.attach(MIMEText(msgHtml, 'html'))
-        return {'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode()}  # Fix encoding issue
+    SCOPES = [
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/userinfo.email"  
+        ]
 
     def __init__(self, recipient_email):
         self.recipient_email = recipient_email
         self.completion_event = QueueManager.get_completion_event()
+        self.credentials = self.get_credentials()
+        if not self.credentials:
+            print("Failed to authenticate Gmail API.")
+            return
+        self.service = build("gmail", "v1", credentials=self.credentials)
+
+    def get_credentials(self):
+        """Authenticate user with OAuth 2.0 and return credentials
+        """
+        print("Inside get_credentials function")
+        try:
+            credentials_path = ""
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, self.SCOPES)
+            creds = flow.run_local_server(port=0)
+            print("Authentication successful!")
+            return creds
+        except Exception as e:
+            print("Error in get_credentials")
+            return None
+        
+    def create_email(sender, to, subject, body):
+        """Create a MIME email message
+        """
+        message = MIMEText(body)
+        message["to"] = to
+        message["from"] = sender
+        message["subject"] = subject
+        return {"raw": base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")}
+
+    def send_email(self):
+        """Sends an email using the Gmail API."""
+        try:
+            sender_profile = self.service.users().getProfile(userId="me").execute()
+            sender_email = sender_profile["emailAddress"]
+            print(f"Using authenticated sender: {sender_email}")
+            subject = "Reaction Completed Notification"
+            body = "Hello! Your reaction is complete. You can now view your results."
+            message = self.create_email(sender_email, self.recipient_email, subject, body)
+            sent_message = self.service.users().messages().send(userId="me", body=message).execute()
+            print(f"Email sent successfully! Message ID: {sent_message['id']}")
+        except Exception as error:
+            print(f"An error occurred while sending email: {error}")
 
     def watch_event(self):
         """Waits for the completion event and sends an email notification."""
-        print("EmailNotifier: Waiting for completion event...")
-
+        print("Waiting for completion event...")
         while True:
             self.completion_event.wait()  # Blocks until `set()` is called
-            print("EmailNotifier: Event detected. Sending email.")
-
-            try:
-                self.send_message(
-                    sender="your-email@example.com",
-                    to=self.recipient_email,
-                    subject="Task Completed",
-                    msgHtml="<p>The task has been completed.</p>",
-                    msgPlain="The task has been completed."
-                )
-            except Exception as e:
-                print("Error in watch_event():", e)
-            
+            print("Event detected. Sending email.")
+            self.send_email()
             self.completion_event.clear()
