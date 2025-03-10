@@ -1,4 +1,4 @@
 #!/bin/sh
 pwd
-python ot2_robot.py
+python OT2Control/ot2_robot.py
 
