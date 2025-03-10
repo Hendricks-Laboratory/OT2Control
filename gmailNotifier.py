@@ -31,8 +31,10 @@ class EmailNotifier:
         """Authenticate user with OAuth 2.0 and return credentials
         """
         print("Inside get_credentials function")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        credentials_path = os.path.join(script_dir, "Credentials/creds.json")
+        print(f"Using credentials file at: {credentials_path}")
         try:
-            credentials_path = ""
             flow = InstalledAppFlow.from_client_secrets_file(credentials_path, self.SCOPES)
             creds = flow.run_local_server(port=0)
             print("Authentication successful!")
