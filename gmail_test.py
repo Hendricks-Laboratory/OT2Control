@@ -2,11 +2,11 @@ import time
 from gmailNotifier import EmailNotifier
 from threadManager import QueueManager, ThreadManager
 
-test_email = "mocke@whitman.edu"
+recipient = "mocke@whitman.edu"
 
 # QueueManager.get_completion_event().t()
 
-notifier = EmailNotifier(test_email)
+notifier = EmailNotifier(recipient)
 
 tm = ThreadManager()
 tm.start_thread(target=notifier.watch_event)

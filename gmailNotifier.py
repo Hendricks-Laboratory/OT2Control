@@ -14,12 +14,12 @@ class EmailNotifier:
 
     SCOPES = [
         "https://www.googleapis.com/auth/gmail.send",
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/userinfo.email"  
+        #"https://www.googleapis.com/auth/gmail.readonly",
+        #"https://www.googleapis.com/auth/userinfo.email"  
         ]
 
-    def __init__(self, recipient_email):
-        self.recipient_email = recipient_email
+    def __init__(self, recipient):
+        self.recipient = recipient
         self.completion_event = QueueManager.get_completion_event()
         self.credentials = self.get_credentials()
         if not self.credentials:
@@ -32,7 +32,8 @@ class EmailNotifier:
         """
         print("Inside get_credentials function")
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        credentials_path = os.path.join(script_dir, "Credentials/creds.json")
+        credentials_path = "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Credentials/credentials.json"
+        #os.path.join(script_dir, "Credentials/credentials.json")
         print(f"Using credentials file at: {credentials_path}")
         try:
             flow = InstalledAppFlow.from_client_secrets_file(credentials_path, self.SCOPES)
@@ -40,10 +41,10 @@ class EmailNotifier:
             print("Authentication successful!")
             return creds
         except Exception as e:
-            print("Error in get_credentials")
+            print(e)
             return None
         
-    def create_email(sender, to, subject, body):
+    def create_email(self, sender, to, subject, body):
         """Create a MIME email message
         """
         message = MIMEText(body)
@@ -55,14 +56,13 @@ class EmailNotifier:
     def send_email(self):
         """Sends an email using the Gmail API."""
         try:
-            sender_profile = self.service.users().getProfile(userId="me").execute()
-            sender_email = sender_profile["emailAddress"]
-            print(f"Using authenticated sender: {sender_email}")
+            sender = "your-email@gmail.com"
+            #recipient = input("Enter your email address: ")
             subject = "Reaction Completed Notification"
             body = "Hello! Your reaction is complete. You can now view your results."
-            message = self.create_email(sender_email, self.recipient_email, subject, body)
+            message = self.create_email(sender, self.recipient, subject, body)
             sent_message = self.service.users().messages().send(userId="me", body=message).execute()
-            print(f"Email sent successfully! Message ID: {sent_message['id']}")
+            print(f"Email sent successfully!{sent_message['id']}")
         except Exception as error:
             print(f"An error occurred while sending email: {error}")
 
