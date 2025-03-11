@@ -5,7 +5,9 @@ import pickle
 from queue import Queue
 from threadManager import QueueManager, ThreadManager
 from controller import run_as_thread
-from deckPositionsGui import run_deckpos
+from emailNotifier import EmailNotifier
+#from deckPositionsGui import run_deckpos
+
 class PickleManager:
     def __init__(self, filename="pickle.pk"):
         self.filename = filename
@@ -54,6 +56,8 @@ class GUIApp(tk.Tk):
         self.sheet_name = tk.StringVar()
         self.sim = tk.IntVar()
         self.auto = tk.IntVar()
+        
+        self.recipient_email = None
 
         self.create_interface()
         self.listen_input()
@@ -73,9 +77,21 @@ class GUIApp(tk.Tk):
 
         tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
         tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+        
+        tk.Button(self, text="Notify Me", command=self.ask_email).pack(pady=10)
 
         self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
         self.output_text.pack(expand=True, fill="both", pady=10)
+        
+    def ask_email(self):
+        email = simpledialog.askstring("Notification Signup", "Enter your email for reaction updates:")
+        
+        if email:
+            self.chemist_email = email
+            messagebox.showinfo("Success", f"You will be notified at {email} when the reaction is complete.")
+        else:
+            messagebox.showwarning("Input Required", "Please enter a valid email address.")
+
 
     def show_popup(self, type, msg):
         if type == "yesno":
@@ -104,14 +120,15 @@ class GUIApp(tk.Tk):
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
         
-        self.chemist_email = self.ask_email()
-        
-        if self.chemist_email:
-            self.notifier = EmailNotifier(self.chemist_email)
-            print(f"Email notifier started for {self.chemist_email}")
-        else:
-            print("No email entered. Notifications disabled.")
+        if self.recipient_email:
+            try:
+                self.notifier = EmailNotifier(self.recipient_email)
+                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                self.thread_manager.start_thread(target=self.notifier.watch_event)
+            except Exception as e:
+                messagebox.showerror(e)
 
+        # Start robot processes
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
 

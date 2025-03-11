@@ -12,11 +12,7 @@ class EmailNotifier:
     Completion is triggered by `completion_event` being set in `controller.py`.
     """
 
-    SCOPES = [
-        "https://www.googleapis.com/auth/gmail.send",
-        #"https://www.googleapis.com/auth/gmail.readonly",
-        #"https://www.googleapis.com/auth/userinfo.email"  
-        ]
+    SCOPES = ["https://www.googleapis.com/auth/gmail.send", ]
 
     def __init__(self, recipient):
         self.recipient = recipient
@@ -32,7 +28,8 @@ class EmailNotifier:
         """
         print("Inside get_credentials function")
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        credentials_path = "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Credentials/credentials.json"
+        #credentials_path = "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/Credentials/credentials.json"
+        credentials_path = "/Users/ericamock/Documents/GitHub/OT2Control/Credentials/credentials.json"
         #os.path.join(script_dir, "Credentials/credentials.json")
         print(f"Using credentials file at: {credentials_path}")
         try:

@@ -19,12 +19,9 @@ class QueueManager:
                 cls._instance.status_queue = Queue()
                 cls._instance.input_queue = Queue()
                 cls._instance.response_queue = Queue()
-<<<<<<< HEAD
                 cls._instance._sheetname = ""
                 cls._instance._sheetname_lock = threading.Lock()  # Lock for string access
-=======
                 cls._instance.completion_event = threading.Event()
->>>>>>> emailNotif
         return cls._instance
 
     @staticmethod

@@ -1,5 +1,5 @@
 import time
-from gmailNotifier import EmailNotifier
+from emailNotifier import EmailNotifier
 from threadManager import QueueManager, ThreadManager
 
 recipient = "mocke@whitman.edu"
