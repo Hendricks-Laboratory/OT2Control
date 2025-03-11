@@ -2172,6 +2172,7 @@ class AutoContr(Controller):
         self._clean_template() #moves template data out of the data for rxn_df
         self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
         self.num_duplicates = num_duplicates
+        self.max_conc = list(self.get_max_conc().values())
     
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result):

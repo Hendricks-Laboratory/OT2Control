@@ -151,7 +151,7 @@ class OptimizationModel():
             return abs(sum(x)-(self.target_value*3))
 
         
-        kernel = GPy.kern.sde_Matern32(input_dim=1, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
+        kernel = GPy.kern.sde_Matern32(input_dim=2, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
         self.gp_model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
         self.gp_model.updateModel(X_init, Y_init, None, None)
         self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
@@ -265,11 +265,11 @@ class OptimizationModel():
 
         print(f"X_all Before Update: {self.optimizer.X}")
         print(f"Y_all Before Update: {self.optimizer.Y}")
-
-        #print(f"Experiment Data X: {self.experiment_data["X"]}")
-        self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
         self.experiment_data['X'].extend(X_new)
         self.experiment_data['Y'].extend(Y_new)
+        #print(f"Experiment Data X: {self.experiment_data["X"]}")
+        self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
+    
         #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
         
         print(f"X_all After Update: {self.optimizer.X}")
