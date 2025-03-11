@@ -58,7 +58,9 @@ class GUIApp(tk.Tk):
         self.create_interface()
         self.listen_input()
         self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
-        
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+        self.thread_manager.start_thread(target=self.listen_input)
+
 
     def create_interface(self):
         tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
@@ -101,6 +103,14 @@ class GUIApp(tk.Tk):
         else:
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
+        
+        self.chemist_email = self.ask_email()
+        
+        if self.chemist_email:
+            self.notifier = EmailNotifier(self.chemist_email)
+            print(f"Email notifier started for {self.chemist_email}")
+        else:
+            print("No email entered. Notifications disabled.")
 
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
