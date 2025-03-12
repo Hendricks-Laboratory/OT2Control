@@ -6,7 +6,7 @@ from queue import Queue
 from threadManager import QueueManager, ThreadManager
 from controller import run_as_thread
 from emailNotifier import EmailNotifier
-#from deckPositionsGui import run_deckpos
+from deckPositionsGui import run_deckpos
 
 class PickleManager:
     """
