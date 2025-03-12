@@ -9,12 +9,16 @@ from emailNotifier import EmailNotifier
 #from deckPositionsGui import run_deckpos
 
 class PickleManager:
+    """
+    This class manages adding and retrieving data from the Pickle file
+    """
     def __init__(self, filename="pickle.pk"):
         self.filename = filename
         self.default_data = []
         self.data = self._load_or_create()
 
     def _load_or_create(self):
+        """find the existing pickle file or creat a new one"""
         if not os.path.isfile(self.filename):  
             return self._save(self.default_data)
         try:
@@ -26,11 +30,13 @@ class PickleManager:
             return self.default_data
 
     def _save(self, data):
+        """save to pickle"""
         with open(self.filename, 'wb') as file:
             pickle.dump(data, file)
         return data
     
     def add_entry(self, entry):
+        """add a piece of data to the list for pickle and for gui"""
         if isinstance(entry, str) and entry.strip():
             if entry not in self.data:
                 self.data.append(entry)
@@ -39,9 +45,14 @@ class PickleManager:
                 self._save(self.data)
     
     def get_data(self):
+        """get data from pickle"""
         return self.data
 
 class GUIApp(tk.Tk):
+    """
+    Main GUI object
+    This class represents the main GUI window and passes selected arguements to controller
+    """
     def __init__(self):
         super().__init__()
         self.title("OT2Control")
@@ -67,6 +78,7 @@ class GUIApp(tk.Tk):
 
 
     def create_interface(self):
+        """initializes all of the UI elements in the main window"""
         tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
         
         self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
@@ -84,6 +96,7 @@ class GUIApp(tk.Tk):
         self.output_text.pack(expand=True, fill="both", pady=10)
         
     def ask_email(self):
+        """prompt the user for their email"""
         email = simpledialog.askstring("Notification Signup", "Enter your email for reaction updates:")
         
         if email:
@@ -94,6 +107,12 @@ class GUIApp(tk.Tk):
 
 
     def show_popup(self, type, msg):
+        """
+        show a popup, type indicated by string
+        yesno = a popup with a yes and not option
+        continue = a popup which gives the options for ok or cancel
+        input = a popup which prompts the user for text input
+        """
         if type == "yesno":
             return messagebox.askyesno("User Input", msg)
         elif type == "continue":
@@ -107,6 +126,9 @@ class GUIApp(tk.Tk):
             return returnval
 
     def run_controller(self):
+        """
+        initializes the controller, status, and email threads
+        """
         cli_args = []
         if self.sheet_name.get():
             cli_args.append(f"-n{self.sheet_name.get().strip()}")
@@ -128,11 +150,11 @@ class GUIApp(tk.Tk):
             except Exception as e:
                 messagebox.showerror(e)
 
-        # Start robot processes
-        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
 
     def run_deckpos(self):
+        """run deckpositions"""
         if self.sheet_name.get() == "":
             self.status_queue.put("no sheetname provided")
         else:
@@ -146,6 +168,7 @@ class GUIApp(tk.Tk):
             self.output_text.see(tk.END)
     
     def listen_input(self):
+        """manage making popups given requests from input queue, sending return vals to response queue"""
         response_queue = QueueManager.get_response_queue()
         if not self.input_queue.empty():
             type, msg = self.input_queue.get()
@@ -155,6 +178,7 @@ class GUIApp(tk.Tk):
 
         
     def on_close(self):
+        """make sure the window is destroyed"""
         self.destroy()
 
 if __name__ == "__main__":
