@@ -1,254 +1,186 @@
-import customtkinter
-from CTkMessagebox import CTkMessagebox
-from customtkinter import IntVar, CHECKBUTTON
-import subprocess
-from subprocess import check_output
+import tkinter as tk
+from tkinter import messagebox, ttk, simpledialog
 import os
 import pickle
-import threading
-import pty
+from queue import Queue
+from threadManager import QueueManager, ThreadManager
 from controller import run_as_thread
-from threadManager import ThreadManager, QueueManager
+from emailNotifier import EmailNotifier
+#from deckPositionsGui import run_deckpos
 
-def run():
-   os.chdir(os.curdir)
-   execute_python_file('deckPositionsGui.py',mynumber.get(),T)
+class PickleManager:
+    """
+    This class manages adding and retrieving data from the Pickle file
+    """
+    def __init__(self, filename="pickle.pk"):
+        self.filename = filename
+        self.default_data = []
+        self.data = self._load_or_create()
 
-def run_controller(sim, auto, sheet_name, combobox):
+    def _load_or_create(self):
+        """find the existing pickle file or creat a new one"""
+        if not os.path.isfile(self.filename):  
+            return self._save(self.default_data)
+        try:
+            with open(self.filename, 'rb') as file:
+                return pickle.load(file)
+        except (EOFError, pickle.UnpicklingError):
+            return self._save(self.default_data)
+        except Exception:
+            return self.default_data
 
-   """
-   This function will pass the arguements entered by the use in GUI to controller, and run controller as a thread in paralell with 
-   the update thread. 
-   parameters:
-      sim:
-         checkbox user entry for "--no-sim" flag
-      auto:
-         checkbox user entry for "-m" flag 
-      sheet_name:
-         user text entry for sheet name
-   """
+    def _save(self, data):
+        """save to pickle"""
+        with open(self.filename, 'wb') as file:
+            pickle.dump(data, file)
+        return data
+    
+    def add_entry(self, entry):
+        """add a piece of data to the list for pickle and for gui"""
+        if isinstance(entry, str) and entry.strip():
+            if entry not in self.data:
+                self.data.append(entry)
+                if len(self.data) > 10:
+                    self.data = self.data[1:]
+                self._save(self.data)
+    
+    def get_data(self):
+        """get data from pickle"""
+        return self.data
 
-   
-   update_pickle(sheet_name.get(),combobox)
+class GUIApp(tk.Tk):
+    """
+    Main GUI object
+    This class represents the main GUI window and passes selected arguements to controller
+    """
+    def __init__(self):
+        super().__init__()
+        self.title("OT2Control")
+        self.geometry("750x450")
+        self.configure(bg='#252526')
 
+        self.input_queue = QueueManager().get_input_queue()
+        self.status_queue = QueueManager().get_status_queue()
+        self.pickle = PickleManager()
+        self.thread_manager = ThreadManager()
+        
+        self.sheet_name = tk.StringVar()
+        self.sim = tk.IntVar()
+        self.auto = tk.IntVar()
+        
+        self.recipient_email = None
 
-   # mimic cli args for controller
-   cli_args = []
-
-   if sheet_name.get():
-      cli_args.append(f"-n{sheet_name.get().strip()}")
-   if auto.get():
-      cli_args.append(f"-mauto")
-   if sim.get():
-      cli_args.append(f"--no-sim")
-
-   # shared resource between threads
-   # create status obj
-
-   thread_manager = ThreadManager()
-
-   thread_manager.start_thread(target=update_status, args=(T,))
-   thread_manager.start_thread(target=listen_input)
-   thread_manager.start_thread(target=run_as_thread, args=(cli_args, ))
-   
-
-def update_status(T):
-   """
-   status_q: singleto
-   """
-   status_q = QueueManager.get_status_queue()
-   while True:
-      msg = status_q.get()
-      T.insert(customtkinter.END, msg + "\n")
-
-
-def listen_input():
-   """
-
-   """
-   input_q = QueueManager.get_input_queue()
-   while True:
-      pass
-
-
-def handle_yn(msg):
-   msgbox = CTkMessagebox(message = msg,
-                 icon="check",
-                 option_1="yes",
-                 option_2="no")
-   response = msgbox.get() 
-   if response == "yes":
-      return True
-   else:
-      return False
-   
-
-def handle_step():
-   """
-   This un-sets the event indicator, and switches the threads from read to write mode
-   """
-   event.set()
+        self.create_interface()
+        self.listen_input()
+        self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+        self.thread_manager.start_thread(target=self.listen_input)
 
 
-def execute_python_file(file_name, argument,Textbox):
-   try:
-      process = start_subprocess(["python3", file_name,'-n',argument], Textbox)
-   except FileNotFoundError:
-      print("Error: The file does not exist.")
-      
-def start_subprocess(command, textbox):
-    try:
-        master_fd, slave_fd = pty.openpty() #PseudoTerminal
-        process = subprocess.Popen(command, stdout=slave_fd, stderr=subprocess.STDOUT, stdin=slave_fd, universal_newlines=True)
-        os.close(slave_fd)
-        threading.Thread(target=read_output, args=(master_fd, textbox), daemon=True).start()
-    except Exception as e:
-        print(f"Error starting subprocess: {e}")
-        update_output("Error starting subprocess: " + str(e), textbox)
-        return None
-    return process
+    def create_interface(self):
+        """initializes all of the UI elements in the main window"""
+        tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
+        
+        self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
+        self.sheet_input.pack()
+        
+        ttk.Checkbutton(self, text="Sim", variable=self.sim).pack(pady=5)
+        ttk.Checkbutton(self, text="Auto", variable=self.auto).pack(pady=5)
 
-# def write_stdin(process):
-#    process.stdin.write()
-   
-# def read_output(master_fd, textbox):
-#     try:
-#         while True:
-#             output = os.read(master_fd, 1024)
-#             if not output:
-#                 break
-#             textbox.insert(customtkinter.END, output)
-#     except Exception as e:
-#         print(f"Error reading output from subprocess: {e}")
-#         update_output("Error reading output from subprocess: " + str(e), textbox)
+        tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
+        tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+        
+        tk.Button(self, text="Notify Me", command=self.ask_email).pack(pady=10)
+
+        self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
+        self.output_text.pack(expand=True, fill="both", pady=10)
+        
+    def ask_email(self):
+        """prompt the user for their email"""
+        email = simpledialog.askstring("Notification Signup", "Enter your email for reaction updates:")
+        
+        if email:
+            self.chemist_email = email
+            messagebox.showinfo("Success", f"You will be notified at {email} when the reaction is complete.")
+        else:
+            messagebox.showwarning("Input Required", "Please enter a valid email address.")
 
 
-# def read_stderr(process):
-#    # reads stderr of the provided process line by line and the output
-#    while True:
-#       error = process.stderr.readline().decode('utf-8')
-#       if not error:
-#          break
-#       update_output(error)
+    def show_popup(self, type, msg):
+        """
+        show a popup, type indicated by string
+        yesno = a popup with a yes and not option
+        continue = a popup which gives the options for ok or cancel
+        input = a popup which prompts the user for text input
+        """
+        if type == "yesno":
+            return messagebox.askyesno("User Input", msg)
+        elif type == "continue":
+            return messagebox.askokcancel("User Input", msg)
+        elif type == "input":
+            #workaround from Stackoverflow
+            newWin = tk.Tk()
+            newWin.withdraw()
+            returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+            newWin.destroy()
+            return returnval
 
-# def update_output(text,Textbox):
-#    print("in update")
-#    Textbox.configure(state="normal") # Make the state normal
+    def run_controller(self):
+        """
+        initializes the controller, status, and email threads
+        """
+        cli_args = []
+        if self.sheet_name.get():
+            cli_args.append(f"-n{self.sheet_name.get().strip()}")
+        if self.auto.get():
+            cli_args.append("-mauto")
+        else:
+            cli_args.append("-mprotocol")
+        if self.sim.get():
+            cli_args.append("-s")
+        else:
+            cli_args.append("--no-sim")
+        self.pickle.add_entry(self.sheet_name.get())
+        
+        if self.recipient_email:
+            try:
+                self.notifier = EmailNotifier(self.recipient_email)
+                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                self.thread_manager.start_thread(target=self.notifier.watch_event)
+            except Exception as e:
+                messagebox.showerror(e)
 
-#    Textbox.insert(customtkinter.END, text)
-#    Textbox.configure(state="disabled") # Make the state disabled again
-#    print("out of update")
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
 
-def update_pickle(val,combobox):
-   global comboboxlist
-   vals=list(comboboxlist)
-   try:
-      if isinstance(val,str) and val!='':
-         filename='pickle.pk'
-         if os.path.isfile(filename):
-            vals.append(val)
-            with open(filename, 'wb') as g:
-               vals=list(dict.fromkeys(vals))
-               if len(vals)>10:
-                  vals=vals[1:]
-               pickle.dump(vals,g)
-               g.close()
-      else:
-         print("Sheetname is not string")
-      combobox.configure(values=vals)
-   except:
-      print("updating pickle didnt work. Please try doing something different")
-      
+    def run_deckpos(self):
+        """run deckpositions"""
+        if self.sheet_name.get() == "":
+            self.status_queue.put("no sheetname provided")
+        else:
+            QueueManager().set_sheetname(str(self.sheet_name.get()))
+            self.thread_manager.start_thread(target=run_deckpos)
 
-def read_pickle():
-   try:
-      with open('pickle.pk', 'rb') as fi:
-         loadedval=pickle.load(fi)
-         loadedval=[x for x in list(loadedval) if x]
-         fi.close()
-         return list(dict.fromkeys(loadedval))
-   except:
-      print("couldnt read pickle")
-      return []
+    def update_run_status(self):
+        while True:
+            msg = self.status_queue.get()
+            self.output_text.insert(tk.END, str(msg) + "\n")
+            self.output_text.see(tk.END)
+    
+    def listen_input(self):
+        """manage making popups given requests from input queue, sending return vals to response queue"""
+        response_queue = QueueManager.get_response_queue()
+        if not self.input_queue.empty():
+            type, msg = self.input_queue.get()
+            response = self.show_popup(type, msg)
+            response_queue.put(response)
+        self.after(100, self.listen_input)
 
+        
+    def on_close(self):
+        """make sure the window is destroyed"""
+        self.destroy()
 
-customtkinter.set_appearance_mode("dark")
-customtkinter.set_default_color_theme('dark-blue')
-#Create an instance of Tkinter frame
-win= customtkinter.CTk()
-win.title("OT2Control")
-#Set the geometry of Tkinter frame
-
-
-win.geometry("750x450")
-win.configure(fg_color= '#252526')
-win.title("OT2Control")
-
-
-# Name Label
-# l = customtkinter.CTkLabel(master= win, text = "What is the name?")
-# l.configure(font =("Inter", 16), text_color="white")
-l = customtkinter.CTkLabel(master= win, text = "Sheetname")
-l.configure(font =("Inter", 16), text_color="white")
-l.pack()
-
-
-#Create an Entry widget to accept User Input
-mynumber = customtkinter.StringVar()
-combobox = customtkinter.CTkComboBox(win, width = 400 , variable = mynumber,fg_color='#3e3e42')
-v=read_pickle()
-combobox.configure(values = v)
-comboboxlist=v
-combobox.focus_set()
-combobox.pack()
-#Sim checkbox
-
-
-sim = IntVar()
-c2 = customtkinter.CTkCheckBox(master= win, text='Sim',variable=sim, onvalue=1, offvalue=0, fg_color= "#303030", text_color= "white", border_color = "#A7A6A6")
-c2.configure(border_width= 2, font= ("Inter", 12))
-c2.pack(padx=20, pady= (15, 10))
-
-
-#Sim checkbox
-auto = IntVar()
-c2 = customtkinter.CTkCheckBox(master= win, text='Auto',variable=auto, onvalue=1, offvalue=0, text_color= "white", border_color = "#A7A6A6")
-c2.configure(border_width= 2, font= ("Inter", 12))
-c2.pack()
-output="hello"
-#Create a Button to validate Entry Widget
-customtkinter.CTkButton(win, text= "Execute",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [run_controller(sim,auto,mynumber,combobox)]).pack(pady=(20, 13))
-# Bind the <Return> event to the execute_button's command
-win.bind('<Return>', lambda event: [run_controller(sim, auto, mynumber,combobox)])
-
-
-#show deck positions
-customtkinter.CTkButton(win, text= "Check Deck Positions",fg_color='#007acc', font= ("Inter", 12), command=run, width=30).pack(pady= (0, 17))
-
-
-I = customtkinter.CTkButton(win, text= "Step",fg_color='#007acc', font= ("Inter", 12), command=handle_step, width=30)
-I.pack(pady= (0, 17))
-
-
-# Create label
-# l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
-# l.configure(font =("Inter", 14))
-l = customtkinter.CTkLabel(win, text = "Output", text_color= "white")
-l.configure(font =("Inter", 14))
-l.pack()
-
-
-v=customtkinter.CTkScrollbar(win,orientation='vertical') 
-v.pack(side="right", fill='y')  
-
-
-# Create text widget and specify size.
-T = customtkinter.CTkTextbox(win, height = 50, width = 400)
-T.configure(fg_color= "#3e3e42", text_color= "white")
-T.pack(side='left',expand=True,fill='both')
-
-
-# handle_yn("hello there")
-
-# customtkinter.CTkButton(win, text= "Step",width= 20,fg_color='#007acc', font= ("Inter", 12) ,command= lambda : [step_controller()]).pack(pady=(20, 13))
-win.mainloop()
+if __name__ == "__main__":
+    app = GUIApp()
+    app.mainloop()
