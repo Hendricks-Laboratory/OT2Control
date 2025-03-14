@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmailNotifier Documentation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+            background-color: #f4f4f4;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        code {
+            background-color: #eee;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: "Courier New", monospace;
+        }
+        pre {
+            background-color: #eee;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>EmailNotifier Documentation</h1>
+        <p><strong>Author:</strong> Cold Hard Cache</p>
+        <p><strong>Description:</strong> The <code>EmailNotifier</code> class is responsible for sending email notifications when a robot reaction process is complete. It utilizes the Gmail API for sending emails and listens for an event triggered by the robot controller.</p>
+
+        <h2>Class: <code>EmailNotifier</code></h2>
+        <p><strong>Imports:</strong></p>
+        <ul>
+            <li><code>os</code> – Handles file paths.</li>
+            <li><code>base64</code> – Encodes email messages for the Gmail API.</li>
+            <li><code>email.mime.text.MIMEText</code> – Constructs email messages.</li>
+            <li><code>google.auth.transport.requests.Request</code> – Handles authentication requests.</li>
+            <li><code>google_auth_oauthlib.flow.InstalledAppFlow</code> – Manages OAuth 2.0 authentication.</li>
+            <li><code>googleapiclient.discovery.build</code> – Builds the Gmail API service.</li>
+            <li><code>threadManager.QueueManager</code> – Manages event queues for completion detection.</li>
+            <li><code>threadManager.ThreadManager</code> – Manages threading (not explicitly used in this class).</li>
+        </ul>
+
+        <h3>Class Attributes</h3>
+        <ul>
+            <li><code>SCOPES</code> – Defines the required OAuth 2.0 permissions for sending emails.</li>
+        </ul>
+
+        <h3>Constructor: <code>__init__(self, recipient)</code></h3>
+        <p>Initializes the email notifier and sets up authentication with the Gmail API.</p>
+        <h4>Parameters:</h4>
+        <ul>
+            <li><code>recipient</code> (str) – The email address of the recipient.</li>
+        </ul>
+        <h4>Functionality:</h4>
+        <ul>
+            <li>Retrieves the completion event from <code>QueueManager</code>.</li>
+            <li>Authenticates the user with the Gmail API.</li>
+            <li>Initializes the Gmail service.</li>
+        </ul>
+
+        <h2>Methods</h2>
+
+        <h3><code>get_credentials(self)</code></h3>
+        <p>Handles OAuth 2.0 authentication to retrieve credentials for accessing the Gmail API.</p>
+        <h4>Returns:</h4>
+        <ul>
+            <li><code>Credentials</code> object if authentication is successful.</li>
+            <li><code>None</code> if authentication fails.</li>
+        </ul>
+        <h4>Behavior:</h4>
+        <ul>
+            <li>Loads credentials from a JSON file.</li>
+            <li>Prompts the user to authenticate via a local web server.</li>
+        </ul>
+
+        <h3><code>create_email(self, sender, to, subject, body)</code></h3>
+        <p>Creates an email message in MIME format and encodes it for Gmail API transmission.</p>
+        <h4>Parameters:</h4>
+        <ul>
+            <li><code>sender</code> (str) – The sender's email address.</li>
+            <li><code>to</code> (str) – The recipient's email address.</li>
+            <li><code>subject</code> (str) – The email subject.</li>
+            <li><code>body</code> (str) – The email content.</li>
+        </ul>
+        <h4>Returns:</h4>
+        <ul>
+            <li>A dictionary containing the encoded email message.</li>
+        </ul>
+
+        <h3><code>send_email(self)</code></h3>
+        <p>Sends an email notification via the Gmail API.</p>
+        <h4>Behavior:</h4>
+        <ul>
+            <li>Creates an email using <code>create_email</code>.</li>
+            <li>Sends the email using the Gmail API.</li>
+            <li>Prints a success message if the email is sent successfully.</li>
+            <li>Prints an error message if sending fails.</li>
+        </ul>
+
+        <h3><code>watch_event(self)</code></h3>
+        <p>Waits for the completion event and sends an email notification when triggered.</p>
+        <h4>Behavior:</h4>
+        <ul>
+            <li>Listens for the completion event.</li>
+            <li>Calls <code>send_email()</code> when the event is triggered.</li>
+            <li>Resets the event after sending the email.</li>
+        </ul>
+
+        <h2>Usage Example</h2>
+        <p>To use the <code>EmailNotifier</code> class, instantiate it with a recipient email address and call <code>watch_event()</code>:</p>
+        <pre><code>
+from email_notifier import EmailNotifier
+
+notifier = EmailNotifier("user@example.com")
+notifier.watch_event()
+        </code></pre>
+
+        <h2>Dependencies</h2>
+        <p>Ensure you have the following installed before running the script:</p>
+        <pre><code>
+pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+        </code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+            <li>The script requires a valid <code>credentials.json</code> file for Gmail API authentication.</li>
+            <li>OAuth authentication may require user interaction via a browser.</li>
+            <li>The email sender must have permission to use the Gmail API.</li>
+        </ul>
+    </div>
+</body>
+</html>

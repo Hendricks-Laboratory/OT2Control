@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThreadManager Documentation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+            background-color: #f4f4f4;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        code {
+            background-color: #eee;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: "Courier New", monospace;
+        }
+        pre {
+            background-color: #eee;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ThreadManager Documentation</h1>
+        <p><strong>Author:</strong> Your Name</p>
+        <p><strong>Description:</strong> This module provides two key classes: <code>QueueManager</code> for managing inter-thread communication and <code>ThreadManager</code> for handling multi-threaded execution.</p>
+
+        <h2>Class: <code>QueueManager</code></h2>
+        <p>A singleton class responsible for managing inter-thread communication via queues and events.</p>
+
+        <h3>Class Attributes</h3>
+        <ul>
+            <li><code>_instance</code> – Stores the singleton instance.</li>
+            <li><code>_lock</code> – A threading lock to ensure thread-safe singleton initialization.</li>
+            <li><code>status_queue</code> – A queue for tracking status updates.</li>
+            <li><code>input_queue</code> – A queue for handling input data.</li>
+            <li><code>response_queue</code> – A queue for storing responses.</li>
+            <li><code>completion_event</code> – A threading event to signal when an operation is complete.</li>
+            <li><code>_sheetname</code> – A shared string resource with a lock.</li>
+            <li><code>_sheetname_lock</code> – A lock to ensure safe access to <code>_sheetname</code>.</li>
+        </ul>
+
+        <h3>Constructor: <code>__new__(cls)</code></h3>
+        <p>Implements a thread-safe singleton pattern to ensure only one instance of <code>QueueManager</code> is created.</p>
+        <h4>Behavior:</h4>
+        <ul>
+            <li>Uses a lock to ensure only one instance is initialized.</li>
+            <li>Creates and initializes the queues and event.</li>
+            <li>Ensures safe access to the shared <code>_sheetname</code> variable.</li>
+        </ul>
+
+        <h2>Methods</h2>
+
+        <h3><code>get_status_queue()</code></h3>
+        <p>Retrieves the status queue instance.</p>
+        <h4>Returns:</h4>
+        <ul>
+            <li>A <code>Queue</code> instance for tracking statuses.</li>
+        </ul>
+
+        <h3><code>get_input_queue()</code></h3>
+        <p>Retrieves the input queue instance.</p>
+        <h4>Returns:</h4>
+        <ul>
+            <li>A <code>Queue</code> instance for handling inputs.</li>
+        </ul>
+
+        <h3><code>get_response_queue()</code></h3>
+        <p>Retrieves the response queue instance.</p>
+        <h4>Returns:</h4>
+       
