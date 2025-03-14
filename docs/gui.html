@@ -1,0 +1,2376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1" />
+<meta name="generator" content="pdoc 0.9.2" />
+<title>controller API documentation</title>
+<meta name="description" content="This module contains everything that the server needs to run. Partly seperate from the OT2 because
+it needs different packages (OT2 uses historic …" />
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/sanitize.min.css" integrity="sha256-PK9q560IAAa6WVRRh76LtCaI8pjTJ2z11v0miyNNjrs=" crossorigin>
+<link rel="preload stylesheet" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/10up-sanitize.css/11.0.1/typography.min.css" integrity="sha256-7l/o7C8jubJiy74VsKTidCy1yBkRtiUGbVkYBylBqUg=" crossorigin>
+<link rel="stylesheet preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/github.min.css" crossorigin>
+<style>:root{--highlight-color:#fe9}.flex{display:flex !important}body{line-height:1.5em}#content{padding:20px}#sidebar{padding:30px;overflow:hidden}#sidebar > *:last-child{margin-bottom:2cm}.http-server-breadcrumbs{font-size:130%;margin:0 0 15px 0}#footer{font-size:.75em;padding:5px 30px;border-top:1px solid #ddd;text-align:right}#footer p{margin:0 0 0 1em;display:inline-block}#footer p:last-child{margin-right:30px}h1,h2,h3,h4,h5{font-weight:300}h1{font-size:2.5em;line-height:1.1em}h2{font-size:1.75em;margin:1em 0 .50em 0}h3{font-size:1.4em;margin:25px 0 10px 0}h4{margin:0;font-size:105%}h1:target,h2:target,h3:target,h4:target,h5:target,h6:target{background:var(--highlight-color);padding:.2em 0}a{color:#058;text-decoration:none;transition:color .3s ease-in-out}a:hover{color:#e82}.title code{font-weight:bold}h2[id^="header-"]{margin-top:2em}.ident{color:#900}pre code{background:#f8f8f8;font-size:.8em;line-height:1.4em}code{background:#f2f2f1;padding:1px 4px;overflow-wrap:break-word}h1 code{background:transparent}pre{background:#f8f8f8;border:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;margin:1em 0;padding:1ex}#http-server-module-list{display:flex;flex-flow:column}#http-server-module-list div{display:flex}#http-server-module-list dt{min-width:10%}#http-server-module-list p{margin-top:0}.toc ul,#index{list-style-type:none;margin:0;padding:0}#index code{background:transparent}#index h3{border-bottom:1px solid #ddd}#index ul{padding:0}#index h4{margin-top:.6em;font-weight:bold}@media (min-width:200ex){#index .two-column{column-count:2}}@media (min-width:300ex){#index .two-column{column-count:3}}dl{margin-bottom:2em}dl dl:last-child{margin-bottom:4em}dd{margin:0 0 1em 3em}#header-classes + dl > dd{margin-bottom:3em}dd dd{margin-left:2em}dd p{margin:10px 0}.name{background:#eee;font-weight:bold;font-size:.85em;padding:5px 10px;display:inline-block;min-width:40%}.name:hover{background:#e0e0e0}dt:target .name{background:var(--highlight-color)}.name > span:first-child{white-space:nowrap}.name.class > span:nth-child(2){margin-left:.4em}.inherited{color:#999;border-left:5px solid #eee;padding-left:1em}.inheritance em{font-style:normal;font-weight:bold}.desc h2{font-weight:400;font-size:1.25em}.desc h3{font-size:1em}.desc dt code{background:inherit}.source summary,.git-link-div{color:#666;text-align:right;font-weight:400;font-size:.8em;text-transform:uppercase}.source summary > *{white-space:nowrap;cursor:pointer}.git-link{color:inherit;margin-left:1em}.source pre{max-height:500px;overflow:auto;margin:0}.source pre code{font-size:12px;overflow:visible}.hlist{list-style:none}.hlist li{display:inline}.hlist li:after{content:',\2002'}.hlist li:last-child:after{content:none}.hlist .hlist{display:inline;padding-left:1em}img{max-width:100%}td{padding:0 .5em}.admonition{padding:.1em .5em;margin-bottom:1em}.admonition-title{font-weight:bold}.admonition.note,.admonition.info,.admonition.important{background:#aef}.admonition.todo,.admonition.versionadded,.admonition.tip,.admonition.hint{background:#dfd}.admonition.warning,.admonition.versionchanged,.admonition.deprecated{background:#fd4}.admonition.error,.admonition.danger,.admonition.caution{background:lightpink}</style>
+<style media="screen and (min-width: 700px)">@media screen and (min-width:700px){#sidebar{width:30%;height:100vh;overflow:auto;position:sticky;top:0}#content{width:70%;max-width:100ch;padding:3em 4em;border-left:1px solid #ddd}pre code{font-size:1em}.item .name{font-size:1em}main{display:flex;flex-direction:row-reverse;justify-content:flex-end}.toc ul ul,#index ul{padding-left:1.5em}.toc > ul > li{margin-top:.5em}}</style>
+<style media="print">@media print{#sidebar h1{page-break-before:always}.source{display:none}}@media print{*{background:transparent !important;color:#000 !important;box-shadow:none !important;text-shadow:none !important}a[href]:after{content:" (" attr(href) ")";font-size:90%}a[href][title]:after{content:none}abbr[title]:after{content:" (" attr(title) ")"}.ir a:after,a[href^="javascript:"]:after,a[href^="#"]:after{content:""}pre,blockquote{border:1px solid #999;page-break-inside:avoid}thead{display:table-header-group}tr,img{page-break-inside:avoid}img{max-width:100% !important}@page{margin:0.5cm}p,h2,h3{orphans:3;widows:3}h1,h2,h3,h4,h5,h6{page-break-after:avoid}}</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js" integrity="sha256-Uv3H6lx7dJmRfRvH8TH6kJD1TSK1aFcwgx+mdg3epi8=" crossorigin></script>
+<script>window.addEventListener('DOMContentLoaded', () => hljs.initHighlighting())</script>
+</head>
+<body>
+<main>
+<article id="content">
+<header>
+<h1 class="title">Module <code>GUI</code></h1>
+</header>
+<section id="section-intro">
+<p>
+This is a module which contains the class responsible for creating and controlling the gui.
+It utilizes a number of packages, including Tkinter and pickle. The GUIApp class defines the 
+functionality of the user interface and passes arguements to controller once it is called.
+The PickleManager class creates and manages the pickle file, which stores a history of recent 
+reactions. 
+</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">&#39;&#39;&#39;
+    import tkinter as tk
+    from tkinter import messagebox, ttk, simpledialog
+    import os
+    import pickle
+    from queue import Queue
+    from threadManager import QueueManager, ThreadManager
+    from controller import run_as_thread
+    from emailNotifier import EmailNotifier
+    from deckPositionsGui import run_deckpos
+    
+    class PickleManager:
+        """
+        This class manages adding and retrieving data from the Pickle file
+        """
+        def __init__(self, filename="pickle.pk"):
+            self.filename = filename
+            self.default_data = []
+            self.data = self._load_or_create()
+    
+        def _load_or_create(self):
+            """find the existing pickle file or creat a new one"""
+            if not os.path.isfile(self.filename):  
+                return self._save(self.default_data)
+            try:
+                with open(self.filename, 'rb') as file:
+                    return pickle.load(file)
+            except (EOFError, pickle.UnpicklingError):
+                return self._save(self.default_data)
+            except Exception:
+                return self.default_data
+    
+        def _save(self, data):
+            """save to pickle"""
+            with open(self.filename, 'wb') as file:
+                pickle.dump(data, file)
+            return data
+        
+        def add_entry(self, entry):
+            """add a piece of data to the list for pickle and for gui"""
+            if isinstance(entry, str) and entry.strip():
+                if entry not in self.data:
+                    self.data.append(entry)
+                    if len(self.data) > 10:
+                        self.data = self.data[1:]
+                    self._save(self.data)
+        
+        def get_data(self):
+            """get data from pickle"""
+            return self.data
+    
+    class GUIApp(tk.Tk):
+        """
+        Main GUI object
+        This class represents the main GUI window and passes selected arguements to controller
+        """
+        def __init__(self):
+            super().__init__()
+            self.title("OT2Control")
+            self.geometry("750x450")
+            self.configure(bg='#252526')
+    
+            self.input_queue = QueueManager().get_input_queue()
+            self.status_queue = QueueManager().get_status_queue()
+            self.pickle = PickleManager()
+            self.thread_manager = ThreadManager()
+            
+            self.sheet_name = tk.StringVar()
+            self.sim = tk.IntVar()
+            self.auto = tk.IntVar()
+            
+            self.recipient_email = None
+    
+            self.create_interface()
+            self.listen_input()
+            self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
+            self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+            self.thread_manager.start_thread(target=self.listen_input)
+    
+    
+        def create_interface(self):
+            """initializes all of the UI elements in the main window"""
+            tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
+            
+            self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
+            self.sheet_input.pack()
+            
+            ttk.Checkbutton(self, text="Sim", variable=self.sim).pack(pady=5)
+            ttk.Checkbutton(self, text="Auto", variable=self.auto).pack(pady=5)
+    
+            tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
+            tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+            
+            tk.Button(self, text="Notify Me", command=self.ask_email).pack(pady=10)
+    
+            self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
+            self.output_text.pack(expand=True, fill="both", pady=10)
+            
+        def ask_email(self):
+            """prompt the user for their email"""
+            email = simpledialog.askstring("Notification Signup", "Enter your email for reaction updates:")
+            
+            if email:
+                self.chemist_email = email
+                messagebox.showinfo("Success", f"You will be notified at {email} when the reaction is complete.")
+            else:
+                messagebox.showwarning("Input Required", "Please enter a valid email address.")
+    
+    
+        def show_popup(self, type, msg):
+            """
+            show a popup, type indicated by string
+            yesno = a popup with a yes and not option
+            continue = a popup which gives the options for ok or cancel
+            input = a popup which prompts the user for text input
+            """
+            if type == "yesno":
+                return messagebox.askyesno("User Input", msg)
+            elif type == "continue":
+                return messagebox.askokcancel("User Input", msg)
+            elif type == "input":
+                #workaround from Stackoverflow
+                newWin = tk.Tk()
+                newWin.withdraw()
+                returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+                newWin.destroy()
+                return returnval
+    
+        def run_controller(self):
+            """
+            initializes the controller, status, and email threads
+            """
+            cli_args = []
+            if self.sheet_name.get():
+                cli_args.append(f"-n{self.sheet_name.get().strip()}")
+            if self.auto.get():
+                cli_args.append("-mauto")
+            else:
+                cli_args.append("-mprotocol")
+            if self.sim.get():
+                cli_args.append("-s")
+            else:
+                cli_args.append("--no-sim")
+            self.pickle.add_entry(self.sheet_name.get())
+            
+            if self.recipient_email:
+                try:
+                    self.notifier = EmailNotifier(self.recipient_email)
+                    messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                    self.thread_manager.start_thread(target=self.notifier.watch_event)
+                except Exception as e:
+                    messagebox.showerror(e)
+    
+            self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
+            self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+    
+        def run_deckpos(self):
+            """run deckpositions"""
+            if self.sheet_name.get() == "":
+                self.status_queue.put("no sheetname provided")
+            else:
+                QueueManager().set_sheetname(str(self.sheet_name.get()))
+                self.thread_manager.start_thread(target=run_deckpos)
+    
+        def update_run_status(self):
+            while True:
+                msg = self.status_queue.get()
+                self.output_text.insert(tk.END, str(msg) + "\n")
+                self.output_text.see(tk.END)
+        
+        def listen_input(self):
+            """manage making popups given requests from input queue, sending return vals to response queue"""
+            response_queue = QueueManager.get_response_queue()
+            if not self.input_queue.empty():
+                type, msg = self.input_queue.get()
+                response = self.show_popup(type, msg)
+                response_queue.put(response)
+            self.after(100, self.listen_input)
+    
+            
+        def on_close(self):
+            """make sure the window is destroyed"""
+            self.destroy()
+    
+    if __name__ == "__main__":
+        app = GUIApp()
+        app.mainloop()    
+</code></pre>
+</details>
+</section>
+<section>
+</section>
+<section>
+</section>
+<section>
+<h2 class="section-title" id="header-classes">Classes</h2>
+<dl>
+<dt id="controller.AbstractPlateReader"><code class="flex name class">
+<span>class <span class="ident">PickleManager</span></span>
+</code></dt>
+<dd>
+<div class="desc"><p>
+    This class is responsible for managing and creating the pickle file.
+</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    class PickleManager:
+    """
+    This class manages adding and retrieving data from the Pickle file
+    """
+    def __init__(self, filename="pickle.pk"):
+        self.filename = filename
+        self.default_data = []
+        self.data = self._load_or_create()
+
+    def _load_or_create(self):
+        """find the existing pickle file or creat a new one"""
+        if not os.path.isfile(self.filename):  
+            return self._save(self.default_data)
+        try:
+            with open(self.filename, 'rb') as file:
+                return pickle.load(file)
+        except (EOFError, pickle.UnpicklingError):
+            return self._save(self.default_data)
+        except Exception:
+            return self.default_data
+
+    def _save(self, data):
+        """save to pickle"""
+        with open(self.filename, 'wb') as file:
+            pickle.dump(data, file)
+        return data
+    
+    def add_entry(self, entry):
+        """add a piece of data to the list for pickle and for gui"""
+        if isinstance(entry, str) and entry.strip():
+            if entry not in self.data:
+                self.data.append(entry)
+                if len(self.data) > 10:
+                    self.data = self.data[1:]
+                self._save(self.data)
+    
+    def get_data(self):
+        """get data from pickle"""
+        return self.data
+</code></pre>
+</details>
+<h3>Class variables</h3>
+<dl>
+<dt id="controller.AbstractPlateReader.PROTOCOL_PATH"><code class="name">var <span class="ident">filename</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="controller.AbstractPlateReader.SPECTRO_DATA_PATH"><code class="name">var <span class="ident">default_data</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="controller.AbstractPlateReader.SPECTRO_ROOT_PATH"><code class="name">var <span class="ident">data</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="controller.AbstractPlateReader.edit_layout"><code class="name flex">
+<span>def <span class="ident">_load_or_create</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def _load_or_create(self):
+        """find the existing pickle file or creat a new one"""
+        if not os.path.isfile(self.filename):  
+            return self._save(self.default_data)
+        try:
+            with open(self.filename, 'rb') as file:
+                return pickle.load(file)
+        except (EOFError, pickle.UnpicklingError):
+            return self._save(self.default_data)
+        except Exception:
+            return self.default_data
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AbstractPlateReader.exec_macro"><code class="name flex">
+<span>def <span class="ident">_save</span></span>(<span>self, data)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>
+    data: list of strings to add to pickle
+</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def _save(self, data):
+        """save to pickle"""
+        with open(self.filename, 'wb') as file:
+            pickle.dump(data, file)
+        return data
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AbstractPlateReader.load_reader_data"><code class="name flex">
+<span>def <span class="ident">add_entry</span></span>(<span>self, entry)</span>
+</code></dt>
+<dd>
+<div class="desc">
+    This method is responsible for adding a single entry to the history stored in pickle
+</div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def add_entry(self, entry):
+        """add a piece of data to the list for pickle and for gui"""
+        if isinstance(entry, str) and entry.strip():
+            if entry not in self.data:
+                self.data.append(entry)
+                if len(self.data) > 10:
+                    self.data = self.data[1:]
+                self._save(self.data)
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AbstractPlateReader.merge_scans"><code class="name flex">
+<span>def <span class="ident">get_data</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Returns the data retrieved from the pickle</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def get_data(self):
+    """get data from pickle"""
+    return self.data
+</code></pre>
+</details>
+</dd>
+
+<dt id="controller.AutoContr"><code class="flex name class">
+<span>class <span class="ident">GUIApp</span></span>
+<span>(</span><span>)</span>
+</code></dt>
+<dd>
+<div class="desc">This class is responsible for creating the graphical user interface which the user will interact with. 
+</div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    class GUIApp(tk.Tk):
+    """
+    Main GUI object
+    This class represents the main GUI window and passes selected arguements to controller
+    """
+    def __init__(self):
+        super().__init__()
+        self.title("OT2Control")
+        self.geometry("750x450")
+        self.configure(bg='#252526')
+
+        self.input_queue = QueueManager().get_input_queue()
+        self.status_queue = QueueManager().get_status_queue()
+        self.pickle = PickleManager()
+        self.thread_manager = ThreadManager()
+        
+        self.sheet_name = tk.StringVar()
+        self.sim = tk.IntVar()
+        self.auto = tk.IntVar()
+        
+        self.recipient_email = None
+
+        self.create_interface()
+        self.listen_input()
+        self.protocol("WM_DELETE_WINDOW", self.thread_manager.stop_all_threads()) # make sure all threads close if window closed
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+        self.thread_manager.start_thread(target=self.listen_input)
+
+
+    def create_interface(self):
+        """initializes all of the UI elements in the main window"""
+        tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
+        
+        self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
+        self.sheet_input.pack()
+        
+        ttk.Checkbutton(self, text="Sim", variable=self.sim).pack(pady=5)
+        ttk.Checkbutton(self, text="Auto", variable=self.auto).pack(pady=5)
+
+        tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
+        tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+        
+        tk.Button(self, text="Notify Me", command=self.ask_email).pack(pady=10)
+
+        self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
+        self.output_text.pack(expand=True, fill="both", pady=10)
+        
+    def ask_email(self):
+        """prompt the user for their email"""
+        email = self.show_popup("input", "Enter your email for reaction updates.")
+        print(email)
+        if email:
+            self.recipient_email = email
+            self.show_popup("info", "You will be notified at {email} when your reaction is complete")
+        else:
+            self.show_popup("warning", "Please enter a valid email address.")
+
+
+    def show_popup(self, type, msg):
+        """
+        show a popup, type indicated by string
+        yesno = a popup with a yes and not option
+        continue = a popup which gives the options for ok or cancel
+        input = a popup which prompts the user for text input
+        """
+        if type == "yesno":
+            return messagebox.askyesno("User Input", msg)
+        elif type == "continue":
+            return messagebox.askokcancel("User Input", msg)
+        elif type == "input":
+            #workaround from Stackoverflow
+            newWin = tk.Tk()
+            newWin.withdraw()
+            returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+            newWin.destroy()
+            return returnval
+        elif type == "info":
+            messagebox.showinfo("Information", msg)
+        elif type == "warning":
+            messagebox.showwarning("Warning", msg)
+
+    def run_controller(self):
+        """
+        initializes the controller, status, and email threads
+        """
+        cli_args = []
+        if self.sheet_name.get():
+            cli_args.append(f"-n{self.sheet_name.get().strip()}")
+        if self.auto.get():
+            cli_args.append("-mauto")
+        else:
+            cli_args.append("-mprotocol")
+        if self.sim.get():
+            cli_args.append("-s")
+        else:
+            cli_args.append("--no-sim")
+        self.pickle.add_entry(self.sheet_name.get())
+        
+        if self.recipient_email:
+            try:
+                self.notifier = EmailNotifier(self.recipient_email)
+                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                self.thread_manager.start_thread(target=self.notifier.watch_event)
+            except Exception as e:
+                messagebox.showerror(e)
+
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+
+    def run_deckpos(self):
+        """run deckpositions"""
+        if self.sheet_name.get() == "":
+            self.status_queue.put("no sheetname provided")
+        else:
+            QueueManager().set_sheetname(str(self.sheet_name.get()))
+            self.thread_manager.start_thread(target=run_deckpos)
+
+    def update_run_status(self):
+        while True:
+            msg = self.status_queue.get()
+            self.output_text.insert(tk.END, str(msg) + "\n")
+            self.output_text.see(tk.END)
+    
+    def listen_input(self):
+        """manage making popups given requests from input queue, sending return vals to response queue"""
+        response_queue = QueueManager.get_response_queue()
+        if not self.input_queue.empty():
+            type, msg = self.input_queue.get()
+            response = self.show_popup(type, msg)
+            response_queue.put(response)
+        self.after(100, self.listen_input)
+
+        
+    def on_close(self):
+        """make sure the window is destroyed"""
+        self.destroy()
+</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="controller.Controller" href="#controller.Controller">tk.TK</a></li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="controller.AutoContr.check_rxn_df"><code class="name flex">
+<span>def <span class="ident">create_interface</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>
+    Initializes all of the main UI elements of the GUI
+</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def create_interface(self):
+        """initializes all of the UI elements in the main window"""
+        tk.Label(self, text="Sheetname", font=("Inter", 16), fg="white", bg="#252526").pack()
+        
+        self.sheet_input = ttk.Combobox(self, textvariable=self.sheet_name, values=self.pickle.get_data(), width=50)
+        self.sheet_input.pack()
+        
+        ttk.Checkbutton(self, text="Sim", variable=self.sim).pack(pady=5)
+        ttk.Checkbutton(self, text="Auto", variable=self.auto).pack(pady=5)
+
+        tk.Button(self, text="Execute", command=self.run_controller).pack(pady=10)
+        tk.Button(self, text="Check Deck Positions", command=self.run_deckpos).pack(pady=10)
+        
+        tk.Button(self, text="Notify Me", command=self.ask_email).pack(pady=10)
+
+        self.output_text = tk.Text(self, height=10, width=50, bg="#3e3e42", fg="white")
+        self.output_text.pack(expand=True, fill="both", pady=10)
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AutoContr.run_protocol"><code class="name flex">
+<span>def <span class="ident">ask_email</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>
+    Prompts the user for their email, and saves it as a member variable. 
+</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+def ask_email(self):
+    """prompt the user for their email"""
+    email = self.show_popup("input", "Enter your email for reaction updates.")
+    print(email)
+    if email:
+        self.recipient_email = email
+        self.show_popup("info", "You will be notified at {email} when your reaction is complete")
+    else:
+        self.show_popup("warning", "Please enter a valid email address.")
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AutoContr.run_simulation"><code class="name flex">
+<span>def <span class="ident">show_popup</span></span>(<span>self, type, msg)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>
+    A general purpose method for showing popups of different types,
+    type is a string which indicates the type of popup, msg indicates the message to show in the 
+    popup.
+</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def show_popup(self, type, msg):
+        """
+        show a popup, type indicated by string
+        yesno = a popup with a yes and not option
+        continue = a popup which gives the options for ok or cancel
+        input = a popup which prompts the user for text input
+        """
+        if type == "yesno":
+            return messagebox.askyesno("User Input", msg)
+        elif type == "continue":
+            return messagebox.askokcancel("User Input", msg)
+        elif type == "input":
+            #workaround from Stackoverflow
+            newWin = tk.Tk()
+            newWin.withdraw()
+            returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+            newWin.destroy()
+            return returnval
+        elif type == "info":
+            messagebox.showinfo("Information", msg)
+        elif type == "warning":
+            messagebox.showwarning("Warning", msg)
+</code></pre>
+</details>
+</dd>
+<dt id="controller.AutoContr.run_simulation"><code class="name flex">
+    <span>def <span class="ident">run_controller</span></span>(<span>self, type, msg)</span>
+    </code></dt>
+    <dd>
+    <div class="desc"><p>
+        This class parses arguements produced by the GUI and runs controller in a seperate thread, along with other threads
+        necessary for updating the GUI elements.
+    </p></div>
+    <details class="source">
+    <summary>
+    <span>Expand source code</span>
+    </summary>
+    <pre><code class="python">
+        def show_popup(self, type, msg):
+            """
+            show a popup, type indicated by string
+            yesno = a popup with a yes and not option
+            continue = a popup which gives the options for ok or cancel
+            input = a popup which prompts the user for text input
+            """
+            if type == "yesno":
+                return messagebox.askyesno("User Input", msg)
+            elif type == "continue":
+                return messagebox.askokcancel("User Input", msg)
+            elif type == "input":
+                #workaround from Stackoverflow
+                newWin = tk.Tk()
+                newWin.withdraw()
+                returnval = simpledialog.askstring("User Input", msg, parent=newWin)
+                newWin.destroy()
+                return returnval
+            elif type == "info":
+                messagebox.showinfo("Information", msg)
+            elif type == "warning":
+                messagebox.showwarning("Warning", msg)
+    </code></pre>
+    </details>
+    </dd>
+</dl>
+</dd>
+
+<dt id="controller.Controller"><code class="flex name class">
+<span>def <span class="ident">run_controller</span></span>
+<span>(</span><span>self)</span>
+</code></dt>
+<dd>
+<div class="desc">
+<p>
+    This class parses arguements produced by the GUI and runs controller in a seperate thread, along with other 
+</p>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">
+    def run_controller(self):
+        """
+        initializes the controller, status, and email threads
+        """
+        cli_args = []
+        if self.sheet_name.get():
+            cli_args.append(f"-n{self.sheet_name.get().strip()}")
+        if self.auto.get():
+            cli_args.append("-mauto")
+        else:
+            cli_args.append("-mprotocol")
+        if self.sim.get():
+            cli_args.append("-s")
+        else:
+            cli_args.append("--no-sim")
+        self.pickle.add_entry(self.sheet_name.get())
+        
+        if self.recipient_email:
+            try:
+                self.notifier = EmailNotifier(self.recipient_email)
+                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                self.thread_manager.start_thread(target=self.notifier.watch_event)
+            except Exception as e:
+                messagebox.showerror(e)
+
+        self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
+        self.thread_manager.start_thread(target=self.update_run_status) # begin update thread
+</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li>abc.ABC</li>
+</ul>
+<h3>Subclasses</h3>
+<ul class="hlist">
+<li><a title="controller.AutoContr" href="#controller.AutoContr">AutoContr</a></li>
+<li><a title="controller.ProtocolExecutor" href="#controller.ProtocolExecutor">ProtocolExecutor</a></li>
+</ul>
+<h3>Class variables</h3>
+<dl>
+<dt id="controller.Controller.ChemCacheEntry"><code class="name">var <span class="ident">ChemCacheEntry</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+<dt id="controller.Controller.DilutionParams"><code class="name">var <span class="ident">DilutionParams</span></code></dt>
+<dd>
+<div class="desc"><p>DilultionParams(cont, vol)</p></div>
+</dd>
+<dt id="controller.Controller.PLATEREADER_INDEX_TRANSLATOR"><code class="name">var <span class="ident">PLATEREADER_INDEX_TRANSLATOR</span></code></dt>
+<dd>
+<div class="desc"></div>
+</dd>
+</dl>
+<h3>Methods</h3>
+<dl>
+<dt id="controller.Controller.check_conc"><code class="name flex">
+<span>def <span class="ident">check_conc</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_conc(self):
+    found_errors = 0
+
+    #Check to make sure water always has a concentration defined
+    check_water_conc = (self.rxn_df.loc[(self.rxn_df[&#39;reagent&#39;]==&#39;Water&#39;),&#39;conc&#39;].isna())
+    if check_water_conc.any():
+        print(&#34;&lt;&lt;controller&gt;&gt; Error in index: &#34;+ str(check_water_conc.loc[check_water_conc].index[0])+ &#34; Water needs to always have a concentration defined.&#34;)
+        found_errors = max(found_errors,2)
+    #Check to make sure you don&#39;t transfer a reagent with a concentration into a reagent with a volume
+    #boolean list of all concentrations that are nan
+            
+    check_conc = (self.rxn_df.loc[(self.rxn_df[&#39;op&#39;]== &#39;transfer&#39;),&#39;conc&#39;].isna())
+    transfer_df = self.rxn_df.loc[(self.rxn_df[&#39;op&#39;] == &#39;transfer&#39;)]
+    #Check_nan a list of all reagents that dont have a concentration
+    check_nan = (transfer_df.loc[(check_conc),&#39;reagent&#39;].unique())
+    #check_vol list of all reagents that dont have a volume
+    check_vol = (transfer_df.loc[(~check_conc),&#39;reagent&#39;].unique())
+    
+    for prod in self._products:
+        col = self.rxn_df[prod].ne(0)
+        product_df = self.rxn_df.loc[col]
+        check_concs = (product_df.loc[(product_df[&#39;op&#39;] == &#39;transfer&#39;),&#39;conc&#39;].isna())
+        transfer_dfs = product_df.loc[(product_df[&#39;op&#39;] == &#39;transfer&#39;)]
+        check_nans = (transfer_dfs.loc[(check_concs),&#39;reagent&#39;].unique())
+        check_vols = (transfer_dfs.loc[(~check_concs),&#39;reagent&#39;].unique())
+        for val in check_nans:
+            if val in check_vols:
+                print(&#34;&lt;&lt;controller&gt;&gt; Error in reagent &#34; + val + &#34;, cannot transfer a reagent without a concentration into the same product with a reagent with concentration.&#34;)
+    
+    #Checks to make sure all reagents with molarity get transferred into products with total volume
+    tot_vol_mol = transfer_df.loc[check_conc,self._products]
+    if not tot_vol_mol.empty:
+        tot_vol_mol = tot_vol_mol.sum().apply(lambda x: not math.isclose(x, 0, abs_tol=1e-9))
+        tot_vol_mol = tot_vol_mol.loc[tot_vol_mol].index
+        for i in tot_vol_mol:
+            if i not in self.tot_vols.keys():
+                print(&#34;&lt;&lt;controller&gt;&gt; Error in product: &#34; + str(i) + &#34; you can only transfer reagents with molarity into products with total volume specified.&#34;)
+                found_errors = max(found_errors, 2)
+    return found_errors</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.check_labware"><code class="name flex">
+<span>def <span class="ident">check_labware</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>checks to ensure that the labware has been correctly initialized<br>
+returns<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_labware(self):
+    &#39;&#39;&#39;
+    checks to ensure that the labware has been correctly initialized  
+    returns  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;
+    found_errors = 0
+    for i, r in self.robo_params[&#39;labware_df&#39;].iterrows():
+        #check that everything has afirst well if it&#39;s not a tube
+        if not &#39;tube&#39; in r[&#39;name&#39;] and not r[&#39;first_usable&#39;]:
+            print(&#39;&lt;&lt;controller&gt;&gt; specified labware {} on deck_pos {}, but did not specify first usable tip/well.&#39;.format(r[&#39;name&#39;], r[&#39;deck_pos&#39;]))
+            found_errors = max(found_errors,2)
+        #if you&#39;re not a tube and you have an empty_list, that&#39;s also bad
+        if not &#39;tube&#39; in r[&#39;name&#39;] and r[&#39;empty_list&#39;]:
+            print(&#39;&lt;&lt;controller&gt;&gt; An empty list for {} on deck pos {} was specified, but {} takes only a first usable tip/well.&#39;.format(r[&#39;name&#39;], r[&#39;deck_pos&#39;], r[&#39;name&#39;]))
+            found_errors = max(found_errors,2)
+        #check for no duplicates in the empty list
+        if r[&#39;empty_list&#39;]:
+            locs = r[&#39;empty_list&#39;].replace(&#39; &#39;,&#39;&#39;).split(&#39;,&#39;)
+            if len(set(locs)) &lt; len(locs):
+                print(&#39;&lt;&lt;controller&gt;&gt; empty list for {} on deck pos {} had duplicates. List was {}&#39;.format(r[&#39;name&#39;],r[&#39;deck_pos&#39;], r[&#39;empty_list&#39;]))
+                found_errors = max(found_errors,2)
+    return found_errors </code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.check_reagents"><code class="name flex">
+<span>def <span class="ident">check_reagents</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>checks to ensure that you've specified reagents correctly, and also checks that
+you did not double book empty containers onto reagents<br>
+returns<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_reagents(self):
+    &#39;&#39;&#39;
+    checks to ensure that you&#39;ve specified reagents correctly, and also checks that
+    you did not double book empty containers onto reagents  
+    returns  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;
+    found_errors = 0
+    #This is a little hefty. We&#39;re checking to see if any reagents/empty containers 
+    #were double booked onto the same location on the same deck position
+    labware_w_empties = self.robo_params[&#39;labware_df&#39;].loc[self.robo_params[&#39;labware_df&#39;][&#39;empty_list&#39;].astype(bool)]
+    loc_pos_empty_pairs = [] # will become series
+    for i, row in labware_w_empties.iterrows():
+        for loc in row[&#39;empty_list&#39;].replace(&#39; &#39;,&#39;&#39;).split(&#39;,&#39;):
+            loc_pos_empty_pairs.append((loc, row[&#39;deck_pos&#39;]))
+    loc_pos_empty_pairs = pd.Series(loc_pos_empty_pairs, dtype=object)
+    loc_deck_pos_pairs = self.robo_params[&#39;reagent_df&#39;].apply(lambda r: (r[&#39;loc&#39;], r[&#39;deck_pos&#39;]),axis=1)
+    loc_deck_pos_pairs = loc_deck_pos_pairs.append(loc_pos_empty_pairs)
+    val_counts = loc_deck_pos_pairs.value_counts()
+    for i in val_counts.loc[val_counts &gt; 2].index:
+        print(&#39;&lt;&lt;controller&gt;&gt; location {} on deck position has multiple reagents/empty containers assigned to it&#39;)
+        found_errors = max(found_errors,2)
+    return found_errors</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.check_rxn_df"><code class="name flex">
+<span>def <span class="ident">check_rxn_df</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill
+Advised options are printed and if an error code is returned
+Will run through and check all rows, even if errors are found
+returns<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_rxn_df(self):
+    &#39;&#39;&#39;
+    Runs error checks on the reaction df to ensure that formating is correct. Illegal/Ill 
+    Advised options are printed and if an error code is returned
+    Will run through and check all rows, even if errors are found
+    returns  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;
+    found_errors = 0
+    if self.rxn_df.loc[self.rxn_df[&#39;op&#39;]==&#39;scan&#39;][&#39;scan_filename&#39;].duplicated().sum() &gt; 0:
+        print(&#34;&lt;&lt;controller&gt;&gt; Multiple scans use same filename. It will be overwritten. Do you wish to proceed?&#34;)
+        found_errors = max(found_errors, 1)
+    if self.rxn_df.loc[self.rxn_df[&#39;op&#39;]==&#39;plot&#39;][&#39;plot_filename&#39;].duplicated().sum() &gt; 0:
+        print(&#34;&lt;&lt;controller&gt;&gt; Multiple plots use same filename. They will be overwritten. Do you wish to proceed?&#34;)
+        found_errors = max(found_errors, 1)
+    for i, r in self.rxn_df.iterrows():
+        r_num = i+1
+        #check pauses
+        if (not (&#39;pause&#39; in r[&#39;op&#39;] or &#39;pause&#39; in r[&#39;callbacks&#39;])) == (not pd.isna(r[&#39;pause_time&#39;])):
+            print(&#34;&lt;&lt;controller&gt;&gt; You asked for a pause in row {}, but did not specify the pause_time or vice versa&#34;.format(r_num))
+            found_errors = max(found_errors, 2)
+        #check that there&#39;s always a volume when you transfer
+        if (r[&#39;op&#39;] == &#39;transfer&#39; and math.isclose(r[self._products].sum(), 0,abs_tol=1e-9)):
+            print(&#34;&lt;&lt;controller&gt;&gt; You executed a transfer step in row {}, but you did not transfer any volume.&#34;.format(r_num))
+            found_errors = max(found_errors, 1)
+        #check that you have a reagent if you&#39;re transfering
+        if r[&#39;op&#39;] == &#39;transfer&#39; and pd.isna(r[&#39;reagent&#39;]):
+            print(&#39;&lt;&lt;controller&gt;&gt; transfer specified without reagent in row {}&#39;.format(r_num))
+            found_errors = max(found_errors,2)
+        #check that scans have a scan file
+        if (r[&#39;op&#39;] == &#39;scan&#39; or &#39;scan&#39; in r[&#39;callbacks&#39;]) and pd.isna(r[&#39;scan_filename&#39;]):
+            print(&#39;&lt;&lt;controller&gt;&gt; scan without scan filename in row {}&#39;.format(r_num))
+            found_errors = max(found_errors,2)
+        #check no multiple scans on one callback
+        callbacks = r[&#39;callbacks&#39;].replace(&#39; &#39;, &#39;&#39;).split(&#39;,&#39;)
+        if &#39;scan&#39; in callbacks:
+            callbacks.remove(&#39;scan&#39;)
+            if &#39;scan&#39; in callbacks:
+                print(&#39;&lt;&lt;controller&gt;&gt; multiple scans in a callback on line {}&#39;.format(r_num))
+                found_errors = max(found_errors,2)
+        #check that plots have scans
+        if r[&#39;op&#39;] == &#39;plot&#39;:
+            if pd.isna(r[&#39;scan_filename&#39;]):
+                print(&#34;&lt;&lt;controller&gt;&gt; please specify a scan filename in row &#39;{}&#39;&#34;.format(r_num))
+                found_errors = max(found_errors,2)
+            if pd.isna(r[&#39;plot_filename&#39;]):
+                print(&#34;&lt;&lt;controller&gt;&gt; please specify a plot filename in row &#39;{}&#39;&#34;.format(r_num))
+                found_errors = max(found_errors,2)
+            rows_above = self.rxn_df.loc[:i,:]
+            scan_rows = rows_above.loc[(rows_above[&#39;scan_filename&#39;] == r[&#39;scan_filename&#39;]) &amp;\
+                    (rows_above[&#39;op&#39;] == &#39;scan&#39;)]
+            if scan_rows.empty:
+                    print(&#34;&lt;&lt;controller&gt;&gt; row {} plots using nonexistent scan file\
+                            &#34;.format(r_num))
+                    found_errors = max(found_errors, 2)
+            else:
+                last_scan_row = scan_rows.iloc[-1,:]
+                last_scan_products = last_scan_row[self._products]
+                scanned_products=last_scan_products.loc[last_scan_products.astype(bool)].index
+                scanned_products = set(scanned_products)
+                plotted_products = r[self._products]
+                plotted_products = set(plotted_products[plotted_products.astype(bool)])
+                if plotted_products.issubset(scanned_products):
+                    print(&#34;&lt;&lt;controller&gt;&gt; row {} plots products that have not been scanned\
+                    &#34;.format(r_num))
+                    found_errors = max(found_errors, 2)
+    return found_errors</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.check_tot_vol"><code class="name flex">
+<span>def <span class="ident">check_tot_vol</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This check ensures that the inserted total volume row does not contain negative floats.
+returns:<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_tot_vol(self):
+    &#39;&#39;&#39;
+    This check ensures that the inserted total volume row does not contain negative floats.
+    returns:  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;        
+    found_errors = 0;
+    
+    #checks for negative input in tot_vol rows
+    for key,val in self.tot_vols.items():
+        product_volumes = self.rxn_df[key]
+        if val &lt; 0:
+            print(&#34;&lt;&lt;controller&gt;&gt; Error in total volume row: value &#34; + str(val) + &#34; is negative. We cannot have negative values as input.&#34;)
+            found_errors = max(found_errors,2)
+        
+    #checks for scan errors
+    check_scan = self.rxn_df.loc[(self.rxn_df[&#39;op&#39;] == &#39;scan&#39;)]
+    #make sure if you&#39;re scanning you have a total volume
+    cols_w_scans = check_scan[self._products].astype(int).any() #bool arr if product is scaned
+    cols_w_scans = cols_w_scans.loc[cols_w_scans].index #just the cols that are scanned
+    for col in cols_w_scans:
+        if col not in self.tot_vols:
+            print(&#34;&lt;&lt;controller&gt;&gt; {} is scanned, but does not have a specified total volume. Will be scanned at whatever volume it has at the time of scan.&#34;.format(col))
+            found_errors = max(found_errors,1)
+    #check more scan issues
+    first_scans_i = check_scan[check_scan.eq(check_scan.max(1),0)&amp;check_scan.ne(0)].stack()   
+    scan_products = []
+    #Creates list for products that have scans
+    for prod in self.tot_vols.keys():
+        for sc in  first_scans_i.index:
+            if prod == sc[1]:
+                scan_products.append([prod,sc[0]])  
+    #checks if all transfers happen before scan
+    for products in scan_products:
+        specific_prod = self.rxn_df[products[0]]
+        scan_index = products[1]
+        while (scan_index &lt; len(specific_prod)):
+            if self.rxn_df[&#39;op&#39;][scan_index] == &#39;transfer&#39; and specific_prod[scan_index] != 0:
+                print(&#34;&lt;&lt;controller&gt;&gt; Error in product: &#34; +str(products[0]) +&#34; in index: &#34; +str(scan_index) + &#34;, cannot make transfers after scan when total volume column is specified.&#34;)
+                found_errors = max(found_errors,2)
+                break
+            else:
+                scan_index +=1
+            
+    #check for illegal dilutions in total vol
+    check_dilutions = self.rxn_df.loc[(self.rxn_df[&#39;op&#39;] == &#39;dilution&#39;)]
+    check_dilutions_name = self.rxn_df.loc[(self.rxn_df[&#39;op&#39;] == &#39;dilution&#39;),&#39;chemical_name&#39;]
+    first_dilutions_i = check_dilutions[check_dilutions.eq(check_dilutions.max(1),0)&amp;check_dilutions.ne(0)].stack()
+    for prod in self.tot_vols.keys():
+        for dil in first_dilutions_i.index:
+            if prod == dil[1]:
+                print(&#34;&lt;&lt;controller&gt;&gt; Error in product: &#34; + str(prod) + &#34; in index: &#34; +str(dil[0]) + &#34;, cannot dilute products that have a given total volume&#34;)
+                found_errors = max(found_errors,2)
+                break
+    #checks for dilutions in reagent slot--illegal!
+    for idx,dil_prod in enumerate(check_dilutions_name):
+        if dil_prod in self.tot_vols.keys():
+            print(&#34;&lt;&lt;controller&gt;&gt; Error in reagent row index &#34;+str(idx) +&#34; with product &#34;+  str(dil_prod) + &#34;: cannot have dilutions out of product with total volume specified.&#34;)
+            found_errors = max(found_errors,2)
+            
+    #Checks reagents to see if there is a transfer that transfers a product with tot_vol
+    check_transfer = self.rxn_df.loc[(self.rxn_df[&#39;op&#39;] == &#39;transfer&#39;),&#39;chemical_name&#39;]
+    for idx,trans_prod in enumerate(check_transfer):
+        if trans_prod in self.tot_vols.keys():
+            print(&#34;&lt;&lt;controller&gt;&gt; Error in reagent row index &#34;+str(idx) +&#34; with product &#34;+  str(trans_prod) + &#34;: cannot have transfer out of product with total volume specified.&#34;)
+            found_errors= max(found_errors,2)
+    
+    return found_errors </code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.close_connection"><code class="name flex">
+<span>def <span class="ident">close_connection</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>runs through closing procedure with robot
+<br>
+Postconditions:
+<br>
+Log files have been written to self.out_path<br>
+Connection has been closed</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def close_connection(self):
+    &#39;&#39;&#39;
+    runs through closing procedure with robot    
+    Postconditions:    
+        Log files have been written to self.out_path  
+        Connection has been closed  
+    &#39;&#39;&#39;
+    print(&#39;&lt;&lt;controller&gt;&gt; initializing breakdown&#39;)
+    self.save()
+    #server should now send a close command
+    self.portal.send_pack(&#39;close&#39;)
+    print(&#39;&lt;&lt;controller&gt;&gt; shutting down&#39;)
+    self.portal.close()</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.execute_protocol_df"><code class="name flex">
+<span>def <span class="ident">execute_protocol_df</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>takes a protocol df and sends every step to robot to execute<br>
+params:<br>
+int buff: the number of commands allowed in flight at a time<br>
+Postconditions:<br>
+every step in the protocol has been sent to the robot</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def execute_protocol_df(self):
+    &#39;&#39;&#39;
+    takes a protocol df and sends every step to robot to execute  
+    params:  
+        int buff: the number of commands allowed in flight at a time  
+    Postconditions:  
+        every step in the protocol has been sent to the robot  
+    &#39;&#39;&#39;
+    for i, row in self.rxn_df.iterrows():
+        print(&#34;&lt;&lt;controller&gt;&gt; executing command {} of the protocol df with operation {}.&#34;.format(i, row[&#39;op&#39;]))
+        if row[&#39;op&#39;] == &#39;transfer&#39;:
+            self._send_transfer_command(row,i)
+        elif row[&#39;op&#39;] == &#39;pause&#39;:
+            cid = self.portal.send_pack(&#39;pause&#39;,row[&#39;pause_time&#39;])
+        elif row[&#39;op&#39;] == &#39;stop&#39;:
+            self._stop(i)
+        elif row[&#39;op&#39;] == &#39;scan&#39;:
+            self._execute_scan(row, i)
+        elif row[&#39;op&#39;] == &#39;dilution&#39;:
+            self._send_dilution_commands(row, i)
+        elif row[&#39;op&#39;] == &#39;mix&#39;:
+            self._mix(row, i)
+        elif row[&#39;op&#39;] == &#39;make&#39;:
+            self._send_make(row, i)
+        elif row[&#39;op&#39;] == &#39;save&#39;:
+            self.save()
+        elif row[&#39;op&#39;] == &#39;plot&#39;:
+            self._create_plot(row, i)
+        elif row[&#39;op&#39;] == &#39;print&#39;:
+            self._execute_print(row,i)
+        else:
+            raise Exception(&#39;invalid operation {}&#39;.format(row[&#39;op&#39;]))</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.init_robot"><code class="name flex">
+<span>def <span class="ident">init_robot</span></span>(<span>self, simulate)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>this does the dirty work of sending accumulated params over network to the robot<br>
+params:<br>
+bool simulate: whether the robot should run a simulation<br>
+Postconditions:<br>
+robot has been initialized with necessary params</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def init_robot(self, simulate):
+    &#39;&#39;&#39;
+    this does the dirty work of sending accumulated params over network to the robot  
+    params:  
+        bool simulate: whether the robot should run a simulation  
+    Postconditions:  
+        robot has been initialized with necessary params  
+    &#39;&#39;&#39;
+    #send robot data to initialize itself
+    #note reagent_df can have index with same name so index is reset for transfer
+    cid = self.portal.send_pack(&#39;init&#39;, simulate, 
+            self.robo_params[&#39;using_temp_ctrl&#39;], self.robo_params[&#39;temp&#39;],
+            self.robo_params[&#39;labware_df&#39;].to_dict(), self.robo_params[&#39;instruments&#39;],
+            self.robo_params[&#39;reagent_df&#39;].reset_index().to_dict(), self.my_ip,
+            self.robo_params[&#39;dry_containers&#39;].to_dict())</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.plot_LAM_overlay"><code class="name flex">
+<span>def <span class="ident">plot_LAM_overlay</span></span>(<span>self, df, wells, filename=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>plots overlayed spectra of wells in the order that they are specified<br>
+params:<br>
+df df: dataframe with columns = chem_names, and values of each column is a series
+of scans in 701 intervals.<br>
+str filename: the title of the plot, and the file<br>
+list<str> wells: an ordered list of all of the chem_names you want to plot.<br>
+Postconditions:<br>
+plot has been written with name "overlay.png" to the plotting dir. or
+{filename}.png if filename was supplied</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot_LAM_overlay(self,df,wells,filename=None):
+    &#39;&#39;&#39;
+    plots overlayed spectra of wells in the order that they are specified  
+    params:  
+        df df: dataframe with columns = chem_names, and values of each column is a series
+          of scans in 701 intervals.  
+        str filename: the title of the plot, and the file  
+        list&lt;str&gt; wells: an ordered list of all of the chem_names you want to plot.  
+    Postconditions:  
+        plot has been written with name &#34;overlay.png&#34; to the plotting dir. or 
+        {filename}.png if filename was supplied  
+    &#39;&#39;&#39;
+    if not filename:
+        filename = &#34;overlay&#34;
+    x_vals = list(range(300,1001))
+    #overlays only things you specify
+    y = []
+    #df = df[df_reorder]
+    #headers = [well_key[k] for k in df.columns]
+    #legend_colors = []
+    for chem_name in wells:
+        y.append(df[chem_name].iloc[-701:].to_list())
+    self._plot_setup_overlay(filename)
+    colors = list(cm.rainbow(np.linspace(0, 1,len(y))))
+    for i in range(len(y)):
+        plt.plot(x_vals,y[i],color = tuple(colors[i]))
+    patches = [mpatches.Patch(color=color, label=label) for label, color in zip(wells, colors)]
+    plt.legend(patches, wells, loc=&#39;upper right&#39;, frameon=False,prop={&#39;size&#39;:3})
+    legend = pd.DataFrame({&#39;Color&#39;:patches,&#39;Labels&#39;: wells})
+    plt.savefig(os.path.join(self.plot_path, &#39;{}.png&#39;.format(filename)))
+    plt.close()</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.plot_kin_subplots"><code class="name flex">
+<span>def <span class="ident">plot_kin_subplots</span></span>(<span>self, df, n_cycles, wells, filename=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>TODO this function doesn't save properly, but it does show. Don't know issue<br>
+plots kinetics for each well in the order given by wells.<br>
+params:<br>
+df df: the scan data<br>
+int n_cycles: the number of cycles for the scan data<br>
+list<str> wells: the wells you want to plot in order
+Postconditions:<br>
+plot has been written with name "{filename}_overlay.png" to the plotting dir.<br>
+If filename is not supplied, name is kin_subplots</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
+    &#39;&#39;&#39;
+    TODO this function doesn&#39;t save properly, but it does show. Don&#39;t know issue  
+    plots kinetics for each well in the order given by wells.  
+    params:  
+        df df: the scan data  
+        int n_cycles: the number of cycles for the scan data  
+        list&lt;str&gt; wells: the wells you want to plot in order
+    Postconditions:  
+        plot has been written with name &#34;{filename}_overlay.png&#34; to the plotting dir.  
+        If filename is not supplied, name is kin_subplots
+    &#39;&#39;&#39;
+    if not filename:
+        filename=kin_subplots
+    x_vals = list(range(300,1001))
+    colors = list(cm.rainbow(np.linspace(0, 1, n_cycles)))
+    fig, axes = plt.subplots(8, 12, dpi=300, figsize=(50, 50),subplot_kw=dict(box_aspect=1,sharex = True,sharey = True))
+    for idx, (chem_name, ax) in enumerate(zip(wells, axes.flatten())):
+        ax.set_title(chem_name)
+        self._plot_kin(ax, df, n_cycles, chem_name)
+        plt.subplots_adjust(wspace=0.3, hspace= -0.1)
+    
+        ax.tick_params(
+            which=&#39;both&#39;,
+            bottom=&#39;off&#39;,
+            left=&#39;off&#39;,
+            right=&#39;off&#39;,
+            top=&#39;off&#39;
+        )
+        ax.set_xlim((300,1000))
+        ax.set_ylim((0,1.0))
+        ax.set_xlabel(&#34;Wavlength (nm)&#34;)
+        ax.set_ylabel(&#34;Absorbance (A.U.)&#34;)
+        ax.set_xticks(range(301, 1100, 100))
+        #ax.set_aspect(adjustable=&#39;box&#39;)
+        #ax.set_yticks(range(0,1))
+    else:
+        [ax.set_visible(False) for ax in axes.flatten()[idx+1:]]
+    plt.savefig(os.path.join(self.plot_path, &#39;{}.png&#39;.format(filename)))
+    plt.close()</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.plot_single_kin"><code class="name flex">
+<span>def <span class="ident">plot_single_kin</span></span>(<span>self, df, n_cycles, chem_name, filename=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>plots one kinetics trace.
+params:<br>
+df df: the scan data<br>
+int n_cycles: the number of cycles in per well scanned<br>
+str chem_name: the name of the chemical to be plotted<br>
+str filename: the name of the file to write<br>
+Postconditions:<br>
+A kinetics trace of the well has been written to the Plots directory.
+under the name filename. If filename was None, the filename will be
+{chem_name}_kinetics.png</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def plot_single_kin(self, df, n_cycles, chem_name, filename=None):
+    &#39;&#39;&#39;
+    plots one kinetics trace. 
+    params:  
+        df df: the scan data  
+        int n_cycles: the number of cycles in per well scanned  
+        str chem_name: the name of the chemical to be plotted  
+        str filename: the name of the file to write  
+    Postconditions:  
+        A kinetics trace of the well has been written to the Plots directory.
+        under the name filename. If filename was None, the filename will be 
+        {chem_name}_kinetics.png
+    &#39;&#39;&#39;
+    if not filename:
+        filename = &#39;{}_kinetics&#39;.format(chem_name)
+    self._plot_setup_overlay(&#39;Kinetics {}: &#39;.format(chem_name))
+    self._plot_kin(plt,df, n_cycles, chem_name)
+    plt.savefig(os.path.join(self.plot_path, &#39;{}.png&#39;.format(filename)))
+    plt.close()</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.run_all_checks"><code class="name flex">
+<span>def <span class="ident">run_all_checks</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>runs all checks on a rxn_df converted to volumes.<br>
+This code will probably be overridden by children of this class to add more checks.<br>
+returns:<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def run_all_checks(self):
+    &#39;&#39;&#39;
+    runs all checks on a rxn_df converted to volumes.  
+    This code will probably be overridden by children of this class to add more checks.  
+    returns:  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;
+    found_errors = 0
+    found_errors = max(found_errors, self.check_rxn_df())
+    found_errors = max(found_errors, self.check_labware())
+    found_errors = max(found_errors, self.check_reagents())
+    found_errors = max(found_errors, self.check_tot_vol())
+    found_errors = max(found_errors,self.check_conc())
+    return found_errors</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.run_protocol"><code class="name flex">
+<span>def <span class="ident">run_protocol</span></span>(<span>self, simulate)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@abstractmethod
+def run_protocol(self,simulate):
+    pass</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.run_simulation"><code class="name flex">
+<span>def <span class="ident">run_simulation</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">@abstractmethod
+def run_simulation(self):
+    pass</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.save"><code class="name flex">
+<span>def <span class="ident">save</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def save(self):
+    self.portal.send_pack(&#39;save&#39;)
+    #server will initiate file transfer
+    files = self.portal.recv_ftp()
+    for filename, file_bytes in files:
+        with open(os.path.join(self.eve_files_path,filename), &#39;wb&#39;) as write_file:
+            write_file.write(file_bytes)
+    self.translate_wellmap()</code></pre>
+</details>
+</dd>
+<dt id="controller.Controller.translate_wellmap"><code class="name flex">
+<span>def <span class="ident">translate_wellmap</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Preconditions:<br>
+there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+machine labels<br>
+Postconditions:<br>
+translated_wellmap.tsv has been created. translated is a copy of wellmap with <br>
+it's locations translated to human locs, but the labware pos remains the same</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def translate_wellmap(self):
+    &#39;&#39;&#39;
+    Preconditions:  
+        there exists a file wellmap.tsv in self.eve_files, and that file has eve level
+        machine labels  
+    Postconditions:  
+        translated_wellmap.tsv has been created. translated is a copy of wellmap with   
+        it&#39;s locations translated to human locs, but the labware pos remains the same  
+    &#39;&#39;&#39;
+    df = pd.read_csv(os.path.join(self.eve_files_path,&#39;wellmap.tsv&#39;), sep=&#39;\t&#39;)
+    df[&#39;loc&#39;] = df.apply(lambda r: r[&#39;loc&#39;] if (r[&#39;deck_pos&#39;] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r[&#39;loc&#39;],&#39;platereader&#39;+str(r[&#39;deck_pos&#39;]))],axis=1)
+    df.to_csv(os.path.join(self.eve_files_path,&#39;translated_wellmap.tsv&#39;),sep=&#39;\t&#39;,index=False)</code></pre>
+</details>
+</dd>
+</dl>
+</dd>
+<dt id="controller.DummyReader"><code class="flex name class">
+<span>class <span class="ident">DummyReader</span></span>
+<span>(</span><span>data_path)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>Inherits from AbstractPlateReader, so it has all of it's methods, but doesn't actually do
+anything. useful for some simulations</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class DummyReader(AbstractPlateReader):
+    &#39;&#39;&#39;
+    Inherits from AbstractPlateReader, so it has all of it&#39;s methods, but doesn&#39;t actually do
+    anything. useful for some simulations
+    &#39;&#39;&#39;
+    pass</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></li>
+<li>abc.ABC</li>
+</ul>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></b></code>:
+<ul class="hlist">
+<li><code><a title="controller.AbstractPlateReader.edit_layout" href="#controller.AbstractPlateReader.edit_layout">edit_layout</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.exec_macro" href="#controller.AbstractPlateReader.exec_macro">exec_macro</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.merge_scans" href="#controller.AbstractPlateReader.merge_scans">merge_scans</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.run_protocol" href="#controller.AbstractPlateReader.run_protocol">run_protocol</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="controller.PlateReader"><code class="flex name class">
+<span>class <span class="ident">PlateReader</span></span>
+<span>(</span><span>data_path, simulate=False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This class handles all platereader interactions. Inherits from the interface</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class PlateReader(AbstractPlateReader):
+    &#39;&#39;&#39;
+    This class handles all platereader interactions. Inherits from the interface
+    &#39;&#39;&#39;
+
+    def __init__(self, data_path, simulate=False):
+        super().__init__(data_path)
+        self.simulate=simulate
+        self._set_config_attr(&#39;Configuration&#39;,&#39;SimulationMode&#39;, str(int(simulate)))
+        self._set_config_attr(&#39;ControlApp&#39;,&#39;AsDDEserver&#39;, &#39;True&#39;)
+        self.exec_macro(&#34;dummy&#34;)
+        self.exec_macro(&#34;init&#34;)
+        self.exec_macro(&#39;PlateOut&#39;)
+        
+    def exec_macro(self, macro, *args):
+        &#39;&#39;&#39;
+        sends a macro command to the platereader and blocks waiting for response. If response
+        not ok, it&#39;ll crash and burn  
+        params:  
+            str macro: should be a macro from the documentation  
+            *args: associated arguments of the macto  
+        Postconditions:  
+            The command has been sent to the PlateReader, if the return status was not 0 (good)
+            an error will be thrown  
+        &#39;&#39;&#39;
+        exec_str = &#34;&#39;{}Cln/DDEClient.exe&#39; {}&#34;.format(self.SPECTRO_ROOT_PATH, macro)
+        #add arguments
+        for arg in args:
+            exec_str += &#34; &#39;{}&#39;&#34;.format(arg)
+        print(&#39;&lt;&lt;Reader&gt;&gt; executing: {}&#39;.format(exec_str))
+        exit_code = os.system(exec_str)
+        try:
+            assert (exit_code == 0)
+        except:
+            if exit_code &lt; 1000:
+                raise Exception(&#34;PlateReader rejected command Error&#34;)
+            elif exit_code == 1000:
+                raise Exception(&#34;PlateReader Nonexistent Protocol Name Error&#34;)
+            elif exit_code == 2000:
+                raise Exception(&#34;PlateReader Communication Error&#34;)
+            else:
+                raise Exception(&#34;PlateReader Error. Exited with code {}&#34;.format(exit_code))
+
+    def shake(self, shake_time):
+        &#39;&#39;&#39;
+        executes a shake
+        &#39;&#39;&#39;
+        macro = &#34;Shake&#34;
+        shake_type = 2
+        shake_freq = 300
+        self.exec_macro(macro, shake_type, shake_freq, shake_time)
+
+    def load_reader_data(self, filename, loc_to_name):
+        &#39;&#39;&#39;
+        takes in the filename of a reader output and returns a dataframe with the scan data
+        loaded, and a dictionary with relevant metadata.  
+        Note that only the wells specified in loc_to_name will be returned.  
+        params:  
+            str filename: the name of the file to read without extension  
+            df: the scan data for the wellnames supplied in loc_to_name for that file.  
+        returns:  
+            df: the scan data for that file  
+            dict&lt;str:obj&gt;: holds the metadata  
+                str filename: the filename as you passed in  
+                int n_cycles: the number of cycles  
+        &#39;&#39;&#39;
+        if self.simulate:
+            return super().load_reader_data(filename, loc_to_name) #return dummy data
+        else:
+            filename = &#34;{}.csv&#34;.format(filename)
+            #parse the metadata
+            start_i, metadata = self._parse_metadata(filename)
+            # Read data ignoring first metadata lines
+            df = pd.read_csv(os.path.join(self.data_path,filename), skiprows=start_i,
+                    header=None,index_col=0,na_values=[&#34;       -&#34;],encoding = &#39;latin1&#39;).T
+            headers = [&#34;{}{}&#34;.format(x[0], int(x[1:-1])) for x in df.columns] #rename A01-&gt;A1
+            df.columns = headers
+            #get only the things we want
+            df = df[loc_to_name.keys()]
+            #rename by wellname
+            df.rename(columns=loc_to_name, inplace=True)
+            df.dropna(inplace=True)
+            df = df.astype(float)
+            return df, metadata
+
+
+    def edit_layout(self, protocol_name, layout):
+        &#39;&#39;&#39;
+        This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
+        in the SPECTROstar root. It is also possible (theoretically) to 
+        send a literal &#39;edit_layout&#39; command, but this fails for long
+        strings. (not sure why, maybe windows limited sized strings?
+        but the file works). It removes the file after importing  
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list&lt;str&gt; wells: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+        Postcondtions:  
+            The protocol has had it&#39;s layout updated to include only the wells specified  
+        &#39;&#39;&#39;
+        if layout == &#39;all&#39;:
+            #get a list of all the wellanmes
+            layout = [a+str(i) for a in list(&#39;ABCDEFGH&#39;) for i in range(1,13,1)]
+        well_entries = []
+        for i, well in enumerate(layout):
+            well_entries.append(&#34;{}=X{}&#34;.format(well, i+1))
+        filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,&#39;.temp_ot2_bmg_layout.lb&#39;)
+        filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,&#39;w&#39;),&#39;.temp_ot2_bmg_layout.lb&#39;)
+        with open(filepath_lin, &#39;w+&#39;) as layout:
+            layout.write(&#39;EmptyLayout&#39;)
+            for entry in well_entries:
+                layout.write(&#34;\n{}&#34;.format(entry))
+        self.exec_macro(&#39;ImportLayout&#39;, protocol_name, self.PROTOCOL_PATH, filepath_win)
+        os.remove(filepath_lin)
+
+    def run_protocol(self, protocol_name, filename, layout=None):
+        r&#39;&#39;&#39;
+        params:  
+            str protocol_name: the name of the protocol that will be edited  
+            list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
+              (first will be X1, second X2 etc. If not specified will not alter layout)  
+        &#39;&#39;&#39;
+        if layout:
+            self.edit_layout(protocol_name, layout)
+        macro = &#39;run&#39;
+        #three &#39;&#39; are plate ids to pad. data_path specified once for ascii and once for other
+        self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,&#39;w&#39;), &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+        #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+        #that, so we move it from the default landing zone to where I actually want it
+        if self.simulate:
+            super().run_protocol(protocol_name, filename, layout)
+        else:
+            shutil.move(os.path.join(self.SPECTRO_DATA_PATH, &#34;{}.csv&#34;.format(filename)), 
+                    os.path.join(self.data_path, &#34;{}.csv&#34;.format(filename)))
+        
+
+
+    def _set_config_attr(self, header, attr, val):
+        &#39;&#39;&#39;
+        opens the Spectrostar nano config file and replaces the value of attr under header
+        with val
+        There are better ways to build this function, but it&#39;s not something you&#39;ll use much
+        so I&#39;m leaving it here  
+        params:  
+            str header: the header in the config file [header]  
+            str attr: the attribute you want to change  
+            obj val: the value to set the attribute to  
+        Postconditions:  
+            The SPECTROstar Nano.ini has had the attribute under the header overwritten with val
+            or appended to end if it wasn&#39;t found   
+        &#39;&#39;&#39;
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r&#39;SPECTROstar Nano.ini&#39;), &#39;r&#39;) as config:
+            file_str = config.readlines()
+            write_str = &#39;&#39;
+            header_exists = False
+            i = 0
+            while i &lt; len(file_str): #iterating through lines
+                line = file_str[i]
+                write_str += line
+                if line[1:-2] == header:
+                    header_exists = True#you found the appropriate header
+                    i += 1
+                    found_attr = False
+                    line = file_str[i] #do
+                    while &#39;[&#39; != line[0] and i &lt; len(file_str): #not a header and not EOF
+                        if line[:line.find(&#39;=&#39;)] == attr:
+                            found_attr = True
+                            write_str += &#39;{}={}\n&#39;.format(attr, val)
+                        else:
+                            write_str += line
+                        i += 1
+                        if i &lt; len(file_str):
+                            line = file_str[i]
+                    if not found_attr:
+                        write_str += &#39;{}={}\n&#39;.format(attr, val)
+                else:
+                    i += 1
+            if not header_exists:
+                write_str += &#39;[{}]\n&#39;.format(header)
+                write_str += &#39;{}={}\n&#39;.format(attr, val)
+
+        with open(os.path.join(self.SPECTRO_ROOT_PATH, r&#39;SPECTROstar Nano.ini&#39;), &#39;w+&#39;) as config:
+            config.write(write_str)
+
+    def shutdown(self):
+        &#39;&#39;&#39;
+        closes connection. Use this if you&#39;re done with this object at cleanup stage
+        &#39;&#39;&#39;
+        self.exec_macro(&#39;PlateIn&#39;)
+        self.exec_macro(&#39;Terminate&#39;)
+        self._set_config_attr(&#39;ControlApp&#39;,&#39;AsDDEserver&#39;,&#39;False&#39;)
+        self._set_config_attr(&#39;ControlApp&#39;, &#39;DisablePlateCmds&#39;,&#39;False&#39;)
+        self._set_config_attr(&#39;Configuration&#39;,&#39;SimulationMode&#39;, str(0))</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></li>
+<li>abc.ABC</li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="controller.PlateReader.edit_layout"><code class="name flex">
+<span>def <span class="ident">edit_layout</span></span>(<span>self, protocol_name, layout)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
+in the SPECTROstar root. It is also possible (theoretically) to
+send a literal 'edit_layout' command, but this fails for long
+strings. (not sure why, maybe windows limited sized strings?
+but the file works). It removes the file after importing<br>
+params:<br>
+str protocol_name: the name of the protocol that will be edited<br>
+list<str> wells: the wells that you want to be used for the protocol ordered.
+(first will be X1, second X2 etc. If layout is all, all wells will be made X<br>
+Postcondtions:<br>
+The protocol has had it's layout updated to include only the wells specified</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def edit_layout(self, protocol_name, layout):
+    &#39;&#39;&#39;
+    This protocol creates a temporary file, .temp_ot2_bmg_layout.lb
+    in the SPECTROstar root. It is also possible (theoretically) to 
+    send a literal &#39;edit_layout&#39; command, but this fails for long
+    strings. (not sure why, maybe windows limited sized strings?
+    but the file works). It removes the file after importing  
+    params:  
+        str protocol_name: the name of the protocol that will be edited  
+        list&lt;str&gt; wells: the wells that you want to be used for the protocol ordered.
+          (first will be X1, second X2 etc. If layout is all, all wells will be made X  
+    Postcondtions:  
+        The protocol has had it&#39;s layout updated to include only the wells specified  
+    &#39;&#39;&#39;
+    if layout == &#39;all&#39;:
+        #get a list of all the wellanmes
+        layout = [a+str(i) for a in list(&#39;ABCDEFGH&#39;) for i in range(1,13,1)]
+    well_entries = []
+    for i, well in enumerate(layout):
+        well_entries.append(&#34;{}=X{}&#34;.format(well, i+1))
+    filepath_lin = os.path.join(self.SPECTRO_ROOT_PATH,&#39;.temp_ot2_bmg_layout.lb&#39;)
+    filepath_win = os.path.join(wslpath(self.SPECTRO_ROOT_PATH,&#39;w&#39;),&#39;.temp_ot2_bmg_layout.lb&#39;)
+    with open(filepath_lin, &#39;w+&#39;) as layout:
+        layout.write(&#39;EmptyLayout&#39;)
+        for entry in well_entries:
+            layout.write(&#34;\n{}&#34;.format(entry))
+    self.exec_macro(&#39;ImportLayout&#39;, protocol_name, self.PROTOCOL_PATH, filepath_win)
+    os.remove(filepath_lin)</code></pre>
+</details>
+</dd>
+<dt id="controller.PlateReader.exec_macro"><code class="name flex">
+<span>def <span class="ident">exec_macro</span></span>(<span>self, macro, *args)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>sends a macro command to the platereader and blocks waiting for response. If response
+not ok, it'll crash and burn<br>
+params:<br>
+str macro: should be a macro from the documentation<br>
+*args: associated arguments of the macto<br>
+Postconditions:<br>
+The command has been sent to the PlateReader, if the return status was not 0 (good)
+an error will be thrown</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def exec_macro(self, macro, *args):
+    &#39;&#39;&#39;
+    sends a macro command to the platereader and blocks waiting for response. If response
+    not ok, it&#39;ll crash and burn  
+    params:  
+        str macro: should be a macro from the documentation  
+        *args: associated arguments of the macto  
+    Postconditions:  
+        The command has been sent to the PlateReader, if the return status was not 0 (good)
+        an error will be thrown  
+    &#39;&#39;&#39;
+    exec_str = &#34;&#39;{}Cln/DDEClient.exe&#39; {}&#34;.format(self.SPECTRO_ROOT_PATH, macro)
+    #add arguments
+    for arg in args:
+        exec_str += &#34; &#39;{}&#39;&#34;.format(arg)
+    print(&#39;&lt;&lt;Reader&gt;&gt; executing: {}&#39;.format(exec_str))
+    exit_code = os.system(exec_str)
+    try:
+        assert (exit_code == 0)
+    except:
+        if exit_code &lt; 1000:
+            raise Exception(&#34;PlateReader rejected command Error&#34;)
+        elif exit_code == 1000:
+            raise Exception(&#34;PlateReader Nonexistent Protocol Name Error&#34;)
+        elif exit_code == 2000:
+            raise Exception(&#34;PlateReader Communication Error&#34;)
+        else:
+            raise Exception(&#34;PlateReader Error. Exited with code {}&#34;.format(exit_code))</code></pre>
+</details>
+</dd>
+<dt id="controller.PlateReader.run_protocol"><code class="name flex">
+<span>def <span class="ident">run_protocol</span></span>(<span>self, protocol_name, filename, layout=None)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>params:<br>
+str protocol_name: the name of the protocol that will be edited<br>
+list<str> layout: the wells that you want to be used for the protocol ordered.
+(first will be X1, second X2 etc. If not specified will not alter layout)</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def run_protocol(self, protocol_name, filename, layout=None):
+    r&#39;&#39;&#39;
+    params:  
+        str protocol_name: the name of the protocol that will be edited  
+        list&lt;str&gt; layout: the wells that you want to be used for the protocol ordered.
+          (first will be X1, second X2 etc. If not specified will not alter layout)  
+    &#39;&#39;&#39;
+    if layout:
+        self.edit_layout(protocol_name, layout)
+    macro = &#39;run&#39;
+    #three &#39;&#39; are plate ids to pad. data_path specified once for ascii and once for other
+    self.exec_macro(macro, protocol_name, self.PROTOCOL_PATH, wslpath(self.SPECTRO_DATA_PATH,&#39;w&#39;), &#39;&#39;, &#39;&#39;, &#39;&#39;, &#39;&#39;, filename)
+    #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
+    #that, so we move it from the default landing zone to where I actually want it
+    if self.simulate:
+        super().run_protocol(protocol_name, filename, layout)
+    else:
+        shutil.move(os.path.join(self.SPECTRO_DATA_PATH, &#34;{}.csv&#34;.format(filename)), 
+                os.path.join(self.data_path, &#34;{}.csv&#34;.format(filename)))</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></b></code>:
+<ul class="hlist">
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.merge_scans" href="#controller.AbstractPlateReader.merge_scans">merge_scans</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+<dt id="controller.ProtocolExecutor"><code class="flex name class">
+<span>class <span class="ident">ProtocolExecutor</span></span>
+<span>(</span><span>rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>class to execute a protocol from the docs<br>
+ATTRIBUTES:<br>
+ATTRIBUTES:<br>
+class to execute a protocol from the docs<br>
+ATTRIBUTES:<br>
+df rxn_df: the reaction df. Not passed in, but created in init<br>
+INHERITED ATTRIBUTES:<br>
+armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache, <br>
+str eve_files_path, str debug_path, str my_ip, str server_ip,<br>
+dict<str:object> robo_params, bool simulate, int buff_size<br>
+PRIVATE ATTRS:<br>
+pd.index _products: the product columns<br>
+INHERITED PRIVATE ATTRS:<br>
+dict<str:tuple\<obj>> _cached_reader_locs<br>
+METHODS:<br>
+execute_protocol_df() void: used to execute a single row of the reaction df<br>
+run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
+run automatically when you run your simulation<br>
+CHECKS: all print messages for errors and return error codes<br>
+check_rxn_df() int: checks for errors in input.<br>
+check_labware() int: checks for errors in labware/labware assignments. <br>
+check_products() int: checks for errors in the product placement.<br>
+check_reagents() int: checks for errors in the reagent_info tab. <br>
+INHERITED METHODS:<br>
+run_protocol(simulate, port) void, close_connection() void, init_robot(simulate),
+translate_wellmap() void, run_simulation() bool
+</p>
+<p>Note that init does not initialize the portal. This must be done explicitly or by calling
+a run function that creates a portal. The portal is not passed to init because although
+the code must not use more than one portal at a time, the portal may change over the
+lifetime of the class
+NOte that pr cannot be initialized until you know if you're simulating or not, so it
+is instantiated in run</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">class ProtocolExecutor(Controller): 
+    &#39;&#39;&#39;
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+    ATTRIBUTES:  
+    class to execute a protocol from the docs  
+    ATTRIBUTES:  
+        df rxn_df: the reaction df. Not passed in, but created in init  
+    INHERITED ATTRIBUTES:  
+        armchair.Armchair portal, str rxn_sheet_name, str cache_path, bool use_cache,   
+        str eve_files_path, str debug_path, str my_ip, str server_ip,  
+        dict&lt;str:object&gt; robo_params, bool simulate, int buff_size  
+    PRIVATE ATTRS:  
+        pd.index _products: the product columns  
+    INHERITED PRIVATE ATTRS:  
+        dict&lt;str:tuple&lt;obj&gt;&gt; _cached_reader_locs  
+    METHODS:  
+        execute_protocol_df() void: used to execute a single row of the reaction df  
+        run_all_checks() void: wrapper for pre rxn error checking to handle any found errors
+          run automatically when you run your simulation  
+        CHECKS: all print messages for errors and return error codes  
+        check_rxn_df() int: checks for errors in input.  
+        check_labware() int: checks for errors in labware/labware assignments.   
+        check_products() int: checks for errors in the product placement.  
+        check_reagents() int: checks for errors in the reagent_info tab.   
+    INHERITED METHODS:  
+        run_protocol(simulate, port) void, close_connection() void, init_robot(simulate), 
+        translate_wellmap() void, run_simulation() bool  
+    &#39;&#39;&#39;
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False):
+        &#39;&#39;&#39;
+        Note that init does not initialize the portal. This must be done explicitly or by calling
+        a run function that creates a portal. The portal is not passed to init because although
+        the code must not use more than one portal at a time, the portal may change over the 
+        lifetime of the class
+        NOte that pr cannot be initialized until you know if you&#39;re simulating or not, so it
+        is instantiated in run
+        &#39;&#39;&#39;
+        super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache)
+        self.run_all_checks() 
+
+    def run_simulation(self, no_pr=False):
+        &#39;&#39;&#39;
+        runs a full simulation of the protocol with
+        Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+        end of function  
+        Returns:  
+            bool: True if all tests were passed  
+        &#39;&#39;&#39;
+        
+        #cache some things before you overwrite them for the simulation
+        stored_server_ip = self.server_ip
+        stored_simulate = self.simulate
+        stored_cached_reader_locs = self._cached_reader_locs
+        self.server_ip = &#39;127.0.0.1&#39;
+        self.simulate = True
+        print(&#39;&lt;&lt;controller&gt;&gt; ENTERING SIMULATION&#39;)
+        port = 50000
+        #launch an eve server in background for simulation purposes
+        b = threading.Barrier(2,timeout=20)
+        eve_thread = threading.Thread(target=launch_eve_server, kwargs={&#39;my_ip&#39;:&#39;&#39;,&#39;barrier&#39;:b},name=&#39;eve_thread&#39;)
+        eve_thread.start()
+
+        #do create a connection
+        b.wait()
+        self._run(port, simulate=True, no_pr=no_pr)
+
+
+
+        #collect the eve thread
+        eve_thread.join()
+
+        #restore changed vars
+        self.server_ip = stored_server_ip
+        self.simulate = stored_simulate
+        self._cached_reader_locs = stored_cached_reader_locs
+        print(&#39;&lt;&lt;controller&gt;&gt; EXITING SIMULATION&#39;)
+    
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
+        &#39;&#39;&#39;
+        The real deal. Input a server addr and port if you choose and protocol will be run  
+        params:  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
+        NOTE: the simulate here is a little different than running run_simulation(). This simulate
+          is sent to the robot to tell it to simulate the reaction, but that it all. The other
+          simulate changes some things about how code is run from the controller
+        &#39;&#39;&#39;
+        print(&#39;&lt;&lt;controller&gt;&gt; RUNNING PROTOCOL&#39;)
+        self._run(port, simulate=simulate, no_pr=no_pr)
+        print(&#39;&lt;&lt;controller&gt;&gt; EXITING PROTOCOL&#39;)
+        
+    @error_exit
+    def _run(self, port, simulate, no_pr):
+        &#39;&#39;&#39;
+        params:  
+            int port: the port number to connect on  
+            bool simulate: (this should never be used in normal operation. It is for debugging
+              on the robot)  
+            bool no_pr: This should be false normally, but can be set to true to deliberately
+              not use the platereader even if on the laptop  
+        Returns:  
+            bool: True if all tests were passed  
+        &#39;&#39;&#39;
+        self._init_pr(simulate, no_pr)
+        #create a connection
+        sock = socket.socket(socket.AF_INET)
+        sock.connect((self.server_ip, port))
+        buffered_sock = BufferedSocket(sock, maxsize=1e9, timeout=None)
+        print(&#34;&lt;&lt;controller&gt;&gt; connected&#34;)
+        self.portal = Armchair(buffered_sock,&#39;controller&#39;,&#39;Armchair_Logs&#39;, buffsize=4)
+
+        self.init_robot(simulate)
+        successful_build = False
+        while not successful_build:
+            try:
+                self._update_cached_locs(&#39;all&#39;)
+                #build new df
+                self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
+                self._insert_tot_vol_transfer()
+                if self.tot_vols: #has at least one element
+                    if (self.rxn_df.loc[0,self._products] &lt; 0).any():
+                        raise NotImplementedError(&#34;A product overflowed it&#39;s container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution&#34;)
+                successful_build = True
+            except ConversionError as e:
+                self._handle_conversion_err(e)        
+        self.execute_protocol_df()
+        self.close_connection()
+        self.pr.shutdown()
+
+    def init_robot(self,simulate):
+        &#39;&#39;&#39;
+        calls super init robot, and then sends an init_containers command to initialize all the
+        prodcuts  
+        params:  
+            bool simulate: whether the robot should run a simulation  
+        &#39;&#39;&#39;
+        super().init_robot(simulate)
+        #send robot data to initialize empty product containers. Because we know things like total
+        #vol and desired labware, this makes sense for a planned experiment
+        self.portal.send_pack(&#39;init_containers&#39;, self.robo_params[&#39;product_df&#39;].to_dict())
+    
+    def _rename_products(self, rxn_df):
+        &#39;&#39;&#39;
+        renames dilutions acording to the reagent that created them
+        and renames rxns to have a concentration  
+        Preconditions:  
+            dilution cols are named dilution_1/2 etc  
+            callback is the last column in the dataframe  
+            rxn_df is not expected to be initialized yet. This is a helper for the initialization  
+        params:  
+            df rxn_df: the dataframe with all the reactions  
+        Postconditions:  
+            the df has had it&#39;s dilution columns renamed to the chemical used to produce it + C&lt;conc&gt;  
+            rxn columns have C1 appended to them  
+        &#39;&#39;&#39;
+        dilution_cols = [col for col in rxn_df.columns if &#39;dilution_placeholder&#39; in col]
+        #get the rxn col names
+        rxn_cols = rxn_df.loc[:, &#39;reagent&#39;:&#39;chemical_name&#39;].drop(columns=[&#39;reagent&#39;,&#39;chemical_name&#39;]).columns
+        rename_key = {}
+        for col in rxn_cols:
+            if &#39;dilution_placeholder&#39; in col:
+                row = rxn_df.loc[rxn_df[&#39;op&#39;] == &#39;dilution&#39;].loc[~rxn_df[col].isna()].squeeze()
+                reagent_name = row[&#39;chemical_name&#39;]
+                assert (isinstance(reagent_name, str)), &#34;dilution placeholder was used twice&#34;
+                name = reagent_name[:reagent_name.rfind(&#39;C&#39;)+1]+str(row[&#39;dilution_conc&#39;])
+                rename_key[col] = name
+            else:
+                rename_key[col] = &#34;{}C1.0&#34;.format(col).replace(&#39; &#39;,&#39;_&#39;)
+        rxn_df.rename(rename_key, axis=1, inplace=True)
+
+    def _get_rxn_max_vol(self, name, products):
+        &#39;&#39;&#39;
+        Preconditions:  
+            volume in a container can change only during a &#39;transfer&#39; or &#39;dilution&#39;. Easy to add more
+            by changing the vol_change_rows
+            self.rxn_df is initialized  
+        params:  
+            str name: the column name to be searched  
+            list&lt;str&gt; products: the column names of all reagents (we could look this up in rxn_df, but
+              convenient to pass it in)  
+        returns:  
+            float: the maximum volume that this container will ever hold at one time, not taking into 
+              account aspirations for dilutions  
+        &#39;&#39;&#39;
+        if name in self.tot_vols:
+            return self.tot_vols[name]
+        else:
+            vol_change_rows = self.rxn_df.loc[self.rxn_df[&#39;op&#39;].apply(lambda x: x in [&#39;transfer&#39;,&#39;dilution&#39;])]
+            aspirations = vol_change_rows[&#39;chemical_name&#39;] == name
+            max_vol = 0
+            current_vol = 0
+            for i, is_aspiration in aspirations.iteritems():
+                if is_aspiration and self.rxn_df.loc[i,&#39;op&#39;] == &#39;transfer&#39;:
+                    #This is a row where we&#39;re transfering from this well
+                    current_vol -= self.rxn_df.loc[i, products].sum()
+                elif is_aspiration and self.rxn_df.loc[i, &#39;op&#39;] == &#39;dilution&#39;:
+                    current_vol -= self._get_dilution_transfer_vols(self.rxn_df.loc[i])[1]
+                else:
+                    current_vol += self.rxn_df.loc[i,name]
+                    max_vol = max(max_vol, current_vol)
+            return max_vol
+
+    
+    #TESTING
+    #PRE Simulation
+    def run_all_checks(self):
+        found_errors = super().run_all_checks()
+        found_errors = max(found_errors, self.check_products())
+        if found_errors == 0:
+            print(&#34;&lt;&lt;controller&gt;&gt; All prechecks passed!&#34;)
+            return
+        elif found_errors == 1:
+            if &#39;y&#39;==input(&#34;&lt;&lt;controller&gt;&gt; Please check the above errors and if you would like to ignore them and continue enter &#39;y&#39; else any key&#34;):
+                return
+            else:
+                raise Exception(&#39;Aborting base on user input&#39;)
+        elif found_errors == 2:
+            raise Exception(&#39;Critical Errors encountered during prechecks. Aborting&#39;)
+
+                
+    def check_products(self):
+        &#39;&#39;&#39;
+        checks to ensure that the products were correctly initialized  
+        returns  
+            int found_errors:  
+                code:  
+                0: OK.  
+                1: Some Errors, but could run  
+                2: Critical. Abort  
+        &#39;&#39;&#39;
+        found_errors = 0
+        for i, r in self.robo_params[&#39;product_df&#39;].loc[\
+                ~self.robo_params[&#39;product_df&#39;][&#39;labware&#39;].astype(bool) &amp; \
+                ~self.robo_params[&#39;product_df&#39;][&#39;container&#39;].astype(bool)].iterrows():
+            found_errors = max(found_errors,1)
+            print(&#39;&lt;&lt;controller&gt;&gt; {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\&#39;s what you want? &#39;.format(i))
+        return found_errors
+
+    #POST Simulation</code></pre>
+</details>
+<h3>Ancestors</h3>
+<ul class="hlist">
+<li><a title="controller.Controller" href="#controller.Controller">Controller</a></li>
+<li>abc.ABC</li>
+</ul>
+<h3>Methods</h3>
+<dl>
+<dt id="controller.ProtocolExecutor.check_products"><code class="name flex">
+<span>def <span class="ident">check_products</span></span>(<span>self)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>checks to ensure that the products were correctly initialized<br>
+returns<br>
+int found_errors:<br>
+code:<br>
+0: OK.<br>
+1: Some Errors, but could run<br>
+2: Critical. Abort</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def check_products(self):
+    &#39;&#39;&#39;
+    checks to ensure that the products were correctly initialized  
+    returns  
+        int found_errors:  
+            code:  
+            0: OK.  
+            1: Some Errors, but could run  
+            2: Critical. Abort  
+    &#39;&#39;&#39;
+    found_errors = 0
+    for i, r in self.robo_params[&#39;product_df&#39;].loc[\
+            ~self.robo_params[&#39;product_df&#39;][&#39;labware&#39;].astype(bool) &amp; \
+            ~self.robo_params[&#39;product_df&#39;][&#39;container&#39;].astype(bool)].iterrows():
+        found_errors = max(found_errors,1)
+        print(&#39;&lt;&lt;controller&gt;&gt; {} has no specified labware or container. It could end up in anything that has enough volume to contain it. Are you sure that\&#39;s what you want? &#39;.format(i))
+    return found_errors</code></pre>
+</details>
+</dd>
+<dt id="controller.ProtocolExecutor.init_robot"><code class="name flex">
+<span>def <span class="ident">init_robot</span></span>(<span>self, simulate)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>calls super init robot, and then sends an init_containers command to initialize all the
+prodcuts<br>
+params:<br>
+bool simulate: whether the robot should run a simulation</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def init_robot(self,simulate):
+    &#39;&#39;&#39;
+    calls super init robot, and then sends an init_containers command to initialize all the
+    prodcuts  
+    params:  
+        bool simulate: whether the robot should run a simulation  
+    &#39;&#39;&#39;
+    super().init_robot(simulate)
+    #send robot data to initialize empty product containers. Because we know things like total
+    #vol and desired labware, this makes sense for a planned experiment
+    self.portal.send_pack(&#39;init_containers&#39;, self.robo_params[&#39;product_df&#39;].to_dict())</code></pre>
+</details>
+</dd>
+<dt id="controller.ProtocolExecutor.run_protocol"><code class="name flex">
+<span>def <span class="ident">run_protocol</span></span>(<span>self, simulate=False, no_pr=False, port=50000)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>The real deal. Input a server addr and port if you choose and protocol will be run<br>
+params:<br>
+bool simulate: (this should never be used in normal operation. It is for debugging
+on the robot)<br>
+bool no_pr: This should be false normally, but can be set to true to deliberately
+not use the platereader even if on the laptop<br>
+NOTE: the simulate here is a little different than running run_simulation(). This simulate
+is sent to the robot to tell it to simulate the reaction, but that it all. The other
+simulate changes some things about how code is run from the controller</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def run_protocol(self, simulate=False, no_pr=False, port=50000):
+    &#39;&#39;&#39;
+    The real deal. Input a server addr and port if you choose and protocol will be run  
+    params:  
+        bool simulate: (this should never be used in normal operation. It is for debugging
+          on the robot)  
+        bool no_pr: This should be false normally, but can be set to true to deliberately
+          not use the platereader even if on the laptop  
+    NOTE: the simulate here is a little different than running run_simulation(). This simulate
+      is sent to the robot to tell it to simulate the reaction, but that it all. The other
+      simulate changes some things about how code is run from the controller
+    &#39;&#39;&#39;
+    print(&#39;&lt;&lt;controller&gt;&gt; RUNNING PROTOCOL&#39;)
+    self._run(port, simulate=simulate, no_pr=no_pr)
+    print(&#39;&lt;&lt;controller&gt;&gt; EXITING PROTOCOL&#39;)</code></pre>
+</details>
+</dd>
+<dt id="controller.ProtocolExecutor.run_simulation"><code class="name flex">
+<span>def <span class="ident">run_simulation</span></span>(<span>self, no_pr=False)</span>
+</code></dt>
+<dd>
+<div class="desc"><p>runs a full simulation of the protocol with
+Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+end of function<br>
+Returns:<br>
+bool: True if all tests were passed</p></div>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def run_simulation(self, no_pr=False):
+    &#39;&#39;&#39;
+    runs a full simulation of the protocol with
+    Temporarilly overwrites the self.server_ip with loopback, but will restore it at
+    end of function  
+    Returns:  
+        bool: True if all tests were passed  
+    &#39;&#39;&#39;
+    
+    #cache some things before you overwrite them for the simulation
+    stored_server_ip = self.server_ip
+    stored_simulate = self.simulate
+    stored_cached_reader_locs = self._cached_reader_locs
+    self.server_ip = &#39;127.0.0.1&#39;
+    self.simulate = True
+    print(&#39;&lt;&lt;controller&gt;&gt; ENTERING SIMULATION&#39;)
+    port = 50000
+    #launch an eve server in background for simulation purposes
+    b = threading.Barrier(2,timeout=20)
+    eve_thread = threading.Thread(target=launch_eve_server, kwargs={&#39;my_ip&#39;:&#39;&#39;,&#39;barrier&#39;:b},name=&#39;eve_thread&#39;)
+    eve_thread.start()
+
+    #do create a connection
+    b.wait()
+    self._run(port, simulate=True, no_pr=no_pr)
+
+
+
+    #collect the eve thread
+    eve_thread.join()
+
+    #restore changed vars
+    self.server_ip = stored_server_ip
+    self.simulate = stored_simulate
+    self._cached_reader_locs = stored_cached_reader_locs
+    print(&#39;&lt;&lt;controller&gt;&gt; EXITING SIMULATION&#39;)</code></pre>
+</details>
+</dd>
+</dl>
+<h3>Inherited members</h3>
+<ul class="hlist">
+<li><code><b><a title="controller.Controller" href="#controller.Controller">Controller</a></b></code>:
+<ul class="hlist">
+<li><code><a title="controller.Controller.ChemCacheEntry" href="#controller.Controller.ChemCacheEntry">ChemCacheEntry</a></code></li>
+<li><code><a title="controller.Controller.DilutionParams" href="#controller.Controller.DilutionParams">DilutionParams</a></code></li>
+<li><code><a title="controller.Controller.check_labware" href="#controller.Controller.check_labware">check_labware</a></code></li>
+<li><code><a title="controller.Controller.check_reagents" href="#controller.Controller.check_reagents">check_reagents</a></code></li>
+<li><code><a title="controller.Controller.check_rxn_df" href="#controller.Controller.check_rxn_df">check_rxn_df</a></code></li>
+<li><code><a title="controller.Controller.check_tot_vol" href="#controller.Controller.check_tot_vol">check_tot_vol</a></code></li>
+<li><code><a title="controller.Controller.close_connection" href="#controller.Controller.close_connection">close_connection</a></code></li>
+<li><code><a title="controller.Controller.execute_protocol_df" href="#controller.Controller.execute_protocol_df">execute_protocol_df</a></code></li>
+<li><code><a title="controller.Controller.plot_LAM_overlay" href="#controller.Controller.plot_LAM_overlay">plot_LAM_overlay</a></code></li>
+<li><code><a title="controller.Controller.plot_kin_subplots" href="#controller.Controller.plot_kin_subplots">plot_kin_subplots</a></code></li>
+<li><code><a title="controller.Controller.plot_single_kin" href="#controller.Controller.plot_single_kin">plot_single_kin</a></code></li>
+<li><code><a title="controller.Controller.run_all_checks" href="#controller.Controller.run_all_checks">run_all_checks</a></code></li>
+<li><code><a title="controller.Controller.translate_wellmap" href="#controller.Controller.translate_wellmap">translate_wellmap</a></code></li>
+</ul>
+</li>
+</ul>
+</dd>
+</dl>
+</section>
+</article>
+<nav id="sidebar">
+<h1>Index</h1>
+<div class="toc">
+<ul></ul>
+</div>
+<ul id="index">
+<li><h3><a href="#header-functions">Functions</a></h3>
+<ul class="">
+<li><code><a title="controller.init_parser" href="#controller.init_parser">init_parser</a></code></li>
+<li><code><a title="controller.launch_auto" href="#controller.launch_auto">launch_auto</a></code></li>
+<li><code><a title="controller.launch_protocol_exec" href="#controller.launch_protocol_exec">launch_protocol_exec</a></code></li>
+<li><code><a title="controller.main" href="#controller.main">main</a></code></li>
+</ul>
+</li>
+<li><h3><a href="#header-classes">Classes</a></h3>
+<ul>
+<li>
+<h4><code><a title="controller.AbstractPlateReader" href="#controller.AbstractPlateReader">AbstractPlateReader</a></code></h4>
+<ul class="two-column">
+<li><code><a title="controller.AbstractPlateReader.PROTOCOL_PATH" href="#controller.AbstractPlateReader.PROTOCOL_PATH">PROTOCOL_PATH</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.SPECTRO_DATA_PATH" href="#controller.AbstractPlateReader.SPECTRO_DATA_PATH">SPECTRO_DATA_PATH</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.SPECTRO_ROOT_PATH" href="#controller.AbstractPlateReader.SPECTRO_ROOT_PATH">SPECTRO_ROOT_PATH</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.edit_layout" href="#controller.AbstractPlateReader.edit_layout">edit_layout</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.exec_macro" href="#controller.AbstractPlateReader.exec_macro">exec_macro</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.load_reader_data" href="#controller.AbstractPlateReader.load_reader_data">load_reader_data</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.merge_scans" href="#controller.AbstractPlateReader.merge_scans">merge_scans</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.run_protocol" href="#controller.AbstractPlateReader.run_protocol">run_protocol</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shake" href="#controller.AbstractPlateReader.shake">shake</a></code></li>
+<li><code><a title="controller.AbstractPlateReader.shutdown" href="#controller.AbstractPlateReader.shutdown">shutdown</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="controller.AutoContr" href="#controller.AutoContr">AutoContr</a></code></h4>
+<ul class="">
+<li><code><a title="controller.AutoContr.check_rxn_df" href="#controller.AutoContr.check_rxn_df">check_rxn_df</a></code></li>
+<li><code><a title="controller.AutoContr.run_protocol" href="#controller.AutoContr.run_protocol">run_protocol</a></code></li>
+<li><code><a title="controller.AutoContr.run_simulation" href="#controller.AutoContr.run_simulation">run_simulation</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="controller.Controller" href="#controller.Controller">Controller</a></code></h4>
+<ul class="">
+<li><code><a title="controller.Controller.ChemCacheEntry" href="#controller.Controller.ChemCacheEntry">ChemCacheEntry</a></code></li>
+<li><code><a title="controller.Controller.DilutionParams" href="#controller.Controller.DilutionParams">DilutionParams</a></code></li>
+<li><code><a title="controller.Controller.PLATEREADER_INDEX_TRANSLATOR" href="#controller.Controller.PLATEREADER_INDEX_TRANSLATOR">PLATEREADER_INDEX_TRANSLATOR</a></code></li>
+<li><code><a title="controller.Controller.check_conc" href="#controller.Controller.check_conc">check_conc</a></code></li>
+<li><code><a title="controller.Controller.check_labware" href="#controller.Controller.check_labware">check_labware</a></code></li>
+<li><code><a title="controller.Controller.check_reagents" href="#controller.Controller.check_reagents">check_reagents</a></code></li>
+<li><code><a title="controller.Controller.check_rxn_df" href="#controller.Controller.check_rxn_df">check_rxn_df</a></code></li>
+<li><code><a title="controller.Controller.check_tot_vol" href="#controller.Controller.check_tot_vol">check_tot_vol</a></code></li>
+<li><code><a title="controller.Controller.close_connection" href="#controller.Controller.close_connection">close_connection</a></code></li>
+<li><code><a title="controller.Controller.execute_protocol_df" href="#controller.Controller.execute_protocol_df">execute_protocol_df</a></code></li>
+<li><code><a title="controller.Controller.init_robot" href="#controller.Controller.init_robot">init_robot</a></code></li>
+<li><code><a title="controller.Controller.plot_LAM_overlay" href="#controller.Controller.plot_LAM_overlay">plot_LAM_overlay</a></code></li>
+<li><code><a title="controller.Controller.plot_kin_subplots" href="#controller.Controller.plot_kin_subplots">plot_kin_subplots</a></code></li>
+<li><code><a title="controller.Controller.plot_single_kin" href="#controller.Controller.plot_single_kin">plot_single_kin</a></code></li>
+<li><code><a title="controller.Controller.run_all_checks" href="#controller.Controller.run_all_checks">run_all_checks</a></code></li>
+<li><code><a title="controller.Controller.run_protocol" href="#controller.Controller.run_protocol">run_protocol</a></code></li>
+<li><code><a title="controller.Controller.run_simulation" href="#controller.Controller.run_simulation">run_simulation</a></code></li>
+<li><code><a title="controller.Controller.save" href="#controller.Controller.save">save</a></code></li>
+<li><code><a title="controller.Controller.translate_wellmap" href="#controller.Controller.translate_wellmap">translate_wellmap</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="controller.DummyReader" href="#controller.DummyReader">DummyReader</a></code></h4>
+</li>
+<li>
+<h4><code><a title="controller.PlateReader" href="#controller.PlateReader">PlateReader</a></code></h4>
+<ul class="">
+<li><code><a title="controller.PlateReader.edit_layout" href="#controller.PlateReader.edit_layout">edit_layout</a></code></li>
+<li><code><a title="controller.PlateReader.exec_macro" href="#controller.PlateReader.exec_macro">exec_macro</a></code></li>
+<li><code><a title="controller.PlateReader.run_protocol" href="#controller.PlateReader.run_protocol">run_protocol</a></code></li>
+</ul>
+</li>
+<li>
+<h4><code><a title="controller.ProtocolExecutor" href="#controller.ProtocolExecutor">ProtocolExecutor</a></code></h4>
+<ul class="">
+<li><code><a title="controller.ProtocolExecutor.check_products" href="#controller.ProtocolExecutor.check_products">check_products</a></code></li>
+<li><code><a title="controller.ProtocolExecutor.init_robot" href="#controller.ProtocolExecutor.init_robot">init_robot</a></code></li>
+<li><code><a title="controller.ProtocolExecutor.run_protocol" href="#controller.ProtocolExecutor.run_protocol">run_protocol</a></code></li>
+<li><code><a title="controller.ProtocolExecutor.run_simulation" href="#controller.ProtocolExecutor.run_simulation">run_simulation</a></code></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</nav>
+</main>
+<footer id="footer">
+<p>Generated by <a href="https://pdoc3.github.io/pdoc"><cite>pdoc</cite> 0.9.2</a>.</p>
+</footer>
+</body>
+</html>
