@@ -64,6 +64,8 @@ from exceptions import ConversionError
 
 from threadManager import QueueManager
 
+cli = True
+
 def init_parser():
     parser = argparse.ArgumentParser()
     mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
@@ -81,9 +83,10 @@ def main(serveraddr,gui_args = None):
     '''
     parser = init_parser()
     test_inputs()
-    if not gui_args: 
+    if not gui_args:
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those in stead
+        cli = False
         args = parser.parse_args(gui_args)
     if args.mode == 'protocol':
         launch_protocol_exec(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
@@ -3477,10 +3480,13 @@ def status(msg):
 
 def prompt_input(type, msg):
     """ Handle user input requests (Yes/No or Continue or text) """
-    input_queue = QueueManager.get_input_queue()
-    response_queue = QueueManager.get_response_queue()
-    input_queue.put((type, msg))
-    response = response_queue.get()
+    if not cli:
+        input_queue = QueueManager.get_input_queue()
+        response_queue = QueueManager.get_response_queue()
+        input_queue.put((type, msg))
+        response = response_queue.get()
+    else:
+        response = input(msg)
     return response
 
 def test_inputs():

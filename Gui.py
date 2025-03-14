@@ -97,13 +97,13 @@ class GUIApp(tk.Tk):
         
     def ask_email(self):
         """prompt the user for their email"""
-        email = simpledialog.askstring("Notification Signup", "Enter your email for reaction updates:")
-        
+        email = self.show_popup("input", "Enter your email for reaction updates.")
+        print(email)
         if email:
-            self.chemist_email = email
-            messagebox.showinfo("Success", f"You will be notified at {email} when the reaction is complete.")
+            self.recipient_email = email
+            self.show_popup("info", "You will be notified at {email} when your reaction is complete")
         else:
-            messagebox.showwarning("Input Required", "Please enter a valid email address.")
+            self.show_popup("warning", "Please enter a valid email address.")
 
 
     def show_popup(self, type, msg):
@@ -124,6 +124,10 @@ class GUIApp(tk.Tk):
             returnval = simpledialog.askstring("User Input", msg, parent=newWin)
             newWin.destroy()
             return returnval
+        elif type == "info":
+            messagebox.showinfo("Information", msg)
+        elif type == "warning":
+            messagebox.showwarning("Warning", msg)
 
     def run_controller(self):
         """
