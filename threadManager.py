@@ -39,6 +39,7 @@ class QueueManager:
     @staticmethod
     def get_completion_event():
         return QueueManager()._instance.completion_event
+    
 
     @staticmethod
     def get_sheetname():
