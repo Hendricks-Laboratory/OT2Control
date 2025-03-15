@@ -104,6 +104,13 @@ class GUIApp(tk.Tk):
             self.show_popup("info", "You will be notified at {email} when your reaction is complete")
         else:
             self.show_popup("warning", "Please enter a valid email address.")
+        if self.recipient_email:
+            try:
+                self.notifier = EmailNotifier(self.recipient_email)
+                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
+                self.thread_manager.start_thread(target=self.notifier.watch_event)
+            except Exception as e:
+                messagebox.showerror(e)
 
 
     def show_popup(self, type, msg):
@@ -145,14 +152,6 @@ class GUIApp(tk.Tk):
         else:
             cli_args.append("--no-sim")
         self.pickle.add_entry(self.sheet_name.get())
-        
-        if self.recipient_email:
-            try:
-                self.notifier = EmailNotifier(self.recipient_email)
-                messagebox.showinfo("Email Notification", f"Notifications setup for {self.recipient_email}")
-                self.thread_manager.start_thread(target=self.notifier.watch_event)
-            except Exception as e:
-                messagebox.showerror(e)
 
         self.thread_manager.start_thread(target=run_as_thread, args=(cli_args, )) # begin controller thread
         self.thread_manager.start_thread(target=self.update_run_status) # begin update thread

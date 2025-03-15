@@ -82,10 +82,10 @@ def main(serveraddr,gui_args = None):
     prompts for input and then calls appropriate launcher
     '''
     parser = init_parser()
-    test_inputs()
     if not gui_args:
         args = parser.parse_args()
     else: # if controller recieves gui_args, parse those in stead
+        global cli
         cli = False
         args = parser.parse_args(gui_args)
     if args.mode == 'protocol':
@@ -3480,13 +3480,13 @@ def status(msg):
 
 def prompt_input(type, msg):
     """ Handle user input requests (Yes/No or Continue or text) """
-    if not cli:
+    if cli:
+        response = input(msg)
+    else:
         input_queue = QueueManager.get_input_queue()
         response_queue = QueueManager.get_response_queue()
         input_queue.put((type, msg))
         response = response_queue.get()
-    else:
-        response = input(msg)
     return response
 
 def test_inputs():
