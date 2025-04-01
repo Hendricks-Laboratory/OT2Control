@@ -3369,7 +3369,10 @@ class ScanDataFrame():
                     stillWater = True
                     while stillWater:
                         if len(transfers_before_scans)>1:
+                            print(f"remove this {latest_transfer_time}")
+                            print(f"list before remove {transfers_before_scans}")
                             transfers_before_scans.remove(latest_transfer_time)
+                            print(f"list after remove {transfers_before_scans}")
                             latest_transfer_time = max(transfers_before_scans)
                         elif len(transfers_before_scans) ==1:
                             latest_transfer_time = transfers_before_scans[0]
