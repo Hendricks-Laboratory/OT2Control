@@ -2279,8 +2279,6 @@ class AutoContr(Controller):
         returns: None
         '''
         
-        max_conc = list(self.get_max_conc().values()) 
-
         if normalize_flag:
             operation = 'divide'
         else:
@@ -2290,9 +2288,9 @@ class AutoContr(Controller):
             for i in range(len(row)):
                 print(row)
                 if operation == 'multiply':
-                    row[i] = max_conc[i] * row[i]
+                    row[i] = self.max_conc[i] * row[i]
                 else:
-                    row[i] = row[i] / max_conc[i]
+                    row[i] = row[i] / self.max_conc[i]
         
         return X
 
