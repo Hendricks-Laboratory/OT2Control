@@ -193,7 +193,7 @@ class OptimizationModel():
         """
         return list(product(*iterables))
         
-    def suggest(self, num_variable_reagents, num_points=100):
+    def exploit2D(self, num_variable_reagents, num_points=100):
         '''
         Suggests the next locations (parameter sets) for experimentation based on the current acquisition function.
         returns:
@@ -223,7 +223,7 @@ class OptimizationModel():
 
         step_size = 1/num_points
 
-        concentrations = cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
+        concentrations = self.cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
 
         for i in range(len(concentrations)):
             pred, std = self.gp_model.predict(np.array([concentrations[i]]))

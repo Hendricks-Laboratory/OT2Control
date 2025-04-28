@@ -2398,7 +2398,7 @@ class AutoContr(Controller):
         while not model.quit:
 
             # get new recipes
-            X_new = model.suggest(len(self.variable_reagents))
+            X_new = model.exploit2D(len(self.variable_reagents))
             recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
             recipes = self.update_experiment_max_conc(recipes, normalize_flag=False)
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
