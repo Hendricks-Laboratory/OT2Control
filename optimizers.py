@@ -4,7 +4,7 @@ from pyDOE import lhs
 from GPyOpt import Design_space
 import GPy
 
-from itertools import product
+import itertools
 
 from abc import abstractmethod
 import time  #TODO delete this debugging only
@@ -191,7 +191,7 @@ class OptimizationModel():
         """""
         Compute the Cartesian product of input iterables.
         """
-        return list(product(*iterables))
+        return list(itertools.product(*iterables))
         
     def exploit2D(self, num_variable_reagents, num_points=100):
         '''
@@ -223,7 +223,10 @@ class OptimizationModel():
 
         step_size = 1/num_points
 
-        concentrations = self.cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
+        #concentrations = self.cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
+
+        grid_x, grid_y = np.meshgrid(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
+        concentrations = np.stack([grid_x.ravel(), grid_y.ravel()], axis=-1)
 
         for i in range(len(concentrations)):
             pred, std = self.gp_model.predict(np.array([concentrations[i]]))
@@ -241,7 +244,7 @@ class OptimizationModel():
        
        # best is the conc that predicts the lambda value closest to the target value
         best = concentrations[closest]
-        print(f"{best} uM KBr results in a closeness of {closest} nm")
+        print(f"{best} uM KBr results in a closeness of {predictions[closest]} nm")
         print(type(best))
         #suggestions = self.optimizer.suggest_next_locations()
         
@@ -251,7 +254,7 @@ class OptimizationModel():
 
         #TODO plot the model and save it after every iteration here 
 
-        return best
+        return [best]
 
     def update_experiment_data(self, X_new, Y_new):
         '''

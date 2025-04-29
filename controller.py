@@ -2285,8 +2285,8 @@ class AutoContr(Controller):
             operation = 'multiply'
         
         for row in X:
+            print(row)
             for i in range(len(row)):
-                print(row)
                 if operation == 'multiply':
                     row[i] = self.max_conc[i] * row[i]
                 else:
@@ -2399,8 +2399,11 @@ class AutoContr(Controller):
 
             # get new recipes
             X_new = model.exploit2D(len(self.variable_reagents))
-            recipes =  self.duplicate_list_elements(X_new, self.num_duplicates)
-            recipes = self.update_experiment_max_conc(recipes, normalize_flag=False)
+            print(f"X_new {X_new}")
+            X_new_Denormalized = self.update_experiment_max_conc(X_new, normalize_flag=False)
+            recipes =  self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
+            print(f"Recipes {recipes}")
+            #recipes = self.update_experiment_max_conc([recipes], normalize_flag=False)
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
             # do the experiments
             #generate new wellnames for next batch
@@ -2421,6 +2424,7 @@ class AutoContr(Controller):
             lambda_maxes = find_max(scan_data)
             print(f"Lambda Maxes: {lambda_maxes}")
             Y_new = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
+            print(f"Recipies{recipes}")
             X_new_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
             model.update_experiment_data(X_new_normalized, Y_new)
 
