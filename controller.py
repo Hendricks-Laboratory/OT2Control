@@ -2176,14 +2176,16 @@ class AutoContr(Controller):
     
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result):
-        print(recipes)
-        print(Experiment_result)
-        new_data = pd.DataFrame({
+        
+        for i, reagent in enumerate(self.variable_reagents):
+            self.experiment_data = pd.concat([self.experiment_data, {str(reagent): recipes[:, i]}], axis=1)
+
+        """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
             'KBr': recipes[:, 1],
             'Experiment Result': Experiment_result
         })
-        self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)
+        self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)"""
 
     def get_variable_reagents(self):
 
@@ -2440,7 +2442,7 @@ class AutoContr(Controller):
             self.batch_num += 1
             self._update_experiment_data(recipes, lambda_maxes)     
             
-        self.experiment_data.to_csv("experiment_data.csv", index=True)
+        self.experiment_data.to_csv(f'{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv', index=False)
         print("Success!!!")
 
         print(self.well_count) # for heatmap debugging
