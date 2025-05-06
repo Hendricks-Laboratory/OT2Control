@@ -134,7 +134,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     except Exception as e:
         print(f'Error getting max_conc: {e}')
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0.1, 1)} for i in range(y_shape)]
+    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
     model = OptimizationModel(bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
     print(f"Target: {target_value}")
@@ -415,6 +415,26 @@ class Controller(ABC):
                 dill.dump(data, rxn_wks_data_cache)
         return data
 
+    def get_min_conc(self):
+        df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
+        print(df_sliced)
+        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))  # Convert to dictionary
+        print(mapping)
+        
+        conc = self.robo_params["reagent_df"]
+        reagent_names = conc.index
+        
+        min_concs = {}
+        for var_reagent in self.get_variable_reagents():
+            prefix = var_reagent
+            regex = f"^{prefix}.*"
+            # Filter the list using the regex
+            matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
+            var_reagent_conc = self._get_conc(matching_chemicals[0])
+            min_conc = (var_reagent_conc * 5) / 200
+            min_concs[var_reagent] = min_conc
+        return min_concs
+    
     def get_max_conc(self):
         """
         Gets the volumes of fixed reagents and calculates max concentrations for variable reagents.
@@ -2173,6 +2193,7 @@ class AutoContr(Controller):
         self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
         self.num_duplicates = num_duplicates
         self.max_conc = list(self.get_max_conc().values())
+        self.min_conc = list(self.get_min_conc().values())
     
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result):
@@ -2290,9 +2311,9 @@ class AutoContr(Controller):
             print(row)
             for i in range(len(row)):
                 if operation == 'multiply':
-                    row[i] = self.max_conc[i] * row[i]
+                    row[i] = (self.max_conc[i]-self.min_conc[i]) * row[i] + self.min_conc[i]
                 else:
-                    row[i] = row[i] / self.max_conc[i]
+                    row[i] = (row[i]-self.min_conc[i]) / (self.max_conc[i]-self.min_conc[i])
         
         return X
 
