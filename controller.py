@@ -128,11 +128,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     variable_reagents = auto.get_variable_reagents()
     target_value = auto.getModelInfo()["target"] 
     try:
-        max_conc = auto.get_max_conc()
-        print(f'max_conc for variable reagents: {max_conc}')
+        min_conc = auto.get_min_conc()
+        print(f'min_conc for variable reagents: {min_conc}')
         max_conc = list(max_conc.values())
     except Exception as e:
-        print(f'Error getting max_conc: {e}')
+        print(f'Error getting min_conc: {e}')
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
