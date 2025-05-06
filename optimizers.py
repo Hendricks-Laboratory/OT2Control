@@ -74,6 +74,7 @@ class OptimizationModel():
         self.gp_model = None
         self.acquisition = None
         self.optimizer = None
+        self.prediction = None
 
     def check_bounds(self, suggestion):
         '''
@@ -233,7 +234,8 @@ class OptimizationModel():
             predictions.append(pred)
             stdev.append(std)
 
-        
+        self.predictions = (np.concatenate(predictions).flatten().reshape(100,100).T*600 + 300) 
+
         predictions = denormalize(np.array(predictions).flatten(),300, 900)
         #predictions is a list of lambda values for each conc
         #stdev = np.array(stdev).flatten()*(600)
@@ -244,7 +246,7 @@ class OptimizationModel():
        
        # best is the conc that predicts the lambda value closest to the target value
         best = concentrations[closest]
-        print(f"{best} uM KBr results in a closeness of {predictions[closest]} nm")
+        print(f"{best} uM KBr results in a predicted lambda max of {predictions[closest]} nm")
         print(type(best))
         #suggestions = self.optimizer.suggest_next_locations()
         

@@ -687,6 +687,25 @@ class Controller(ABC):
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
+    def plot_2D_GPR(self, model):
+        plt.figure(figsize=(4.8,4), dpi=200)
+        plt.xlabel(f"{self.variable_reagents[0]} (mM)", fontsize = 12)
+        plt.ylabel(f"{self.variable_reagents[1]} (mM)", fontsize = 12)
+        plt.subplots_adjust(left=0.2, bottom=0.2, right=0.9, top=0.9)
+        plt.tick_params(axis = "both", width = 1.5)
+        plt.ylim(0, self.max_conc[0])  # X-axis range from 2 to 8
+        plt.xlim(0, self.max_conc[1])
+        plt.subplot().spines['bottom'].set_linewidth(1.5)
+        plt.subplot().spines['top'].set_linewidth(1.5)
+        plt.subplot().spines['left'].set_linewidth(1.5)
+        plt.subplot().spines['right'].set_linewidth(1.5)
+        plt.rc('axes', linewidth = 1.5)
+        One = np.linspace(0,self.max_conc[0],100)
+        Two = np.linspace(0,self.max_conc[1],100)
+        plt.pcolormesh(One, Two, model.predictions, cmap='inferno', shading='auto')
+        plt.colorbar(label="Lambda Max")
+        plt.savefig(os.path.join(self.plot_path, 'gpr_predictions.png'))
+    
     # below until ~end is all not used yet needs to be worked up
     def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
         '''
@@ -1166,7 +1185,7 @@ class Controller(ABC):
         '''
         pass
 
-    def execute_protocol_df(self):
+    def execute_protocol_df(self, model=None):
         '''
         takes a protocol df and sends every step to robot to execute  
         params:  
@@ -1193,7 +1212,7 @@ class Controller(ABC):
             elif row['op'] == 'save':
                 self.save()
             elif row['op'] == 'plot':
-                self._create_plot(row, i)
+                self._create_plot(row, i, model)
             elif row['op'] == 'print':
                 self._execute_print(row,i)
             elif row['op'] == 'scan_until_complete':
@@ -1204,7 +1223,7 @@ class Controller(ABC):
     def _execute_print(self, row, i):
         print(row['message'])
 
-    def _create_plot(self, row, i):
+    def _create_plot(self, row, i, model=None):
         '''
         exectues a plot command  
         params:  
@@ -1228,6 +1247,8 @@ class Controller(ABC):
             self.plot_LAM_overlay(df, wellnames, filename)
         elif plot_type == 'multi_kin':
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
+        elif plot_type == '2D_GPR':
+            self.plot_2D_GPR(model)
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
@@ -2349,7 +2370,7 @@ class AutoContr(Controller):
         #plan and execute a reaction with duplicates.
         #print(f'creating samples at wellnames: {wellnames}')
 
-        self._create_samples(wellnames, recipes)
+        self._create_samples(wellnames, recipes, model)
 
         #print('samples created')
         #pull in the scan data
@@ -2519,7 +2540,7 @@ class AutoContr(Controller):
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-    def _create_samples(self, wellnames, recipes):
+    def _create_samples(self, wellnames, recipes, model=None):
         '''
         creates the desired reactions on the platereader  
         params:  
@@ -2559,7 +2580,7 @@ class AutoContr(Controller):
                 successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
-        self.execute_protocol_df()
+        self.execute_protocol_df(model)
 
 
 
