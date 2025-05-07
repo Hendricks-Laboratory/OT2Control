@@ -2170,7 +2170,7 @@ class AutoContr(Controller):
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         #print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
-        self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
+        self.experiment_data = pd.DataFrame()
         self.num_duplicates = num_duplicates
         self.max_conc = list(self.get_max_conc().values())
     
@@ -2178,7 +2178,7 @@ class AutoContr(Controller):
     def _update_experiment_data(self, recipes, Experiment_result):
         
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, {str(reagent): recipes[:, i]}], axis=1)
+            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=1)
 
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
@@ -2442,7 +2442,7 @@ class AutoContr(Controller):
             self.batch_num += 1
             self._update_experiment_data(recipes, lambda_maxes)     
             
-        self.experiment_data.to_csv(f'{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv', index=False)
+        self.experiment_data.to_csv(f"{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv", index=False)
         print("Success!!!")
 
         print(self.well_count) # for heatmap debugging

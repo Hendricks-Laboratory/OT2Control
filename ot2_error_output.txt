@@ -1,0 +1,28 @@
+29-Apr-2025 14:58:21:831182
+[Errno 99] Cannot assign requested addressTraceback (most recent call last):
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1969, in <module>
+    launch_eve_server(my_ip=my_ip, barrier=None)
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1924, in launch_eve_server
+    sock.bind((my_ip,PORT_NUM))
+OSError: [Errno 99] Cannot assign requested address
+29-Apr-2025 14:58:21:832563
+[Errno 99] Cannot assign requested addressTraceback (most recent call last):
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1969, in <module>
+    launch_eve_server(my_ip=my_ip, barrier=None)
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1924, in launch_eve_server
+    sock.bind((my_ip,PORT_NUM))
+OSError: [Errno 99] Cannot assign requested address
+29-Apr-2025 14:58:21:833147
+[Errno 99] Cannot assign requested addressTraceback (most recent call last):
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1969, in <module>
+    launch_eve_server(my_ip=my_ip, barrier=None)
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1924, in launch_eve_server
+    sock.bind((my_ip,PORT_NUM))
+OSError: [Errno 99] Cannot assign requested address
+29-Apr-2025 14:58:21:833641
+[Errno 99] Cannot assign requested addressTraceback (most recent call last):
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1969, in <module>
+    launch_eve_server(my_ip=my_ip, barrier=None)
+  File "/mnt/c/Users/science_356_lab/Robot_Files/OT2Control/ot2_robot.py", line 1924, in launch_eve_server
+    sock.bind((my_ip,PORT_NUM))
+OSError: [Errno 99] Cannot assign requested address
