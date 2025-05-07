@@ -2196,11 +2196,11 @@ class AutoContr(Controller):
         self.min_conc = list(self.get_min_conc().values())
     
     # Update experiment_data DataFrame after each batch
-    def _update_experiment_data(self, recipes, Experiment_result):
+    def _update_experiment_data(self, recipes, Experiment_result, axis=1):
         
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=1)
-
+            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=axis, ignore_index=True)
+        self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({"Lambda Max": Experiment_result})], axis=axis, ignore_index=True)
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
             'KBr': recipes[:, 1],
@@ -2461,7 +2461,7 @@ class AutoContr(Controller):
             print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")"""
 
             self.batch_num += 1
-            self._update_experiment_data(recipes, lambda_maxes)     
+            self._update_experiment_data(recipes, lambda_maxes, 0)     
             
         self.experiment_data.to_csv(f"{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv", index=False)
         print("Success!!!")
