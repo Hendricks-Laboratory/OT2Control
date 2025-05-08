@@ -2316,7 +2316,7 @@ class AutoContr(Controller):
         '''
         pass
 
-    def update_experiment_max_conc(self, X, normalize_flag=True):
+    def Normalize_Denormalize_Recipes(self, X, normalize_flag=True):
         '''
         Updates the experiment_data DataFrame with the maximum concentration of each reagent 
         input: X, a numpy array of the current recipe 
@@ -2344,7 +2344,8 @@ class AutoContr(Controller):
         '''
         private function to run
         '''
-        #TODO Normalize Inputs
+        
+        # Helper functions for normalization and denormalization
         def normalize(x, min_val, max_val):
            return (x - min_val) / (max_val - min_val)
 
@@ -2357,33 +2358,33 @@ class AutoContr(Controller):
         # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
-        # Generate initial design and simulate experiments to get initial data
+        # Generate initial data which is a list of recipies (normalized)
         X_initial = model.generate_initial_design()
-        print(f"X_initial: {X_initial}")
-        X_Denormalized = self.update_experiment_max_conc(X_initial, normalize_flag=False) 
-        print(f"X Denormalized: {X_Denormalized}")
+        print(f"X initial: {X_initial}")
 
-        recipes =  self.duplicate_list_elements(X_Denormalized, self.num_duplicates)    
+        # The list of recipies is denormalized with different maximums for each reagent
+        X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False) 
+        print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
-        #generate wellnames for this batch
+        # Tripplicates each recipie to be run on the robot
+        recipes =  self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)    
+
+        # Generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-        #plan and execute a reaction with duplicates.
-        #print(f'creating samples at wellnames: {wellnames}')
-
+        
+        # Plan and execute a reaction with triplicates
         self._create_samples(wellnames, recipes, model)
 
-        #print('samples created')
-        #pull in the scan data
+        # Pull in the scan data
         filenames = self.rxn_df[
                 (self.rxn_df['op'] == 'scan') |
                 (self.rxn_df['op'] == 'scan_until_complete')
                 ].reset_index()
-        #TODO filenames is empty. dunno why
 
-        #print(f'filenames: {filenames}')
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
 
+        # Helper function that extracts lambda maxes from scan data
         def find_max(scan_data):
             find_max_df = scan_data
 
@@ -2412,95 +2413,70 @@ class AutoContr(Controller):
 
             return lambda_max_wavelengths
 
-        lambda_maxes = find_max(scan_data)
-        print(f"Lambda Maxes: {lambda_maxes}")
+        # Lambda maxes are Y_intial
+        Y_initial = find_max(scan_data)
+        print(f"Lambda Maxes: {Y_initial}")
         
-        Y_initial = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
-        #X_initial = normalize(recipes,0,0.002)
-        self.batch_num += 1
+        # Normalize the experimental lambda maxes to pass to the gpr model
+        Y_initial_Normalized = normalize(np.array(Y_initial),300,900).reshape(-1,1)
+        
+        # Normalize recipe concentrations to pass to the gpr model
+        X_initial_normalized = self.Normalize_Denormalize_Recipes(recipes, normalize_flag=True)
 
-        print(f"Normalized Lambda Maxes: {Y_initial}")
-        print(f"Normalized recipes: {X_initial}")
-
-        self._update_experiment_data(recipes, lambda_maxes)
-        # Optimizer update method not yet available so add initial design to records.
-        model.experiment_data['X'] = list(recipes)
-        model.experiment_data['Y'] = list(Y_initial)
-        # Initialize the optimizer with initial experimental data
-        X_initial_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
-        print(f"Normalized recipes: {X_initial}")
-        model.initialize_optimizer(X_initial_normalized, Y_initial)
-        self.batch_num += 1
-
-        Y_best = np.min(abs(denormalize(model.optimizer.Y,300,900) - model.target_value))
+        # Create the model with initial normalized data
+        model.initialize_optimizer(X_initial_normalized, Y_initial_Normalized)
 
         print(f"Model X: {model.optimizer.X}")
         print(f"Model Y: {model.optimizer.Y}")
 
-        
-        #enter iterative while loop now that we have data
+        # Update data on the controller side (this function updates the df that is exported to pr_data called self.experiment_data)
+        self._update_experiment_data(recipes, Y_initial)
+
+        # Intial data is considered the zeroith batch 
+        self.batch_num += 1
+
+        # Enter iterative while loop now until max_iters is hit or close to the target
         while not model.quit:
 
-            # get new recipes
-            X_new = model.exploit2D(len(self.variable_reagents))
-            print(f"X_new {X_new}")
-            X_new_Denormalized = self.update_experiment_max_conc(X_new, normalize_flag=False)
+            # Get new recipe from gpr (can either be explore or exploit based on how much uncertainty is in the model)
+            X_new = model.getNextReaction()
+            print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
+
+            # Denormalize the recipe and triplicate it to pass to the robot
+            X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
             recipes =  self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
             print(f"Recipes {recipes}")
-            #recipes = self.update_experiment_max_conc([recipes], normalize_flag=False)
-            print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
-            # do the experiments
-            #generate new wellnames for next batch
+            
+            # Run the experiments
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            # plan and execute a reaction with duplicate reactions.
             self._create_samples(wellnames, recipes)
 
-            #pull in the scan data
+            # Pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
                     (self.rxn_df['op'] == 'scan_until_complete')
                     ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename) 
-            #TODO convert scan data into list of single values. Add method of optimizer? Or maybe just incorporate into calc_obj method
-            # update model with data
-
-            lambda_maxes = find_max(scan_data)
-            print(f"Lambda Maxes: {lambda_maxes}")
-            Y_new = normalize(np.array(lambda_maxes),300,900).reshape(-1,1)
-            print(f"Recipies{recipes}")
-            X_new_normalized = self.update_experiment_max_conc(recipes, normalize_flag=True)
-            model.update_experiment_data(X_new_normalized, Y_new)
-
-            # print results
-            # To get the best observed X values (parameters)
-            #X_best = model.optimizer.X[np.argmin(model.optimizer.Y)]
-            # To get the best observed Y value (function value)
-            """Y_best = np.min(model.optimizer.Y) # if zero we need to quit?
-            if Y_best < 5:
-                print("Exit due to meeting target")
-            print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")"""
-
-            self.batch_num += 1
-            self._update_experiment_data(recipes, lambda_maxes)     
             
+            # Y_new is lambda maxes from the new recipe
+            Y_new = find_max(scan_data)
+            print(f"Lambda Maxes: {Y_new}")
+
+            # Normalize the lambda maxes and recipes to pass to the model
+            Y_new_normalized = normalize(np.array(Y_new),300,900).reshape(-1,1)
+            X_new_normalized = self.Normalize_Denormalize_Recipes(recipes, normalize_flag=True)
+
+            # Update the model with the three new recipes and lambda maxes (normalized)
+            model.update_experiment_data(X_new_normalized, Y_new_normalized)
+
+            # Add new denormalized data to the controller experiment_data
+            self._update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized) 
+            self.batch_num += 1    
+            
+        # Save the experiment data as a csv to pr_data
         self.experiment_data.to_csv(f'{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv', index=False)
         print("Success!!!")
-
-        print(self.well_count) # for heatmap debugging
-
-        # Add plotting before closing connections
-        try:
-                    #plate(file, num_wells, target)
-            data = plate(os.path.join(self.data_path, f"{self.experiment_name}full_df.csv"),  
-                        self.well_count, 
-                        550)  # target is hardcoded for now
-            plt.figure()
-            heat_map(data)
-            plt.savefig(os.path.join(self.data_path, f"{self.experiment_name}_heatmap.png"))
-            plt.close()
-        except Exception as e:
-            print(f"<<controller>> Failed to generate heatmap: {str(e)}")
         
         self.close_connection()
         self.pr.shutdown()

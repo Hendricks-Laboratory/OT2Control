@@ -76,7 +76,7 @@ class OptimizationModel():
         self.optimizer = None
         self.prediction = None
 
-    def check_bounds(self, suggestion):
+    """def check_bounds(self, suggestion):
         '''
         Checks if a suggested set of parameters is within the pre-defined bounds and constraints.
         params:
@@ -124,7 +124,7 @@ class OptimizationModel():
         water_volume = total_volume
         print(f"Water volume is {water_volume}")
         return True
-    
+    """
         
     def generate_initial_design(self):
         '''
@@ -163,16 +163,16 @@ class OptimizationModel():
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
             self.gp_model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
     
-    def _update_acquisition(self):
+    """def _update_acquisition(self):
         '''
         Updates the acquisition function based on the current index and reinitializes the evaluator with the new acquisition function.
         '''
-        """if self.curr_iter < 6:
+        if self.curr_iter < 6:
             self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer,exploration_weight=8)
         else:
             self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer, exploration_weight=0.5)
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
-        """
+        
         acquisition_type = self.acquisition_functions[1] 
         if acquisition_type == 'EI':
             self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
@@ -186,99 +186,76 @@ class OptimizationModel():
     
     def get_target_wavelength(self):
         # TODO: something with evaluate_objective() maybe.
-        pass
+        pass"""
 
-    def cartesian_product(*iterables):
-        """""
-        Compute the Cartesian product of input iterables.
-        """
-        return list(itertools.product(*iterables))
+    """def cartesian_product(*iterables):
         
-    def exploit2D(self, num_variable_reagents, num_points=100):
+        Compute the Cartesian product of input iterables.
+        
+        return list(itertools.product(*iterables))"""
+        
+    def getNextReaction(self, num_points=100):
         '''
         Suggests the next locations (parameter sets) for experimentation based on the current acquisition function.
         returns:
         np.ndarray: The suggested parameters for the next experiments.
         max_conc: The maximum concentration of the variable reagents.
         '''
-        #self.current_acquisition_index = (self.current_acquisition_index + 1) % len(self.acquisition_functions)
-        #print(self.current_acquisition_index)
-        #print(self.acquisition_functions[self.current_acquisition_index])
-        #self._update_acquisition()
 
+        predictions = []
+        stdev = []
         reagent_combinations = 10000
         num_steps = math.floor(reagent_combinations ** (1 / len(self.variable_reagents)))
         
-        def normalize(x, min_val, max_val):
-           return (x - min_val) / (max_val - min_val)
         def denormalize(x_normalized, min_val, max_val):
             return x_normalized * (max_val - min_val) + min_val
-
-        temp = 0
-        predictions = []
-        stdev = []
-
-        print(f"SModel: {self.gp_model}")
-        print(f"SOptimizer: {self.optimizer}")
-
-
-        step_size = 1/num_points
-
-        #concentrations = self.cartesian_product(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
-
+   
+        #calculates the cartesian product that creates all possible recipes of two reagents (normalized)
+        #TODO for more dimensions these two lines must be redone
         grid_x, grid_y = np.meshgrid(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
         concentrations = np.stack([grid_x.ravel(), grid_y.ravel()], axis=-1)
 
+        #for every possible recipes stored in concentration a prediction and a standard devation is calculated by gpr
         for i in range(len(concentrations)):
             pred, std = self.gp_model.predict(np.array([concentrations[i]]))
             predictions.append(pred)
             stdev.append(std)
 
+        #this variable is made for accessability during plotting (Controller: plot_2d_gpr)
         self.predictions = (np.concatenate(predictions).flatten().reshape(100,100).T*600 + 300) 
 
+        #the gpr predictions and standard devations are normalized, here we denormalize them to find the next reaction to run
         predictions = denormalize(np.array(predictions).flatten(),300, 900)
-        #predictions is a list of lambda values for each conc
-        #stdev = np.array(stdev).flatten()*(600)
-        #linespace = np.linspace(0,max_conc,num_points)
-
-        # closest is an index of the lambda value that is closest to the target value
-        closest = np.argmin(np.abs(predictions - self.target_value))
-       
-       # best is the conc that predicts the lambda value closest to the target value
-        best = concentrations[closest]
-        print(f"{best} uM KBr results in a predicted lambda max of {predictions[closest]} nm")
-        print(type(best))
-        #suggestions = self.optimizer.suggest_next_locations()
+        stdev = np.array(stdev).flatten()*(600)
         
-        # loop to check suggestion and get new if out of bounds
+        #for exploration we find the maximum error and choose the reaction that corresponds to it 
+        lowest = np.argmax(stdev)
+        explore = concentrations[lowest]
+        print(f"The lowest uncertainty {lowest} occurs at low")
+        
+        #for exploitation we find the closest lambda max and the reaction that corresponds to it
+        closest = np.argmin(np.abs(predictions - self.target_value))
+        exploit = concentrations[closest]
+        print(f"{exploit} results in a predicted lambda max of {predictions[closest]} nm")
+        
+        #if the uncertainty everywhere is bellow a threashold we let the robot exploit, otherwise we explore
+        if all(unc < 100 for unc in stdev):
+            print("Exploiting!!!")
+            return [exploit]
+        else:
+            print("Exploring!!!")
+            return[explore]
 
-        #has a call to self.check_bounds()
 
-        #TODO plot the model and save it after every iteration here 
-
-        return [best]
-
-    def update_experiment_data(self, X_new, Y_new):
+    def update_experiment_data(self, X_all, Y_all, X_new, Y_new):
         '''
         Updates the optimizer with new experimental data, extending the historical dataset.
         params:
         np.ndarray X_new: The new parameter values from the experiments.
         np.ndarray Y_new: The new objective function values corresponding to X_new.
         '''
-        print(f"X_new: {X_new}")
-        print(f"Y_new: {Y_new}")
-
-        print(f"X_all Before Update: {self.optimizer.X}")
-        print(f"Y_all Before Update: {self.optimizer.Y}")
-        self.experiment_data['X'].extend(X_new)
-        self.experiment_data['Y'].extend(Y_new)
-        #print(f"Experiment Data X: {self.experiment_data["X"]}")
-        self.gp_model.updateModel(X_all=np.array(self.experiment_data['X']), Y_all=np.array(self.experiment_data['Y']),X_new=X_new, Y_new=Y_new)
-    
-        #self.initialize_optimizer(np.array(self.experiment_data['X']), np.array(self.experiment_data['Y']).reshape(-1, 1))
         
-        print(f"X_all After Update: {self.optimizer.X}")
-        print(f"Y_all After Update: {self.optimizer.Y}")
+        self.gp_model.updateModel(X_all=X_all, Y_all=Y_all, X_new=X_new, Y_new=Y_new)
         
         self.curr_iter += 1
         self.update_quit(X_new, Y_new)
