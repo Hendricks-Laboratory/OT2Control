@@ -687,14 +687,14 @@ class Controller(ABC):
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
-    def plot_2D_GPR(self, model):
+    def plot_2d_gpr(self, model):
         plt.figure(figsize=(4.8,4), dpi=200)
         plt.xlabel(f"{self.variable_reagents[0]} (mM)", fontsize = 12)
         plt.ylabel(f"{self.variable_reagents[1]} (mM)", fontsize = 12)
         plt.subplots_adjust(left=0.2, bottom=0.2, right=0.9, top=0.9)
         plt.tick_params(axis = "both", width = 1.5)
-        plt.ylim(0, self.max_conc[0])  # X-axis range from 2 to 8
-        plt.xlim(0, self.max_conc[1])
+        plt.ylim(0, self.max_conc[1])  # X-axis range from 2 to 8
+        plt.xlim(0, self.max_conc[0])
         plt.subplot().spines['bottom'].set_linewidth(1.5)
         plt.subplot().spines['top'].set_linewidth(1.5)
         plt.subplot().spines['left'].set_linewidth(1.5)
@@ -1247,8 +1247,8 @@ class Controller(ABC):
             self.plot_LAM_overlay(df, wellnames, filename)
         elif plot_type == 'multi_kin':
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
-        elif plot_type == '2D_GPR':
-            self.plot_2D_GPR(model)
+        elif plot_type == '2d_gpr':
+            self.plot_2d_gpr(model)
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
@@ -2217,11 +2217,11 @@ class AutoContr(Controller):
         self.min_conc = list(self.get_min_conc().values())
     
     # Update experiment_data DataFrame after each batch
-    def _update_experiment_data(self, recipes, Experiment_result, axis=1):
+    def _update_experiment_data(self, recipes, Experiment_result, axis=1, ignore_index=False):
         
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=axis, ignore_index=True)
-        self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({"Lambda Max": Experiment_result})], axis=axis, ignore_index=True)
+            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=axis, ignore_index=ignore_index)
+        self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({"Lambda Max": Experiment_result})], axis=axis, ignore_index=ignore_index)
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
             'KBr': recipes[:, 1],
@@ -2453,7 +2453,7 @@ class AutoContr(Controller):
             #generate new wellnames for next batch
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
             # plan and execute a reaction with duplicate reactions.
-            self._create_samples(wellnames, recipes)
+            self._create_samples(wellnames, recipes, model)
 
             #pull in the scan data
             filenames = self.rxn_df[
@@ -2482,7 +2482,7 @@ class AutoContr(Controller):
             print(f"Best recipe: {X_best}, Best lambda max: {Y_best}")"""
 
             self.batch_num += 1
-            self._update_experiment_data(recipes, lambda_maxes, 0)     
+            self._update_experiment_data(recipes, lambda_maxes, 0, True)     
             
         self.experiment_data.to_csv(f"{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv", index=False)
         print("Success!!!")

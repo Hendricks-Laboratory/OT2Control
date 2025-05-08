@@ -74,7 +74,7 @@ class OptimizationModel():
         self.gp_model = None
         self.acquisition = None
         self.optimizer = None
-        self.prediction = None
+        self.predictions = np.zeros((100, 100))
 
     def check_bounds(self, suggestion):
         '''
