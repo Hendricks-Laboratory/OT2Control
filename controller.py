@@ -420,6 +420,7 @@ class Controller(ABC):
         Handles obtaining the minimum concentration of each reagent based on 5 uL of the concentration on deck
         Input: None
         Output: dictionary of reagent names (keys) and their minimum concentrations (values)
+        TODO: how to deal with zero concentrations
         """
 
         # Grabbing concentrations from the google sheet
