@@ -1240,6 +1240,7 @@ class Controller(ABC):
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
         elif plot_type == '2D_GPR':
             self.plot_2D_GPR(model)
+        # TODO: A new plotting protocol for 3+ dimensions
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
