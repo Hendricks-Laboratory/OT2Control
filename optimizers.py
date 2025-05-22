@@ -75,56 +75,6 @@ class OptimizationModel():
         self.acquisition = None
         self.optimizer = None
         self.prediction = None
-
-    """def check_bounds(self, suggestion):
-        '''
-        Checks if a suggested set of parameters is within the pre-defined bounds and constraints.
-        params:
-        list suggestion: The suggested parameters to be checked.
-        returns:
-        bool: True if the suggestion is within bounds, False otherwise.
-        '''
-        print("------checking bounds-------")
-        print(f'reagent info: {self.reagent_info}')
-        print(self.reagent_info.columns)
-        print(f'fixed_reagents: {self.fixed_reagents}')
-        print(f'variable_reagents: {self.variable_reagents}')
-        print(f'suggestion is: {suggestion}')
-
-
-        
-        # Initialize an empty dictionary
-        deck = {}
-
-        # Iterate through the DataFrame index
-        for index_value in self.reagent_info.index:
-            # Use regex to remove "C" and the floating-point number that follows
-            modified_index = re.sub(r'C\d+(\.\d+)?', '', index_value)
-            # Assign the conc value to the corresponding key in the dictionary
-            deck[modified_index] = self.reagent_info.loc[index_value, 'conc']
-
-        print(f'deck: {deck}')
-        # create deck variable holding dict of reagents available and their concs on deck. take out the suffix
-
-
-
-        #  M1V1 = M1V2 
-        water_volume = 0
-
-        total_volume = 200
-        i = 0
-        for conc in suggestion:
-            total_volume -= (float(conc)*(200/float(deck[self.variable_reagents[i]])))
-            i += 1
-        # invalid case: total volume is greater than 200mL
-        if total_volume < 0:
-            return False
-        
-        # valid case: add water to get the 200mL concentration
-        water_volume = total_volume
-        print(f"Water volume is {water_volume}")
-        return True
-    """
         
     def generate_initial_design(self):
         '''
@@ -136,9 +86,6 @@ class OptimizationModel():
         # Here, you might want to filter or adjust initial_design based on constraints
         # This is a placeholder; actual implementation may require validating each point
 
-        """for recipe in initial_design:
-            if not self.check_bounds(recipe):
-                initial_design = np.delete(initial_design, np.where(initial_design == recipe))"""
         return initial_design
 
     def initialize_optimizer(self, X_init, Y_init):
@@ -162,37 +109,6 @@ class OptimizationModel():
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
             self.gp_model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
-    
-    """def _update_acquisition(self):
-        '''
-        Updates the acquisition function based on the current index and reinitializes the evaluator with the new acquisition function.
-        '''
-        if self.curr_iter < 6:
-            self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer,exploration_weight=8)
-        else:
-            self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer, exploration_weight=0.5)
-        self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
-        
-        acquisition_type = self.acquisition_functions[1] 
-        if acquisition_type == 'EI':
-            self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.model, self.space, self.acq_optimizer)
-        elif acquisition_type == 'MPI':
-            self.acquisition = GPyOpt.acquisitions.AcquisitionMPI(self.model, self.space, self.acq_optimizer)
-        elif acquisition_type == 'LCB':
-            self.acquisition = GPyOpt.acquisitions.AcquisitionLCB(self.model, self.space, self.acq_optimizer)
-        self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
-        #print('last,', self.acquisition)
-        #print(self.evaluator)
-    
-    def get_target_wavelength(self):
-        # TODO: something with evaluate_objective() maybe.
-        pass"""
-
-    """def cartesian_product(*iterables):
-        
-        Compute the Cartesian product of input iterables.
-        
-        return list(itertools.product(*iterables))"""
         
     def getNextReaction(self, num_points=100):
         '''
@@ -239,6 +155,7 @@ class OptimizationModel():
         print(f"{exploit} results in a predicted lambda max of {predictions[closest]} nm")
         
         #if the uncertainty everywhere is bellow a threashold we let the robot exploit, otherwise we explore
+        return [exploit]
         if all(unc < 100 for unc in stdev):
             print("Exploiting!!!")
             return [exploit]
@@ -260,15 +177,6 @@ class OptimizationModel():
         self.curr_iter += 1
         self.update_quit(X_new, Y_new)
     
-    def calc_obj(self, x):
-        '''
-        Calculates the objective function based on the difference from the target value.
-        params:
-        np.ndarray x: The experimental results to evaluate.
-        returns:
-        np.ndarray: The calculated objective function values.
-        '''
-        return abs(x - self.target_value).reshape(-1, 1)
 
     def update_quit(self, X_new, Y_new):
         '''

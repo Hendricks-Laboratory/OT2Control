@@ -130,7 +130,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     try:
         min_conc = auto.get_min_conc()
         print(f'min_conc for variable reagents: {min_conc}')
-        max_conc = list(max_conc.values())
+        min_conc = list(min_conc.values())
     except Exception as e:
         print(f'Error getting min_conc: {e}')
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
@@ -416,14 +416,17 @@ class Controller(ABC):
         return data
 
     def get_min_conc(self):
-        df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
-        print(df_sliced)
-        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))  # Convert to dictionary
-        print(mapping)
-        
+        """
+        Handles obtaining the minimum concentration of each reagent based on 5 uL of the concentration on deck
+        Input: None
+        Output: dictionary of reagent names (keys) and their minimum concentrations (values)
+        """
+
+        # Grabbing concentrations from the google sheet
         conc = self.robo_params["reagent_df"]
         reagent_names = conc.index
         
+        # Fore each reagent parsing the concentration out of it's concatinated form (potassium_bromideC0.01) grabbing everything after the C
         min_concs = {}
         for var_reagent in self.get_variable_reagents():
             prefix = var_reagent
@@ -431,18 +434,26 @@ class Controller(ABC):
             # Filter the list using the regex
             matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
             var_reagent_conc = self._get_conc(matching_chemicals[0])
+            
+            # Finding the concentration that results from 5uL of the concentration on deck
             min_conc = (var_reagent_conc * 5) / 200
+            
+            # Adding the key value pair to the dictionary
             min_concs[var_reagent] = min_conc
         return min_concs
     
     def get_max_conc(self):
         """
-        Gets the volumes of fixed reagents and calculates max concentrations for variable reagents.
+        Calculates the maximum concentration of a given reagent based on the concentration provided on deck.
+        It does this by calculating the remaining space in the well after fixed reagents are added and splitting it evenly between the variable reagents
+        TODO: What happens when multiple concentrations are put on deck? (Overlap/gaps)
+        TODO: What if we don't want to split the space evenly between variable reagents (One is more important?)
         
         Returns:
             dict: Maximum concentrations for each variable reagent
         """
-        # total volumes for fixed reagents
+        # Line 488-458 parsing the fixed reagent volumes from google sheets 
+        # TODO: Check if this parsing is redundant
         fixed_vols = {}
 
         df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
@@ -454,55 +465,34 @@ class Controller(ABC):
             if reagent in mapping:
                 fixed_vols[reagent] = mapping[reagent]
         
-        print(f"!!!!{fixed_vols}")
+        print(f"Fixed Volumes: {fixed_vols}")
 
-        # Calculate remaining volume available for this reagent
+        # Calculate the total volume of fixed reagents 
         total_fixed_vol = sum(fixed_vols.values())
-        print(f"!!!!!{total_fixed_vol}")
-        remaining_vol = 200 - total_fixed_vol # Assuming 200uL total volume
+        print(f"Total volume of fixed reagents: {total_fixed_vol}")
 
-        #  max concentrations for variable reagents one at a time
+        # Calculate the volume remaining in a 200 uL well
+        remaining_vol = 200 - total_fixed_vol 
+
+        # Max concentrations for variable reagents one at a time
         conc = self.robo_params["reagent_df"]
         reagent_names = conc.index
-
-
        
         max_concs = {}
         for var_reagent in self.get_variable_reagents():
-            # Get initial concentration of this reagent
-
-            """var_reagent_conc = 
-            print(f"!!!!!{var_reagent_conc}")"""
-            
+            # Get initial concentration of this reagent by parsing regular expressions eg. potassium_boromideC0.01
             prefix = var_reagent
             regex = f"^{prefix}.*"
             # Filter the list using the regex
             matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
             var_reagent_conc = self._get_conc(matching_chemicals[0])
-            print(f"!!!!!{var_reagent_conc}")
+            print(f"Concentration on deck: {var_reagent_conc}")
 
-            
-            """initial_conc = None
-            for idx, row in self.rxn_df.iterrows():
-                if row['reagent'] == var_reagent and not pd.isna(row['conc']):
-                    initial_conc = row['conc']
-                    break
-                    
-            if initial_conc is None:
-                continue
-                
-            
-            
-            if remaining_vol <= 0:
-                max_concs[var_reagent] = 0
-                continue"""
-                
-            # Use C1V1 = C2V2 to calculate max concentration
-            # C1 = initial_conc
-            # V1 = remaining_vol 
-            # V2 = 200 (total volume)
-            # Solve for C2 (max concentration)
+            # Caluclate maximum concentration using M1V1=M2V2
             max_conc = (var_reagent_conc * remaining_vol) / 200
+
+            # Divide the space up evenly by the number of variable reagents 
+            # TODO: This division is preferably done to the volume but check that the math is the same
             max_concs[var_reagent] = max_conc / len(self.variable_reagents)
             
         return max_concs
@@ -2220,7 +2210,7 @@ class AutoContr(Controller):
     def _update_experiment_data(self, recipes, Experiment_result):
         
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, {str(reagent): recipes[:, i]}], axis=1)
+            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=1)
 
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
@@ -2318,18 +2308,22 @@ class AutoContr(Controller):
 
     def Normalize_Denormalize_Recipes(self, X, normalize_flag=True):
         '''
-        Updates the experiment_data DataFrame with the maximum concentration of each reagent 
-        input: X, a numpy array of the current recipe 
-        returns: None
+        Handles normalization and denormalization of different reagents on the deck
+        Input: A set of recipes in a 2D numpy array
+        Output: A set of normalize/denormalized (converted based on flag) recipes in a 2D numpy array  
         '''
         
+        # Normalization is the conversion of concentration to 0-1 range
         if normalize_flag:
             operation = 'divide'
+        
+        # Denormalization is the conversion of 0-1 range to concentrations
         else:
             operation = 'multiply'
         
+        
+        # Fore every recipe (set of reagent concentrations) go through each reagent and normalize/denormalize specific min and max concentrations
         for row in X:
-            print(row)
             for i in range(len(row)):
                 if operation == 'multiply':
                     row[i] = (self.max_conc[i]-self.min_conc[i]) * row[i] + self.min_conc[i]
@@ -2358,15 +2352,15 @@ class AutoContr(Controller):
         # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
-        # Generate initial data which is a list of recipies (normalized)
+        # Generate initial data which is a list of recipes (normalized)
         X_initial = model.generate_initial_design()
         print(f"X initial: {X_initial}")
 
-        # The list of recipies is denormalized with different maximums for each reagent
+        # The list of recipes is denormalized with different maximums for each reagent
         X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False) 
         print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
-        # Tripplicates each recipie to be run on the robot
+        # Tripplicates each recipes to be run on the robot
         recipes =  self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)    
 
         # Generate wellnames for this batch
@@ -2468,14 +2462,14 @@ class AutoContr(Controller):
             X_new_normalized = self.Normalize_Denormalize_Recipes(recipes, normalize_flag=True)
 
             # Update the model with the three new recipes and lambda maxes (normalized)
-            model.update_experiment_data(X_new_normalized, Y_new_normalized)
+            model.update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized)
 
             # Add new denormalized data to the controller experiment_data
-            self._update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized) 
+            self._update_experiment_data(recipes, Y_new) 
             self.batch_num += 1    
             
         # Save the experiment data as a csv to pr_data
-        self.experiment_data.to_csv(f'{os.path.join(self.out_path, 'pr_data')}/experiment_data.csv', index=False)
+        self.experiment_data.to_csv(f'{os.path.join(self.out_path, "pr_data")}/experiment_data.csv', index=False)
         print("Success!!!")
         
         self.close_connection()
