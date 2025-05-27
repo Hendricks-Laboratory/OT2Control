@@ -2207,11 +2207,13 @@ class AutoContr(Controller):
         self.min_conc = list(self.get_min_conc().values())
     
     # Update experiment_data DataFrame after each batch
-    def _update_experiment_data(self, recipes, Experiment_result):
-        
+    def _update_experiment_data(self, recipes, Experiment_result, axis=1):
+        # TODO: Reformat the instructions for csv output to make it export 
+        # TODO: Test this implementation of formatting this csv
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=1)
-
+            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=axis, ignore_index=True)
+        new = pd.DataFrame({"Experiment_result": recipes})
+        self.experiment_data = pd.concat([self.experiment_data, new], ignore_index=True)
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
             'KBr': recipes[:, 1],
@@ -2465,7 +2467,7 @@ class AutoContr(Controller):
             model.update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized)
 
             # Add new denormalized data to the controller experiment_data
-            self._update_experiment_data(recipes, Y_new) 
+            self._update_experiment_data(recipes, Y_new, axis=0) 
             self.batch_num += 1    
             
         # Save the experiment data as a csv to pr_data
