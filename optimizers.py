@@ -145,9 +145,9 @@ class OptimizationModel():
         stdev = np.array(stdev).flatten()*(600)
         
         #for exploration we find the maximum error and choose the reaction that corresponds to it 
-        lowest = np.argmax(stdev)
-        explore = concentrations[lowest]
-        print(f"The lowest uncertainty {lowest} occurs at low")
+        maximum = np.argmax(stdev)
+        explore = concentrations[maximum]
+        print(f"The maximum uncertainty {maximum} occurs at low")
         
         #for exploitation we find the closest lambda max and the reaction that corresponds to it
         closest = np.argmin(np.abs(predictions - self.target_value))

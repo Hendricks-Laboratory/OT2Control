@@ -419,7 +419,8 @@ class Controller(ABC):
         """
         Handles obtaining the minimum concentration of each reagent based on 5 uL of the concentration on deck
         Input: None
-        Output: dictionary of reagent names (keys) and their minimum concentrations (values)
+        Output: dictionary of reagent names (key) and their minimum concentrations (values)
+        TODO: how to deal with zero concentrations
         """
 
         # Grabbing concentrations from the google sheet
@@ -1239,6 +1240,7 @@ class Controller(ABC):
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
         elif plot_type == '2D_GPR':
             self.plot_2D_GPR(model)
+        # TODO: A new plotting protocol for 3+ dimensions
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
