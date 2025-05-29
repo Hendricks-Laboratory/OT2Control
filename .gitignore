@@ -12,4 +12,7 @@ TODO*.txt
 Controller_Out/
 .venv
 requirements.txt
+
+.venv
+requirements.txt
 experiment_data.csv

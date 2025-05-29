@@ -17,6 +17,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 from datetime import datetime
+import pytz
 import socket
 import json
 import dill
@@ -94,7 +95,7 @@ class Container(ABC):
         self.history = []
         if vol:
             #create an entry with yourself as first
-            self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, vol))
+            self.history.append((datetime.now(pytz.timezone('US/Pacific')).strftime('%d-%b-%Y %H:%M:%S:%f'), name, vol))
 
     DEAD_VOL = 0
     MIN_HEIGHT = 0
@@ -115,7 +116,7 @@ class Container(ABC):
         '''
         #if you are dispersing without specifying the name of incoming chemical, complain
         assert ((del_vol < 0) or (name and del_vol > 0)), 'Developer Error: dispensing without specifying src'
-        self.history.append((datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
+        self.history.append((datetime.now(pytz.timezone('US/Pacific')).strftime('%d-%b-%Y %H:%M:%S:%f'), name, del_vol))
         self.vol = self.vol + del_vol
         self._update_height()
         assert (self.vol < self.MAX_VOL + 1e-9), "tried to set volume of {} to {}uL, but {} has max capacity of {}uL".format(self.name, self.vol, self.name, self.MAX_VOL) #1e-9 is fudge
@@ -1524,7 +1525,7 @@ class OT2Robot():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', chem_name]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(chem_name, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
-        self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
+        self.protocol._commands.append('HEAD: {} : mixing {} '.format(datetime.now(pytz.timezone('US/Pacific')).strftime('%d-%b-%Y %H:%M:%S:%f'), chem_name))
         arm = self._get_preffered_pipette(300) #gets the larger pipette
         pipette = self.pipettes[arm]['pipette']
         self.pipettes[arm]['last_used'] = chem_name #gotta update the last used
@@ -1761,7 +1762,7 @@ class OT2Robot():
             #this is really easy to fix, but it should not be fixed here, it should be fixed in a
             #higher level function call. This is minimal step for maximum speed.
             assert (self.pipettes[arm_to_check]['last_used'] in ['clean', 'WaterC1.0', src]), "trying to transfer {}->{}, with {} arm, but {} arm was dirty with {}".format(src, dst, arm, arm_to_check, self.pipettes[arm_to_check]['last_used'])
-        self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
+        self.protocol._commands.append('HEAD: {} : transfering {} to {}'.format(datetime.now(pytz.timezone('US/Pacific')).strftime('%d-%b-%Y %H:%M:%S:%f'), src, dst))
         pipette = self.pipettes[arm]['pipette']
         src_cont = self.containers[src] #the src container
         dst_cont = self.containers[dst] #the dst container
@@ -1972,7 +1973,7 @@ if __name__ == '__main__':
             print("ot2_robot code encountered exception '{}' in ot2_robot. Traceback will be written to ot2_error_output.txt. Excepting and launching new server.".format(e))
             #credit Horacio of stack overflow
             with open('ot2_error_output.txt', 'a+') as file:
-                file.write("{}\n".format(datetime.now().strftime('%d-%b-%Y %H:%M:%S:%f')))
+                file.write("{}\n".format(datetime.now(pytz.timezone('US/Pacific')).strftime('%d-%b-%Y %H:%M:%S:%f')))
                 file.write(str(e))
                 file.write(traceback.format_exc())
         finally:

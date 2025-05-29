@@ -1529,14 +1529,16 @@ class Controller(ABC):
 
             #merge all the scans into a single file if there were any scans
             #get the names of all the scan files
+            
+            def getPair(num): 
+                alpha = "abcdefghijklmnopqrstuvwxyz"
+                first = alpha[math.floor(num/26)]
+                second = alpha[num - ((math.floor(num/26))*26)]
+                return first + second
+            
             if 'scan' in callbacks:
                 dst = row['scan_filename'] #also the base name for all files to be merged
-                scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps))]
-                if len(transfer_steps) <= 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(len(transfer_steps))]
-                elif len(transfer_steps) > 25:
-                    scan_names = ['{}-{}'.format(dst, chr(i+97)) for i in range(26)] + ['{}-{}'.format(dst, chr(i+97)+chr(i+97)) for i in range(len(transfer_steps)-26)]
-                    callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
+                scan_names = ['{}-{}'.format(dst, getPair(i)) for i in range(len(transfer_steps))] 
                 self.pr.merge_scans(scan_names, dst)
         else:
             self.portal.send_pack('transfer', src, transfer_steps)
@@ -1561,11 +1563,12 @@ class Controller(ABC):
             callback_num must not be larger than 26 (alpha numeric characters are used. If you
               go larger than 26, you'll exceed alpha numeric)
         '''
-        if callback_num <= 25:
-            callback_alph = chr(callback_num + ord('a')) #convert the number to alpha
-        elif callback_num > 25:
-            callback_num -= 26
-            callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
+        def getPair(num): 
+            alpha = "abcdefghijklmnopqrstuvwxyz"
+            first = alpha[math.floor(num/26)]
+            second = alpha[num - ((math.floor(num/26))*26)]
+            return first + second
+        callback_alph = getPair(callback_num) #convert the number to alpha
         i_ext = 'i-{}'.format(callback_alph) #extended index with callback
         if callback == 'stop':
             self._stop(i)
@@ -3428,7 +3431,8 @@ class ScanDataFrame():
             temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
             hour = temphour if temphour == 12  else temphour +12
         elif am_pm == "AM":
-            hour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            temphour = int(df_read_data_1.iloc[1][0].split(" ")[4].split(":")[0])
+            hour = temphour -12 if temphour == 12  else temphour
         
         
         
@@ -3531,10 +3535,8 @@ class ScanDataFrame():
           
             index = timess.index(time)
 
-            time = pd.Timestamp(time)
-            given_time = time - pd.DateOffset(hours=7)
-            given_time = given_time.strftime('%Y-%m-%d %H:%M:%S:%f')
-            timess[index] = given_time
+            time = pd.Timestamp(time).strftime('%Y-%m-%d %H:%M:%S:%f')
+            timess[index] = time
 
 
         well_hist_df['timestamp'] = timess
@@ -3698,12 +3700,12 @@ class ScanDataFrame():
                 transfers_before_scans = []
                 react = str(react)
                 transfer_times = full.loc[full['cont'].str.contains(react),'time'].tolist()             
-                print("transfer_times list = ", transfer_times)
+                #print("transfer_times list = ", transfer_times)
                 for transfer_time in transfer_times:
-                    print("transfer_time = ", transfer_time)
-                    print("time = ", time)
+                    #print("transfer_time = ", transfer_time)
+                    #print("time = ", time)
                     if transfer_time <= time:
-                        print("yes, transfer_time<=time")
+                        #print("yes, transfer_time<=time")
                         transfers_before_scans.append(transfer_time)
                 latest_transfer_time = max(transfers_before_scans)
                 
