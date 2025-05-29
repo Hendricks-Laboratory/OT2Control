@@ -156,6 +156,8 @@ class OptimizationModel():
         
         #if the uncertainty everywhere is bellow a threashold we let the robot exploit, otherwise we explore
         return [exploit]
+    
+        # TODO: Maximum number of rounds of exploration is a variable that can be put in header parameters
         if all(unc < 100 for unc in stdev):
             print("Exploiting!!!")
             return [exploit]
