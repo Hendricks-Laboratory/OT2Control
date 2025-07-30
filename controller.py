@@ -695,10 +695,11 @@ class Controller(ABC):
         reagent_df = raw_reagent_df.drop(['empty'], errors='ignore')
         reagent_df = reagent_df.loc[~reagent_df['molar_mass'].astype(bool)] #drop dry
         reagent_df.drop(columns='molar_mass',inplace=True)
-        try:
-            reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
-        except ValueError as e:
-            raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
+        #commenting this out because we're trying to create a reagent in a well and that shouldn't have a mass
+        #try:
+        #    reagent_df = reagent_df.astype({'conc':float,'deck_pos':int,'mass':float})
+        #except ValueError as e:
+        #    raise ValueError("Your reagent info could not be parsed. Likely you left out a required field, or you did not specify a concentration on the input sheet")
         return reagent_df
 
     def _get_instrument_dict(self, deck_data):
