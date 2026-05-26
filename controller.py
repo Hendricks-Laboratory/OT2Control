@@ -2642,13 +2642,21 @@ class AutoContr(Controller):
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
         # debugging conc to vol eve threw assertion error cannot aspirate more than max vol
+        
+        from pathlib import Path
+
         print("conc to vol dataframe:")
+
         print(rxn_df)
+
         print("rxn_df shape:", rxn_df.shape)
+
         print("rxn_df columns:", rxn_df.columns.tolist())
 
-        debug_filename = f"conc_to_vol_debug_batch_{self.batch_num}.csv"
+        debug_filename = Path.home() / "Desktop" / f"conc_to_vol_debug_batch_{self.batch_num}.csv"
+
         rxn_df.to_csv(debug_filename, index=False)
+
         print(f"Saved debug dataframe to {debug_filename}")
 
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
