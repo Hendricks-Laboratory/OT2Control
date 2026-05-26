@@ -2606,7 +2606,48 @@ class AutoContr(Controller):
 
         print(f'recipes {recipes}')
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
+        # ===== NEW DEBUG CODE: print/save initial rxn_df =====
+        from pathlib import Path
+
+        print("Initial rxn_df:")
+
+        print(rxn_df)
+
+        print("rxn_df shape:", rxn_df.shape)
+
+        print("rxn_df columns:", rxn_df.columns.tolist())
+
+        debug_dir = Path.home() / "Desktop"
+
+        rxn_df_debug_filename = debug_dir / f"initial_rxn_df_batch_{self.batch_num}.csv"
+
+        rxn_df.to_csv(rxn_df_debug_filename, index=False)
+
+        print(f"Saved initial rxn_df debug dataframe to {rxn_df_debug_filename}")
+        # ===== END NEW DEBUG CODE =====
+
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
+        # ===== NEW DEBUG CODE: print/save recipe_df =====
+
+        print("recipe_df:")
+
+        print(recipe_df)
+
+        print("recipe_df shape:", recipe_df.shape)
+
+        print("recipe_df columns:", recipe_df.columns.tolist())
+
+        print("recipe_df index:", recipe_df.index.tolist())
+
+        recipe_df_debug_filename = debug_dir / f"recipe_df_batch_{self.batch_num}.csv"
+
+        recipe_df.to_csv(recipe_df_debug_filename)
+
+        print(f"Saved recipe_df debug dataframe to {recipe_df_debug_filename}")
+
+        # ===== END NEW DEBUG CODE =====
+
+
         n_wellnames = np.array(wellnames)
         #n_wellnames_reshaped = n_wellnames.reshape(2,2)
         #n_reagent_order = self.reagent_order.reshape(2,2)
@@ -2641,6 +2682,7 @@ class AutoContr(Controller):
                 return pd.Series(row['Template'], index=recipe_df.index)
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
+        
         # debugging conc to vol eve threw assertion error cannot aspirate more than max vol
         
         from pathlib import Path
