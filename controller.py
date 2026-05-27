@@ -1503,6 +1503,26 @@ class Controller(ABC):
             input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
+    def _normalize_transfer_volume(self, vol, sig_figs=6):
+        """
+        Normalize computed dataframe volumes before sending them to the robot.
+
+        Uses significant figures rather than fixed decimal places so both large
+        and small volumes are handled cleanly.
+
+        Examples:
+            20.000000000000004 -> 20.0
+            10.000000000000002 -> 10.0
+            0.00123456789 -> 0.00123457
+        """
+        vol = float(vol)
+
+        if vol == 0:
+            return 0.0
+
+        return round(vol, sig_figs - int(math.floor(math.log10(abs(vol)))) - 1)
+    
+    
     def _send_transfer_command(self, row, i):
         '''
         params:  
@@ -1514,7 +1534,7 @@ class Controller(ABC):
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
-        transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
+        transfer_steps = [(name, self._normalize_transfer_volume(vol, sig_figs=6)) for name, vol in containers.iteritems()]
         
         # ===== NEW DEBUG CODE: inspect transfer command =====
         print("DEBUG _send_transfer_command")
