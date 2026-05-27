@@ -1503,12 +1503,31 @@ class Controller(ABC):
             input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
-    def _normalize_transfer_volume(self, vol, sig_figs=6):
+    def _round_transfer_volume(self, vol, sig_figs=6):
         """
-        Normalize computed dataframe volumes before sending them to the robot.
+        Round a computed transfer volume before sending it to the robot.
 
-        Uses significant figures rather than fixed decimal places so both large
-        and small volumes are handled cleanly.
+        Parameters:
+            vol:
+                The computed transfer volume, usually taken from the reaction
+                dataframe. This may contain floating-point artifacts from
+                concentration-to-volume calculations.
+
+            sig_figs:
+                The number of significant figures to keep. Defaults to 6.
+
+        Returns:
+            float:
+                The transfer volume rounded to the requested number of
+                significant figures.
+
+        Postconditions:
+            - The returned value is a float.
+            - Tiny floating-point artifacts are removed before the volume is
+              sent to the robot.
+            - The intended physical transfer volume is preserved to the chosen
+              significant-figure precision.
+            - The input dataframe and original volume value are not modified.
 
         Examples:
             20.000000000000004 -> 20.0
@@ -1519,7 +1538,12 @@ class Controller(ABC):
 
         if vol == 0:
             return 0.0
-
+        
+        # Python's round(x, n) rounds to n decimal places, not n significant figures.
+        # Convert the requested number of significant figures into the number of
+        # decimal places needed for this specific volume based on its order of magnitude.
+        # This removes tiny floating-point artifacts, such as 20.000000000000004,
+        # without unnecessarily reducing precision for smaller volumes.
         return round(vol, sig_figs - int(math.floor(math.log10(abs(vol)))) - 1)
     
     
@@ -1534,7 +1558,7 @@ class Controller(ABC):
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
-        transfer_steps = [(name, self._normalize_transfer_volume(vol, sig_figs=6)) for name, vol in containers.iteritems()]
+        transfer_steps = [(name, self._round_transfer_volume(vol, sig_figs=6)) for name, vol in containers.iteritems()]
         
         # ===== NEW DEBUG CODE: inspect transfer command =====
         print("DEBUG _send_transfer_command")
