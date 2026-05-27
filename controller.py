@@ -1515,6 +1515,29 @@ class Controller(ABC):
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
         transfer_steps = [name_vol_pair for name_vol_pair in containers.iteritems()]
+        
+        # ===== NEW DEBUG CODE: inspect transfer command =====
+        print("DEBUG _send_transfer_command")
+        print("protocol row index i:", i)
+        print("src chemical_name:", src)
+        print("row op:", row.get("op"))
+        print("row reagent:", row.get("reagent"))
+        print("row callbacks:", row.get("callbacks"))
+
+        print("containers / nonzero destination volumes:")
+        print(containers)
+
+        try:
+            print("number of transfer steps:", len(transfer_steps))
+            print("transfer_steps:", transfer_steps)
+
+            transfer_volumes = [float(vol) for _, vol in transfer_steps]
+            print("max single transfer volume:", max(transfer_volumes) if transfer_volumes else 0)
+            print("total transfer volume:", sum(transfer_volumes))
+        except Exception as debug_error:
+            print("Could not summarize transfer_steps:", debug_error)
+        # ===== END NEW DEBUG CODE =====
+        
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
         if callbacks:
