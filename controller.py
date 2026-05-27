@@ -2606,7 +2606,8 @@ class AutoContr(Controller):
 
         print(f'recipes {recipes}')
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
-        # ===== NEW DEBUG CODE: print/save initial rxn_df =====
+       # ===== NEW DEBUG CODE: print/save initial rxn_df =====
+
         from pathlib import Path
 
         print("Initial rxn_df:")
@@ -2617,13 +2618,16 @@ class AutoContr(Controller):
 
         print("rxn_df columns:", rxn_df.columns.tolist())
 
-        debug_dir = Path.home() / "Desktop"
+        debug_dir = Path("/mnt/c/Users/science_356_lab/Desktop/ot2_debug_csvs")
+
+        debug_dir.mkdir(parents=True, exist_ok=True)
 
         rxn_df_debug_filename = debug_dir / f"initial_rxn_df_batch_{self.batch_num}.csv"
 
         rxn_df.to_csv(rxn_df_debug_filename, index=False)
 
         print(f"Saved initial rxn_df debug dataframe to {rxn_df_debug_filename}")
+
         # ===== END NEW DEBUG CODE =====
 
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
@@ -2683,23 +2687,25 @@ class AutoContr(Controller):
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
         
-        # debugging conc to vol eve threw assertion error cannot aspirate more than max vol
-        
-        from pathlib import Path
+        # ===== NEW DEBUG CODE: print/save conc-to-vol rxn_df =====
 
-        print("conc to vol dataframe:")
+        print("rxn_df after _convert_conc_to_vol:")
 
         print(rxn_df)
 
-        print("rxn_df shape:", rxn_df.shape)
+        print("conc-to-vol rxn_df shape:", rxn_df.shape)
 
-        print("rxn_df columns:", rxn_df.columns.tolist())
+        print("conc-to-vol rxn_df columns:", rxn_df.columns.tolist())
 
-        debug_filename = Path.home() / "Desktop" / f"conc_to_vol_debug_batch_{self.batch_num}.csv"
+        conc_to_vol_debug_filename = debug_dir / f"conc_to_vol_rxn_df_batch_{self.batch_num}.csv"
 
-        rxn_df.to_csv(debug_filename, index=False)
+        rxn_df.to_csv(conc_to_vol_debug_filename, index=False)
 
-        print(f"Saved debug dataframe to {debug_filename}")
+        print(f"Saved conc-to-vol rxn_df debug dataframe to {conc_to_vol_debug_filename}")
+
+        # ===== END NEW DEBUG CODE =====
+        
+        
 
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
                 else "{}-{}".format(x, self.batch_num))
