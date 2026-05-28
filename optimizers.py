@@ -76,15 +76,73 @@ class OptimizationModel():
         self.optimizer = None
         self.prediction = None
         
+    def _generate_maximin_lhs_design(self, num_candidates=1000, random_seed=None):
+        '''
+        Generates a maximin Latin hypercube initial design.
+
+        Parameters:
+            num_candidates:
+                Number of Latin hypercube candidate designs to generate and compare.
+
+            random_seed:
+                Optional random seed for reproducibility. If None, the design will vary
+                between runs.
+
+        Returns:
+            np.ndarray:
+                The Latin hypercube design with the largest minimum pairwise distance
+                among the generated candidates.
+
+        Postconditions:
+            - Returns an initial design with shape:
+              (self.initial_design_numdata, number_of_variables).
+            - Preserves Latin hypercube-style sampling through GPyOpt's latin design.
+            - Selects the candidate whose closest pair of points is as far apart as possible.
+        '''
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        best_design = None
+        best_min_distance = -np.inf
+
+        for _ in range(num_candidates):
+            candidate_design = GPyOpt.experiment_design.initial_design(
+                'latin',
+                self.space,
+                self.initial_design_numdata
+            )
+
+            min_distance = np.inf
+
+            for i in range(len(candidate_design)):
+                for j in range(i + 1, len(candidate_design)):
+                    distance = np.linalg.norm(candidate_design[i] - candidate_design[j])
+
+                    if distance < min_distance:
+                        min_distance = distance
+
+            if min_distance > best_min_distance:
+                best_min_distance = min_distance
+                best_design = candidate_design
+
+        print("Using maximin Latin hypercube initial design")
+        print(f"Best minimum pairwise distance: {best_min_distance}")
+
+        return best_design
+    
     def generate_initial_design(self):
         '''
-        Generates an initial design of experiments using Latin Hypercube Sampling within the bounds.
-        returns:
-        np.ndarray: The initial set of parameters for the experiments.
+        Generates an initial design of experiments using a maximin Latin
+        hypercube design within the bounds.
+
+        Returns:
+            np.ndarray:
+                The initial set of parameters for the experiments.
         '''
-        initial_design = GPyOpt.experiment_design.initial_design('latin', self.space, self.initial_design_numdata)
-        # Here, you might want to filter or adjust initial_design based on constraints
-        # This is a placeholder; actual implementation may require validating each point
+        initial_design = self._generate_maximin_lhs_design(
+            num_candidates=1000,
+            random_seed=None
+        )
 
         return initial_design
 
