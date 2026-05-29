@@ -1560,27 +1560,6 @@ class Controller(ABC):
         containers = row[self._products].loc[row[self._products] != 0]
         transfer_steps = [(name, self._round_transfer_volume(vol, sig_figs=6)) for name, vol in containers.iteritems()]
         
-        # ===== NEW DEBUG CODE: inspect transfer command =====
-        print("DEBUG _send_transfer_command")
-        print("protocol row index i:", i)
-        print("src chemical_name:", src)
-        print("row op:", row.get("op"))
-        print("row reagent:", row.get("reagent"))
-        print("row callbacks:", row.get("callbacks"))
-
-        print("containers / nonzero destination volumes:")
-        print(containers)
-
-        try:
-            print("number of transfer steps:", len(transfer_steps))
-            print("transfer_steps:", transfer_steps)
-
-            transfer_volumes = [float(vol) for _, vol in transfer_steps]
-            print("max single transfer volume:", max(transfer_volumes) if transfer_volumes else 0)
-            print("total transfer volume:", sum(transfer_volumes))
-        except Exception as debug_error:
-            print("Could not summarize transfer_steps:", debug_error)
-        # ===== END NEW DEBUG CODE =====
         
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
@@ -2280,169 +2259,30 @@ class AutoContr(Controller):
         # TODO: Reformat the instructions for csv output to make it export 
         # TODO: Test this implementation of formatting this csv
 
-        print("===== DEBUG _update_experiment_data START =====")
+        recipes = np.asarray(recipes)
 
-        print("Input recipes:")
-        print(recipes)
-        print("type(recipes):", type(recipes))
-        try:
-            print("recipes.shape:", recipes.shape)
-        except Exception as e:
-            print("Could not print recipes.shape:", e)
+        if recipes.ndim == 1:
+            recipes = recipes.reshape(1, -1)
 
-        print("Input Experiment_result:")
-        print(Experiment_result)
-        print("type(Experiment_result):", type(Experiment_result))
-        try:
-            print("Experiment_result.shape:", Experiment_result.shape)
-        except Exception as e:
-            print("Could not print Experiment_result.shape:", e)
+        experiment_result = np.asarray(Experiment_result).reshape(-1)
 
-        print("axis:", axis)
+        if len(experiment_result) != len(recipes):
+            raise ValueError(
+                f"Number of experiment results ({len(experiment_result)}) does not match "
+                f"number of recipes ({len(recipes)})."
+            )
 
-        print("self.variable_reagents:")
-        print(self.variable_reagents)
-        print("type(self.variable_reagents):", type(self.variable_reagents))
-        try:
-            print("len(self.variable_reagents):", len(self.variable_reagents))
-        except Exception as e:
-            print("Could not print len(self.variable_reagents):", e)
+        new_data = pd.DataFrame(
+            recipes,
+            columns=[str(reagent) for reagent in self.variable_reagents]
+        )
 
-        print("self.experiment_data BEFORE:")
-        print(self.experiment_data)
-        print("type(self.experiment_data):", type(self.experiment_data))
-        try:
-            print("self.experiment_data BEFORE shape:", self.experiment_data.shape)
-            print("self.experiment_data BEFORE columns:", self.experiment_data.columns.tolist())
-            print("self.experiment_data BEFORE index:", self.experiment_data.index.tolist())
-        except Exception as e:
-            print("Could not print self.experiment_data info:", e)
+        new_data["Experiment_result"] = experiment_result
 
-        for i, reagent in enumerate(self.variable_reagents):
-            print("----------------------------------------")
-            print(f"Looping through variable reagent i={i}, reagent={reagent}")
-            print(f"About to access recipes[:, {i}]")
-
-            try:
-                recipe_values_for_reagent = recipes[:, i]
-                print(f"recipes[:, {i}]:")
-                print(recipe_values_for_reagent)
-                print("type(recipe_values_for_reagent):", type(recipe_values_for_reagent))
-                try:
-                    print("recipe_values_for_reagent.shape:", recipe_values_for_reagent.shape)
-                    print("len(recipe_values_for_reagent):", len(recipe_values_for_reagent))
-                except Exception as e:
-                    print("Could not print recipe_values_for_reagent shape/len:", e)
-
-                reagent_df = pd.DataFrame({str(reagent): recipe_values_for_reagent})
-                print("reagent_df created from current reagent:")
-                print(reagent_df)
-                print("reagent_df shape:", reagent_df.shape)
-                print("reagent_df columns:", reagent_df.columns.tolist())
-                print("reagent_df index:", reagent_df.index.tolist())
-
-                print("About to concat:")
-                print("left dataframe = self.experiment_data")
-                print("right dataframe = reagent_df")
-                print("concat axis:", axis)
-                print("concat ignore_index:", True)
-
-                self.experiment_data = pd.concat(
-                    [self.experiment_data, reagent_df],
-                    axis=axis,
-                    ignore_index=True
-                )
-
-                print("self.experiment_data AFTER reagent concat:")
-                print(self.experiment_data)
-                print("self.experiment_data AFTER reagent concat shape:", self.experiment_data.shape)
-                print("self.experiment_data AFTER reagent concat columns:", self.experiment_data.columns.tolist())
-                print("self.experiment_data AFTER reagent concat index:", self.experiment_data.index.tolist())
-
-            except Exception as e:
-                print(f"ERROR while processing reagent {reagent} at index {i}")
-                print("Exception:", e)
-                raise e
-
-        print("----------------------------------------")
-        print("Self experiment data after all reagent columns:")
-        print(self.experiment_data)
-        print("self.experiment_data shape after reagent columns:", self.experiment_data.shape)
-        print("self.experiment_data columns after reagent columns:", self.experiment_data.columns.tolist())
-        print("self.experiment_data index after reagent columns:", self.experiment_data.index.tolist())
-
-        print("----------------------------------------")
-        print("About to create new Experiment_result dataframe")
-        print("Current code line is: new = pd.DataFrame({'Experiment_result': recipes})")
-        print("Value currently being used for Experiment_result column is recipes:")
-        print(recipes)
-        print("type(recipes):", type(recipes))
-        try:
-            print("recipes.shape:", recipes.shape)
-        except Exception as e:
-            print("Could not print recipes.shape here:", e)
-
-        print("Actual Experiment_result argument, for comparison:")
-        print(Experiment_result)
-        print("type(Experiment_result):", type(Experiment_result))
-        try:
-            print("Experiment_result.shape:", Experiment_result.shape)
-            print("len(Experiment_result):", len(Experiment_result))
-        except Exception as e:
-            print("Could not print Experiment_result shape/len:", e)
-
-        try:
-            new = pd.DataFrame({"Experiment_result": recipes})
-            print("New debugging:")
-            print(new)
-            print("new shape:", new.shape)
-            print("new columns:", new.columns.tolist())
-            print("new index:", new.index.tolist())
-
-        except Exception as e:
-            print("ERROR creating new = pd.DataFrame({'Experiment_result': recipes})")
-            print("This is likely the crash point.")
-            print("Exception:", e)
-
-            print("Trying diagnostic alternative only for debugging:")
-            try:
-                diagnostic_new = pd.DataFrame({"Experiment_result": np.asarray(Experiment_result).reshape(-1)})
-                print("diagnostic_new using Experiment_result instead of recipes:")
-                print(diagnostic_new)
-                print("diagnostic_new shape:", diagnostic_new.shape)
-                print("diagnostic_new columns:", diagnostic_new.columns.tolist())
-                print("diagnostic_new index:", diagnostic_new.index.tolist())
-            except Exception as diagnostic_error:
-                print("Diagnostic alternative also failed:")
-                print(diagnostic_error)
-
-            raise e
-
-        print("----------------------------------------")
-        print("About to final concat self.experiment_data with new")
-        print("self.experiment_data before final concat:")
-        print(self.experiment_data)
-        print("self.experiment_data before final concat shape:", self.experiment_data.shape)
-        print("new before final concat:")
-        print(new)
-        print("new before final concat shape:", new.shape)
-
-        self.experiment_data = pd.concat([self.experiment_data, new], ignore_index=True)
-
-        print("self.experiment_data AFTER final concat:")
-        print(self.experiment_data)
-        print("self.experiment_data AFTER final concat shape:", self.experiment_data.shape)
-        print("self.experiment_data AFTER final concat columns:", self.experiment_data.columns.tolist())
-        print("self.experiment_data AFTER final concat index:", self.experiment_data.index.tolist())
-
-        print("===== DEBUG _update_experiment_data END =====")
-
-        """new_data = pd.DataFrame({
-            'Silver': recipes[:, 0],
-            'KBr': recipes[:, 1],
-            'Experiment Result': Experiment_result
-        })
-        self.experiment_data = pd.concat([self.experiment_data, new_data], ignore_index=True)"""
+        self.experiment_data = pd.concat(
+            [self.experiment_data, new_data],
+            ignore_index=True
+        )
 
     def get_variable_reagents(self):
 
@@ -2827,50 +2667,10 @@ class AutoContr(Controller):
 
         print(f'recipes {recipes}')
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
-       # ===== NEW DEBUG CODE: print/save initial rxn_df =====
-
-        from pathlib import Path
-
-        print("Initial rxn_df:")
-
-        print(rxn_df)
-
-        print("rxn_df shape:", rxn_df.shape)
-
-        print("rxn_df columns:", rxn_df.columns.tolist())
-
-        debug_dir = Path("/mnt/c/Users/science_356_lab/Desktop/ot2_debug_csvs")
-
-        debug_dir.mkdir(parents=True, exist_ok=True)
-
-        rxn_df_debug_filename = debug_dir / f"initial_rxn_df_batch_{self.batch_num}.csv"
-
-        rxn_df.to_csv(rxn_df_debug_filename, index=False)
-
-        print(f"Saved initial rxn_df debug dataframe to {rxn_df_debug_filename}")
-
-        # ===== END NEW DEBUG CODE =====
+       
 
         recipe_df = pd.DataFrame(recipes, index=wellnames, columns=self.reagent_order)
-        # ===== NEW DEBUG CODE: print/save recipe_df =====
-
-        print("recipe_df:")
-
-        print(recipe_df)
-
-        print("recipe_df shape:", recipe_df.shape)
-
-        print("recipe_df columns:", recipe_df.columns.tolist())
-
-        print("recipe_df index:", recipe_df.index.tolist())
-
-        recipe_df_debug_filename = debug_dir / f"recipe_df_batch_{self.batch_num}.csv"
-
-        recipe_df.to_csv(recipe_df_debug_filename)
-
-        print(f"Saved recipe_df debug dataframe to {recipe_df_debug_filename}")
-
-        # ===== END NEW DEBUG CODE =====
+        
 
 
         n_wellnames = np.array(wellnames)
@@ -2908,23 +2708,6 @@ class AutoContr(Controller):
         rxn_df = rxn_df.join(self.rxn_df_template.apply(build_product_rows, axis=1))
         rxn_df = self._convert_conc_to_vol(rxn_df, wellnames)
         
-        # ===== NEW DEBUG CODE: print/save conc-to-vol rxn_df =====
-
-        print("rxn_df after _convert_conc_to_vol:")
-
-        print(rxn_df)
-
-        print("conc-to-vol rxn_df shape:", rxn_df.shape)
-
-        print("conc-to-vol rxn_df columns:", rxn_df.columns.tolist())
-
-        conc_to_vol_debug_filename = debug_dir / f"conc_to_vol_rxn_df_batch_{self.batch_num}.csv"
-
-        rxn_df.to_csv(conc_to_vol_debug_filename, index=False)
-
-        print(f"Saved conc-to-vol rxn_df debug dataframe to {conc_to_vol_debug_filename}")
-
-        # ===== END NEW DEBUG CODE =====
         
         
 
