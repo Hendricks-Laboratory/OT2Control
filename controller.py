@@ -2283,7 +2283,8 @@ class AutoContr(Controller):
             [self.experiment_data, new_data],
             ignore_index=True
         )
-
+        print("Self experiment data DF:")
+        print(self.experiment_data)
         print(f"<<controller>> experiment data updated successfully with {len(new_data)} new rows")
 
     def get_variable_reagents(self):
