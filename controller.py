@@ -2284,6 +2284,8 @@ class AutoContr(Controller):
             ignore_index=True
         )
 
+        print(f"<<controller>> experiment data updated successfully with {len(new_data)} new rows")
+
     def get_variable_reagents(self):
 
         # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
