@@ -2680,16 +2680,6 @@ class AutoContr(Controller):
         #n_wellnames_reshaped = n_wellnames.reshape(2,2)
         #n_reagent_order = self.reagent_order.reshape(2,2)
         #n_recipes = recipes.reshape(2,2)
-
-        print("Shapes:")
-        print("wellnames:", n_wellnames.shape)
-        print("recipes:", recipes.shape)
-        print("self.reagent_order:", self.reagent_order.shape)
-
-        print("Contents:")
-        print("wellnames:", n_wellnames)
-        print("recipes:", recipes)
-        print("self.reagent_order:", self.reagent_order)
         
         
 
