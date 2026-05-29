@@ -2279,10 +2279,164 @@ class AutoContr(Controller):
     def _update_experiment_data(self, recipes, Experiment_result, axis=1):
         # TODO: Reformat the instructions for csv output to make it export 
         # TODO: Test this implementation of formatting this csv
+
+        print("===== DEBUG _update_experiment_data START =====")
+
+        print("Input recipes:")
+        print(recipes)
+        print("type(recipes):", type(recipes))
+        try:
+            print("recipes.shape:", recipes.shape)
+        except Exception as e:
+            print("Could not print recipes.shape:", e)
+
+        print("Input Experiment_result:")
+        print(Experiment_result)
+        print("type(Experiment_result):", type(Experiment_result))
+        try:
+            print("Experiment_result.shape:", Experiment_result.shape)
+        except Exception as e:
+            print("Could not print Experiment_result.shape:", e)
+
+        print("axis:", axis)
+
+        print("self.variable_reagents:")
+        print(self.variable_reagents)
+        print("type(self.variable_reagents):", type(self.variable_reagents))
+        try:
+            print("len(self.variable_reagents):", len(self.variable_reagents))
+        except Exception as e:
+            print("Could not print len(self.variable_reagents):", e)
+
+        print("self.experiment_data BEFORE:")
+        print(self.experiment_data)
+        print("type(self.experiment_data):", type(self.experiment_data))
+        try:
+            print("self.experiment_data BEFORE shape:", self.experiment_data.shape)
+            print("self.experiment_data BEFORE columns:", self.experiment_data.columns.tolist())
+            print("self.experiment_data BEFORE index:", self.experiment_data.index.tolist())
+        except Exception as e:
+            print("Could not print self.experiment_data info:", e)
+
         for i, reagent in enumerate(self.variable_reagents):
-            self.experiment_data = pd.concat([self.experiment_data, pd.DataFrame({str(reagent): recipes[:, i]})], axis=axis, ignore_index=True)
-        new = pd.DataFrame({"Experiment_result": recipes})
+            print("----------------------------------------")
+            print(f"Looping through variable reagent i={i}, reagent={reagent}")
+            print(f"About to access recipes[:, {i}]")
+
+            try:
+                recipe_values_for_reagent = recipes[:, i]
+                print(f"recipes[:, {i}]:")
+                print(recipe_values_for_reagent)
+                print("type(recipe_values_for_reagent):", type(recipe_values_for_reagent))
+                try:
+                    print("recipe_values_for_reagent.shape:", recipe_values_for_reagent.shape)
+                    print("len(recipe_values_for_reagent):", len(recipe_values_for_reagent))
+                except Exception as e:
+                    print("Could not print recipe_values_for_reagent shape/len:", e)
+
+                reagent_df = pd.DataFrame({str(reagent): recipe_values_for_reagent})
+                print("reagent_df created from current reagent:")
+                print(reagent_df)
+                print("reagent_df shape:", reagent_df.shape)
+                print("reagent_df columns:", reagent_df.columns.tolist())
+                print("reagent_df index:", reagent_df.index.tolist())
+
+                print("About to concat:")
+                print("left dataframe = self.experiment_data")
+                print("right dataframe = reagent_df")
+                print("concat axis:", axis)
+                print("concat ignore_index:", True)
+
+                self.experiment_data = pd.concat(
+                    [self.experiment_data, reagent_df],
+                    axis=axis,
+                    ignore_index=True
+                )
+
+                print("self.experiment_data AFTER reagent concat:")
+                print(self.experiment_data)
+                print("self.experiment_data AFTER reagent concat shape:", self.experiment_data.shape)
+                print("self.experiment_data AFTER reagent concat columns:", self.experiment_data.columns.tolist())
+                print("self.experiment_data AFTER reagent concat index:", self.experiment_data.index.tolist())
+
+            except Exception as e:
+                print(f"ERROR while processing reagent {reagent} at index {i}")
+                print("Exception:", e)
+                raise e
+
+        print("----------------------------------------")
+        print("Self experiment data after all reagent columns:")
+        print(self.experiment_data)
+        print("self.experiment_data shape after reagent columns:", self.experiment_data.shape)
+        print("self.experiment_data columns after reagent columns:", self.experiment_data.columns.tolist())
+        print("self.experiment_data index after reagent columns:", self.experiment_data.index.tolist())
+
+        print("----------------------------------------")
+        print("About to create new Experiment_result dataframe")
+        print("Current code line is: new = pd.DataFrame({'Experiment_result': recipes})")
+        print("Value currently being used for Experiment_result column is recipes:")
+        print(recipes)
+        print("type(recipes):", type(recipes))
+        try:
+            print("recipes.shape:", recipes.shape)
+        except Exception as e:
+            print("Could not print recipes.shape here:", e)
+
+        print("Actual Experiment_result argument, for comparison:")
+        print(Experiment_result)
+        print("type(Experiment_result):", type(Experiment_result))
+        try:
+            print("Experiment_result.shape:", Experiment_result.shape)
+            print("len(Experiment_result):", len(Experiment_result))
+        except Exception as e:
+            print("Could not print Experiment_result shape/len:", e)
+
+        try:
+            new = pd.DataFrame({"Experiment_result": recipes})
+            print("New debugging:")
+            print(new)
+            print("new shape:", new.shape)
+            print("new columns:", new.columns.tolist())
+            print("new index:", new.index.tolist())
+
+        except Exception as e:
+            print("ERROR creating new = pd.DataFrame({'Experiment_result': recipes})")
+            print("This is likely the crash point.")
+            print("Exception:", e)
+
+            print("Trying diagnostic alternative only for debugging:")
+            try:
+                diagnostic_new = pd.DataFrame({"Experiment_result": np.asarray(Experiment_result).reshape(-1)})
+                print("diagnostic_new using Experiment_result instead of recipes:")
+                print(diagnostic_new)
+                print("diagnostic_new shape:", diagnostic_new.shape)
+                print("diagnostic_new columns:", diagnostic_new.columns.tolist())
+                print("diagnostic_new index:", diagnostic_new.index.tolist())
+            except Exception as diagnostic_error:
+                print("Diagnostic alternative also failed:")
+                print(diagnostic_error)
+
+            raise e
+
+        print("----------------------------------------")
+        print("About to final concat self.experiment_data with new")
+        print("self.experiment_data before final concat:")
+        print(self.experiment_data)
+        print("self.experiment_data before final concat shape:", self.experiment_data.shape)
+        print("new before final concat:")
+        print(new)
+        print("new before final concat shape:", new.shape)
+
         self.experiment_data = pd.concat([self.experiment_data, new], ignore_index=True)
+
+        print("self.experiment_data AFTER final concat:")
+        print(self.experiment_data)
+        print("self.experiment_data AFTER final concat shape:", self.experiment_data.shape)
+        print("self.experiment_data AFTER final concat columns:", self.experiment_data.columns.tolist())
+        print("self.experiment_data AFTER final concat index:", self.experiment_data.index.tolist())
+
+        print("===== DEBUG _update_experiment_data END =====")
+
         """new_data = pd.DataFrame({
             'Silver': recipes[:, 0],
             'KBr': recipes[:, 1],
