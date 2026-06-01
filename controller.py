@@ -136,6 +136,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # Generate bounds for each reagent, assuming concentrations range from 0 to 1
     bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
     # final_spectra not used?
+    print("<<controller>> setting up Auto optimization model")
+    
     model = OptimizationModel(bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
     print(f"Target: {target_value}")
     if not no_sim:
@@ -2615,6 +2617,7 @@ class AutoContr(Controller):
         while not model.quit:
 
             # Get new recipe from gpr (can either be explore or exploit based on how much uncertainty is in the model)
+            print("<<controller>> selecting next reaction from updated model")
             X_new = model.getNextReaction()
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
 
@@ -2719,6 +2722,8 @@ class AutoContr(Controller):
 
 
                 #build new df
+                print(f"<<controller>> building protocol dataframe for {len(wellnames)} wells")
+                
                 self.rxn_df = self._build_rxn_df(wellnames, recipes)
                 self._insert_tot_vol_transfer()
 
@@ -2731,6 +2736,7 @@ class AutoContr(Controller):
                     # catch real negative water/top-off volumes.
                     if (self.rxn_df.loc[0,self._products] < -1e-9).any():
                         raise NotImplementedError('A product overflowed it\'s container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution')
+                print("<<controller>> protocol dataframe built successfully")
                 successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
@@ -3018,12 +3024,14 @@ class ProtocolExecutor(Controller):
             try:
                 self._update_cached_locs('all')
                 #build new df
+                print("<<controller>> building protocol dataframe")
                 self.rxn_df = self._convert_conc_to_vol(self.rxn_df,self._products)
                 self._insert_tot_vol_transfer()
                 if self.tot_vols: #has at least one element
                     if (self.rxn_df.loc[0,self._products] < 0).any():
                         raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
                 successful_build = True
+                print("<<controller>> protocol dataframe built successfully")
             except ConversionError as e:
                 self._handle_conversion_err(e)        
         self.execute_protocol_df()
