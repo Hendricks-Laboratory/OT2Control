@@ -2258,31 +2258,79 @@ class AutoContr(Controller):
     def _update_experiment_data(self, recipes, Experiment_result, axis=1):
         # TODO: Reformat the instructions for csv output to make it export 
         # TODO: Test this implementation of formatting this csv
+        '''
+        Updates self.experiment_data with the recipes tested in the current batch
+        and the corresponding experimental results.
 
+        Parameters:
+            recipes:
+                Recipe values for the current batch. Expected shape is:
+                    number_of_experiments x number_of_variable_reagents
+
+                Each row is one tested well/experiment. Each column corresponds
+                to one variable reagent in self.variable_reagents.
+
+            Experiment_result:
+                Experimental result values for the current batch. Expected length
+                is one result per recipe row.
+
+            axis:
+                Kept in the function signature for compatibility with older calls.
+                The current implementation appends rows to self.experiment_data
+                and does not use axis.
+
+        Postconditions:
+            - Converts recipes and Experiment_result into numpy arrays with
+              predictable shapes.
+            - Verifies that each recipe has exactly one corresponding result.
+            - Creates a new DataFrame with one column per variable reagent.
+            - Adds Experiment_result as the final column.
+            - Appends the new batch rows to self.experiment_data.
+        '''
+
+        # Convert recipes to a numpy array so that shape checks and indexing work
+        # consistently, regardless of whether recipes was passed in as a list or array.
         recipes = np.asarray(recipes)
 
+        # If a single recipe was passed as a 1D array, reshape it into a 2D array
+        # with one row. This keeps the rest of the function compatible with both
+        # single-recipe and multi-recipe batches.
         if recipes.ndim == 1:
             recipes = recipes.reshape(1, -1)
 
+        # Convert experiment results to a flat 1D array. This avoids dataframe
+        # construction errors and ensures there is one result value per recipe row.
         experiment_result = np.asarray(Experiment_result).reshape(-1)
 
+        # Safety check: the number of measured results must match the number of
+        # recipe rows. If not, experiment_data would be misaligned, so stop here
+        # with a clear error message.
         if len(experiment_result) != len(recipes):
             raise ValueError(
                 f"Number of experiment results ({len(experiment_result)}) does not match "
                 f"number of recipes ({len(recipes)})."
             )
 
+        # Build a dataframe for the current batch. The recipe matrix supplies the
+        # values, and self.variable_reagents supplies the column names, such as
+        # silver_nitrate and potassium_bromide.
         new_data = pd.DataFrame(
             recipes,
             columns=[str(reagent) for reagent in self.variable_reagents]
         )
 
+        # Add the measured experimental result as its own column. This is separate
+        # from the recipe matrix because recipes contains input conditions, while
+        # Experiment_result contains the measured output.
         new_data["Experiment_result"] = experiment_result
 
+        # Append the current batch to the running experiment_data dataframe.
+        # ignore_index=True creates a clean continuous row index after appending.
         self.experiment_data = pd.concat(
             [self.experiment_data, new_data],
             ignore_index=True
         )
+
         print("Self experiment data DF:")
         print(self.experiment_data)
         print(f"<<controller>> experiment data updated successfully with {len(new_data)} new rows")
