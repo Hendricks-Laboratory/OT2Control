@@ -1314,7 +1314,7 @@ class Controller(ABC):
             # Print only when cached volume differs from the expected scan volume.
             # This keeps normal output clean while making tiny bookkeeping differences
             # visible during scan-volume debugging.
-            if well in self.tot_vols and not math.isclose(entry.vol, self.tot_vols[well], rel_tol=0, abs_tol=0.0):
+            if well in self.tot_vols and entry.vol != self.tot_vols[well]:
                 print(
                     f"<<controller>> scan volume difference for {well}: "
                     f"cached={entry.vol}, expected={self.tot_vols[well]}, "
