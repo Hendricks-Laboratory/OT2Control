@@ -1310,7 +1310,17 @@ class Controller(ABC):
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-             
+
+            # Print only when cached volume differs from the expected scan volume.
+            # This keeps normal output clean while making tiny bookkeeping differences
+            # visible during scan-volume debugging.
+            if well in self.tot_vols and not math.isclose(entry.vol, self.tot_vols[well], rel_tol=0, abs_tol=0.0):
+                print(
+                    f"<<controller>> scan volume difference for {well}: "
+                    f"cached={entry.vol}, expected={self.tot_vols[well]}, "
+                    f"diff={entry.vol - self.tot_vols[well]}"
+                )
+
             # Allow a tiny tolerance for floating-point/cached-volume artifacts.
             # For example, a well intended to contain 200.0 uL may be tracked as
             # 200.00007 uL after several computed transfer steps. This prevents
@@ -1321,7 +1331,7 @@ class Controller(ABC):
                 math.isclose(entry.vol, self.tot_vols[well], rel_tol=0, abs_tol=1e-3)
             ), "tried to scan {}, but {} has a bad volume. Vol was {}, but {} is required for a scan".format(
                 well, well, entry.vol, self.tot_vols[well]
-            )   
+            )
             well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
