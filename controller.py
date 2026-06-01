@@ -1954,7 +1954,7 @@ class Controller(ABC):
         '''
         min_vol = 5
         containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(reagent+'C\d*\.\d*', key)]
+                if re.fullmatch(reagent+r'C\d*\.\d*', key)]
         containers.sort(key=self._get_conc)
         filtered_conts = [] #this will hold the containers that are diluted enough to be able
         #to transfer without exceeding min_vol
@@ -2065,7 +2065,7 @@ class Controller(ABC):
         returns:  
             float: the concentration parsed from the chem_name  
         '''
-        return float(re.search('C\d*\.\d*$', chem_name).group(0)[1:])
+        return float(re.search(r'C\d*\.\d*$', chem_name).group(0)[1:])
 
     def _get_reagent(self, chem_name):
         '''
@@ -2077,7 +2077,7 @@ class Controller(ABC):
             str: the reagent name parsed from the chem_name  
         '''
         
-        return chem_name[:re.search('C\d*\.\d*$', chem_name).start()]
+        return chem_name[:re.search(r'C\d*\.\d*$', chem_name).start()]
 
     def _handle_conversion_err(self,e):
         '''
@@ -2875,7 +2875,7 @@ class AutoContr(Controller):
 
             #generate necessary parameters
             containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(e.reagent+'C\d*\.\d*', key)]
+                if re.fullmatch(e.reagent+r'C\d*\.\d*', key)]
             stock_cont = max(containers, key=self._get_conc)
             min_conc = min(map(self._get_conc, containers))
             new_conc = min_conc / 2
@@ -3318,7 +3318,7 @@ class AbstractPlateReader(ABC):
                     #is number of cycles
                     n_cycles = int((re.search(r'\d+', line)).group(0))
                 if line[:6] == 'T[°C]:':
-                    while not bool(re.match('\D\d',line)) and line != '':
+                    while not bool(re.match(r'\D\d',line)) and line != '':
                         #is not of form A1/B03 etc
                         line = file.readline()
                         i += 1
@@ -3975,7 +3975,7 @@ class ScanDataFrame():
 #         df['wellnameorder'] = wellnamenumbers
         
 #         # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
-#         df['num'] = df['col'].str.extract('(\d+)').astype(int)
+#         df['num'] = df['col'].str.extract(r'(\d+)').astype(int)
 #         df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
         
 #          # Sort by 'time', then 'num' and 'alpha'
