@@ -2249,7 +2249,7 @@ class AutoContr(Controller):
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
         #print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
-        self.experiment_data = pd.DataFrame(columns = ["Recipes", "Wellnames", "Experiment_result"])
+        self.experiment_data = pd.DataFrame(columns=[str(reagent) for reagent in self.variable_reagents] + ["Experiment_result"])
         self.num_duplicates = num_duplicates
         self.max_conc = list(self.get_max_conc().values())
         self.min_conc = list(self.get_min_conc().values())
@@ -2283,6 +2283,8 @@ class AutoContr(Controller):
             - Converts recipes and Experiment_result into numpy arrays with
               predictable shapes.
             - Verifies that each recipe has exactly one corresponding result.
+            - Verifies that the number of recipe columns matches the number of
+              variable reagents, so each recipe column can be correctly labeled.
             - Creates a new DataFrame with one column per variable reagent.
             - Adds Experiment_result as the final column.
             - Appends the new batch rows to self.experiment_data.
@@ -2310,7 +2312,17 @@ class AutoContr(Controller):
                 f"Number of experiment results ({len(experiment_result)}) does not match "
                 f"number of recipes ({len(recipes)})."
             )
-
+        
+        # Safety check: the number of recipe columns must match the number of
+        # variable reagents. Each recipe column is labeled using self.variable_reagents,
+        # so a mismatch here would mean the dataframe columns could be mislabeled
+        # or that a reagent value is missing/extra.
+        if recipes.shape[1] != len(self.variable_reagents):
+            raise ValueError(
+                f"Number of recipe columns ({recipes.shape[1]}) does not match "
+                f"number of variable reagents ({len(self.variable_reagents)})."
+            )
+        
         # Build a dataframe for the current batch. The recipe matrix supplies the
         # values, and self.variable_reagents supplies the column names, such as
         # silver_nitrate and potassium_bromide.
