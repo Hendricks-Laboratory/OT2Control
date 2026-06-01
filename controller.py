@@ -2624,7 +2624,8 @@ class AutoContr(Controller):
             # Denormalize the recipe and triplicate it to pass to the robot
             X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
             recipes =  self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
-            print(f"Recipes {recipes}")
+            
+            print(f"<<controller>> preparing {recipes.shape[0]} recipe wells with {recipes.shape[1]} variable reagents")
             
             # Run the experiments
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
@@ -2789,8 +2790,6 @@ class AutoContr(Controller):
         Postconditions:  
             self.tot_vols has been updated to 
         '''
-
-        print(f'recipes {recipes}')
         rxn_df = self.rxn_df_template.copy() #starting point. still neeeds products
        
 
