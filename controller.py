@@ -1588,13 +1588,25 @@ class Controller(ABC):
             a transfer command has been sent to the robot  
         '''
         src = row['chemical_name']
+
+        # Product columns should contain numeric transfer volumes for each product well.
+        # Convert them to numeric values defensively so blanks, strings, or unexpected
+        # nonnumeric entries become NaN instead of causing unclear downstream errors.
+        #
+        # NaN product volumes should not be sent to the robot as transfer commands.
+        # Treat NaN as 0 here because a missing product-well volume means there is no
+        # meaningful transfer to perform for that well.
+        product_volumes = pd.to_numeric(row[self._products], errors='coerce').fillna(0)
+
         # Treat tiny floating-point artifacts as zero so meaningless near-zero
-        # transfer volumes are not sent to the robot.
-        containers = row[self._products].loc[
-            ~row[self._products].apply(
+        # transfer volumes are not sent to the robot. This prevents values like
+        # 1e-15 from being interpreted as real transfer steps.
+        containers = product_volumes.loc[
+            ~product_volumes.apply(
                 lambda x: math.isclose(float(x), 0.0, rel_tol=0, abs_tol=1e-9)
             )
         ]
+
         transfer_steps = [(name, self._round_transfer_volume(vol)) for name, vol in containers.iteritems()]
         
         #temporarilly just the raw callbacks
@@ -1919,7 +1931,7 @@ class Controller(ABC):
         There are a number of ways to optimize which container should be chosen. This 
         algorithm will always take the most concentrated solution unless there is not sufficient
         volume, or the volume that would be required to pipette is less than the minimum
-        pipettable volume. defined here as 2uL.  
+        pipettable volume. defined here as 5uL.  
         params:  
             str reagent: the name of the reagent that you are searching for a container for  
             float molarity: the desired molarity at end of reaction.  
