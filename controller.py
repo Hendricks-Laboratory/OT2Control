@@ -2545,7 +2545,9 @@ class AutoContr(Controller):
         print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
         # Tripplicates each recipes to be run on the robot
-        recipes =  self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)    
+        recipes = self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)
+
+        print(f"<<controller>> preparing {recipes.shape[0]} recipe wells with {recipes.shape[1]} variable reagents")
 
         # Generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
