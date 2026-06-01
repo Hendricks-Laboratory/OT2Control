@@ -1588,7 +1588,13 @@ class Controller(ABC):
             a transfer command has been sent to the robot  
         '''
         src = row['chemical_name']
-        containers = row[self._products].loc[row[self._products] != 0]
+        # Treat tiny floating-point artifacts as zero so meaningless near-zero
+        # transfer volumes are not sent to the robot.
+        containers = row[self._products].loc[
+            ~row[self._products].apply(
+                lambda x: math.isclose(float(x), 0.0, rel_tol=0, abs_tol=1e-9)
+            )
+        ]
         transfer_steps = [(name, self._round_transfer_volume(vol)) for name, vol in containers.iteritems()]
         
         #temporarilly just the raw callbacks
@@ -1940,9 +1946,15 @@ class Controller(ABC):
         #to transfer without exceeding min_vol
         for cont in containers:
             vol = self._get_transfer_vol(cont,molarity,total_vol,ratio)
-            if vol > min_vol:
+
+            # Allow exactly-minimum transfers and protect against tiny floating-point
+            # artifacts around the 5 uL lower limit.
+            if vol >= min_vol - 1e-9:
                 filtered_conts.append(cont)
-                if vol < self._cached_reader_locs[cont].aspirable_vol:
+
+                # Allow tiny floating-point artifacts when comparing calculated
+                # transfer volume to cached aspiratable volume.
+                if vol <= self._cached_reader_locs[cont].aspirable_vol + 1e-9:
                     return cont, vol
         raise ConversionError(reagent, molarity, total_vol, ratio, filtered_conts)
 
@@ -2702,9 +2714,11 @@ class AutoContr(Controller):
                 #print(f'products list:{self._products}')
                 #print(f'rxn_df: {self.rxn_df}')
 
-                if self.tot_vols: #has at least one element
-                    if (self.rxn_df.loc[0,self._products] < 0).any():
-                        raise NotImplementedError("A product overflowed it's container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution")
+                if self.tot_vols:
+                    # Ignore tiny negative floating-point artifacts, but still
+                    # catch real negative water/top-off volumes.
+                    if (self.rxn_df.loc[0,self._products] < -1e-9).any():
+                        raise NotImplementedError('A product overflowed it\'s container using the most concentrated solutions on the deck. Future iterations will ask Mark to add a more concentrated solution')
                 successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
