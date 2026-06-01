@@ -1589,8 +1589,7 @@ class Controller(ABC):
         '''
         src = row['chemical_name']
         containers = row[self._products].loc[row[self._products] != 0]
-        transfer_steps = [(name, self._round_transfer_volume(vol, sig_figs=6)) for name, vol in containers.iteritems()]
-        
+        transfer_steps = [(name, self._round_transfer_volume(vol)) for name, vol in containers.iteritems()]
         
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
