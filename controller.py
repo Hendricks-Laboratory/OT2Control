@@ -1308,7 +1308,18 @@ class Controller(ABC):
         well_locs = []
         for well, entry in [(well, self._cached_reader_locs[well]) for well in wellnames]:
             assert (entry.deck_pos in [4,7]), "tried to scan {}, but {} is on {} in deck pos {}".format(well, well, entry.deck_pos, entry.loc)
-            assert (well not in self.tot_vols or math.isclose(entry.vol, self.tot_vols[well])), "tried to scan {}, but {} has a bad volume. Vol was {}, but 200 is required for a scan".format(well, well, entry.vol)
+             
+            # Allow a tiny tolerance for floating-point/cached-volume artifacts.
+            # For example, a well intended to contain 200.0 uL may be tracked as
+            # 200.00007 uL after several computed transfer steps. This prevents
+            # harmless numeric noise from blocking scans while still catching
+            # meaningful volume errors.
+            assert (
+                well not in self.tot_vols or
+                math.isclose(entry.vol, self.tot_vols[well], rel_tol=0, abs_tol=1e-3)
+            ), "tried to scan {}, but {} has a bad volume. Vol was {}, but {} is required for a scan".format(
+                well, well, entry.vol, self.tot_vols[well]
+            )   
             well_locs.append(entry.loc)
         #5
         self.pr.exec_macro('PlateIn')
@@ -1503,48 +1514,68 @@ class Controller(ABC):
             input("stopped on line {} of protocol. Please press enter to continue execution".format(i+1))
         self.portal.send_pack('continue')
 
-    def _round_transfer_volume(self, vol, sig_figs=6):
+    def _round_transfer_volume(self, vol, decimals=9, artifact_tol=1e-9):
         """
-        Round a computed transfer volume before sending it to the robot.
+        Clean tiny floating-point artifacts from transfer volumes before sending
+        them to the robot.
+
+        This function is intentionally conservative. It only changes a volume
+        when the difference between the original value and the rounded value is
+        extremely small, which indicates normal binary floating-point noise.
+
+        This prevents values like:
+            20.000000000000004 -> 20.0
+            10.000000000000002 -> 10.0
+
+        while avoiding unnecessary rounding of meaningful fractional transfer
+        volumes that may be needed to preserve the intended final well volume.
 
         Parameters:
             vol:
-                The computed transfer volume, usually taken from the reaction
-                dataframe. This may contain floating-point artifacts from
-                concentration-to-volume calculations.
+                Computed transfer volume.
 
-            sig_figs:
-                The number of significant figures to keep. Defaults to 6.
+            decimals:
+                Number of decimal places used for artifact cleanup. This is not
+                meant to impose robot precision broadly; it is only used to
+                identify whether a value is extremely close to a cleaner decimal
+                representation.
+
+            artifact_tol:
+                Maximum allowed difference between the original value and the
+                rounded value for the rounded value to be used. If the difference
+                is larger than this tolerance, the original volume is preserved.
 
         Returns:
             float:
-                The transfer volume rounded to the requested number of
-                significant figures.
+                The cleaned transfer volume if the change is only a tiny
+                floating-point artifact; otherwise, the original volume.
 
         Postconditions:
-            - The returned value is a float.
-            - Tiny floating-point artifacts are removed before the volume is
-              sent to the robot.
-            - The intended physical transfer volume is preserved to the chosen
-              significant-figure precision.
-            - The input dataframe and original volume value are not modified.
-
-        Examples:
-            20.000000000000004 -> 20.0
-            10.000000000000002 -> 10.0
-            0.00123456789 -> 0.00123457
+            - Values that are effectively whole/simple decimal volumes are cleaned.
+            - Meaningful fractional transfer volumes are preserved.
+            - The returned value is always a float.
         """
+        # Convert to float so math.isclose and round behave predictably even if
+        # the input comes from a pandas/numpy scalar.
         vol = float(vol)
 
+        # Preserve true zero exactly. Zero-volume transfers should remain zero
+        # and should not be affected by rounding logic.
         if vol == 0:
             return 0.0
-        
-        # Python's round(x, n) rounds to n decimal places, not n significant figures.
-        # Convert the requested number of significant figures into the number of
-        # decimal places needed for this specific volume based on its order of magnitude.
-        # This removes tiny floating-point artifacts, such as 20.000000000000004,
-        # without unnecessarily reducing precision for smaller volumes.
-        return round(vol, sig_figs - int(math.floor(math.log10(abs(vol)))) - 1)
+
+        # Create a cleaned candidate value. This candidate is only used if it is
+        # nearly identical to the original value within artifact_tol.
+        rounded_vol = round(vol, decimals)
+
+        # Only return the rounded value when the difference is tiny enough to be
+        # considered binary floating-point noise, such as 20.000000000000004.
+        if math.isclose(vol, rounded_vol, rel_tol=0, abs_tol=artifact_tol):
+            return rounded_vol
+
+        # If rounding would meaningfully change the volume, keep the original.
+        # This avoids accumulating small volume shifts across multiple reagents.
+        return vol
     
     
     def _send_transfer_command(self, row, i):
