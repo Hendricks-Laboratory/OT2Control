@@ -2946,11 +2946,11 @@ class AutoContr(Controller):
         
         # Naming of output scan file:
         #   RTG_004_auto_scan-0.csv
-        #   RTG_004      = self.experiment_name from the reaction/sheet name
+        #   RTG_004      = self.rxn_sheet_name from the reaction/sheet name
         #   auto_scan    = scan_filename from the spreadsheet template
         #   0            = self.batch_num from the Auto loop
         rxn_df['scan_filename'] = rxn_df['scan_filename'].apply(lambda x: np.nan if pd.isna(x) 
-                else "{}_{}-{}".format(self.experiment_name, x, self.batch_num))
+                else "{}_{}-{}".format(self.rxn_sheet_name, x, self.batch_num))
         rxn_df['plot_filename'] = rxn_df['plot_filename'].apply(lambda x: np.nan if pd.isna(x) 
                 else "{}-{}".format(x, self.batch_num))
         rxn_df.drop(columns='Template',inplace=True) #no longer need template
