@@ -144,6 +144,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         auto._check_auto_well_capacity(model)
+        auto._prompt_auto_pipette_tip_plan(model)
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
 
@@ -2550,6 +2551,17 @@ class AutoContr(Controller):
             return x_normalized * (max_val - min_val) + min_val
         
         self.batch_num = 0 #used internally for unique filenames
+        
+        # Controls whether Auto mode pauses before each batch to confirm the
+        # exact pipette tip estimate for that batch. This is set by the user
+        # during the pre-run pipette tip check.
+        self.confirm_pipette_tips_each_batch = False
+
+        # Tracks simulated pipette tip state for pipette tip estimation across
+        # Auto batches. This lets the estimator mirror the robot's behavior more
+        # closely instead of resetting pipette tip state for every batch.
+        self._estimated_pipette_tip_state = None
+        
         self.well_count = 0 #used internally for unique wellnames
         self.create_connection(simulate, no_pr, port)
         # Begin optimization
@@ -2762,6 +2774,13 @@ class AutoContr(Controller):
                 successful_build = True
             except ConversionError as e:
                 self._handle_conversion_err(e)
+
+        # If the user enabled exact per-batch pipette tip confirmation during
+        # the pre-run prompt, pause here after the batch protocol dataframe has
+        # been built but before any robot commands are executed.
+        if self.confirm_pipette_tips_each_batch:
+            self._prompt_confirm_batch_pipette_tip_usage()
+
         self.execute_protocol_df(model)
 
 
@@ -2889,6 +2908,282 @@ class AutoContr(Controller):
 
         print("<<controller>> Auto well capacity check passed")
 
+    def _initialize_pipette_tip_estimator_state(self):
+        '''
+        Initializes the simulated pipette tip state used for Auto mode pipette
+        tip estimation.
+
+        This mirrors the robot startup behavior in ot2_robot.py, where each
+        mounted pipette starts by picking up one clean pipette tip.
+
+        returns:
+            dict:
+                Simulated pipette state and pipette tip counts.
+        '''
+        pipette_tip_state = {}
+
+        # The robot's pipette dictionary is keyed by pipette size. In this
+        # controller-side estimator, we track the same concept by pipette size.
+        #
+        # last_used starts as "clean" because ot2_robot.py initializes each
+        # mounted pipette with a clean pipette tip already picked up.
+        #
+        # pipette_tips_used starts at 1 for each mounted pipette because the
+        # robot consumes one pipette tip per mounted pipette during initialization.
+        for pipette_size in [20.0, 300.0]:
+            pipette_tip_state[pipette_size] = {
+                "last_used": "clean",
+                "pipette_tips_used": 1
+            }
+
+        return pipette_tip_state
+    
+    def _get_estimated_pipette_size_for_volume(self, vol):
+        '''
+        Estimates which pipette size the robot will use for a transfer volume.
+
+        This mirrors the pipette-selection logic in ot2_robot.py:
+            - volumes below 40 uL use the 20 uL pipette
+            - volumes 40 uL or greater use the 300 uL pipette
+
+        params:
+            float vol:
+                Transfer volume in uL.
+
+        returns:
+            float:
+                Estimated pipette size, either 20.0 or 300.0.
+        '''
+        vol = float(vol)
+
+        if vol < 40.0:
+            return 20.0
+
+        return 300.0
+
+    def _replace_incompatible_pipette_tips_for_estimate(self, pipette_tip_state, src):
+        '''
+        Updates the simulated pipette tip state before a transfer from src.
+
+        This mirrors the robot-side compatibility logic in ot2_robot.py. Before
+        transferring a reagent, the robot checks whether any mounted pipette has
+        a pipette tip dirtied by an incompatible previous reagent. If so, it
+        replaces all dirty non-water pipette tips before continuing.
+
+        params:
+            dict pipette_tip_state:
+                Simulated pipette state keyed by pipette size.
+
+            str src:
+                Source reagent/container name for the upcoming transfer row.
+
+        returns:
+            dict:
+                Updated simulated pipette tip state.
+        '''
+        src = str(src)
+
+        needs_clean_pipette_tips = False
+
+        for pipette_size in pipette_tip_state:
+            last_used = pipette_tip_state[pipette_size]["last_used"]
+
+            if last_used not in ["WaterC1.0", "clean", src]:
+                needs_clean_pipette_tips = True
+                break
+
+        if needs_clean_pipette_tips:
+            for pipette_size in pipette_tip_state:
+                last_used = pipette_tip_state[pipette_size]["last_used"]
+
+                # Mirror _get_clean_tips(): replace pipette tips that are dirty
+                # with non-water reagents. Clean and water-used pipette tips are
+                # allowed to remain mounted.
+                if last_used not in ["WaterC1.0", "clean"]:
+                    pipette_tip_state[pipette_size]["last_used"] = "clean"
+                    pipette_tip_state[pipette_size]["pipette_tips_used"] += 1
+
+        return pipette_tip_state
+
+    def _estimate_pipette_tips_for_rxn_df(self, rxn_df):
+        '''
+        Estimates pipette tip usage for the currently built protocol dataframe.
+
+        This walks through transfer rows in the same order they will be executed.
+        For each transfer row, it:
+            1) checks whether the current mounted pipette tips are compatible
+               with the source reagent
+            2) replaces incompatible dirty pipette tips in the simulated state
+            3) determines which pipette size would be used for each nonzero
+               transfer volume
+            4) marks that pipette size as last used with the source reagent
+
+        params:
+            pd.DataFrame rxn_df:
+                Protocol dataframe for the batch about to be run.
+
+        returns:
+            dict:
+                Estimated pipette tips used for this batch, keyed by pipette size.
+                Example:
+                    {20.0: 4, 300.0: 3}
+        '''
+        if self._estimated_pipette_tip_state is None:
+            self._estimated_pipette_tip_state = self._initialize_pipette_tip_estimator_state()
+
+        pipette_tip_state = self._estimated_pipette_tip_state
+
+        starting_counts = {
+            pipette_size: pipette_tip_state[pipette_size]["pipette_tips_used"]
+            for pipette_size in pipette_tip_state
+        }
+
+        transfer_rows = rxn_df.loc[rxn_df["op"] == "transfer"]
+
+        for _, row in transfer_rows.iterrows():
+            src = row["chemical_name"]
+
+            if pd.isna(src):
+                continue
+
+            src = str(src)
+
+            pipette_tip_state = self._replace_incompatible_pipette_tips_for_estimate(
+                pipette_tip_state,
+                src
+            )
+
+            for product in self._products:
+                if product not in row:
+                    continue
+
+                vol = row[product]
+
+                if pd.isna(vol):
+                    continue
+
+                vol = float(vol)
+
+                if math.isclose(vol, 0.0, rel_tol=0, abs_tol=1e-9):
+                    continue
+
+                pipette_size = self._get_estimated_pipette_size_for_volume(vol)
+                pipette_tip_state[pipette_size]["last_used"] = src
+
+        self._estimated_pipette_tip_state = pipette_tip_state
+
+        batch_counts = {
+            pipette_size: pipette_tip_state[pipette_size]["pipette_tips_used"] - starting_counts[pipette_size]
+            for pipette_size in pipette_tip_state
+        }
+
+        return batch_counts
+
+    def _prompt_confirm_batch_pipette_tip_usage(self):
+        '''
+        Prompts the user to confirm the estimated pipette tip use for the
+        currently built Auto batch.
+
+        This should be called after self.rxn_df has been built for the batch,
+        but before execute_protocol_df() sends commands to the robot.
+        '''
+        batch_counts = self._estimate_pipette_tips_for_rxn_df(self.rxn_df)
+
+        print("<<controller>> exact pipette tip estimate for this batch:")
+        print(f"<<controller>>   20 uL pipette tips: {batch_counts.get(20.0, 0)}")
+        print(f"<<controller>>   300 uL pipette tips: {batch_counts.get(300.0, 0)}")
+
+        confirm = input("Confirm these pipette tips are loaded before executing this batch? [yn] ").lower()
+
+        if confirm != 'y':
+            raise RuntimeError(
+                "Auto run stopped because batch pipette tip confirmation was not accepted."
+            )
+
+    def _estimate_conservative_full_auto_pipette_tips(self, model):
+        '''
+        Estimates the maximum pipette tip use for the full Auto run.
+
+        This is a conservative pre-run estimate because future model-suggested
+        recipes are not known yet. The exact pipette tip use for each batch can
+        only be calculated after that batch's protocol dataframe has been built.
+
+        params:
+            OptimizationModel model:
+                The Auto optimization model. Used for batch_size.
+
+        returns:
+            dict:
+                Conservative estimated pipette tips used for the full Auto run,
+                keyed by pipette size.
+        '''
+        initial_data = int(self.getModelInfo()["initial_data"])
+        max_iterations = int(self.getModelInfo()["max_iterations"])
+        batch_size = int(model.batch_size)
+
+        total_batches = 1 + max_iterations
+
+        # Estimate one reagent-group pass per batch for water, fixed reagents,
+        # and variable reagents. This mirrors the normal Auto protocol structure,
+        # where each reagent is transferred to all wells for that batch before
+        # moving to the next reagent.
+        num_fixed_reagents = len(self.get_fixed_reagents())
+        num_variable_reagents = len(self.get_variable_reagents())
+
+        # Water is included as its own transfer group.
+        reagent_groups_per_batch = 1 + num_fixed_reagents + num_variable_reagents
+
+        # The robot starts with one clean pipette tip already mounted on each
+        # pipette. Count these once at the beginning of the full run.
+        estimated_counts = {
+            20.0: 1,
+            300.0: 1
+        }
+
+        # Conservative approximation:
+        # assume each reagent group may require one new pipette tip on each
+        # pipette size. This intentionally overestimates so the user is not
+        # underprepared before a closed-loop run.
+        estimated_counts[20.0] += total_batches * reagent_groups_per_batch
+        estimated_counts[300.0] += total_batches * reagent_groups_per_batch
+
+        return estimated_counts
+    
+    def _prompt_auto_pipette_tip_plan(self, model):
+        '''
+        Prompts the user to confirm pipette tip readiness before starting Auto mode.
+
+        This function runs once before the robot begins. It prints a conservative
+        full-run pipette tip estimate, asks the user to confirm that at least that
+        many pipette tips are loaded, and then asks whether the user wants exact
+        per-batch pipette tip confirmation during the run.
+
+        If per-batch confirmation is disabled, Auto mode can continue closed-loop
+        without additional user input.
+        '''
+        estimated_counts = self._estimate_conservative_full_auto_pipette_tips(model)
+
+        print("<<controller>> estimating maximum pipette tip use for Auto run")
+        print("<<controller>> estimated maximum pipette tips for full Auto run:")
+        print(f"<<controller>>   20 uL pipette tips: {estimated_counts.get(20.0, 0)}")
+        print(f"<<controller>>   300 uL pipette tips: {estimated_counts.get(300.0, 0)}")
+        print("<<controller>> This is a conservative estimate because future Auto recipes are not known yet.")
+
+        confirm_loaded = input("Confirm at least this many pipette tips are loaded? [yn] ").lower()
+
+        if confirm_loaded != 'y':
+            raise RuntimeError(
+                "Auto run stopped because full-run pipette tip readiness was not confirmed."
+            )
+
+        per_batch_confirm = input("Would you like exact per-batch pipette tip confirmation during the run? [yn] ").lower()
+
+        if per_batch_confirm == 'y':
+            self.confirm_pipette_tips_each_batch = True
+            print("<<controller>> exact per-batch pipette tip confirmation enabled")
+        else:
+            self.confirm_pipette_tips_each_batch = False
+            print("<<controller>> exact per-batch pipette tip confirmation skipped; Auto mode will continue closed-loop")
 
     def _generate_wellname(self):
         '''
