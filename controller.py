@@ -143,6 +143,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+        auto._check_auto_well_capacity(model)
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
 
@@ -887,9 +888,17 @@ class Controller(ABC):
         usable_rows = platereader_rows.loc[platereader_rows['first_usable'].astype(bool), 'first_usable']
         assert (not usable_rows.empty), "please specify a first tip/well for the platereader"
         assert (usable_rows.shape[0] == 1), "too many first wells specified for platereader"
-        platereader_input_first_usable = usable_rows.iloc[0]
+        
+        platereader_input_first_usable = str(usable_rows.iloc[0]).strip().upper()
+
+        # Preserve the user-selected 96-well plate starting well before translating
+        # it into the internal platereader4/platereader7 coordinate system. Auto mode
+        # uses this original well, such as A4, for the pre-run well capacity check.
+        self.robo_params['platereader_input_first_usable'] = platereader_input_first_usable
+
         platereader_name = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][1]
         platereader_first_usable = self.PLATEREADER_INDEX_TRANSLATOR[platereader_input_first_usable][0]
+        
         if platereader_name == 'platereader7':
             platereader4_first_usable = 'F8' #anything larger than what is on plate
             platereader7_first_usable = platereader_first_usable
@@ -2778,7 +2787,108 @@ class AutoContr(Controller):
         self.tot_vols.update({wellname:self.template_meta['tot_vol'] for wellname in wellnames})
         #update products
         self._products = wellnames
-            
+
+    def _get_96_well_plate_order(self):
+        '''
+        Gets the well order used by the robot for a standard 96-well plate.
+
+        The robot fills wells top-to-bottom within a column, then moves
+        left-to-right across columns. For example:
+            A1, B1, C1, ..., H1, A2, B2, ..., H12
+
+        returns:
+            list:
+                Ordered list of 96-well plate positions.
+        '''
+        return [
+            f"{row}{col}"
+            for col in range(1, 13)
+            for row in ["A", "B", "C", "D", "E", "F", "G", "H"]
+        ]       
+    
+    def _count_available_96_well_plate_wells(self, starting_well):
+        '''
+        Counts how many wells are available on a 96-well plate from the selected
+        starting well through the end of the plate.
+
+        params:
+            str starting_well:
+                User-selected starting well, such as A1, A4, or E6.
+
+        returns:
+            int:
+                Number of wells available from starting_well to H12, following
+                the robot's top-to-bottom, left-to-right well order.
+        '''
+        plate_order = self._get_96_well_plate_order()
+        starting_well = str(starting_well).strip().upper()
+
+        if starting_well not in plate_order:
+            raise ValueError(
+                f"Starting well {starting_well} is not valid for a 96-well plate. "
+                f"Expected a well like A1 through H12."
+            )
+
+        first_index = plate_order.index(starting_well)
+
+        return len(plate_order) - first_index
+    
+    def _check_auto_well_capacity(self, model):
+        '''
+        Checks whether the Auto run could require more product wells than are
+        available from the selected starting well on the 96-well plate.
+
+        This check is intentionally conservative. The run may stop early if the
+        model reaches the target, but the check assumes the maximum possible run:
+            initial_data * num_duplicates
+            + max_iterations * model.batch_size * num_duplicates
+
+        params:
+            OptimizationModel model:
+                The Auto optimization model. Used for batch_size.
+
+        Postconditions:
+            - Prints the maximum number of wells the Auto run may require.
+            - Prints the number of wells available from the selected starting well.
+            - Raises an error before the run begins if there are not enough wells.
+        '''
+        initial_data = int(self.getModelInfo()["initial_data"])
+        max_iterations = int(self.getModelInfo()["max_iterations"])
+        batch_size = int(model.batch_size)
+
+        initial_wells = initial_data * self.num_duplicates
+        iteration_wells = max_iterations * batch_size * self.num_duplicates
+        required_wells = initial_wells + iteration_wells
+
+        starting_well = self.robo_params.get('platereader_input_first_usable')
+
+        if not starting_well:
+            raise ValueError(
+                "Could not find the original plate-reader starting well for the Auto "
+                "capacity check. Please confirm the deck_positions sheet specifies "
+                "one first usable platereader well."
+            )
+
+        available_wells = self._count_available_96_well_plate_wells(starting_well)
+
+        print("<<controller>> checking Auto well capacity")
+        print(f"<<controller>> selected starting well: {starting_well}")
+        print(
+            f"<<controller>> Auto run may require up to {required_wells} wells "
+            f"({initial_wells} initial + {iteration_wells} iterative)"
+        )
+        print(f"<<controller>> {available_wells} wells available from {starting_well} to H12")
+
+        if required_wells > available_wells:
+            raise Exception(
+                f"Auto run requires up to {required_wells} wells, but only "
+                f"{available_wells} wells are available from starting well {starting_well}. "
+                f"Choose an earlier starting well, reduce initial_data, reduce max_iterations, "
+                f"or reduce the number of replicates."
+            )
+
+        print("<<controller>> Auto well capacity check passed")
+
 
     def _generate_wellname(self):
         '''
