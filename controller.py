@@ -144,6 +144,7 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         auto.run_simulation(no_pr=no_pr)
     if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
         auto._check_auto_well_capacity(model)
+        auto._check_auto_pipette_tip_capacity(model)
         auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
 
 
@@ -2892,7 +2893,211 @@ class AutoContr(Controller):
 
         print("<<controller>> Auto well capacity check passed")
 
+    def _count_available_pipette_tips_by_size(self):
+        '''
+        Counts pipette tips available from the configured deck positions.
+
+        This uses the labware dataframe built from the deck_positions sheet.
+        For each configured pipette tip rack, it counts from the rack's
+        first_usable position through the end of the 96-position rack.
+
+        returns:
+            dict:
+                Available pipette tips keyed by pipette size.
+                Example:
+                    {20.0: 96, 300.0: 192}
+        '''
+        labware_df = self.robo_params['labware_df']
+        rack_order = self._get_96_well_plate_order()
+
+        available_counts = {
+            20.0: 0,
+            300.0: 0
+        }
+
+        tip_rack_rows = labware_df.loc[
+            labware_df['name'].astype(str).str.contains('tip_rack', case=False, na=False)
+        ]
+
+        for _, row in tip_rack_rows.iterrows():
+            rack_name = str(row['name'])
+            first_usable = str(row['first_usable']).strip().upper()
+
+            if '20' in rack_name:
+                pipette_size = 20.0
+            elif '300' in rack_name:
+                pipette_size = 300.0
+            else:
+                continue
+
+            if first_usable == '' or first_usable.lower() == 'nan':
+                raise ValueError(
+                    f"Missing first_usable pipette tip position for {rack_name}. "
+                    f"Please specify a starting pipette tip such as A1."
+                )
+
+            if first_usable not in rack_order:
+                raise ValueError(
+                    f"Starting pipette tip position {first_usable} for {rack_name} "
+                    f"is not valid. Expected a position from A1 through H12."
+                )
+
+            first_index = rack_order.index(first_usable)
+            available_counts[pipette_size] += len(rack_order) - first_index
+
+        return available_counts
     
+    def _count_non_water_reagent_groups_for_tip_estimate(self):
+        '''
+        Counts unique non-water reagent groups available on the deck.
+
+        This is used for a conservative Auto pipette tip estimate. The estimate
+        assumes each non-water reagent group may require pipette tip changes
+        during each Auto batch.
+
+        returns:
+            int:
+                Number of unique non-water reagent groups.
+        '''
+        reagent_df = self.robo_params['reagent_df']
+
+        reagent_names = []
+
+        for reagent_container_name in reagent_df.index:
+            reagent_container_name = str(reagent_container_name)
+
+            # Reagent containers are named like silver_nitrateC0.375.
+            # Split at the concentration marker C to recover the base reagent name.
+            if 'C' in reagent_container_name:
+                base_name = reagent_container_name.split('C')[0]
+            else:
+                base_name = reagent_container_name
+
+            if base_name != 'Water':
+                reagent_names.append(base_name)
+
+        return len(set(reagent_names))
+    
+    def _estimate_max_auto_pipette_tips_needed(self, model):
+        '''
+        Conservatively estimates the maximum pipette tips needed for the full
+        Auto run.
+
+        This estimate is intentionally conservative because future Auto recipes
+        are not known before the run begins. It assumes each non-water reagent
+        group may require both pipette sizes during each batch.
+
+        The count includes startup pipette tips picked up during robot
+        initialization.
+
+        params:
+            OptimizationModel model:
+                The Auto optimization model. Used for max iteration structure.
+
+        returns:
+            dict:
+                Estimated maximum pipette tips needed, keyed by pipette size.
+        '''
+        max_iterations = int(self.getModelInfo()["max_iterations"])
+
+        # One initial seed batch plus up to max_iterations model-suggested batches.
+        total_batches = 1 + max_iterations
+
+        non_water_reagent_groups = self._count_non_water_reagent_groups_for_tip_estimate()
+
+        # Conservative estimate:
+        # For each pipette size, assume each non-water reagent group may require
+        # one pipette tip per batch. This includes startup behavior in the total
+        # upper-bound count and intentionally overestimates rather than risking
+        # a false pass.
+        estimated_counts = {
+            20.0: max(1, total_batches * non_water_reagent_groups),
+            300.0: max(1, total_batches * non_water_reagent_groups)
+        }
+
+        return estimated_counts
+    
+    def _check_auto_pipette_tip_capacity(self, model):
+        '''
+        Checks whether the configured deck positions provide enough pipette tips
+        for the planned Auto run.
+
+        This prevents the robot from starting a closed-loop Auto experiment that
+        may later fail because the mapped pipette tip racks do not contain enough
+        available pipette tips.
+
+        Because the estimate is conservative, the user is allowed to override the
+        warning and continue. However, overriding does not make unmapped pipette
+        tip positions available to the robot.
+
+        params:
+            OptimizationModel model:
+                The Auto optimization model.
+
+        Postconditions:
+            - Prints estimated pipette tips needed.
+            - Prints configured pipette tips available.
+            - Passes automatically if configured capacity is sufficient.
+            - Warns and prompts the user if estimated use exceeds configured capacity.
+            - Stops before the robot starts if the user does not accept the warning.
+        '''
+        needed_counts = self._estimate_max_auto_pipette_tips_needed(model)
+        available_counts = self._count_available_pipette_tips_by_size()
+
+        print("<<controller>> checking Auto pipette tip capacity")
+        print("<<controller>> estimated maximum pipette tips needed:")
+        print(f"<<controller>>   20 uL pipette tips: {needed_counts.get(20.0, 0)}")
+        print(f"<<controller>>   300 uL pipette tips: {needed_counts.get(300.0, 0)}")
+        print("<<controller>> configured pipette tips available from deck:")
+        print(f"<<controller>>   20 uL pipette tips: {available_counts.get(20.0, 0)}")
+        print(f"<<controller>>   300 uL pipette tips: {available_counts.get(300.0, 0)}")
+
+        exceeded_capacity = False
+
+        for pipette_size in [20.0, 300.0]:
+            needed = needed_counts.get(pipette_size, 0)
+            available = available_counts.get(pipette_size, 0)
+
+            if needed > available:
+                exceeded_capacity = True
+                print(
+                    f"<<controller>> WARNING: estimated {int(pipette_size)} uL "
+                    f"pipette tip use exceeds configured capacity."
+                )
+                print(
+                    f"<<controller>>   estimated needed: {needed} "
+                    f"{int(pipette_size)} uL pipette tips"
+                )
+                print(
+                    f"<<controller>>   configured available: {available} "
+                    f"{int(pipette_size)} uL pipette tips"
+                )
+
+        if exceeded_capacity:
+            print(
+                "<<controller>> The robot may run out of mapped pipette tips during this run."
+            )
+            print(
+                "<<controller>> Physically adding pipette tips mid-run may not help unless "
+                "those positions are mapped and available to the robot."
+            )
+            print(
+                "<<controller>> Consider adding another pipette tip rack to the deck sheet, "
+                "choosing an earlier first usable pipette tip, reducing max_iterations, "
+                "or reducing replicates."
+            )
+
+            confirm = input("Continue anyway? [yn] ").lower()
+
+            if confirm != 'y':
+                raise RuntimeError(
+                    "Auto run stopped because configured pipette tip capacity was not confirmed."
+                )
+
+            print("<<controller>> Auto pipette tip capacity warning accepted; continuing")
+        else:
+            print("<<controller>> Auto pipette tip capacity check passed")
+
     def _generate_wellname(self):
         '''
         returns:  
