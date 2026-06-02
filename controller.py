@@ -2329,6 +2329,15 @@ class AutoContr(Controller):
         self.num_duplicates = num_duplicates
         self.max_conc = list(self.get_max_conc().values())
         self.min_conc = list(self.get_min_conc().values())
+        # Controls whether Auto mode pauses before each batch to confirm the
+        # exact pipette tip estimate for that batch. This is set by the user
+        # during the pre-run pipette tip check.
+        self.confirm_pipette_tips_each_batch = False
+
+        # Tracks simulated pipette tip state for pipette tip estimation across
+        # Auto batches. This lets the estimator mirror the robot's behavior more
+        # closely instead of resetting pipette tip state for every batch.
+        self._estimated_pipette_tip_state = None
     
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result, axis=1):
@@ -2551,15 +2560,13 @@ class AutoContr(Controller):
             return x_normalized * (max_val - min_val) + min_val
         
         self.batch_num = 0 #used internally for unique filenames
-        
-        # Controls whether Auto mode pauses before each batch to confirm the
-        # exact pipette tip estimate for that batch. This is set by the user
-        # during the pre-run pipette tip check.
-        self.confirm_pipette_tips_each_batch = False
 
-        # Tracks simulated pipette tip state for pipette tip estimation across
-        # Auto batches. This lets the estimator mirror the robot's behavior more
-        # closely instead of resetting pipette tip state for every batch.
+        # Reset simulated pipette tip state at the start of each Auto run so
+
+        # pipette tip estimates begin from the same clean-start assumption as
+
+        # the robot connection.
+
         self._estimated_pipette_tip_state = None
         
         self.well_count = 0 #used internally for unique wellnames
