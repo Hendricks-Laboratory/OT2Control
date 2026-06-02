@@ -3031,7 +3031,11 @@ class AutoContr(Controller):
 
         returns:
             dict:
-                Estimated pipette tips used for this batch, keyed by pipette size.
+                Additional pipette tips expected during this batch, keyed by
+                pipette size. Initial pipette tips picked up during robot
+                connection/startup are tracked in the simulated state but are
+                not included in this per-batch additional count.
+
                 Example:
                     {20.0: 4, 300.0: 3}
         '''
@@ -3096,11 +3100,11 @@ class AutoContr(Controller):
         '''
         batch_counts = self._estimate_pipette_tips_for_rxn_df(self.rxn_df)
 
-        print("<<controller>> exact pipette tip estimate for this batch:")
+        print("<<controller>> additional pipette tips expected during this batch:")
         print(f"<<controller>>   20 uL pipette tips: {batch_counts.get(20.0, 0)}")
         print(f"<<controller>>   300 uL pipette tips: {batch_counts.get(300.0, 0)}")
 
-        confirm = input("Confirm these pipette tips are loaded before executing this batch? [yn] ").lower()
+        confirm = input("Confirm these additional pipette tips are available before executing this batch? [yn] ").lower()
 
         if confirm != 'y':
             raise RuntimeError(
@@ -3171,7 +3175,7 @@ class AutoContr(Controller):
         estimated_counts = self._estimate_conservative_full_auto_pipette_tips(model)
 
         print("<<controller>> estimating maximum pipette tip use for Auto run")
-        print("<<controller>> estimated maximum pipette tips for full Auto run:")
+        print("<<controller>> estimated maximum pipette tips for full Auto run, including startup pipette tips:")
         print(f"<<controller>>   20 uL pipette tips: {estimated_counts.get(20.0, 0)}")
         print(f"<<controller>>   300 uL pipette tips: {estimated_counts.get(300.0, 0)}")
         print("<<controller>> This is a conservative estimate because future Auto recipes are not known yet.")
