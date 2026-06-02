@@ -2960,7 +2960,7 @@ class AutoContr(Controller):
         found_errors = super().run_all_checks()
         found_errors = max(found_errors,self.check_conc())
         if found_errors == 0:
-            print("<<controller>> All prechecks passed!")
+            print("<<controller>> spreadsheet/setup prechecks passed")
             return
         elif found_errors == 1:
             if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key "):
@@ -3253,7 +3253,7 @@ class ProtocolExecutor(Controller):
         found_errors = super().run_all_checks()
         found_errors = max(found_errors, self.check_products())
         if found_errors == 0:
-            print("<<controller>> All prechecks passed!")
+            print("<<controller>> spreadsheet/setup prechecks passed")
             return
         elif found_errors == 1:
             if 'y'==input("<<controller>> Please check the above errors and if you would like to ignore them and continue enter 'y' else any key"):
