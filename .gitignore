@@ -13,3 +13,4 @@ Controller_Out/
 .venv
 requirements.txt
 experiment_data.csv
+.DS_Store
