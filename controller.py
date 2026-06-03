@@ -699,7 +699,10 @@ class Controller(ABC):
         Two = np.linspace(0,self.max_conc[1],100)
         plt.pcolormesh(One, Two, model.predictions, cmap='inferno', shading='auto')
         plt.colorbar(label="Lambda Max")
-        plt.savefig(os.path.join(self.plot_path, 'gpr_predictions.png'))
+        plot_filename = os.path.join(self.plot_path, f'gpr_predictions_batch_{self.batch_num}.png')
+        plt.savefig(plot_filename)
+        print(f"<<controller>> saved 2D_GPR plot to {plot_filename}")
+        plt.close()
     
     # below until ~end is all not used yet needs to be worked up
     def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
@@ -1252,6 +1255,14 @@ class Controller(ABC):
         elif plot_type == 'MULTI_KIN':
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
         elif plot_type == '2D_GPR':
+            # The initial seed batch can execute a plot row before the optimizer
+            # has generated a prediction grid. In that case, skip the GPR plot
+            # instead of failing the run. Later Auto batches can plot once
+            # model.predictions has been populated by getNextReaction().
+            if model is None or not hasattr(model, 'predictions'):
+                print("<<controller>> skipping 2D_GPR plot because model predictions are not available yet")
+                return
+
             self.plot_2D_GPR(model)
         # TODO: A new plotting protocol for 3+ dimensions
 
