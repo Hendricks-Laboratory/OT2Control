@@ -688,8 +688,8 @@ class Controller(ABC):
         plt.ylabel(f"{self.variable_reagents[1]} (mM)", fontsize = 12)
         plt.subplots_adjust(left=0.2, bottom=0.2, right=0.9, top=0.9)
         plt.tick_params(axis = "both", width = 1.5)
-        plt.ylim(0, self.max_conc[0])  # X-axis range from 2 to 8
-        plt.xlim(0, self.max_conc[1])
+        plt.xlim(0, self.max_conc[0])
+        plt.ylim(0, self.max_conc[1])
         plt.subplot().spines['bottom'].set_linewidth(1.5)
         plt.subplot().spines['top'].set_linewidth(1.5)
         plt.subplot().spines['left'].set_linewidth(1.5)
