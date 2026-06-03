@@ -76,15 +76,142 @@ class OptimizationModel():
         self.optimizer = None
         self.prediction = None
         
+    def _minimum_pairwise_distance(self, design):
+        '''
+        Computes the minimum Euclidean distance between any two points in a
+        candidate design.
+
+        This score is used for maximin design selection. A larger minimum
+        pairwise distance means the closest two design points are farther apart,
+        which indicates better space-filling behavior.
+
+        params:
+            np.ndarray design:
+                Candidate design matrix with shape:
+                    n_points x n_dimensions
+
+        returns:
+            float:
+                The smallest Euclidean distance between any two distinct design
+                points. Returns 0.0 if fewer than two points are provided.
+        '''
+        design = np.asarray(design, dtype=float)
+
+        if design.shape[0] < 2:
+            return 0.0
+
+        min_distance = np.inf
+
+        for i in range(design.shape[0]):
+            for j in range(i + 1, design.shape[0]):
+                distance = np.linalg.norm(design[i] - design[j])
+
+                if distance < min_distance:
+                    min_distance = distance
+
+        return float(min_distance)
+    
+    def _generate_random_lhs_design(self, n_points, n_dimensions):
+        '''
+        Generates one random Latin hypercube design in normalized 0-1 space.
+
+        Each dimension is divided into n_points equal intervals. The design
+        samples once from each interval in each dimension, then randomly
+        permutes the interval assignments independently for each dimension.
+
+        params:
+            int n_points:
+                Number of design points to generate.
+
+            int n_dimensions:
+                Number of optimized variables / reagent dimensions.
+
+        returns:
+            np.ndarray:
+                Latin hypercube design with shape:
+                    n_points x n_dimensions
+        '''
+        design = np.zeros((n_points, n_dimensions), dtype=float)
+
+        for dim in range(n_dimensions):
+            # Create one random sample inside each equal interval so each
+            # dimension is evenly represented across the 0-1 range.
+            interval_samples = (np.arange(n_points) + np.random.random(n_points)) / n_points
+
+            # Randomly permute the interval samples for this dimension so the
+            # dimensions are not artificially correlated.
+            design[:, dim] = np.random.permutation(interval_samples)
+
+        return design
+    
+    def _generate_maximin_lhs_design(self, n_points, n_dimensions, n_candidates=500):
+        '''
+        Generates a maximin Latin hypercube design in normalized 0-1 space.
+
+        This creates many random Latin hypercube candidate designs and selects
+        the one with the largest minimum pairwise distance. The result keeps the
+        per-dimension stratification of Latin hypercube sampling while improving
+        global space-filling behavior.
+
+        params:
+            int n_points:
+                Number of design points to generate.
+
+            int n_dimensions:
+                Number of optimized variables / reagent dimensions.
+
+            int n_candidates:
+                Number of random Latin hypercube candidates to evaluate.
+                Larger values may improve the design but take longer.
+
+        returns:
+            np.ndarray:
+                Selected maximin Latin hypercube design with shape:
+                    n_points x n_dimensions
+        '''
+        best_design = None
+        best_score = -np.inf
+
+        for _ in range(n_candidates):
+            candidate_design = self._generate_random_lhs_design(n_points, n_dimensions)
+            candidate_score = self._minimum_pairwise_distance(candidate_design)
+
+            if candidate_score > best_score:
+                best_score = candidate_score
+                best_design = candidate_design
+
+        if best_design is None:
+            raise RuntimeError("Failed to generate a maximin Latin hypercube design.")
+
+        return best_design
+    
     def generate_initial_design(self):
         '''
-        Generates an initial design of experiments using Latin Hypercube Sampling within the bounds.
+        Generates the initial Auto experiment design.
+
+        The design is generated in normalized 0-1 model space using maximin
+        Latin hypercube sampling. This keeps each reagent dimension stratified
+        across its range while selecting the candidate design with the best
+        space-filling behavior.
+
         returns:
-        np.ndarray: The initial set of parameters for the experiments.
+            np.ndarray:
+                Initial design matrix with shape:
+                    initial_design_numdata x number_of_variable_reagents
         '''
-        initial_design = GPyOpt.experiment_design.initial_design('latin', self.space, self.initial_design_numdata)
-        # Here, you might want to filter or adjust initial_design based on constraints
-        # This is a placeholder; actual implementation may require validating each point
+        n_points = int(self.initial_design_numdata)
+        n_dimensions = len(self.variable_reagents)
+
+        initial_design = self._generate_maximin_lhs_design(
+            n_points=n_points,
+            n_dimensions=n_dimensions,
+            n_candidates=500
+        )
+
+        print("<<optimizer>> generated maximin Latin hypercube initial design")
+        print(f"<<optimizer>> initial design points: {n_points}")
+        print(f"<<optimizer>> initial design dimensions: {n_dimensions}")
+        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(initial_design)}")
 
         return initial_design
 

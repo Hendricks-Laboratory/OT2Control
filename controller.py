@@ -2571,6 +2571,7 @@ class AutoContr(Controller):
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
         # Generate initial data which is a list of recipes (normalized)
+        print("<<controller>> generating maximin Latin hypercube initial design")
         X_initial = model.generate_initial_design()
         print(f"X initial: {X_initial}")
 
