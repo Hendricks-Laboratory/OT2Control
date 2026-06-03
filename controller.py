@@ -3142,6 +3142,10 @@ class AutoContr(Controller):
             2.5 <= volume < 5.0 uL maps to 5.0 uL
             volume >= 5.0 uL is unchanged
 
+        A small tolerance is used at the 0, 2.5, and 5.0 uL boundaries so
+        floating-point artifacts do not send mathematically equivalent values
+        to the wrong side of a threshold.
+
         params:
             float volume:
                 Transfer volume in uL.
@@ -3151,14 +3155,20 @@ class AutoContr(Controller):
                 Repaired transfer volume in uL.
         '''
         volume = float(volume)
+        boundary_tol = 1e-9
 
-        if math.isclose(volume, 0.0, rel_tol=0, abs_tol=1e-9):
+        if math.isclose(volume, 0.0, rel_tol=0, abs_tol=boundary_tol):
             return 0.0
 
-        if 0.0 < volume < 2.5:
+        # Values clearly below the midpoint round down to true zero.
+        # The tolerance prevents values like 2.4999999999999996 from being
+        # treated differently from 2.5 due only to floating-point artifacts.
+        if volume < 2.5 - boundary_tol:
             return 0.0
 
-        if 2.5 <= volume < 5.0:
+        # Values from the midpoint up to just below the minimum transfer round
+        # up to 5 uL. Values effectively equal to 5 uL are left unchanged below.
+        if volume < 5.0 - boundary_tol:
             return 5.0
 
         return volume
@@ -3205,7 +3215,6 @@ class AutoContr(Controller):
                     )
 
                 total_volume = float(self.template_meta['tot_vol'])
-
 
                 # _convert_conc_to_vol() effectively uses:
                 # transfer_volume = target_concentration * total_volume / stock_concentration
