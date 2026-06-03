@@ -1234,7 +1234,8 @@ class Controller(ABC):
             int i: index of this row  
         '''
         wellnames = row[self._products][row[self._products].astype(bool)].index
-        plot_type = row['plot_protocol']
+        plot_type = str(row['plot_protocol']).strip().upper()
+        print(f"<<controller>> creating plot using protocol: {plot_type}")
         filename = row['plot_filename']
         #make sure you have mapping for all files
 
@@ -1243,12 +1244,12 @@ class Controller(ABC):
         #it's not safe to plot in simulation because the scan file may not exist yet
         df, metadata = self.pr.load_reader_data(row['scan_filename'], pr_dict)
         #execute the plot depending on what was specified
-        if plot_type == 'single_kin':
+        if plot_type == 'SINGLE_KIN':
             for wellname in wellnames:
                 self.plot_single_kin(df, metadata['n_cycles'], wellname, "{}_{}".format(wellname, filename))
-        elif plot_type == 'overlay':
+        elif plot_type == 'OVERLAY':
             self.plot_LAM_overlay(df, wellnames, filename)
-        elif plot_type == 'multi_kin':
+        elif plot_type == 'MULTI_KIN':
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
         elif plot_type == '2D_GPR':
             self.plot_2D_GPR(model)
