@@ -2576,7 +2576,15 @@ class AutoContr(Controller):
         print(f"X initial: {X_initial}")
 
         # The list of recipes is denormalized with different maximums for each reagent
-        X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False) 
+        X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False)
+
+        # Apply Auto true-zero transfer behavior before duplicating/running
+        # recipes. This ensures the model is later trained on the same
+        # physically executable recipes that the robot actually ran.
+        X_Initial_Denormalized = self._apply_true_zero_transfer_rule_to_recipes(
+            X_Initial_Denormalized
+        )
+
         print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
         # Tripplicates each recipes to be run on the robot
@@ -2658,9 +2666,19 @@ class AutoContr(Controller):
             X_new = model.getNextReaction()
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
 
-            # Denormalize the recipe and triplicate it to pass to the robot
+            # Denormalize the recipe before sending it to the robot.
             X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
-            recipes =  self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
+
+            # Apply Auto true-zero transfer behavior before duplicating/running
+            # recipes. The optimizer may suggest values that correspond to
+            # impossible 0-5 uL transfers; the model and robot should both use
+            # the repaired executable recipe.
+            X_new_Denormalized = self._apply_true_zero_transfer_rule_to_recipes(
+                X_new_Denormalized
+            )
+
+            # Duplicate the repaired recipe to create replicate wells.
+            recipes = self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
             
             print(f"<<controller>> preparing {recipes.shape[0]} recipe wells with {recipes.shape[1]} variable reagents")
             
@@ -3110,6 +3128,103 @@ class AutoContr(Controller):
             print("<<controller>> Auto pipette tip capacity warning accepted; continuing")
         else:
             print("<<controller>> Auto pipette tip capacity check passed")
+
+    def _apply_true_zero_transfer_rule_to_volume(self, volume):
+        '''
+        Applies the Auto true-zero transfer rule to one transfer volume.
+
+        Auto mode should allow true 0 uL transfers, but nonzero transfers below
+        the robot's reliable minimum should be mapped to an executable value.
+
+        Rule:
+            0 uL stays 0
+            0 < volume < 2.5 uL maps to 0 uL
+            2.5 <= volume < 5.0 uL maps to 5.0 uL
+            volume >= 5.0 uL is unchanged
+
+        params:
+            float volume:
+                Transfer volume in uL.
+
+        returns:
+            float:
+                Repaired transfer volume in uL.
+        '''
+        volume = float(volume)
+
+        if math.isclose(volume, 0.0, rel_tol=0, abs_tol=1e-9):
+            return 0.0
+
+        if 0.0 < volume < 2.5:
+            return 0.0
+
+        if 2.5 <= volume < 5.0:
+            return 5.0
+
+        return volume
+    
+    def _apply_true_zero_transfer_rule_to_recipes(self, recipes):
+        '''
+        Applies the Auto true-zero transfer rule to denormalized recipe
+        concentrations.
+
+        Recipes are stored as target concentrations, but the robot executes
+        transfer volumes. This function converts each recipe concentration to
+        its corresponding transfer volume, applies the true-zero transfer rule,
+        and then converts the repaired volume back to concentration.
+
+        This ensures the robot, model updates, and exported experiment data all
+        use the same physically executable recipe.
+
+        params:
+            np.ndarray recipes:
+                Denormalized recipe concentrations with shape:
+                    n_recipes x n_variable_reagents
+
+        returns:
+            np.ndarray:
+                Repaired denormalized recipe concentrations with the same shape
+                as recipes.
+        '''
+        repaired_recipes = np.array(recipes, dtype=float, copy=True)
+
+        for recipe_i in range(repaired_recipes.shape[0]):
+            for reagent_i, reagent_name in enumerate(self.variable_reagents):
+                target_conc = float(repaired_recipes[recipe_i, reagent_i])
+
+                if math.isclose(target_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                    repaired_recipes[recipe_i, reagent_i] = 0.0
+                    continue
+
+                stock_conc = float(self.max_conc[reagent_i])
+
+                if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                    raise ValueError(
+                        f"Cannot apply true-zero transfer rule for {reagent_name}: "
+                        "stock concentration is 0."
+                    )
+
+                # _convert_conc_to_vol() effectively uses:
+                # transfer_volume = target_concentration * total_volume / stock_concentration
+                transfer_volume = target_conc * self.total_vol / stock_conc
+
+                repaired_volume = self._apply_true_zero_transfer_rule_to_volume(
+                    transfer_volume
+                )
+
+                # Only print when the true-zero rule actually changes the
+                # planned transfer. This keeps normal output clean while making
+                # recipe repairs visible during Auto runs.
+                if not math.isclose(repaired_volume, transfer_volume, rel_tol=0, abs_tol=1e-9):
+                    print(
+                        f"<<controller>> true-zero adjusted {reagent_name}: "
+                        f"{transfer_volume:.4f} uL -> {repaired_volume:.4f} uL"
+                    )
+
+                repaired_conc = repaired_volume * stock_conc / self.total_vol
+                repaired_recipes[recipe_i, reagent_i] = repaired_conc
+
+        return repaired_recipes
 
     def _generate_wellname(self):
         '''
