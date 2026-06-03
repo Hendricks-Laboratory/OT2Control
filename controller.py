@@ -2665,8 +2665,8 @@ class AutoContr(Controller):
             
             # Run the experiments
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-            self._create_samples(wellnames, recipes)
-
+            self._create_samples(wellnames, recipes, model)
+            
             # Pull in the scan data
             filenames = self.rxn_df[
                     (self.rxn_df['op'] == 'scan') |
