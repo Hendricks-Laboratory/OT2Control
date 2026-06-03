@@ -3206,6 +3206,7 @@ class AutoContr(Controller):
 
                 total_volume = float(self.template_meta['tot_vol'])
 
+
                 # _convert_conc_to_vol() effectively uses:
                 # transfer_volume = target_concentration * total_volume / stock_concentration
                 transfer_volume = target_conc * total_volume / stock_conc
