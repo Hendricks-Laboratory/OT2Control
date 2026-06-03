@@ -3204,9 +3204,11 @@ class AutoContr(Controller):
                         "stock concentration is 0."
                     )
 
+                total_volume = float(self.template_meta['tot_vol'])
+
                 # _convert_conc_to_vol() effectively uses:
                 # transfer_volume = target_concentration * total_volume / stock_concentration
-                transfer_volume = target_conc * self.total_vol / stock_conc
+                transfer_volume = target_conc * total_volume / stock_conc
 
                 repaired_volume = self._apply_true_zero_transfer_rule_to_volume(
                     transfer_volume
@@ -3221,7 +3223,7 @@ class AutoContr(Controller):
                         f"{transfer_volume:.4f} uL -> {repaired_volume:.4f} uL"
                     )
 
-                repaired_conc = repaired_volume * stock_conc / self.total_vol
+                repaired_conc = repaired_volume * stock_conc / total_volume
                 repaired_recipes[recipe_i, reagent_i] = repaired_conc
 
         return repaired_recipes
