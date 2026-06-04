@@ -138,7 +138,20 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     # final_spectra not used?
     print("<<controller>> setting up Auto optimization model")
     
-    model = OptimizationModel(bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata=auto.getModelInfo()["initial_data"], batch_size=1, max_iters=auto.getModelInfo()["max_iterations"])
+    model = OptimizationModel(
+        bounds,
+        target_value,
+        reagent_info,
+        fixed_reagents,
+        variable_reagents,
+        initial_design_numdata=auto.getModelInfo()["initial_data"],
+        batch_size=1,
+        max_iters=auto.getModelInfo()["max_iterations"],
+        min_conc=auto.min_conc,
+        max_conc=auto.max_conc,
+        total_volume=auto.template_meta['tot_vol']
+    )
+    
     print(f"Target: {target_value}")
     if not no_sim:
         auto.run_simulation(no_pr=no_pr)

@@ -54,28 +54,93 @@ class OptimizationModel():
     calc_obj(self, x) -> np.ndarray: Calculates the objective function.
     update_quit(self, X_new, Y_new) -> None: Updates the quit parameter based on optimization progress.
     '''
-    def __init__(self, bounds, target_value, reagent_info, fixed_reagents, variable_reagents, initial_design_numdata, batch_size, max_iters):
-        #super().__init__(None, max_iters)  # don't have a base model
+    def __init__(
+        self,
+        bounds,
+        target_value,
+        reagent_info,
+        fixed_reagents,
+        variable_reagents,
+        initial_design_numdata,
+        batch_size,
+        max_iters,
+        min_conc=None,
+        max_conc=None,
+        total_volume=None
+    ):
+        '''
+        Initializes the Auto optimization model.
+
+        In addition to the normalized optimization bounds, this stores physical
+        recipe context needed for true-zero-aware optimization. The controller
+        remains the final source of truth for robot execution, but the optimizer
+        needs the same concentration/volume context so it can avoid treating the
+        forbidden 0-5 uL region as a normal continuous search space.
+
+        params:
+            list[dict] bounds:
+                GPyOpt bounds for normalized model-space variables.
+
+            float target_value:
+                Target lambda max in nm.
+
+            pd.DataFrame reagent_info:
+                Reagent dataframe from the controller. Used to look up deck
+                stock concentrations for variable reagents.
+
+            list fixed_reagents:
+                Fixed reagent names/volumes used by the controller.
+
+            list variable_reagents:
+                Names of variable reagents being optimized.
+
+            int initial_design_numdata:
+                Number of unique initial design points.
+
+            int batch_size:
+                Number of unique model-suggested recipes per iteration.
+
+            int max_iters:
+                Maximum number of Auto optimization iterations.
+
+            list[float] min_conc:
+                Minimum target concentration for each variable reagent.
+
+            list[float] max_conc:
+                Maximum target concentration for each variable reagent.
+
+            float total_volume:
+                Final/template reaction volume in uL.
+        '''
         self.bounds = bounds
         self.target_value = target_value
         self.reagent_info = reagent_info
-        self.fixed_reagents = fixed_reagents  # Additional info, if needed for constraints
+        self.fixed_reagents = fixed_reagents
         self.variable_reagents = variable_reagents
         self.space = GPyOpt.Design_space(bounds)
-        #self.constraints = self.define_constraints()
+
         self.initial_design_numdata = initial_design_numdata
         self.batch_size = batch_size
         self.experiment_data = {'X': [], 'Y': []}
         self.threshold = 1
-        self.quit=False
+        self.quit = False
         self.acquisition_functions = ['EI', 'MPI', 'LCB']
         self.current_acquisition_index = 0
         self.curr_iter = 0
         self.max_iters = max_iters
+
+        # Physical recipe context used by true-zero-aware optimization. These
+        # are optional for backwards compatibility, but should be provided by
+        # Auto mode before true-zero candidate repair is enabled.
+        self.min_conc = min_conc
+        self.max_conc = max_conc
+        self.total_volume = total_volume
+
         self.gp_model = None
         self.acquisition = None
         self.optimizer = None
         self.prediction = None
+        self.predictions = None
         
     def _minimum_pairwise_distance(self, design):
         '''
@@ -227,6 +292,172 @@ class OptimizationModel():
         '''
         return len(self.variable_reagents)
     
+    def _get_variable_reagent_stock_conc(self, reagent_name):
+        '''
+        Gets the stock concentration currently available on the deck for a
+        variable reagent.
+
+        Reagent containers are indexed by names like:
+            silver_nitrateC0.375
+            potassium_bromideC0.01
+
+        This helper matches the base reagent name before the concentration
+        marker and returns the deck concentration from reagent_info.
+
+        params:
+            str reagent_name:
+                Base reagent name, such as 'silver_nitrate'.
+
+        returns:
+            float:
+                Stock concentration of the reagent on the deck.
+        '''
+        matching_concs = []
+
+        for reagent_container_name in self.reagent_info.index:
+            reagent_container_name = str(reagent_container_name)
+
+            if 'C' in reagent_container_name:
+                base_name = reagent_container_name.split('C')[0]
+            else:
+                base_name = reagent_container_name
+
+            if base_name == reagent_name:
+                matching_concs.append(
+                    float(self.reagent_info.loc[reagent_container_name, 'conc'])
+                )
+
+        if len(matching_concs) == 0:
+            raise ValueError(
+                f"Could not find stock concentration for variable reagent "
+                f"{reagent_name} in reagent_info."
+            )
+
+        if len(matching_concs) > 1:
+            raise ValueError(
+                f"Found multiple stock concentrations for variable reagent "
+                f"{reagent_name}: {matching_concs}. True-zero-aware optimization "
+                f"currently expects one stock concentration per variable reagent."
+            )
+
+        return matching_concs[0]
+    
+    def _apply_true_zero_transfer_rule_to_volume(self, volume):
+        '''
+        Applies the Auto true-zero transfer rule to one transfer volume.
+
+        Rule:
+            0 uL stays 0
+            0 < volume < 2.5 uL maps to 0 uL
+            2.5 <= volume < 5.0 uL maps to 5.0 uL
+            volume >= 5.0 uL is unchanged
+
+        A small tolerance is used at the 0, 2.5, and 5.0 uL boundaries so
+        floating-point artifacts do not send mathematically equivalent values
+        to the wrong side of a threshold.
+
+        params:
+            float volume:
+                Transfer volume in uL.
+
+        returns:
+            float:
+                Repaired transfer volume in uL.
+        '''
+        volume = float(volume)
+        boundary_tol = 1e-9
+
+        if math.isclose(volume, 0.0, rel_tol=0, abs_tol=boundary_tol):
+            return 0.0
+
+        # Values clearly below the midpoint round down to true zero.
+        if volume < 2.5 - boundary_tol:
+            return 0.0
+
+        # Values from the midpoint up to just below the minimum transfer round
+        # up to 5 uL. Values effectively equal to 5 uL are left unchanged below.
+        if volume < 5.0 - boundary_tol:
+            return 5.0
+
+        return volume
+    
+    def _repair_normalized_candidate_for_true_zero(self, x):
+        '''
+        Repairs one normalized optimizer candidate according to the Auto
+        true-zero transfer rule.
+
+        The optimizer works in normalized 0-1 model space, but the robot
+        executes transfer volumes. This helper converts a normalized candidate
+        into target concentrations, converts those concentrations into transfer
+        volumes, applies the true-zero transfer rule, and then converts the
+        repaired values back into normalized model space.
+
+        This allows the optimizer to evaluate candidates as the robot/controller
+        would actually execute them, instead of treating the forbidden 0-5 uL
+        transfer region as a meaningful continuous search space.
+
+        params:
+            np.ndarray x:
+                One normalized recipe candidate with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            np.ndarray:
+                Repaired normalized recipe candidate with shape:
+                    n_dimensions
+        '''
+        if self.min_conc is None or self.max_conc is None or self.total_volume is None:
+            raise ValueError(
+                "True-zero-aware optimization requires min_conc, max_conc, "
+                "and total_volume to be provided to OptimizationModel."
+            )
+
+        n_dimensions = self._get_dimension()
+        x = np.asarray(x, dtype=float).reshape(n_dimensions)
+
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(n_dimensions)
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(n_dimensions)
+        total_volume = float(self.total_volume)
+
+        repaired_x = np.array(x, dtype=float, copy=True)
+
+        for reagent_i, reagent_name in enumerate(self.variable_reagents):
+            stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
+
+            if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                raise ValueError(
+                    f"Cannot repair true-zero candidate for {reagent_name}: "
+                    "stock concentration is 0."
+                )
+
+            # Convert normalized model coordinate to target concentration.
+            target_conc = (
+                x[reagent_i] * (max_conc[reagent_i] - min_conc[reagent_i])
+                + min_conc[reagent_i]
+            )
+
+            # Convert target concentration to the transfer volume that would be
+            # required to make that concentration in the final reaction volume.
+            transfer_volume = target_conc * total_volume / stock_conc
+
+            repaired_volume = self._apply_true_zero_transfer_rule_to_volume(
+                transfer_volume
+            )
+
+            # Convert repaired transfer volume back to target concentration.
+            repaired_conc = repaired_volume * stock_conc / total_volume
+
+            # Convert repaired concentration back to normalized model space.
+            # Clip defensively to keep numerical artifacts inside the GP domain.
+            repaired_x[reagent_i] = (
+                (repaired_conc - min_conc[reagent_i])
+                / (max_conc[reagent_i] - min_conc[reagent_i])
+            )
+
+        return np.clip(repaired_x, 0.0, 1.0)
+    
     def _predict_lambda_max_nm(self, x):
         '''
         Predicts lambda max in nanometers for one normalized recipe point.
@@ -260,11 +491,13 @@ class OptimizationModel():
         '''
         Computes the target-distance objective for one normalized recipe point.
 
+        The raw optimizer candidate is first repaired according to the Auto
+        true-zero transfer rule, then evaluated with the Gaussian process model.
+        This prevents the optimizer from treating the physically forbidden
+        0-5 uL transfer region as a meaningful continuous search space.
+
         The objective is the squared distance between the model-predicted lambda
         max and the target lambda max. Lower values are better.
-
-        This preserves the current exploitation behavior of choosing the recipe
-        whose predicted lambda max is closest to the target.
 
         params:
             np.ndarray x:
@@ -277,7 +510,8 @@ class OptimizationModel():
             float:
                 Squared error between predicted lambda max and target_value.
         '''
-        predicted_lambda_max = self._predict_lambda_max_nm(x)
+        repaired_x = self._repair_normalized_candidate_for_true_zero(x)
+        predicted_lambda_max = self._predict_lambda_max_nm(repaired_x)
         target_error = predicted_lambda_max - self.target_value
 
         return float(target_error ** 2)
@@ -291,13 +525,20 @@ class OptimizationModel():
         dimension-general optimization. Multiple random restarts are used to
         reduce the chance of getting stuck in a poor local optimum.
 
+        The objective evaluates true-zero-repaired candidates, and this method
+        returns the repaired candidate so the controller receives the same
+        physically executable recipe that was scored by the optimizer.
+
+        Debug attributes are stored so getNextReaction() can report whether the
+        optimizer's raw candidate was changed by true-zero repair.
+
         params:
             int n_restarts:
                 Number of random starting points to try.
 
         returns:
             np.ndarray:
-                Best normalized recipe point found, with shape:
+                Best repaired normalized recipe point found, with shape:
                     n_dimensions
         '''
         n_dimensions = self._get_dimension()
@@ -332,7 +573,14 @@ class OptimizationModel():
                 "Target-distance optimization failed from all restart points."
             )
 
-        return best_x
+        repaired_best_x = self._repair_normalized_candidate_for_true_zero(best_x)
+
+        # Store both values for transparent debugging/reporting.
+        self.last_raw_optimizer_candidate = best_x
+        self.last_repaired_optimizer_candidate = repaired_best_x
+        self.last_optimizer_objective = best_objective
+
+        return repaired_best_x
     
     def _update_prediction_grid_for_plotting(self, grid_size=100):
         '''
@@ -444,6 +692,11 @@ class OptimizationModel():
         0-1 reagent space for the recipe whose predicted lambda max is closest
         to the target value.
 
+        Optimizer candidates are repaired according to the Auto true-zero
+        transfer rule before being scored and returned. This prevents the
+        optimizer from treating the physically forbidden 0-5 uL transfer region
+        as a meaningful continuous search space.
+
         For 2D experiments, this also updates self.predictions so the existing
         2D GPR heatmap can still be generated by the controller. For higher
         dimensional experiments, self.predictions is set to None because the
@@ -459,6 +712,15 @@ class OptimizationModel():
         predicted_lambda_max = self._predict_lambda_max_nm(best_x)
 
         self._update_prediction_grid_for_plotting()
+
+        raw_x = getattr(self, 'last_raw_optimizer_candidate', None)
+        repaired_x = getattr(self, 'last_repaired_optimizer_candidate', best_x)
+
+        if raw_x is not None and not np.allclose(raw_x, repaired_x, rtol=0, atol=1e-9):
+            print(
+                f"<<optimizer>> true-zero repaired optimizer candidate "
+                f"from {raw_x} to {repaired_x}"
+            )
 
         print(
             f"<<optimizer>> suggested normalized recipe {best_x} "
