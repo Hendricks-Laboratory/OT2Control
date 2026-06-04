@@ -2578,6 +2578,10 @@ class AutoContr(Controller):
         # The list of recipes is denormalized with different maximums for each reagent
         X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False)
 
+        # Keep a copy of the original denormalized design so the debug export
+        # can show exactly what true-zero repair changed.
+        X_Initial_Denormalized_before_repair = X_Initial_Denormalized.copy()
+
         # Apply Auto true-zero transfer behavior before duplicating/running
         # recipes. This ensures the model is later trained on the same
         # physically executable recipes that the robot actually ran.
@@ -2586,9 +2590,8 @@ class AutoContr(Controller):
         )
 
         self._export_auto_batch_recipe_design(
-
-            X_Initial_Denormalized,
-
+            repaired_recipes=X_Initial_Denormalized,
+            original_recipes=X_Initial_Denormalized_before_repair,
             batch_label=f"batch_{self.batch_num}"
         )
 
@@ -2676,6 +2679,10 @@ class AutoContr(Controller):
             # Denormalize the recipe before sending it to the robot.
             X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
 
+            # Keep a copy of the original denormalized suggestion so the debug
+            # export can show exactly what true-zero repair changed.
+            X_new_Denormalized_before_repair = X_new_Denormalized.copy()
+
             # Apply Auto true-zero transfer behavior before duplicating/running
             # recipes. The optimizer may suggest values that correspond to
             # impossible 0-5 uL transfers; the model and robot should both use
@@ -2685,9 +2692,8 @@ class AutoContr(Controller):
             )
 
             self._export_auto_batch_recipe_design(
-
-                X_new_Denormalized,
-
+                repaired_recipes=X_new_Denormalized,
+                original_recipes=X_new_Denormalized_before_repair,
                 batch_label=f"batch_{self.batch_num}"
             )
 
@@ -3252,54 +3258,126 @@ class AutoContr(Controller):
 
         return repaired_recipes
 
-    def _export_auto_batch_recipe_design(self, recipes, batch_label=None):
+    def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
         '''
-        Exports the unique repaired recipe design for an Auto batch before
-        replicate wells are created.
+        Exports the unique Auto recipe design for a batch before replicate wells
+        are created.
 
-        This file is intended for debugging and auditability. It records the
-        actual repaired recipe concentrations that Auto mode intends to run,
-        along with normalized model-space values and expected transfer volumes.
+        This file is intended for debugging and auditability. It records:
+            - the original recipe concentrations suggested by the model/design
+            - the repaired recipe concentrations after true-zero transfer repair
+            - original and repaired normalized model-space values
+            - original and repaired transfer volumes
+            - whether each reagent was adjusted by the true-zero repair rule
+            - simple spacing metrics for checking maximin design quality
 
         params:
-            np.ndarray recipes:
+            np.ndarray repaired_recipes:
                 Repaired denormalized recipe concentrations with shape:
                     n_unique_recipes x n_variable_reagents
+
+            np.ndarray original_recipes:
+                Optional original denormalized recipe concentrations before
+                true-zero repair. If not provided, repaired_recipes are used as
+                the original values.
 
             str batch_label:
                 Optional label for the exported file name. If not provided,
                 the current self.batch_num is used.
         '''
-        recipes = np.asarray(recipes, dtype=float)
+        repaired_recipes = np.asarray(repaired_recipes, dtype=float)
 
-        if recipes.ndim == 1:
-            recipes = recipes.reshape(1, -1)
+        if repaired_recipes.ndim == 1:
+            repaired_recipes = repaired_recipes.reshape(1, -1)
+
+        if original_recipes is None:
+            original_recipes = repaired_recipes.copy()
+        else:
+            original_recipes = np.asarray(original_recipes, dtype=float)
+
+            if original_recipes.ndim == 1:
+                original_recipes = original_recipes.reshape(1, -1)
+
+        if original_recipes.shape != repaired_recipes.shape:
+            raise ValueError(
+                "original_recipes and repaired_recipes must have the same shape "
+                "for Auto recipe design export."
+            )
 
         if batch_label is None:
             batch_label = f"batch_{self.batch_num}"
 
         total_volume = float(self.template_meta['tot_vol'])
 
-        export_df = pd.DataFrame()
-        export_df['batch_num'] = self.batch_num
-        export_df['recipe_index'] = range(recipes.shape[0])
-
-        normalized_recipes = self.Normalize_Denormalize_Recipes(
-            recipes,
+        original_normalized = self.Normalize_Denormalize_Recipes(
+            original_recipes,
             normalize_flag=True
         )
+
+        repaired_normalized = self.Normalize_Denormalize_Recipes(
+            repaired_recipes,
+            normalize_flag=True
+        )
+
+        export_df = pd.DataFrame()
+        export_df['batch_num'] = self.batch_num
+        export_df['recipe_index'] = range(repaired_recipes.shape[0])
 
         for reagent_i, reagent_name in enumerate(self.variable_reagents):
             stock_conc = float(self.max_conc[reagent_i])
 
-            export_df[f'{reagent_name}_concentration'] = recipes[:, reagent_i]
-            export_df[f'{reagent_name}_normalized'] = normalized_recipes[:, reagent_i]
+            original_transfer = original_recipes[:, reagent_i] * total_volume / stock_conc
+            repaired_transfer = repaired_recipes[:, reagent_i] * total_volume / stock_conc
 
-            # This mirrors the concentration-to-volume relationship used later
-            # when the protocol dataframe is converted into robot transfers.
-            export_df[f'{reagent_name}_transfer_uL'] = (
-                recipes[:, reagent_i] * total_volume / stock_conc
+            export_df[f'{reagent_name}_original_concentration'] = original_recipes[:, reagent_i]
+            export_df[f'{reagent_name}_repaired_concentration'] = repaired_recipes[:, reagent_i]
+
+            export_df[f'{reagent_name}_original_normalized'] = original_normalized[:, reagent_i]
+            export_df[f'{reagent_name}_repaired_normalized'] = repaired_normalized[:, reagent_i]
+
+            export_df[f'{reagent_name}_original_transfer_uL'] = original_transfer
+            export_df[f'{reagent_name}_repaired_transfer_uL'] = repaired_transfer
+
+            export_df[f'{reagent_name}_true_zero_adjusted'] = ~np.isclose(
+                original_transfer,
+                repaired_transfer,
+                rtol=0,
+                atol=1e-9
             )
+
+            # After true-zero repair, every transfer should be either effectively
+            # zero or at least the minimum allowed transfer volume.
+            export_df[f'{reagent_name}_true_zero_valid'] = (
+                np.isclose(repaired_transfer, 0.0, rtol=0, atol=1e-9) |
+                (repaired_transfer >= 5.0 - 1e-9)
+            )
+
+        # Spacing metrics are calculated in repaired normalized model space,
+        # because these are the actual design points used by the model/robot.
+        if repaired_normalized.shape[0] < 2:
+            nearest_neighbor_distances = np.zeros(repaired_normalized.shape[0])
+            batch_min_pairwise_distance = 0.0
+        else:
+            nearest_neighbor_distances = []
+
+            for i in range(repaired_normalized.shape[0]):
+                distances = []
+
+                for j in range(repaired_normalized.shape[0]):
+                    if i == j:
+                        continue
+
+                    distances.append(
+                        np.linalg.norm(repaired_normalized[i] - repaired_normalized[j])
+                    )
+
+                nearest_neighbor_distances.append(min(distances))
+
+            nearest_neighbor_distances = np.asarray(nearest_neighbor_distances, dtype=float)
+            batch_min_pairwise_distance = float(nearest_neighbor_distances.min())
+
+        export_df['nearest_neighbor_distance_repaired_normalized'] = nearest_neighbor_distances
+        export_df['batch_min_pairwise_distance_repaired_normalized'] = batch_min_pairwise_distance
 
         export_path = os.path.join(
             self.out_path,
@@ -3309,7 +3387,7 @@ class AutoContr(Controller):
 
         export_df.to_csv(export_path, index=False)
         print(f"<<controller>> exported Auto recipe design to {export_path}")
-
+    
     def _generate_wellname(self):
         '''
         returns:  
