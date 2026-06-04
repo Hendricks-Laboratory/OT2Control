@@ -529,6 +529,11 @@ class OptimizationModel():
         returns the repaired candidate so the controller receives the same
         physically executable recipe that was scored by the optimizer.
 
+        Because true-zero repair creates flat or discontinuous regions around
+        the 0-5 uL transfer boundary, SciPy may occasionally return a finite
+        useful result even when result.success is False. In that case, the best
+        finite result is accepted with a warning instead of failing the run.
+
         Debug attributes are stored so getNextReaction() can report whether the
         optimizer's raw candidate was changed by true-zero repair.
 
@@ -546,6 +551,8 @@ class OptimizationModel():
 
         best_x = None
         best_objective = np.inf
+        best_result_success = False
+        best_result_message = None
 
         # Include the center point as a deterministic restart so every run has
         # at least one stable starting location.
@@ -564,13 +571,24 @@ class OptimizationModel():
                 method='L-BFGS-B'
             )
 
-            if result.success and result.fun < best_objective:
+            # Accept the best finite result, even if SciPy reports non-success.
+            # This is intentional because the true-zero repair rule can make the
+            # objective less smooth near transfer-volume thresholds.
+            if np.isfinite(result.fun) and result.fun < best_objective:
                 best_objective = float(result.fun)
                 best_x = np.clip(result.x, 0.0, 1.0)
+                best_result_success = bool(result.success)
+                best_result_message = result.message
 
         if best_x is None:
             raise RuntimeError(
                 "Target-distance optimization failed from all restart points."
+            )
+
+        if not best_result_success:
+            print(
+                "<<optimizer>> warning: using best finite optimizer result "
+                f"despite scipy status: {best_result_message}"
             )
 
         repaired_best_x = self._repair_normalized_candidate_for_true_zero(best_x)
