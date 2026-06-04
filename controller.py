@@ -1269,11 +1269,16 @@ class Controller(ABC):
             self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
         elif plot_type == '2D_GPR':
             # The initial seed batch can execute a plot row before the optimizer
-            # has generated a prediction grid. In that case, skip the GPR plot
-            # instead of failing the run. Later Auto batches can plot once
-            # model.predictions has been populated by getNextReaction().
-            if model is None or not hasattr(model, 'predictions'):
-                print("<<controller>> skipping 2D_GPR plot because model predictions are not available yet")
+            # has generated a prediction grid. Higher-dimensional experiments
+            # also cannot use the existing 2D heatmap, so skip cleanly instead
+            # of failing the run.
+            if (
+                model is None
+                or not hasattr(model, 'predictions')
+                or model.predictions is None
+                or len(self.variable_reagents) != 2
+            ):
+                print("<<controller>> skipping 2D_GPR plot because 2D model predictions are not available")
                 return
 
             self.plot_2D_GPR(model)

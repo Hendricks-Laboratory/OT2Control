@@ -3,6 +3,7 @@ import GPyOpt
 from pyDOE import lhs
 from GPyOpt import Design_space
 import GPy
+from scipy.optimize import minimize
 
 import itertools
 
@@ -215,82 +216,256 @@ class OptimizationModel():
 
         return initial_design
 
+    def _get_dimension(self):
+        '''
+        Gets the number of variable reagent dimensions in the current Auto
+        optimization problem.
+
+        returns:
+            int:
+                Number of variable reagents being optimized.
+        '''
+        return len(self.variable_reagents)
+    
+    def _predict_lambda_max_nm(self, x):
+        '''
+        Predicts lambda max in nanometers for one normalized recipe point.
+
+        The Gaussian process model is trained on normalized Y values where:
+            0 corresponds to 300 nm
+            1 corresponds to 900 nm
+
+        This helper converts the model prediction back into nanometers so the
+        optimizer objective can compare predictions directly to target_value.
+
+        params:
+            np.ndarray x:
+                One normalized recipe point with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            float:
+                Predicted lambda max in nanometers.
+        '''
+        x = np.asarray(x, dtype=float).reshape(1, self._get_dimension())
+
+        normalized_prediction = self.optimizer.model.predict(x)[0]
+        normalized_prediction = float(normalized_prediction.flatten()[0])
+
+        return normalized_prediction * 600.0 + 300.0
+
+    def _target_distance_objective(self, x):
+        '''
+        Computes the target-distance objective for one normalized recipe point.
+
+        The objective is the squared distance between the model-predicted lambda
+        max and the target lambda max. Lower values are better.
+
+        This preserves the current exploitation behavior of choosing the recipe
+        whose predicted lambda max is closest to the target.
+
+        params:
+            np.ndarray x:
+                One normalized recipe point with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            float:
+                Squared error between predicted lambda max and target_value.
+        '''
+        predicted_lambda_max = self._predict_lambda_max_nm(x)
+        target_error = predicted_lambda_max - self.target_value
+
+        return float(target_error ** 2)
+    
+    def _optimize_target_distance(self, n_restarts=50):
+        '''
+        Finds the normalized recipe point predicted to be closest to the target
+        lambda max.
+
+        This replaces the old brute-force 2D grid search with a continuous,
+        dimension-general optimization. Multiple random restarts are used to
+        reduce the chance of getting stuck in a poor local optimum.
+
+        params:
+            int n_restarts:
+                Number of random starting points to try.
+
+        returns:
+            np.ndarray:
+                Best normalized recipe point found, with shape:
+                    n_dimensions
+        '''
+        n_dimensions = self._get_dimension()
+        bounds = [(0.0, 1.0)] * n_dimensions
+
+        best_x = None
+        best_objective = np.inf
+
+        # Include the center point as a deterministic restart so every run has
+        # at least one stable starting location.
+        starting_points = [np.full(n_dimensions, 0.5)]
+
+        # Add random restarts to improve global search behavior.
+        starting_points.extend(
+            np.random.random((n_restarts, n_dimensions))
+        )
+
+        for x0 in starting_points:
+            result = minimize(
+                fun=self._target_distance_objective,
+                x0=x0,
+                bounds=bounds,
+                method='L-BFGS-B'
+            )
+
+            if result.success and result.fun < best_objective:
+                best_objective = float(result.fun)
+                best_x = np.clip(result.x, 0.0, 1.0)
+
+        if best_x is None:
+            raise RuntimeError(
+                "Target-distance optimization failed from all restart points."
+            )
+
+        return best_x
+    
+    def _update_prediction_grid_for_plotting(self, grid_size=100):
+        '''
+        Updates self.predictions for the existing 2D GPR heatmap.
+
+        The controller's plot_2D_GPR() function expects self.predictions to be
+        a grid_size x grid_size array of predicted lambda max values in nm.
+        That visualization only makes sense for exactly two variable reagents.
+
+        For experiments with more than two variable reagents, this method sets
+        self.predictions to None so the controller can skip the 2D heatmap
+        cleanly.
+
+        params:
+            int grid_size:
+                Number of grid points per axis for the 2D prediction heatmap.
+        '''
+        if self._get_dimension() != 2:
+            self.predictions = None
+            return
+
+        grid_x, grid_y = np.meshgrid(
+            np.linspace(0.0, 1.0, grid_size),
+            np.linspace(0.0, 1.0, grid_size)
+        )
+
+        grid_points = np.stack(
+            [grid_x.ravel(), grid_y.ravel()],
+            axis=-1
+        )
+
+        normalized_predictions = self.optimizer.model.predict(grid_points)[0]
+
+        self.predictions = (
+            normalized_predictions
+            .flatten()
+            .reshape(grid_size, grid_size)
+            .T * 600.0 + 300.0
+        )
+
     def initialize_optimizer(self, X_init, Y_init):
         '''
-        Initializes the Gaussian Process model and other components for Bayesian Optimization with initial experimental data.
+        Initializes the Gaussian Process model and other components for
+        Bayesian Optimization with initial experimental data.
+
         params:
-        np.ndarray X_init: The initial parameter values for the experiments.
-        np.ndarray Y_init: The initial objective function values corresponding to X_init.
+            np.ndarray X_init:
+                Initial recipe points in normalized model space. Shape:
+                    n_observations x n_variable_reagents
+
+            np.ndarray Y_init:
+                Initial normalized objective values corresponding to X_init.
+                Shape:
+                    n_observations x 1
         '''
         def f(x):
-            return abs(sum(x)-(self.target_value*3))
+            return abs(sum(x) - (self.target_value * 3))
 
-        
-        kernel = GPy.kern.sde_Matern32(input_dim=2, variance=1.0, lengthscale=1, ARD=False, active_dims=None, name='Mat32')
-        self.gp_model = GPyOpt.models.GPModel(kernel, noise_var=1e-4, optimize_restarts=0,verbose=False)
+        input_dim = self._get_dimension()
+
+        kernel = GPy.kern.sde_Matern32(
+            input_dim=input_dim,
+            variance=1.0,
+            lengthscale=1,
+            ARD=False,
+            active_dims=None,
+            name='Mat32'
+        )
+
+        self.gp_model = GPyOpt.models.GPModel(
+            kernel,
+            noise_var=1e-4,
+            optimize_restarts=0,
+            verbose=False
+        )
+
         self.gp_model.updateModel(X_init, Y_init, None, None)
-        self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(self.space, optimizer='lbfgs')
-        self.acquisition = GPyOpt.acquisitions.AcquisitionEI(self.gp_model, self.space, self.acq_optimizer)
+
+        self.acq_optimizer = GPyOpt.optimization.acquisition_optimizer.AcquisitionOptimizer(
+            self.space,
+            optimizer='lbfgs'
+        )
+
+        self.acquisition = GPyOpt.acquisitions.AcquisitionEI(
+            self.gp_model,
+            self.space,
+            self.acq_optimizer
+        )
+
         self.evaluator = GPyOpt.core.evaluators.Sequential(self.acquisition)
         objective = GPyOpt.core.task.objective.SingleObjective(f)
 
         self.optimizer = GPyOpt.methods.ModularBayesianOptimization(
-            self.gp_model, self.space, objective, self.acquisition, self.evaluator, X_init, Y_init)
+            self.gp_model,
+            self.space,
+            objective,
+            self.acquisition,
+            self.evaluator,
+            X_init,
+            Y_init
+        )
         
-    def getNextReaction(self, num_points=100):
+    def getNextReaction(self):
         '''
-        Suggests the next locations (parameter sets) for experimentation based on the current acquisition function.
+        Suggests the next normalized recipe point for experimentation.
+
+        This method replaces the old brute-force 2D grid search with a
+        dimension-general continuous optimizer. The optimizer searches normalized
+        0-1 reagent space for the recipe whose predicted lambda max is closest
+        to the target value.
+
+        For 2D experiments, this also updates self.predictions so the existing
+        2D GPR heatmap can still be generated by the controller. For higher
+        dimensional experiments, self.predictions is set to None because the
+        existing heatmap is only valid for two variable reagents.
+
         returns:
-        np.ndarray: The suggested parameters for the next experiments.
-        max_conc: The maximum concentration of the variable reagents.
+            list[np.ndarray]:
+                A single suggested normalized recipe point wrapped in a list.
+                This preserves the controller-facing return format:
+                    [array([...])]
         '''
+        best_x = self._optimize_target_distance()
+        predicted_lambda_max = self._predict_lambda_max_nm(best_x)
 
-        predictions = []
-        stdev = []
-        reagent_combinations = 10000
-        num_steps = math.floor(reagent_combinations ** (1 / len(self.variable_reagents)))
-        
-        def denormalize(x_normalized, min_val, max_val):
-            return x_normalized * (max_val - min_val) + min_val
-   
-        #calculates the cartesian product that creates all possible recipes of two reagents (normalized)
-        #TODO for more dimensions these two lines must be redone
-        grid_x, grid_y = np.meshgrid(np.linspace(0,1,num_points),np.linspace(0,1,num_points))
-        concentrations = np.stack([grid_x.ravel(), grid_y.ravel()], axis=-1)
+        self._update_prediction_grid_for_plotting()
 
-        #for every possible recipes stored in concentration a prediction and a standard devation is calculated by gpr
-        for i in range(len(concentrations)):
-            pred, std = self.gp_model.predict(np.array([concentrations[i]]))
-            predictions.append(pred)
-            stdev.append(std)
+        print(
+            f"<<optimizer>> suggested normalized recipe {best_x} "
+            f"with predicted lambda max {predicted_lambda_max:.4f} nm"
+        )
 
-        #this variable is made for accessability during plotting (Controller: plot_2d_gpr)
-        self.predictions = (np.concatenate(predictions).flatten().reshape(100,100).T*600 + 300) 
-
-        #the gpr predictions and standard devations are normalized, here we denormalize them to find the next reaction to run
-        predictions = denormalize(np.array(predictions).flatten(),300, 900)
-        stdev = np.array(stdev).flatten()*(600)
-        
-        #for exploration we find the maximum error and choose the reaction that corresponds to it 
-        maximum = np.argmax(stdev)
-        explore = concentrations[maximum]
-        print(f"The maximum uncertainty {maximum} occurs at low")
-        
-        #for exploitation we find the closest lambda max and the reaction that corresponds to it
-        closest = np.argmin(np.abs(predictions - self.target_value))
-        exploit = concentrations[closest]
-        print(f"{exploit} results in a predicted lambda max of {predictions[closest]} nm")
-        
-        #if the uncertainty everywhere is bellow a threashold we let the robot exploit, otherwise we explore
-        return [exploit]
-    
-        # TODO: Maximum number of rounds of exploration is a variable that can be put in header parameters
-        if all(unc < 100 for unc in stdev):
-            print("Exploiting!!!")
-            return [exploit]
-        else:
-            print("Exploring!!!")
-            return[explore]
+        return [best_x]
 
 
     def update_experiment_data(self, X_all, Y_all, X_new, Y_new):
