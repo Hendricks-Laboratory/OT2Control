@@ -251,7 +251,7 @@ class OptimizationModel():
         '''
         x = np.asarray(x, dtype=float).reshape(1, self._get_dimension())
 
-        normalized_prediction = self.optimizer.model.predict(x)[0]
+        normalized_prediction = self.gp_model.predict(x)[0]
         normalized_prediction = float(normalized_prediction.flatten()[0])
 
         return normalized_prediction * 600.0 + 300.0
@@ -364,7 +364,7 @@ class OptimizationModel():
             axis=-1
         )
 
-        normalized_predictions = self.optimizer.model.predict(grid_points)[0]
+        normalized_predictions = self.gp_model.predict(grid_points)[0]
 
         self.predictions = (
             normalized_predictions
