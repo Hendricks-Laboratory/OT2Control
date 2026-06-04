@@ -622,9 +622,22 @@ class Controller(ABC):
             assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
         self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
                 float(header_dict['dilution_vol']))
+        
         self.robo_params['target'] = float(header_dict['target'])
-        self.robo_params['max_iterations'] = float(header_dict['max_iterations'])
+        self.robo_params['max_iterations'] = int(header_dict['max_iterations'])
         self.robo_params['initial_data'] = int(header_dict['initial_data'])
+
+        # Optional Auto setting. Defaults to 3 replicates for backwards
+        # compatibility with older Header sheets that do not include this row.
+        if 'num_duplicates' in header_dict and str(header_dict['num_duplicates']).strip() != '':
+            self.robo_params['num_duplicates'] = int(header_dict['num_duplicates'])
+        else:
+            self.robo_params['num_duplicates'] = 3
+
+        if self.robo_params['num_duplicates'] < 1:
+            raise ValueError(
+                "Header value num_duplicates must be at least 1."
+            )
 
     def getModelInfo(self): 
         return self.robo_params
@@ -2338,7 +2351,8 @@ class AutoContr(Controller):
         #print(f'reagent_order: {self.reagent_order}')
         self._clean_template() #moves template data out of the data for rxn_df
         self.experiment_data = pd.DataFrame(columns=[str(reagent) for reagent in self.variable_reagents] + ["Experiment_result"])
-        self.num_duplicates = num_duplicates
+        self.num_duplicates = int(self.robo_params.get('num_duplicates', num_duplicates))
+        print(f"<<controller>> using {self.num_duplicates} replicate wells per unique Auto recipe")
         self.max_conc = list(self.get_max_conc().values())
         self.min_conc = list(self.get_min_conc().values())
     
