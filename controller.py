@@ -3226,7 +3226,7 @@ class AutoContr(Controller):
                     repaired_recipes[recipe_i, reagent_i] = 0.0
                     continue
 
-                stock_conc = float(self.max_conc[reagent_i])
+                stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
 
                 if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
                     raise ValueError(
@@ -3258,6 +3258,56 @@ class AutoContr(Controller):
 
         return repaired_recipes
 
+    def _get_variable_reagent_stock_conc(self, reagent_name):
+        '''
+        Gets the stock concentration currently available on the deck for a
+        variable reagent.
+
+        Reagent containers are indexed by names like:
+            silver_nitrateC0.375
+            potassium_bromideC0.01
+
+        This helper matches the base reagent name before the concentration
+        marker and returns the deck concentration from reagent_df.
+
+        params:
+            str reagent_name:
+                Base reagent name, such as 'silver_nitrate'.
+
+        returns:
+            float:
+                Stock concentration of the reagent on the deck.
+        '''
+        reagent_df = self.robo_params['reagent_df']
+
+        matching_concs = []
+
+        for reagent_container_name in reagent_df.index:
+            reagent_container_name = str(reagent_container_name)
+
+            if 'C' in reagent_container_name:
+                base_name = reagent_container_name.split('C')[0]
+            else:
+                base_name = reagent_container_name
+
+            if base_name == reagent_name:
+                matching_concs.append(float(reagent_df.loc[reagent_container_name, 'conc']))
+
+        if len(matching_concs) == 0:
+            raise ValueError(
+                f"Could not find stock concentration for variable reagent "
+                f"{reagent_name} in reagent_df."
+            )
+
+        if len(matching_concs) > 1:
+            raise ValueError(
+                f"Found multiple stock concentrations for variable reagent "
+                f"{reagent_name}: {matching_concs}. The true-zero debug export "
+                f"currently expects one stock concentration per variable reagent."
+            )
+
+        return matching_concs[0]
+
     def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
         '''
         Exports the unique Auto recipe design for a batch before replicate wells
@@ -3285,7 +3335,7 @@ class AutoContr(Controller):
                 Optional label for the exported file name. If not provided,
                 the current self.batch_num is used.
         '''
-        repaired_recipes = np.asarray(repaired_recipes, dtype=float)
+        repaired_recipes = np.array(repaired_recipes, dtype=float, copy=True)
 
         if repaired_recipes.ndim == 1:
             repaired_recipes = repaired_recipes.reshape(1, -1)
@@ -3293,7 +3343,7 @@ class AutoContr(Controller):
         if original_recipes is None:
             original_recipes = repaired_recipes.copy()
         else:
-            original_recipes = np.asarray(original_recipes, dtype=float)
+            original_recipes = np.array(original_recipes, dtype=float, copy=True)
 
             if original_recipes.ndim == 1:
                 original_recipes = original_recipes.reshape(1, -1)
@@ -3310,21 +3360,22 @@ class AutoContr(Controller):
         total_volume = float(self.template_meta['tot_vol'])
 
         original_normalized = self.Normalize_Denormalize_Recipes(
-            original_recipes,
+            original_recipes.copy(),
             normalize_flag=True
         )
 
         repaired_normalized = self.Normalize_Denormalize_Recipes(
-            repaired_recipes,
+            repaired_recipes.copy(),
             normalize_flag=True
         )
-
-        export_df = pd.DataFrame()
-        export_df['batch_num'] = self.batch_num
-        export_df['recipe_index'] = range(repaired_recipes.shape[0])
+        
+        export_df = pd.DataFrame({
+            'batch_num': [self.batch_num] * repaired_recipes.shape[0],
+            'recipe_index': range(repaired_recipes.shape[0])
+        })
 
         for reagent_i, reagent_name in enumerate(self.variable_reagents):
-            stock_conc = float(self.max_conc[reagent_i])
+            stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
 
             original_transfer = original_recipes[:, reagent_i] * total_volume / stock_conc
             repaired_transfer = repaired_recipes[:, reagent_i] * total_volume / stock_conc
