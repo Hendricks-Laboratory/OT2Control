@@ -2611,7 +2611,7 @@ class AutoContr(Controller):
 
         print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
-        # Tripplicates each recipes to be run on the robot
+        # Duplicate each unique recipe according to the Header num_duplicates setting.
         recipes = self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)
 
         print(f"<<controller>> preparing {recipes.shape[0]} recipe wells with {recipes.shape[1]} variable reagents")
@@ -2619,7 +2619,7 @@ class AutoContr(Controller):
         # Generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
         
-        # Plan and execute a reaction with triplicates
+        # Plan and execute a reaction according to the Header num_duplicates setting.
         self._create_samples(wellnames, recipes, model)
 
         # Pull in the scan data
@@ -2667,8 +2667,13 @@ class AutoContr(Controller):
         # Normalize the experimental lambda maxes to pass to the gpr model
         Y_initial_Normalized = normalize(np.array(Y_initial),300,900).reshape(-1,1)
         
-        # Normalize recipe concentrations to pass to the gpr model
-        X_initial_normalized = self.Normalize_Denormalize_Recipes(recipes, normalize_flag=True)
+        # Normalize recipe concentrations to pass to the gpr model.
+        # Use a copy because Normalize_Denormalize_Recipes mutates its input,
+        # and recipes should remain denormalized for experiment_data export.
+        X_initial_normalized = self.Normalize_Denormalize_Recipes(
+            recipes.copy(),
+            normalize_flag=True
+        )
 
         # Create the model with initial normalized data
         model.initialize_optimizer(X_initial_normalized, Y_initial_Normalized)
@@ -2732,11 +2737,16 @@ class AutoContr(Controller):
             Y_new = find_max(scan_data)
             print(f"Lambda Maxes: {Y_new}")
 
-            # Normalize the lambda maxes and recipes to pass to the model
+            # Normalize the lambda maxes and recipes to pass to the model.
+            # Use a copy because Normalize_Denormalize_Recipes mutates its input,
+            # and recipes should remain denormalized for experiment_data export.
             Y_new_normalized = normalize(np.array(Y_new),300,900).reshape(-1,1)
-            X_new_normalized = self.Normalize_Denormalize_Recipes(recipes, normalize_flag=True)
+            X_new_normalized = self.Normalize_Denormalize_Recipes(
+                recipes.copy(),
+                normalize_flag=True
+            )
 
-            # Update the model with the three new recipes and lambda maxes (normalized)
+            # Update the model with the new recipes and lambda maxes (normalized)
             model.update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized)
 
             # Add new denormalized data to the controller experiment_data
