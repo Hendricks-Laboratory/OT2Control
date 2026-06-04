@@ -2585,6 +2585,13 @@ class AutoContr(Controller):
             X_Initial_Denormalized
         )
 
+        self._export_auto_batch_recipe_design(
+
+            X_Initial_Denormalized,
+
+            batch_label=f"batch_{self.batch_num}"
+        )
+
         print(f"X Initial Denormalized: {X_Initial_Denormalized}")
 
         # Tripplicates each recipes to be run on the robot
@@ -2675,6 +2682,13 @@ class AutoContr(Controller):
             # the repaired executable recipe.
             X_new_Denormalized = self._apply_true_zero_transfer_rule_to_recipes(
                 X_new_Denormalized
+            )
+
+            self._export_auto_batch_recipe_design(
+
+                X_new_Denormalized,
+
+                batch_label=f"batch_{self.batch_num}"
             )
 
             # Duplicate the repaired recipe to create replicate wells.
@@ -3237,6 +3251,64 @@ class AutoContr(Controller):
                 repaired_recipes[recipe_i, reagent_i] = repaired_conc
 
         return repaired_recipes
+
+    def _export_auto_batch_recipe_design(self, recipes, batch_label=None):
+        '''
+        Exports the unique repaired recipe design for an Auto batch before
+        replicate wells are created.
+
+        This file is intended for debugging and auditability. It records the
+        actual repaired recipe concentrations that Auto mode intends to run,
+        along with normalized model-space values and expected transfer volumes.
+
+        params:
+            np.ndarray recipes:
+                Repaired denormalized recipe concentrations with shape:
+                    n_unique_recipes x n_variable_reagents
+
+            str batch_label:
+                Optional label for the exported file name. If not provided,
+                the current self.batch_num is used.
+        '''
+        recipes = np.asarray(recipes, dtype=float)
+
+        if recipes.ndim == 1:
+            recipes = recipes.reshape(1, -1)
+
+        if batch_label is None:
+            batch_label = f"batch_{self.batch_num}"
+
+        total_volume = float(self.template_meta['tot_vol'])
+
+        export_df = pd.DataFrame()
+        export_df['batch_num'] = self.batch_num
+        export_df['recipe_index'] = range(recipes.shape[0])
+
+        normalized_recipes = self.Normalize_Denormalize_Recipes(
+            recipes,
+            normalize_flag=True
+        )
+
+        for reagent_i, reagent_name in enumerate(self.variable_reagents):
+            stock_conc = float(self.max_conc[reagent_i])
+
+            export_df[f'{reagent_name}_concentration'] = recipes[:, reagent_i]
+            export_df[f'{reagent_name}_normalized'] = normalized_recipes[:, reagent_i]
+
+            # This mirrors the concentration-to-volume relationship used later
+            # when the protocol dataframe is converted into robot transfers.
+            export_df[f'{reagent_name}_transfer_uL'] = (
+                recipes[:, reagent_i] * total_volume / stock_conc
+            )
+
+        export_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            f'auto_recipe_design_{batch_label}.csv'
+        )
+
+        export_df.to_csv(export_path, index=False)
+        print(f"<<controller>> exported Auto recipe design to {export_path}")
 
     def _generate_wellname(self):
         '''
