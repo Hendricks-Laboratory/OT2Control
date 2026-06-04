@@ -434,30 +434,49 @@ class Controller(ABC):
 
     def get_min_conc(self):
         """
-        Handles obtaining the minimum concentration of each reagent based on 5 uL of the concentration on deck
-        Input: None
-        Output: dictionary of reagent names (key) and their minimum concentrations (values)
-        TODO: how to deal with zero concentrations
-        """
+        Gets the minimum target concentration for each variable reagent.
 
-        # Grabbing concentrations from the google sheet
-        conc = self.robo_params["reagent_df"]
-        reagent_names = conc.index
-        
-        # Fore each reagent parsing the concentration out of it's concatinated form (potassium_bromideC0.01) grabbing everything after the C
+        By default, Auto uses the 5 uL-equivalent concentration as the lower
+        bound for each variable reagent. This keeps the optimizer inside the
+        normal continuous pipetting region.
+
+        If Header allow_true_zero is enabled, the lower bound becomes 0 for
+        each variable reagent. The true-zero repair logic then handles the
+        forbidden 0-5 uL transfer region by mapping candidates to either true
+        zero or the minimum executable transfer volume.
+
+        Input:
+            None
+
+        Output:
+            dict:
+                Reagent names as keys and minimum target concentrations as values.
+        """
         min_concs = {}
+
+        if self.robo_params.get('allow_true_zero', False):
+            for var_reagent in self.get_variable_reagents():
+                min_concs[var_reagent] = 0.0
+
+            print(
+                "<<controller>> true-zero search enabled: "
+                "variable reagent lower bounds set to 0"
+            )
+            return min_concs
+
+        # Default behavior: use the concentration produced by a 5 uL transfer
+        # from the stock reagent into the template reaction volume.
         for var_reagent in self.get_variable_reagents():
-            prefix = var_reagent
-            regex = f"^{prefix}.*"
-            # Filter the list using the regex
-            matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
-            var_reagent_conc = self._get_conc(matching_chemicals[0])
-            
-            # Finding the concentration that results from 5uL of the concentration on deck
-            min_conc = (var_reagent_conc * 5) / 200
-            
-            # Adding the key value pair to the dictionary
+            stock_conc = self._get_variable_reagent_stock_conc(var_reagent)
+            total_volume = float(self.template_meta['tot_vol'])
+
+            min_conc = stock_conc * 5.0 / total_volume
             min_concs[var_reagent] = min_conc
+
+        print(
+            "<<controller>> true-zero search disabled: "
+            "variable reagent lower bounds use 5 uL-equivalent concentrations"
+        )
         return min_concs
     
     def get_max_conc(self):
@@ -652,6 +671,18 @@ class Controller(ABC):
                 "Header value num_duplicates must be at least 1."
             )
 
+        # Optional Auto setting. Defaults to False for backwards compatibility.
+        # Values are normalized so inputs like true, TRUE, TruE, yes, y, and 1
+        # all enable true-zero search.
+        allow_true_zero_value = str(header_dict.get('allow_true_zero', '')).strip().lower()
+
+        self.robo_params['allow_true_zero'] = allow_true_zero_value in [
+            '1',
+            'true',
+            'yes',
+            'y'
+        ]
+    
     def getModelInfo(self): 
         return self.robo_params
 
