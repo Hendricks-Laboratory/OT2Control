@@ -3396,14 +3396,14 @@ class AutoContr(Controller):
         '''
         Gets the fixed reagent transfer volumes used in each Auto reaction.
 
-        Fixed reagent volumes come from the reaction template and are added to
-        every generated Auto well. These volumes reduce the remaining space
-        available for variable reagents and water top-off.
+        Fixed reagent volumes come from transfer rows in the reaction template.
+        This helper searches for each fixed reagent by reagent name instead of
+        relying on hardcoded row/column positions.
 
-        This helper intentionally validates that every fixed reagent has a
-        usable template volume. Once volume feasibility checks become safety
-        critical, silently missing a fixed reagent volume could allow an
-        invalid recipe to pass.
+        A fixed reagent should have one clear nonzero template transfer volume.
+        If the fixed volume cannot be found, is blank, or is ambiguous, this
+        helper raises an error instead of silently returning an incomplete or
+        incorrect volume balance.
 
         returns:
             dict:
@@ -3412,28 +3412,74 @@ class AutoContr(Controller):
         '''
         fixed_reagent_volumes = {}
 
-        # This mirrors the existing template parsing used by get_max_conc().
-        # The validation below makes the behavior safer before this helper is
-        # used for volume-feasibility checks and robot-execution hard stops.
-        df_sliced = self.rxn_df.iloc[0:6, 10:12]
-        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))
+        candidate_volume_columns = []
+
+        # Prefer the explicit Template column if present.
+        if 'Template' in self.rxn_df.columns:
+            candidate_volume_columns.append('Template')
+
+        # Also inspect product/template columns used by the controller, while
+        # avoiding duplicates if Template is already included.
+        for product_col in self._products:
+            if product_col in self.rxn_df.columns and product_col not in candidate_volume_columns:
+                candidate_volume_columns.append(product_col)
+
+        if not candidate_volume_columns:
+            raise ValueError(
+                "Could not identify any candidate volume columns for fixed "
+                "reagent parsing."
+            )
 
         for reagent in self.get_fixed_reagents():
-            if reagent not in mapping:
+            matching_rows = self.rxn_df[
+                (self.rxn_df['op'] == 'transfer') &
+                (self.rxn_df['chemical_name'] == reagent)
+            ]
+
+            if matching_rows.empty:
                 raise ValueError(
-                    f"Could not find a fixed transfer volume for {reagent} "
-                    "in the reaction template."
+                    f"Could not find a transfer row for fixed reagent {reagent}."
                 )
 
-            fixed_volume = mapping[reagent]
+            candidate_volumes = []
 
-            if pd.isna(fixed_volume):
+            for _, row in matching_rows.iterrows():
+                for volume_col in candidate_volume_columns:
+                    volume = pd.to_numeric(row.get(volume_col), errors='coerce')
+
+                    if pd.isna(volume):
+                        continue
+
+                    volume = float(volume)
+
+                    if math.isclose(volume, 0.0, rel_tol=0, abs_tol=1e-9):
+                        continue
+
+                    candidate_volumes.append(volume)
+
+            if len(candidate_volumes) == 0:
                 raise ValueError(
-                    f"Fixed transfer volume for {reagent} is blank/NaN in "
-                    "the reaction template."
+                    f"Could not find a nonzero fixed transfer volume for "
+                    f"{reagent} in the reaction template."
                 )
 
-            fixed_reagent_volumes[reagent] = float(fixed_volume)
+            unique_volumes = []
+
+            for volume in candidate_volumes:
+                if not any(
+                    math.isclose(volume, existing, rel_tol=0, abs_tol=1e-9)
+                    for existing in unique_volumes
+                ):
+                    unique_volumes.append(volume)
+
+            if len(unique_volumes) > 1:
+                raise ValueError(
+                    f"Found multiple possible fixed transfer volumes for "
+                    f"{reagent}: {unique_volumes}. The fixed reagent volume "
+                    "must be unambiguous for Auto volume-feasibility checks."
+                )
+
+            fixed_reagent_volumes[reagent] = float(unique_volumes[0])
 
         return fixed_reagent_volumes
 
