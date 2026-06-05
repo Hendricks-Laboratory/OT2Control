@@ -149,7 +149,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         max_iters=auto.getModelInfo()["max_iterations"],
         min_conc=auto.min_conc,
         max_conc=auto.max_conc,
-        total_volume=auto.template_meta['tot_vol']
+        total_volume=auto.template_meta['tot_vol'],
+        fixed_reagent_volumes=auto._get_fixed_reagent_volumes()
     )
     
     print(f"Target: {target_value}")
@@ -481,57 +482,53 @@ class Controller(ABC):
     
     def get_max_conc(self):
         """
-        Calculates the maximum concentration of a given reagent based on the concentration provided on deck.
-        It does this by calculating the remaining space in the well after fixed reagents are added and splitting it evenly between the variable reagents
-        TODO: What happens when multiple concentrations are put on deck? (Overlap/gaps)
-        TODO: What if we don't want to split the space evenly between variable reagents (One is more important?)
-        
+        Calculates the maximum target concentration for each variable reagent.
+
+        Each variable reagent is given an independent maximum based on the
+        concentration it could reach if that reagent alone used the full
+        remaining well volume after fixed reagents are added.
+
+        This intentionally does not split the remaining volume evenly between
+        variable reagents. Splitting evenly makes the search space behave like a
+        ratio-constrained space and cuts off valid high/high combinations that
+        may still physically fit.
+
+        Physical overflow is handled separately by the Auto volume-feasibility
+        checks. Water fills whatever volume remains after fixed and variable
+        reagent transfers.
+
         Returns:
-            dict: Maximum concentrations for each variable reagent
+            dict:
+                Maximum target concentrations for each variable reagent.
         """
-        # Line 488-458 parsing the fixed reagent volumes from google sheets 
-        # TODO: Check if this parsing is redundant
-        fixed_vols = {}
-
-        df_sliced = self.rxn_df.iloc[0:6, 10:12]  # Slices the desired portion
-        print(df_sliced)
-        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))  # Convert to dictionary
-        print(mapping)
-
-        for reagent in self.get_fixed_reagents():
-            if reagent in mapping:
-                fixed_vols[reagent] = mapping[reagent]
-        
+        fixed_vols = self._get_fixed_reagent_volumes()
         print(f"Fixed Volumes: {fixed_vols}")
 
-        # Calculate the total volume of fixed reagents 
-        total_fixed_vol = sum(fixed_vols.values())
+        total_fixed_vol = float(sum(fixed_vols.values()))
         print(f"Total volume of fixed reagents: {total_fixed_vol}")
 
-        # Calculate the volume remaining in a 200 uL well
-        remaining_vol = 200 - total_fixed_vol 
+        total_volume = float(self.template_meta['tot_vol'])
+        remaining_vol = total_volume - total_fixed_vol
 
-        # Max concentrations for variable reagents one at a time
-        conc = self.robo_params["reagent_df"]
-        reagent_names = conc.index
-       
+        if remaining_vol < 0:
+            raise ValueError(
+                "Fixed reagent volumes exceed the final reaction volume. "
+                f"Fixed volume = {total_fixed_vol:.4f} uL, "
+                f"final reaction volume = {total_volume:.4f} uL."
+            )
+
         max_concs = {}
+
         for var_reagent in self.get_variable_reagents():
-            # Get initial concentration of this reagent by parsing regular expressions eg. potassium_boromideC0.01
-            prefix = var_reagent
-            regex = f"^{prefix}.*"
-            # Filter the list using the regex
-            matching_chemicals = [chem for chem in reagent_names if re.match(regex, chem)]
-            var_reagent_conc = self._get_conc(matching_chemicals[0])
-            print(f"Concentration on deck: {var_reagent_conc}")
+            stock_conc = self._get_variable_reagent_stock_conc(var_reagent)
+            print(f"Concentration on deck for {var_reagent}: {stock_conc}")
 
-            # Caluclate maximum concentration using M1V1=M2V2
-            max_conc = (var_reagent_conc * remaining_vol) / 200
+            # Calculate the maximum concentration using M1V1 = M2V2.
+            # This is the concentration the reagent could reach if it alone
+            # used the full remaining volume after fixed reagents.
+            max_conc = stock_conc * remaining_vol / total_volume
+            max_concs[var_reagent] = max_conc
 
-            # Divide the space up evenly by the number of variable reagents 
-            # TODO: This division is preferably done to the volume but check that the math is the same
-            max_concs[var_reagent] = max_conc / len(self.variable_reagents)
-            
         return max_concs
 
 
@@ -2656,6 +2653,11 @@ class AutoContr(Controller):
             X_Initial_Denormalized
         )
 
+        self._validate_auto_recipe_volume_feasibility(
+            X_Initial_Denormalized,
+            context_label=f"initial seed batch {self.batch_num}"
+        )
+
         self._export_auto_batch_recipe_design(
             repaired_recipes=X_Initial_Denormalized,
             original_recipes=X_Initial_Denormalized_before_repair,
@@ -2763,12 +2765,17 @@ class AutoContr(Controller):
                 X_new_Denormalized
             )
 
+            self._validate_auto_recipe_volume_feasibility(
+                X_new_Denormalized,
+                context_label=f"model-suggested batch {self.batch_num}"
+            )
+
             self._export_auto_batch_recipe_design(
                 repaired_recipes=X_new_Denormalized,
                 original_recipes=X_new_Denormalized_before_repair,
                 batch_label=f"batch_{self.batch_num}"
             )
-
+            
             # Duplicate the repaired recipe to create replicate wells.
             recipes = self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
             
@@ -3393,6 +3400,11 @@ class AutoContr(Controller):
         every generated Auto well. These volumes reduce the remaining space
         available for variable reagents and water top-off.
 
+        This helper intentionally validates that every fixed reagent has a
+        usable template volume. Once volume feasibility checks become safety
+        critical, silently missing a fixed reagent volume could allow an
+        invalid recipe to pass.
+
         returns:
             dict:
                 Fixed reagent names as keys and fixed transfer volumes in uL
@@ -3400,12 +3412,28 @@ class AutoContr(Controller):
         '''
         fixed_reagent_volumes = {}
 
+        # This mirrors the existing template parsing used by get_max_conc().
+        # The validation below makes the behavior safer before this helper is
+        # used for volume-feasibility checks and robot-execution hard stops.
         df_sliced = self.rxn_df.iloc[0:6, 10:12]
         mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))
 
         for reagent in self.get_fixed_reagents():
-            if reagent in mapping:
-                fixed_reagent_volumes[reagent] = float(mapping[reagent])
+            if reagent not in mapping:
+                raise ValueError(
+                    f"Could not find a fixed transfer volume for {reagent} "
+                    "in the reaction template."
+                )
+
+            fixed_volume = mapping[reagent]
+
+            if pd.isna(fixed_volume):
+                raise ValueError(
+                    f"Fixed transfer volume for {reagent} is blank/NaN in "
+                    "the reaction template."
+                )
+
+            fixed_reagent_volumes[reagent] = float(fixed_volume)
 
         return fixed_reagent_volumes
 
@@ -3468,18 +3496,126 @@ class AutoContr(Controller):
 
         return variable_transfer_volumes
     
+    def _get_auto_recipe_volume_balance(self, recipe):
+        '''
+        Calculates the full volume balance for one denormalized Auto recipe.
+
+        Auto recipes are stored as target concentrations for variable reagents.
+        This helper converts those concentrations into transfer volumes, adds
+        the fixed reagent volume, calculates the water top-off volume, and
+        determines whether the recipe physically fits in the final reaction
+        volume.
+
+        Water is treated as the filler that occupies any remaining volume.
+        Variable reagent volumes are not rescaled or redistributed.
+
+        params:
+            np.ndarray recipe:
+                One denormalized recipe row with one concentration per variable
+                reagent, ordered the same way as self.variable_reagents.
+
+        returns:
+            dict:
+                Volume-balance information for the recipe.
+        '''
+        total_volume = float(self.template_meta['tot_vol'])
+
+        fixed_transfer_volumes = self._get_fixed_reagent_volumes()
+        fixed_volume_total = float(sum(fixed_transfer_volumes.values()))
+
+        variable_transfer_volumes = self._get_variable_transfer_volumes_for_recipe(
+            recipe
+        )
+        variable_volume_total = float(sum(variable_transfer_volumes.values()))
+
+        volume_before_water = fixed_volume_total + variable_volume_total
+        water_volume = total_volume - volume_before_water
+
+        volume_tol = 1e-9
+        volume_feasible = water_volume >= -volume_tol
+
+        # Treat tiny negative floating-point artifacts as exactly zero water.
+        if math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol):
+            water_volume = 0.0
+
+        return {
+            'total_volume': total_volume,
+            'fixed_transfer_volumes': fixed_transfer_volumes,
+            'fixed_volume_total': fixed_volume_total,
+            'variable_transfer_volumes': variable_transfer_volumes,
+            'variable_volume_total': variable_volume_total,
+            'volume_before_water': volume_before_water,
+            'water_volume': float(water_volume),
+            'volume_feasible': bool(volume_feasible)
+        }
+    
+    def _validate_auto_recipe_volume_feasibility(self, recipes, context_label='Auto batch'):
+        '''
+        Validates that repaired Auto recipes fit within the final reaction
+        volume before they are used to build executable robot transfers.
+
+        This is a controller-side safety check. The optimizer should avoid
+        overfilled recipes, but the controller is the final authority before
+        robot execution. If any repaired recipe requires more volume than the
+        well can hold, the run is stopped before robot commands are created.
+
+        params:
+            np.ndarray recipes:
+                Repaired denormalized recipe concentrations with shape:
+                    n_recipes x n_variable_reagents
+
+            str context_label:
+                Human-readable label used in error messages.
+
+        raises:
+            ValueError:
+                If any recipe exceeds the final reaction volume.
+        '''
+        recipes = np.asarray(recipes, dtype=float)
+
+        if recipes.ndim == 1:
+            recipes = recipes.reshape(1, -1)
+
+        invalid_messages = []
+
+        for recipe_i, recipe in enumerate(recipes):
+            volume_balance = self._get_auto_recipe_volume_balance(recipe)
+
+            if not volume_balance['volume_feasible']:
+                overflow_volume = -1.0 * volume_balance['water_volume']
+
+                invalid_messages.append(
+                    f"{context_label}, recipe index {recipe_i}: "
+                    f"fixed volume = {volume_balance['fixed_volume_total']:.4f} uL, "
+                    f"variable volume = {volume_balance['variable_volume_total']:.4f} uL, "
+                    f"total before water = {volume_balance['volume_before_water']:.4f} uL, "
+                    f"allowed total = {volume_balance['total_volume']:.4f} uL, "
+                    f"overflow = {overflow_volume:.4f} uL"
+                )
+
+        if invalid_messages:
+            raise ValueError(
+                "Auto recipe volume feasibility check failed. These recipes "
+                "would overfill the final reaction volume and will not be "
+                "executed:\n" + "\n".join(invalid_messages)
+            )
+    
     def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
         '''
         Exports the unique Auto recipe design for a batch before replicate wells
         are created.
 
         This file is intended for debugging and auditability. It records:
-            - the original recipe concentrations suggested by the model/design
-            - the repaired recipe concentrations after true-zero transfer repair
+            - original recipe concentrations suggested by the model/design
+            - repaired recipe concentrations after true-zero transfer repair
             - original and repaired normalized model-space values
             - original and repaired transfer volumes
             - whether each reagent was adjusted by the true-zero repair rule
+            - whether each repaired transfer is true-zero valid
             - simple spacing metrics for checking maximin design quality
+            - fixed reagent volume, variable reagent volume, and water top-off
+              volume for each repaired recipe
+            - whether each repaired recipe fits within the final reaction volume
 
         params:
             np.ndarray repaired_recipes:
@@ -3589,6 +3725,27 @@ class AutoContr(Controller):
 
         export_df['nearest_neighbor_distance_repaired_normalized'] = nearest_neighbor_distances
         export_df['batch_min_pairwise_distance_repaired_normalized'] = batch_min_pairwise_distance
+
+        fixed_volume_totals = []
+        variable_volume_totals = []
+        water_volumes = []
+        volume_before_water_values = []
+        volume_feasible_values = []
+
+        for recipe in repaired_recipes:
+            volume_balance = self._get_auto_recipe_volume_balance(recipe)
+
+            fixed_volume_totals.append(volume_balance['fixed_volume_total'])
+            variable_volume_totals.append(volume_balance['variable_volume_total'])
+            water_volumes.append(volume_balance['water_volume'])
+            volume_before_water_values.append(volume_balance['volume_before_water'])
+            volume_feasible_values.append(volume_balance['volume_feasible'])
+
+        export_df['fixed_volume_total_uL'] = fixed_volume_totals
+        export_df['variable_volume_total_uL'] = variable_volume_totals
+        export_df['water_volume_uL'] = water_volumes
+        export_df['volume_before_water_uL'] = volume_before_water_values
+        export_df['volume_feasible'] = volume_feasible_values
 
         export_path = os.path.join(
             self.out_path,

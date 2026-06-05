@@ -66,16 +66,17 @@ class OptimizationModel():
         max_iters,
         min_conc=None,
         max_conc=None,
-        total_volume=None
+        total_volume=None,
+        fixed_reagent_volumes=None
     ):
         '''
         Initializes the Auto optimization model.
 
         In addition to the normalized optimization bounds, this stores physical
-        recipe context needed for true-zero-aware optimization. The controller
-        remains the final source of truth for robot execution, but the optimizer
-        needs the same concentration/volume context so it can avoid treating the
-        forbidden 0-5 uL region as a normal continuous search space.
+        recipe context needed for true-zero-aware and volume-aware optimization.
+        The controller remains the final source of truth for robot execution,
+        but the optimizer needs the same concentration/volume context so it can
+        avoid treating non-executable regions as normal search space.
 
         params:
             list[dict] bounds:
@@ -89,7 +90,7 @@ class OptimizationModel():
                 stock concentrations for variable reagents.
 
             list fixed_reagents:
-                Fixed reagent names/volumes used by the controller.
+                Fixed reagent names used by the controller.
 
             list variable_reagents:
                 Names of variable reagents being optimized.
@@ -111,6 +112,11 @@ class OptimizationModel():
 
             float total_volume:
                 Final/template reaction volume in uL.
+
+            dict fixed_reagent_volumes:
+                Fixed reagent names as keys and fixed transfer volumes in uL
+                as values. Used to calculate remaining well volume during
+                optimizer-side feasibility checks.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -129,12 +135,14 @@ class OptimizationModel():
         self.curr_iter = 0
         self.max_iters = max_iters
 
-        # Physical recipe context used by true-zero-aware optimization. These
-        # are optional for backwards compatibility, but should be provided by
-        # Auto mode before true-zero candidate repair is enabled.
+        # Physical recipe context used by true-zero-aware and volume-aware
+        # optimization. These are optional for backwards compatibility, but
+        # should be provided by Auto mode before physical feasibility checks are
+        # enabled in the optimizer.
         self.min_conc = min_conc
         self.max_conc = max_conc
         self.total_volume = total_volume
+        self.fixed_reagent_volumes = fixed_reagent_volumes
 
         self.gp_model = None
         self.acquisition = None
@@ -256,9 +264,13 @@ class OptimizationModel():
         Generates the initial Auto experiment design.
 
         The design is generated in normalized 0-1 model space using maximin
-        Latin hypercube sampling. This keeps each reagent dimension stratified
-        across its range while selecting the candidate design with the best
-        space-filling behavior.
+        Latin hypercube sampling. Candidate designs are repaired according to
+        the true-zero rule and checked against the well-volume constraint before
+        being scored.
+
+        This prevents the initial seed batch from selecting recipes that would
+        overfill the final reaction volume after fixed and variable reagent
+        transfers are accounted for.
 
         returns:
             np.ndarray:
@@ -267,19 +279,62 @@ class OptimizationModel():
         '''
         n_points = int(self.initial_design_numdata)
         n_dimensions = len(self.variable_reagents)
+        n_candidates = 500
 
-        initial_design = self._generate_maximin_lhs_design(
-            n_points=n_points,
-            n_dimensions=n_dimensions,
-            n_candidates=500
-        )
+        best_design = None
+        best_score = -np.inf
+        feasible_design_count = 0
 
-        print("<<optimizer>> generated maximin Latin hypercube initial design")
+        for _ in range(n_candidates):
+            candidate_design = lhs(
+                n=n_dimensions,
+                samples=n_points,
+                criterion='maximin'
+            )
+
+            repaired_candidate_design = np.array(
+                [
+                    self._repair_normalized_candidate_for_true_zero(candidate)
+                    for candidate in candidate_design
+                ],
+                dtype=float
+            )
+
+            candidate_is_feasible = True
+
+            for candidate in repaired_candidate_design:
+                volume_balance = self._get_candidate_volume_balance(candidate)
+
+                if not volume_balance['volume_feasible']:
+                    candidate_is_feasible = False
+                    break
+
+            if not candidate_is_feasible:
+                continue
+
+            feasible_design_count += 1
+            candidate_score = self._minimum_pairwise_distance(
+                repaired_candidate_design
+            )
+
+            if candidate_score > best_score:
+                best_score = candidate_score
+                best_design = repaired_candidate_design
+
+        if best_design is None:
+            raise RuntimeError(
+                "Could not generate a volume-feasible maximin initial design. "
+                "Try reducing initial_data, reducing variable reagent maximums, "
+                "or increasing available reaction volume."
+            )
+
+        print("<<optimizer>> generated volume-feasible maximin Latin hypercube initial design")
         print(f"<<optimizer>> initial design points: {n_points}")
         print(f"<<optimizer>> initial design dimensions: {n_dimensions}")
-        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(initial_design)}")
+        print(f"<<optimizer>> feasible candidate designs evaluated: {feasible_design_count}")
+        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(best_design)}")
 
-        return initial_design
+        return best_design
 
     def _get_dimension(self):
         '''
@@ -458,6 +513,175 @@ class OptimizationModel():
 
         return np.clip(repaired_x, 0.0, 1.0)
     
+    def _get_variable_transfer_volumes_for_normalized_candidate(self, x):
+        '''
+        Converts one normalized optimizer candidate into variable reagent
+        transfer volumes.
+
+        The optimizer works in normalized 0-1 model space. This helper converts
+        that candidate into target concentrations and then into the physical
+        transfer volumes required to make those concentrations in the final
+        reaction volume.
+
+        The candidate is repaired with the true-zero rule before transfer
+        volumes are calculated, so the returned volumes reflect executable
+        robot behavior.
+
+        params:
+            np.ndarray x:
+                One normalized recipe candidate with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            dict:
+                Variable reagent names as keys and repaired transfer volumes
+                in uL as values.
+        '''
+        if self.min_conc is None or self.max_conc is None or self.total_volume is None:
+            raise ValueError(
+                "Volume-aware optimization requires min_conc, max_conc, "
+                "and total_volume to be provided to OptimizationModel."
+            )
+
+        n_dimensions = self._get_dimension()
+        x = np.asarray(x, dtype=float).reshape(n_dimensions)
+
+        repaired_x = self._repair_normalized_candidate_for_true_zero(x)
+
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(n_dimensions)
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(n_dimensions)
+        total_volume = float(self.total_volume)
+
+        variable_transfer_volumes = {}
+
+        for reagent_i, reagent_name in enumerate(self.variable_reagents):
+            stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
+
+            if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                raise ValueError(
+                    f"Cannot calculate transfer volume for {reagent_name}: "
+                    "stock concentration is 0."
+                )
+
+            repaired_conc = (
+                repaired_x[reagent_i] * (max_conc[reagent_i] - min_conc[reagent_i])
+                + min_conc[reagent_i]
+            )
+
+            transfer_volume = repaired_conc * total_volume / stock_conc
+            variable_transfer_volumes[reagent_name] = float(transfer_volume)
+
+        return variable_transfer_volumes
+
+    def _get_candidate_volume_balance(self, x):
+        '''
+        Calculates the well-volume balance for one normalized optimizer
+        candidate.
+
+        This helper is dimension-general and mirrors the controller-side
+        volume-balance logic. It does not rescale variable reagents as ratios.
+        Variable reagent volumes are treated independently, and water fills the
+        remaining space.
+
+        params:
+            np.ndarray x:
+                One normalized recipe candidate with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            dict:
+                Volume-balance information for the candidate.
+        '''
+        if self.total_volume is None or self.fixed_reagent_volumes is None:
+            raise ValueError(
+                "Volume-aware optimization requires total_volume and "
+                "fixed_reagent_volumes to be provided to OptimizationModel."
+            )
+
+        total_volume = float(self.total_volume)
+
+        fixed_volume_total = float(
+            sum(float(volume) for volume in self.fixed_reagent_volumes.values())
+        )
+
+        variable_transfer_volumes = self._get_variable_transfer_volumes_for_normalized_candidate(
+            x
+        )
+        variable_volume_total = float(sum(variable_transfer_volumes.values()))
+
+        volume_before_water = fixed_volume_total + variable_volume_total
+        water_volume = total_volume - volume_before_water
+
+        volume_tol = 1e-9
+        volume_feasible = water_volume >= -volume_tol
+
+        if math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol):
+            water_volume = 0.0
+
+        return {
+            'total_volume': total_volume,
+            'fixed_volume_total': fixed_volume_total,
+            'variable_transfer_volumes': variable_transfer_volumes,
+            'variable_volume_total': variable_volume_total,
+            'volume_before_water': volume_before_water,
+            'water_volume': float(water_volume),
+            'volume_feasible': bool(volume_feasible)
+        }
+    
+    def _generate_feasible_starting_points(self, n_restarts):
+        '''
+        Generates feasible normalized starting points for optimizer restarts.
+
+        Random starts are repaired with the true-zero rule and checked against
+        the well-volume constraint. Feasible starts are preferred so the
+        optimizer spends less time searching over physically impossible
+        overfilled recipes.
+
+        If the feasible region is small and not enough feasible points are
+        found, this helper returns the feasible points it did find. The caller
+        can still add fallback points if needed.
+
+        params:
+            int n_restarts:
+                Desired number of feasible random starting points.
+
+        returns:
+            list[np.ndarray]:
+                Feasible normalized starting points.
+        '''
+        n_dimensions = self._get_dimension()
+        feasible_points = []
+        max_attempts = max(100, n_restarts * 50)
+
+        attempts = 0
+
+        while len(feasible_points) < n_restarts and attempts < max_attempts:
+            attempts += 1
+
+            candidate = np.random.random(n_dimensions)
+            repaired_candidate = self._repair_normalized_candidate_for_true_zero(
+                candidate
+            )
+            volume_balance = self._get_candidate_volume_balance(
+                repaired_candidate
+            )
+
+            if volume_balance['volume_feasible']:
+                feasible_points.append(repaired_candidate)
+
+        if len(feasible_points) < n_restarts:
+            print(
+                f"<<optimizer>> warning: generated only "
+                f"{len(feasible_points)} feasible optimizer starts out of "
+                f"{n_restarts} requested"
+            )
+
+        return feasible_points
+    
     def _predict_lambda_max_nm(self, x):
         '''
         Predicts lambda max in nanometers for one normalized recipe point.
@@ -492,12 +716,17 @@ class OptimizationModel():
         Computes the target-distance objective for one normalized recipe point.
 
         The raw optimizer candidate is first repaired according to the Auto
-        true-zero transfer rule, then evaluated with the Gaussian process model.
-        This prevents the optimizer from treating the physically forbidden
-        0-5 uL transfer region as a meaningful continuous search space.
+        true-zero transfer rule. The repaired candidate is then checked for
+        volume feasibility before being evaluated with the Gaussian process
+        model.
+
+        This prevents the optimizer from treating either the forbidden 0-5 uL
+        transfer region or overfilled well-volume recipes as meaningful
+        executable search space.
 
         The objective is the squared distance between the model-predicted lambda
-        max and the target lambda max. Lower values are better.
+        max and the target lambda max. Lower values are better. Overfilled
+        recipes receive a large finite penalty so they are not selected.
 
         params:
             np.ndarray x:
@@ -508,9 +737,19 @@ class OptimizationModel():
 
         returns:
             float:
-                Squared error between predicted lambda max and target_value.
+                Squared error between predicted lambda max and target_value, or
+                a large penalty for volume-infeasible candidates.
         '''
         repaired_x = self._repair_normalized_candidate_for_true_zero(x)
+        volume_balance = self._get_candidate_volume_balance(repaired_x)
+
+        if not volume_balance['volume_feasible']:
+            overflow_volume = -1.0 * volume_balance['water_volume']
+
+            # Use a large finite penalty instead of inf so scipy can keep
+            # searching without running into nan/inf optimizer behavior.
+            return float(1e12 + overflow_volume ** 2)
+
         predicted_lambda_max = self._predict_lambda_max_nm(repaired_x)
         target_error = predicted_lambda_max - self.target_value
 
@@ -555,14 +794,22 @@ class OptimizationModel():
         best_result_message = None
 
         # Include the center point as a deterministic restart so every run has
-        # at least one stable starting location.
+        # at least one stable starting location. If it is volume-infeasible, the
+        # objective penalty will handle it.
         starting_points = [np.full(n_dimensions, 0.5)]
 
-        # Add random restarts to improve global search behavior.
+        # Prefer feasible random restarts so the optimizer spends less time
+        # searching over physically impossible overfilled recipes.
         starting_points.extend(
-            np.random.random((n_restarts, n_dimensions))
+            self._generate_feasible_starting_points(n_restarts)
         )
 
+        # If the feasible-region sampler could not find enough starts, add
+        # ordinary random starts as a fallback. The objective function still
+        # penalizes any overfilled candidates.
+        while len(starting_points) < n_restarts + 1:
+            starting_points.append(np.random.random(n_dimensions))
+        
         for x0 in starting_points:
             result = minimize(
                 fun=self._target_distance_objective,
