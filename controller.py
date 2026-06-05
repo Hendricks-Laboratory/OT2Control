@@ -1704,6 +1704,10 @@ class Controller(ABC):
         ]
 
         transfer_steps = [(name, self._round_transfer_volume(vol)) for name, vol in containers.iteritems()]
+
+        if not transfer_steps:
+            print(f"<<controller>> skipping transfer from {src}: all destination volumes are 0 uL")
+            return
         
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
