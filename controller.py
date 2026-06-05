@@ -3433,7 +3433,7 @@ class AutoContr(Controller):
         for reagent in self.get_fixed_reagents():
             matching_rows = self.rxn_df[
                 (self.rxn_df['op'] == 'transfer') &
-                (self.rxn_df['chemical_name'] == reagent)
+                (self.rxn_df['reagent'] == reagent)
             ]
 
             if matching_rows.empty:
