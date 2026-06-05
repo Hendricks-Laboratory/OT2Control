@@ -263,14 +263,15 @@ class OptimizationModel():
         '''
         Generates the initial Auto experiment design.
 
-        The design is generated in normalized 0-1 model space using maximin
-        Latin hypercube sampling. Candidate designs are repaired according to
-        the true-zero rule and checked against the well-volume constraint before
-        being scored.
+        The design is generated in normalized 0-1 model space. Candidate points
+        are repaired according to the true-zero rule and checked against the
+        well-volume constraint before being considered for the initial design.
 
-        This prevents the initial seed batch from selecting recipes that would
-        overfill the final reaction volume after fixed and variable reagent
-        transfers are accounted for.
+        Instead of rejecting an entire Latin hypercube design when one point is
+        volume-infeasible, this method builds a large pool of feasible candidate
+        points and selects a maximin subset from that pool. This is more robust
+        when independent reagent maxima create a rectangular search space whose
+        high/high corners may physically overfill the reaction well.
 
         returns:
             np.ndarray:
@@ -279,62 +280,90 @@ class OptimizationModel():
         '''
         n_points = int(self.initial_design_numdata)
         n_dimensions = len(self.variable_reagents)
-        n_candidates = 500
 
-        best_design = None
-        best_score = -np.inf
-        feasible_design_count = 0
+        pool_multiplier = 500
+        target_pool_size = max(n_points * pool_multiplier, 1000)
+        max_attempts = target_pool_size * 20
 
-        for _ in range(n_candidates):
-            candidate_design = lhs(
-                n=n_dimensions,
-                samples=n_points,
-                criterion='maximin'
+        feasible_points = []
+        attempts = 0
+
+        while len(feasible_points) < target_pool_size and attempts < max_attempts:
+            attempts += 1
+
+            candidate = np.random.random(n_dimensions)
+            repaired_candidate = self._repair_normalized_candidate_for_true_zero(
+                candidate
             )
 
-            repaired_candidate_design = np.array(
-                [
-                    self._repair_normalized_candidate_for_true_zero(candidate)
-                    for candidate in candidate_design
-                ],
-                dtype=float
+            volume_balance = self._get_candidate_volume_balance(
+                repaired_candidate
             )
 
-            candidate_is_feasible = True
+            if volume_balance['volume_feasible']:
+                feasible_points.append(repaired_candidate)
 
-            for candidate in repaired_candidate_design:
-                volume_balance = self._get_candidate_volume_balance(candidate)
-
-                if not volume_balance['volume_feasible']:
-                    candidate_is_feasible = False
-                    break
-
-            if not candidate_is_feasible:
-                continue
-
-            feasible_design_count += 1
-            candidate_score = self._minimum_pairwise_distance(
-                repaired_candidate_design
-            )
-
-            if candidate_score > best_score:
-                best_score = candidate_score
-                best_design = repaired_candidate_design
-
-        if best_design is None:
+        if len(feasible_points) < n_points:
             raise RuntimeError(
-                "Could not generate a volume-feasible maximin initial design. "
+                "Could not generate enough volume-feasible initial design "
+                f"points. Needed {n_points}, found {len(feasible_points)}. "
                 "Try reducing initial_data, reducing variable reagent maximums, "
                 "or increasing available reaction volume."
             )
 
-        print("<<optimizer>> generated volume-feasible maximin Latin hypercube initial design")
+        feasible_points = np.asarray(feasible_points, dtype=float)
+
+        # Greedy maximin selection from the feasible pool.
+        # Start with the feasible point farthest from the center to encourage
+        # broad coverage, then repeatedly add the point whose nearest selected
+        # neighbor is as far away as possible.
+        center = np.full(n_dimensions, 0.5)
+        first_index = int(
+            np.argmax(
+                np.linalg.norm(feasible_points - center, axis=1)
+            )
+        )
+
+        selected_indices = [first_index]
+
+        while len(selected_indices) < n_points:
+            selected_points = feasible_points[selected_indices]
+
+            best_index = None
+            best_distance = -np.inf
+
+            for candidate_i, candidate in enumerate(feasible_points):
+                if candidate_i in selected_indices:
+                    continue
+
+                distances_to_selected = np.linalg.norm(
+                    selected_points - candidate,
+                    axis=1
+                )
+                nearest_selected_distance = float(distances_to_selected.min())
+
+                if nearest_selected_distance > best_distance:
+                    best_distance = nearest_selected_distance
+                    best_index = candidate_i
+
+            if best_index is None:
+                raise RuntimeError(
+                    "Failed to select a maximin subset from feasible initial "
+                    "design candidate pool."
+                )
+
+            selected_indices.append(best_index)
+
+        initial_design = feasible_points[selected_indices]
+
+        print("<<optimizer>> generated volume-feasible maximin initial design")
         print(f"<<optimizer>> initial design points: {n_points}")
         print(f"<<optimizer>> initial design dimensions: {n_dimensions}")
-        print(f"<<optimizer>> feasible candidate designs evaluated: {feasible_design_count}")
-        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(best_design)}")
+        print(f"<<optimizer>> feasible candidate points generated: {len(feasible_points)}")
+        print(f"<<optimizer>> candidate generation attempts: {attempts}")
+        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(initial_design)}")
 
-        return best_design
+        return initial_design
 
     def _get_dimension(self):
         '''
