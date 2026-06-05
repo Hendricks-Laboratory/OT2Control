@@ -3385,6 +3385,89 @@ class AutoContr(Controller):
 
         return matching_concs[0]
 
+    def _get_fixed_reagent_volumes(self):
+        '''
+        Gets the fixed reagent transfer volumes used in each Auto reaction.
+
+        Fixed reagent volumes come from the reaction template and are added to
+        every generated Auto well. These volumes reduce the remaining space
+        available for variable reagents and water top-off.
+
+        returns:
+            dict:
+                Fixed reagent names as keys and fixed transfer volumes in uL
+                as values.
+        '''
+        fixed_reagent_volumes = {}
+
+        df_sliced = self.rxn_df.iloc[0:6, 10:12]
+        mapping = dict(zip(df_sliced.iloc[:, 0], df_sliced.iloc[:, 1]))
+
+        for reagent in self.get_fixed_reagents():
+            if reagent in mapping:
+                fixed_reagent_volumes[reagent] = float(mapping[reagent])
+
+        return fixed_reagent_volumes
+
+    def _get_fixed_reagent_volume_total(self):
+        '''
+        Gets the total volume occupied by fixed reagents in each Auto reaction.
+
+        returns:
+            float:
+                Total fixed reagent volume in uL.
+        '''
+        fixed_reagent_volumes = self._get_fixed_reagent_volumes()
+
+        return float(sum(fixed_reagent_volumes.values()))
+    
+    def _get_variable_transfer_volumes_for_recipe(self, recipe):
+        '''
+        Converts one denormalized Auto recipe into variable reagent transfer
+        volumes.
+
+        Auto recipes are stored as target concentrations. This helper converts
+        those target concentrations into the physical transfer volumes required
+        to make each concentration in the final reaction volume.
+
+        params:
+            np.ndarray recipe:
+                One denormalized recipe row with one concentration per variable
+                reagent, ordered the same way as self.variable_reagents.
+
+        returns:
+            dict:
+                Variable reagent names as keys and transfer volumes in uL as
+                values.
+        '''
+        recipe = np.asarray(recipe, dtype=float).reshape(-1)
+
+        if recipe.shape[0] != len(self.variable_reagents):
+            raise ValueError(
+                "Recipe length does not match number of variable reagents. "
+                f"Recipe has {recipe.shape[0]} values, but Auto expected "
+                f"{len(self.variable_reagents)} variable reagents."
+            )
+
+        total_volume = float(self.template_meta['tot_vol'])
+        variable_transfer_volumes = {}
+
+        for reagent_i, reagent_name in enumerate(self.variable_reagents):
+            stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
+
+            if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                raise ValueError(
+                    f"Cannot calculate transfer volume for {reagent_name}: "
+                    "stock concentration is 0."
+                )
+
+            target_conc = float(recipe[reagent_i])
+            transfer_volume = target_conc * total_volume / stock_conc
+
+            variable_transfer_volumes[reagent_name] = float(transfer_volume)
+
+        return variable_transfer_volumes
+    
     def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
         '''
         Exports the unique Auto recipe design for a batch before replicate wells
