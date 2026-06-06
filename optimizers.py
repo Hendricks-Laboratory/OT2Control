@@ -614,6 +614,13 @@ class OptimizationModel():
         Variable reagent volumes are treated independently, and water fills the
         remaining space.
 
+        A candidate is volume-feasible only if:
+            1. fixed + variable volumes do not exceed the final reaction volume
+            2. water top-off is either exactly 0 uL or at least 5 uL
+
+        This prevents the optimizer from selecting candidates that would require
+        non-executable 0-5 uL water transfers or would run underfilled.
+
         params:
             np.ndarray x:
                 One normalized recipe candidate with shape:
@@ -646,10 +653,25 @@ class OptimizationModel():
         water_volume = total_volume - volume_before_water
 
         volume_tol = 1e-9
-        volume_feasible = water_volume >= -volume_tol
 
+        # Treat tiny floating-point artifacts around zero as exactly zero water.
         if math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol):
             water_volume = 0.0
+
+        volume_does_not_overflow = water_volume >= -volume_tol
+
+        # Water top-off must be executable. If water is needed, it must be at
+        # least 5 uL. Otherwise, the recipe would require a non-executable
+        # 0-5 uL water transfer or would run underfilled.
+        water_transfer_executable = (
+            math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol)
+            or water_volume >= 5.0 - volume_tol
+        )
+
+        volume_feasible = (
+            volume_does_not_overflow
+            and water_transfer_executable
+        )
 
         return {
             'total_volume': total_volume,
@@ -658,6 +680,8 @@ class OptimizationModel():
             'variable_volume_total': variable_volume_total,
             'volume_before_water': volume_before_water,
             'water_volume': float(water_volume),
+            'volume_does_not_overflow': bool(volume_does_not_overflow),
+            'water_transfer_executable': bool(water_transfer_executable),
             'volume_feasible': bool(volume_feasible)
         }
     

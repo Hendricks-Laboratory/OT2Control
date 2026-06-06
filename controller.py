@@ -3396,9 +3396,10 @@ class AutoContr(Controller):
         '''
         Gets the fixed reagent transfer volumes used in each Auto reaction.
 
-        Fixed reagent volumes come from transfer rows in the reaction template.
-        This helper searches for each fixed reagent by reagent name instead of
-        relying on hardcoded row/column positions.
+        Fixed reagent volumes come from transfer rows in the original reaction
+        template. This helper intentionally uses the stored template dataframe
+        and stored fixed reagent list instead of the live self.rxn_df, because
+        self.rxn_df is replaced during Auto runs with generated protocol rows.
 
         A fixed reagent should have one clear nonzero template transfer volume.
         If the fixed volume cannot be found, is blank, or is ambiguous, this
@@ -3412,33 +3413,51 @@ class AutoContr(Controller):
         '''
         fixed_reagent_volumes = {}
 
+        # Use the original input/template dataframe if it exists. During Auto
+        # execution, self.rxn_df is replaced with generated protocol rows, so
+        # relying on the live dataframe can accidentally classify Water or
+        # variable reagents as fixed reagents after batch 0.
+        template_df = getattr(self, 'rxn_df_template', self.rxn_df)
+
+        # Use the stored fixed reagent list if available. This keeps fixed
+        # reagent identity locked to the original template instead of
+        # recalculating it from the generated protocol dataframe.
+        if hasattr(self, 'fixed_reagents'):
+            fixed_reagents = self.fixed_reagents
+        else:
+            fixed_reagents = template_df.loc[
+                template_df['conc'].notna() & (template_df['op'] == 'transfer'),
+                'reagent'
+            ].unique()
+
         candidate_volume_columns = []
 
         # Prefer the explicit Template column if present.
-        if 'Template' in self.rxn_df.columns:
+        if 'Template' in template_df.columns:
             candidate_volume_columns.append('Template')
 
-        # Also inspect product/template columns used by the controller, while
-        # avoiding duplicates if Template is already included.
-        for product_col in self._products:
-            if product_col in self.rxn_df.columns and product_col not in candidate_volume_columns:
+        # Also inspect product/template columns if they are still available,
+        # while avoiding duplicates if Template is already included.
+        for product_col in getattr(self, '_products', []):
+            if product_col in template_df.columns and product_col not in candidate_volume_columns:
                 candidate_volume_columns.append(product_col)
 
         if not candidate_volume_columns:
             raise ValueError(
                 "Could not identify any candidate volume columns for fixed "
-                "reagent parsing."
+                "reagent parsing in the original reaction template."
             )
 
-        for reagent in self.get_fixed_reagents():
-            matching_rows = self.rxn_df[
-                (self.rxn_df['op'] == 'transfer') &
-                (self.rxn_df['reagent'] == reagent)
+        for reagent in fixed_reagents:
+            matching_rows = template_df[
+                (template_df['op'] == 'transfer') &
+                (template_df['reagent'] == reagent)
             ]
 
             if matching_rows.empty:
                 raise ValueError(
-                    f"Could not find a transfer row for fixed reagent {reagent}."
+                    f"Could not find a transfer row for fixed reagent {reagent} "
+                    "in the original reaction template."
                 )
 
             candidate_volumes = []
@@ -3460,7 +3479,7 @@ class AutoContr(Controller):
             if len(candidate_volumes) == 0:
                 raise ValueError(
                     f"Could not find a nonzero fixed transfer volume for "
-                    f"{reagent} in the reaction template."
+                    f"{reagent} in the original reaction template."
                 )
 
             unique_volumes = []
@@ -3555,6 +3574,13 @@ class AutoContr(Controller):
         Water is treated as the filler that occupies any remaining volume.
         Variable reagent volumes are not rescaled or redistributed.
 
+        A recipe is volume-feasible only if:
+            1. fixed + variable volumes do not exceed the final reaction volume
+            2. water top-off is either exactly 0 uL or at least 5 uL
+
+        This prevents recipes that would require non-executable 0-5 uL water
+        transfers from being run underfilled.
+
         params:
             np.ndarray recipe:
                 One denormalized recipe row with one concentration per variable
@@ -3578,11 +3604,26 @@ class AutoContr(Controller):
         water_volume = total_volume - volume_before_water
 
         volume_tol = 1e-9
-        volume_feasible = water_volume >= -volume_tol
 
-        # Treat tiny negative floating-point artifacts as exactly zero water.
+        # Treat tiny floating-point artifacts around zero as exactly zero water.
         if math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol):
             water_volume = 0.0
+
+        volume_does_not_overflow = water_volume >= -volume_tol
+
+        # Water top-off must be executable. If water is needed, it must be at
+        # least 5 uL. Otherwise, skipping the water would leave the final well
+        # volume below the intended total volume and change the effective
+        # concentrations/scans.
+        water_transfer_executable = (
+            math.isclose(water_volume, 0.0, rel_tol=0, abs_tol=volume_tol)
+            or water_volume >= 5.0 - volume_tol
+        )
+
+        volume_feasible = (
+            volume_does_not_overflow
+            and water_transfer_executable
+        )
 
         return {
             'total_volume': total_volume,
@@ -3592,6 +3633,8 @@ class AutoContr(Controller):
             'variable_volume_total': variable_volume_total,
             'volume_before_water': volume_before_water,
             'water_volume': float(water_volume),
+            'volume_does_not_overflow': bool(volume_does_not_overflow),
+            'water_transfer_executable': bool(water_transfer_executable),
             'volume_feasible': bool(volume_feasible)
         }
     
@@ -3661,7 +3704,8 @@ class AutoContr(Controller):
             - simple spacing metrics for checking maximin design quality
             - fixed reagent volume, variable reagent volume, and water top-off
               volume for each repaired recipe
-            - whether each repaired recipe fits within the final reaction volume
+            - whether each repaired recipe avoids overflow, requires executable water
+              top-off, and is physically volume-feasible
 
         params:
             np.ndarray repaired_recipes:
@@ -3776,6 +3820,8 @@ class AutoContr(Controller):
         variable_volume_totals = []
         water_volumes = []
         volume_before_water_values = []
+        volume_does_not_overflow_values = []
+        water_transfer_executable_values = []
         volume_feasible_values = []
 
         for recipe in repaired_recipes:
@@ -3785,12 +3831,16 @@ class AutoContr(Controller):
             variable_volume_totals.append(volume_balance['variable_volume_total'])
             water_volumes.append(volume_balance['water_volume'])
             volume_before_water_values.append(volume_balance['volume_before_water'])
+            volume_does_not_overflow_values.append(volume_balance['volume_does_not_overflow'])
+            water_transfer_executable_values.append(volume_balance['water_transfer_executable'])
             volume_feasible_values.append(volume_balance['volume_feasible'])
 
         export_df['fixed_volume_total_uL'] = fixed_volume_totals
         export_df['variable_volume_total_uL'] = variable_volume_totals
         export_df['water_volume_uL'] = water_volumes
         export_df['volume_before_water_uL'] = volume_before_water_values
+        export_df['volume_does_not_overflow'] = volume_does_not_overflow_values
+        export_df['water_transfer_executable'] = water_transfer_executable_values
         export_df['volume_feasible'] = volume_feasible_values
 
         export_path = os.path.join(
