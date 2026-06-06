@@ -3640,13 +3640,20 @@ class AutoContr(Controller):
     
     def _validate_auto_recipe_volume_feasibility(self, recipes, context_label='Auto batch'):
         '''
-        Validates that repaired Auto recipes fit within the final reaction
-        volume before they are used to build executable robot transfers.
+        Validates that repaired Auto recipes are physically executable before
+        they are used to build robot transfers.
 
         This is a controller-side safety check. The optimizer should avoid
-        overfilled recipes, but the controller is the final authority before
-        robot execution. If any repaired recipe requires more volume than the
-        well can hold, the run is stopped before robot commands are created.
+        infeasible recipes, but the controller is the final authority before
+        robot execution.
+
+        A recipe is considered volume-feasible only if:
+            1. fixed + variable reagent volumes do not exceed the final
+               reaction volume
+            2. required water top-off is either exactly 0 uL or at least 5 uL
+
+        If any repaired recipe is not physically executable, the run is stopped
+        before robot commands are created.
 
         params:
             np.ndarray recipes:
@@ -3658,7 +3665,7 @@ class AutoContr(Controller):
 
         raises:
             ValueError:
-                If any recipe exceeds the final reaction volume.
+                If any recipe is not physically volume-feasible.
         '''
         recipes = np.asarray(recipes, dtype=float)
 
@@ -3671,7 +3678,10 @@ class AutoContr(Controller):
             volume_balance = self._get_auto_recipe_volume_balance(recipe)
 
             if not volume_balance['volume_feasible']:
-                overflow_volume = -1.0 * volume_balance['water_volume']
+                overflow_volume = max(
+                    0.0,
+                    -1.0 * volume_balance['water_volume']
+                )
 
                 invalid_messages.append(
                     f"{context_label}, recipe index {recipe_i}: "
@@ -3679,16 +3689,21 @@ class AutoContr(Controller):
                     f"variable volume = {volume_balance['variable_volume_total']:.4f} uL, "
                     f"total before water = {volume_balance['volume_before_water']:.4f} uL, "
                     f"allowed total = {volume_balance['total_volume']:.4f} uL, "
+                    f"water top-off = {volume_balance['water_volume']:.4f} uL, "
+                    f"does not overflow = {volume_balance['volume_does_not_overflow']}, "
+                    f"water executable = {volume_balance['water_transfer_executable']}, "
                     f"overflow = {overflow_volume:.4f} uL"
                 )
 
         if invalid_messages:
             raise ValueError(
                 "Auto recipe volume feasibility check failed. These recipes "
-                "would overfill the final reaction volume and will not be "
-                "executed:\n" + "\n".join(invalid_messages)
+                "are not physically executable and will not be executed. "
+                "A recipe may fail because it overfills the final reaction "
+                "volume or because it requires a non-executable 0-5 uL water "
+                "top-off transfer:\n" + "\n".join(invalid_messages)
             )
-    
+
     def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
         '''
         Exports the unique Auto recipe design for a batch before replicate wells
