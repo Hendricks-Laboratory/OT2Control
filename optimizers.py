@@ -67,7 +67,8 @@ class OptimizationModel():
         min_conc=None,
         max_conc=None,
         total_volume=None,
-        fixed_reagent_volumes=None
+        fixed_reagent_volumes=None,
+        allow_true_zero=False
     ):
         '''
         Initializes the Auto optimization model.
@@ -117,6 +118,11 @@ class OptimizationModel():
                 Fixed reagent names as keys and fixed transfer volumes in uL
                 as values. Used to calculate remaining well volume during
                 optimizer-side feasibility checks.
+
+            bool allow_true_zero:
+                If True, the mixed mask optimizer may turn variable reagents
+                OFF as exact-zero transfers. If False, all variable reagents
+                remain ON and are optimized only in executable transfer ranges.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -143,6 +149,7 @@ class OptimizationModel():
         self.max_conc = max_conc
         self.total_volume = total_volume
         self.fixed_reagent_volumes = fixed_reagent_volumes
+        self.allow_true_zero = bool(allow_true_zero)
 
         self.gp_model = None
         self.acquisition = None
@@ -375,6 +382,534 @@ class OptimizationModel():
                 Number of variable reagents being optimized.
         '''
         return len(self.variable_reagents)
+    
+    def _generate_reagent_masks(self, include_all_off_mask=False):
+        '''
+        Generates binary ON/OFF masks for the variable reagents.
+
+        A mask defines which variable reagents are allowed to be present in a
+        candidate recipe.
+
+        For each reagent:
+            0 means OFF:
+                reagent is forced to true zero
+
+            1 means ON:
+                reagent is optimized continuously in its executable transfer
+                range
+
+        The all-off mask is excluded by default because the current workflow
+        already performs blank/background subtraction. Including an all-off Auto
+        recipe would usually be redundant with that blank correction.
+
+        params:
+            bool include_all_off_mask:
+                If True, include the all-zero mask. If False, exclude it.
+
+        returns:
+            list[np.ndarray]:
+                List of binary masks, each with shape:
+                    n_dimensions
+        '''
+        n_dimensions = self._get_dimension()
+        masks = []
+
+        for mask_int in range(2 ** n_dimensions):
+            mask = np.array(
+                [
+                    (mask_int >> reagent_i) & 1
+                    for reagent_i in range(n_dimensions)
+                ],
+                dtype=int
+            )
+
+            if not include_all_off_mask and not mask.any():
+                continue
+
+            masks.append(mask)
+
+        return masks
+
+    def _get_reagent_masks_for_current_settings(self):
+        '''
+        Gets the reagent ON/OFF masks allowed by the current optimizer settings.
+
+        If allow_true_zero is True, variable reagents may be turned OFF by the
+        mask optimizer, so all non-empty ON/OFF masks are considered.
+
+        If allow_true_zero is False, true zero is not allowed for variable
+        reagents, so only the all-ON mask is considered.
+
+        returns:
+            list[np.ndarray]:
+                List of allowed binary masks.
+        '''
+        n_dimensions = self._get_dimension()
+
+        if self.allow_true_zero:
+            return self._generate_reagent_masks(
+                include_all_off_mask=False
+            )
+
+        return [
+            np.ones(n_dimensions, dtype=int)
+        ]
+    
+    def _get_active_mask_indices(self, mask):
+        '''
+        Gets the indices of reagents that are ON in a binary mask.
+
+        params:
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+        returns:
+            np.ndarray:
+                Integer indices where mask == 1.
+        '''
+        mask = np.asarray(mask, dtype=int).reshape(-1)
+
+        if mask.shape[0] != self._get_dimension():
+            raise ValueError(
+                "Mask length does not match optimizer dimensionality. "
+                f"Mask has {mask.shape[0]} entries, but optimizer expected "
+                f"{self._get_dimension()}."
+            )
+
+        return np.where(mask == 1)[0]
+    
+    def _expand_masked_candidate_to_full_recipe(self, x_active, mask):
+        '''
+        Expands an active-dimension optimizer candidate into a full normalized
+        recipe vector.
+
+        OFF reagents are forced to true zero. ON reagents receive the values
+        from x_active in mask-index order.
+
+        Example:
+            mask = [1, 0, 1]
+            x_active = [0.42, 0.88]
+            full recipe = [0.42, 0.0, 0.88]
+
+        params:
+            np.ndarray x_active:
+                Normalized candidate values for the ON reagents only.
+
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+        returns:
+            np.ndarray:
+                Full normalized recipe candidate with shape:
+                    n_dimensions
+        '''
+        mask = np.asarray(mask, dtype=int).reshape(-1)
+        active_indices = self._get_active_mask_indices(mask)
+
+        x_active = np.asarray(x_active, dtype=float).reshape(-1)
+
+        if x_active.shape[0] != active_indices.shape[0]:
+            raise ValueError(
+                "Active candidate length does not match mask. "
+                f"x_active has {x_active.shape[0]} values, but mask has "
+                f"{active_indices.shape[0]} active reagents."
+            )
+
+        full_x = np.zeros(self._get_dimension(), dtype=float)
+        full_x[active_indices] = x_active
+
+        return full_x
+    
+    def _get_masked_bounds(self, mask):
+        '''
+        Gets normalized optimization bounds for the ON reagents in a mask.
+
+        OFF reagents are not included in these bounds because they are forced to
+        exactly zero by the mask. ON reagents are optimized continuously, but
+        their lower bound is set to the normalized concentration corresponding
+        to a 5 uL transfer.
+
+        This prevents the mixed discrete/continuous optimizer from searching
+        the non-executable 0-5 uL transfer region for reagents that are ON.
+
+        params:
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+        returns:
+            list[tuple]:
+                Bounds for scipy minimize over active/ON dimensions only.
+        '''
+        if self.min_conc is None or self.max_conc is None or self.total_volume is None:
+            raise ValueError(
+                "Masked optimization requires min_conc, max_conc, and "
+                "total_volume to be provided to OptimizationModel."
+            )
+
+        n_dimensions = self._get_dimension()
+        mask = np.asarray(mask, dtype=int).reshape(n_dimensions)
+        active_indices = self._get_active_mask_indices(mask)
+
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(n_dimensions)
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(n_dimensions)
+        total_volume = float(self.total_volume)
+
+        bounds = []
+
+        for reagent_i in active_indices:
+            reagent_name = self.variable_reagents[reagent_i]
+            stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
+
+            if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                raise ValueError(
+                    f"Cannot calculate masked bounds for {reagent_name}: "
+                    "stock concentration is 0."
+                )
+
+            five_ul_conc = stock_conc * 5.0 / total_volume
+
+            if math.isclose(
+                max_conc[reagent_i],
+                min_conc[reagent_i],
+                rel_tol=0,
+                abs_tol=1e-12
+            ):
+                raise ValueError(
+                    f"Cannot calculate masked bounds for {reagent_name}: "
+                    "min_conc and max_conc are equal."
+                )
+
+            lower_bound = (
+                (five_ul_conc - min_conc[reagent_i])
+                / (max_conc[reagent_i] - min_conc[reagent_i])
+            )
+
+            lower_bound = float(np.clip(lower_bound, 0.0, 1.0))
+
+            if lower_bound > 1.0:
+                raise ValueError(
+                    f"Masked lower bound for {reagent_name} is above 1.0. "
+                    "The reagent cannot reach a 5 uL executable transfer "
+                    "within the configured concentration range."
+                )
+
+            bounds.append((lower_bound, 1.0))
+
+        return bounds
+    
+    def _masked_target_distance_objective(self, x_active, mask):
+        '''
+        Computes the target-distance objective for one masked candidate.
+
+        The mask controls which reagents are OFF and which reagents are ON:
+            OFF reagents are forced to exactly zero.
+            ON reagents are optimized continuously within executable bounds.
+
+        The active candidate is expanded into a full normalized recipe, checked
+        for volume feasibility, then evaluated with the Gaussian process model.
+
+        params:
+            np.ndarray x_active:
+                Normalized candidate values for the ON reagents only.
+
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+        returns:
+            float:
+                Squared error between predicted lambda max and target_value, or
+                a large finite penalty for volume-infeasible candidates.
+        '''
+        full_x = self._expand_masked_candidate_to_full_recipe(
+            x_active,
+            mask
+        )
+
+        volume_balance = self._get_candidate_volume_balance(full_x)
+
+        if not volume_balance['volume_feasible']:
+            overflow_volume = max(
+                0.0,
+                -1.0 * volume_balance['water_volume']
+            )
+
+            bad_water_penalty = 0.0
+
+            if (
+                volume_balance['volume_does_not_overflow']
+                and not volume_balance['water_transfer_executable']
+            ):
+                bad_water_penalty = 1.0
+
+            # Large finite penalty. The overflow term distinguishes overflow
+            # severity, and the bad_water_penalty distinguishes non-executable
+            # 0-5 uL water top-off cases from otherwise valid candidates.
+            return float(1e12 + overflow_volume ** 2 + bad_water_penalty)
+
+        predicted_lambda_max = self._predict_lambda_max_nm(full_x)
+        target_error = predicted_lambda_max - self.target_value
+
+        return float(target_error ** 2)
+    
+    def _generate_feasible_masked_starting_points(self, mask, n_restarts):
+        '''
+        Generates feasible starting points for optimization within one mask.
+
+        The returned points only contain values for ON reagents. OFF reagents
+        are handled by the mask and are forced to exactly zero when the active
+        candidate is expanded into full recipe space.
+
+        Starting points are sampled within the executable ON-reagent bounds,
+        expanded to full recipe space, and checked against the full volume
+        feasibility rules:
+            - no overflow
+            - water top-off is 0 uL or >= 5 uL
+
+        params:
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+            int n_restarts:
+                Desired number of feasible starting points.
+
+        returns:
+            list[np.ndarray]:
+                Feasible active-dimension starting points.
+        '''
+        bounds = self._get_masked_bounds(mask)
+        active_indices = self._get_active_mask_indices(mask)
+
+        if len(bounds) != len(active_indices):
+            raise ValueError(
+                "Masked bounds length does not match number of active reagents."
+            )
+
+        feasible_points = []
+        max_attempts = max(100, n_restarts * 100)
+
+        attempts = 0
+
+        while len(feasible_points) < n_restarts and attempts < max_attempts:
+            attempts += 1
+
+            x_active = np.array(
+                [
+                    np.random.uniform(low, high)
+                    for low, high in bounds
+                ],
+                dtype=float
+            )
+
+            full_x = self._expand_masked_candidate_to_full_recipe(
+                x_active,
+                mask
+            )
+
+            volume_balance = self._get_candidate_volume_balance(full_x)
+
+            if volume_balance['volume_feasible']:
+                feasible_points.append(x_active)
+
+        if len(feasible_points) < n_restarts:
+            print(
+                f"<<optimizer>> warning: generated only "
+                f"{len(feasible_points)} feasible starts for mask "
+                f"{mask.tolist()} out of {n_restarts} requested"
+            )
+
+        return feasible_points
+    
+    def _optimize_single_mask(self, mask, n_restarts=25):
+        '''
+        Optimizes the target-distance objective within one ON/OFF reagent mask.
+
+        OFF reagents are fixed at exactly zero by the mask. ON reagents are
+        optimized continuously within executable transfer bounds.
+
+        params:
+            np.ndarray mask:
+                Binary ON/OFF mask with shape:
+                    n_dimensions
+
+            int n_restarts:
+                Number of feasible starting points to try for this mask.
+
+        returns:
+            dict:
+                Optimization result information for this mask.
+        '''
+        mask = np.asarray(mask, dtype=int).reshape(self._get_dimension())
+        bounds = self._get_masked_bounds(mask)
+        active_indices = self._get_active_mask_indices(mask)
+
+        if len(active_indices) == 0:
+            raise ValueError(
+                "Cannot optimize an all-OFF mask with no active reagents."
+            )
+
+        starting_points = self._generate_feasible_masked_starting_points(
+            mask,
+            n_restarts
+        )
+
+        # If no feasible random starts were found, fall back to the midpoint of
+        # the active bounds. The objective penalty will still reject it if it is
+        # physically infeasible.
+        if not starting_points:
+            midpoint = np.array(
+                [
+                    (low + high) / 2.0
+                    for low, high in bounds
+                ],
+                dtype=float
+            )
+            starting_points = [midpoint]
+
+        best_x_active = None
+        best_full_x = None
+        best_objective = np.inf
+        best_result_success = False
+        best_result_message = None
+
+        for x0 in starting_points:
+            result = minimize(
+                fun=lambda x_active: self._masked_target_distance_objective(
+                    x_active,
+                    mask
+                ),
+                x0=x0,
+                bounds=bounds,
+                method='SLSQP'
+            )
+
+            if np.isfinite(result.fun) and result.fun < best_objective:
+                best_objective = float(result.fun)
+                best_x_active = np.asarray(result.x, dtype=float)
+
+                # Keep the active result inside the executable active bounds.
+                for i, (low, high) in enumerate(bounds):
+                    best_x_active[i] = np.clip(best_x_active[i], low, high)
+
+                best_full_x = self._expand_masked_candidate_to_full_recipe(
+                    best_x_active,
+                    mask
+                )
+                best_result_success = bool(result.success)
+                best_result_message = result.message
+
+        if best_full_x is None:
+            return {
+                'mask': mask,
+                'success': False,
+                'message': 'No finite optimizer result found for mask.',
+                'objective': np.inf,
+                'x_active': None,
+                'x_full': None,
+                'volume_balance': None,
+                'predicted_lambda_max': None
+            }
+
+        volume_balance = self._get_candidate_volume_balance(best_full_x)
+
+        predicted_lambda_max = None
+        if volume_balance['volume_feasible']:
+            predicted_lambda_max = self._predict_lambda_max_nm(best_full_x)
+
+        return {
+            'mask': mask,
+            'success': best_result_success,
+            'message': best_result_message,
+            'objective': best_objective,
+            'x_active': best_x_active,
+            'x_full': best_full_x,
+            'volume_balance': volume_balance,
+            'predicted_lambda_max': predicted_lambda_max
+        }
+    
+    def _optimize_target_distance_with_masks(self, n_restarts_per_mask=25):
+        '''
+        Finds the normalized recipe point predicted to be closest to the target
+        lambda max using mixed discrete/continuous mask optimization.
+
+        Discrete part:
+            Each binary mask decides which variable reagents are OFF or ON.
+
+        Continuous part:
+            For each mask, ON reagents are optimized continuously within their
+            executable transfer bounds. OFF reagents are forced to exactly zero.
+
+        The best feasible candidate across all allowed masks is returned.
+
+        params:
+            int n_restarts_per_mask:
+                Number of feasible starting points to try for each mask.
+
+        returns:
+            np.ndarray:
+                Best full normalized recipe point found, with shape:
+                    n_dimensions
+        '''
+        masks = self._get_reagent_masks_for_current_settings()
+
+        mask_results = []
+
+        for mask in masks:
+            result = self._optimize_single_mask(
+                mask,
+                n_restarts=n_restarts_per_mask
+            )
+            mask_results.append(result)
+
+        finite_results = [
+            result for result in mask_results
+            if result['x_full'] is not None and np.isfinite(result['objective'])
+        ]
+
+        if not finite_results:
+            raise RuntimeError(
+                "Mixed mask optimization failed: no finite optimizer result "
+                "was found for any allowed reagent mask."
+            )
+
+        best_result = min(
+            finite_results,
+            key=lambda result: result['objective']
+        )
+
+        if (
+            best_result['volume_balance'] is None
+            or not best_result['volume_balance']['volume_feasible']
+        ):
+            raise RuntimeError(
+                "Mixed mask optimization failed: best finite result was not "
+                "volume-feasible. The controller would reject this recipe."
+            )
+
+        if not best_result['success']:
+            print(
+                "<<optimizer>> warning: selected best finite mask result "
+                f"despite scipy status for mask "
+                f"{best_result['mask'].tolist()}: {best_result['message']}"
+            )
+
+        best_x = np.asarray(best_result['x_full'], dtype=float)
+
+        # Store detailed debug information for getNextReaction() and terminal
+        # reporting.
+        self.last_mask_results = mask_results
+        self.last_selected_mask = best_result['mask']
+        self.last_raw_optimizer_candidate = best_x
+        self.last_repaired_optimizer_candidate = best_x
+        self.last_optimizer_objective = float(best_result['objective'])
+        self.last_optimizer_predicted_lambda_max = best_result['predicted_lambda_max']
+        self.last_optimizer_volume_balance = best_result['volume_balance']
+
+        return best_x
     
     def _get_variable_reagent_stock_conc(self, reagent_name):
         '''
@@ -1005,15 +1540,16 @@ class OptimizationModel():
         '''
         Suggests the next normalized recipe point for experimentation.
 
-        This method replaces the old brute-force 2D grid search with a
-        dimension-general continuous optimizer. The optimizer searches normalized
-        0-1 reagent space for the recipe whose predicted lambda max is closest
-        to the target value.
+        This method uses mixed discrete/continuous mask optimization.
 
-        Optimizer candidates are repaired according to the Auto true-zero
-        transfer rule before being scored and returned. This prevents the
-        optimizer from treating the physically forbidden 0-5 uL transfer region
-        as a meaningful continuous search space.
+        Discrete part:
+            A binary reagent mask decides which variable reagents are OFF or ON.
+            OFF reagents are forced to exact true zero.
+
+        Continuous part:
+            ON reagents are optimized continuously within executable transfer
+            bounds, so the optimizer does not search the non-executable 0-5 uL
+            transfer region for active reagents.
 
         For 2D experiments, this also updates self.predictions so the existing
         2D GPR heatmap can still be generated by the controller. For higher
@@ -1026,18 +1562,28 @@ class OptimizationModel():
                 This preserves the controller-facing return format:
                     [array([...])]
         '''
-        best_x = self._optimize_target_distance()
+        best_x = self._optimize_target_distance_with_masks()
         predicted_lambda_max = self._predict_lambda_max_nm(best_x)
 
         self._update_prediction_grid_for_plotting()
 
-        raw_x = getattr(self, 'last_raw_optimizer_candidate', None)
-        repaired_x = getattr(self, 'last_repaired_optimizer_candidate', best_x)
+        selected_mask = getattr(self, 'last_selected_mask', None)
 
-        if raw_x is not None and not np.allclose(raw_x, repaired_x, rtol=0, atol=1e-9):
+        if selected_mask is not None:
             print(
-                f"<<optimizer>> true-zero repaired optimizer candidate "
-                f"from {raw_x} to {repaired_x}"
+                f"<<optimizer>> selected reagent mask {selected_mask.tolist()} "
+                f"for suggested recipe"
+            )
+
+        volume_balance = getattr(self, 'last_optimizer_volume_balance', None)
+
+        if volume_balance is not None:
+            print(
+                f"<<optimizer>> suggested recipe volume balance: "
+                f"fixed={volume_balance['fixed_volume_total']:.4f} uL, "
+                f"variable={volume_balance['variable_volume_total']:.4f} uL, "
+                f"water={volume_balance['water_volume']:.4f} uL, "
+                f"feasible={volume_balance['volume_feasible']}"
             )
 
         print(
@@ -1046,7 +1592,6 @@ class OptimizationModel():
         )
 
         return [best_x]
-
 
     def update_experiment_data(self, X_all, Y_all, X_new, Y_new):
         '''

@@ -150,7 +150,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         min_conc=auto.min_conc,
         max_conc=auto.max_conc,
         total_volume=auto.template_meta['tot_vol'],
-        fixed_reagent_volumes=auto._get_fixed_reagent_volumes()
+        fixed_reagent_volumes=auto._get_fixed_reagent_volumes(),
+        allow_true_zero=auto.allow_true_zero
     )
     
     print(f"Target: {target_value}")
