@@ -303,6 +303,18 @@ class OptimizationModel():
                 candidate
             )
 
+            # If true-zero is enabled, exclude the all-off variable-reagent
+            # condition from Auto seed recipes. The current workflow already
+            # performs blank/background subtraction, so an all-variable-off
+            # Auto recipe is usually redundant.
+            if self.allow_true_zero and np.allclose(
+                repaired_candidate,
+                0.0,
+                rtol=0,
+                atol=1e-9
+            ):
+                continue
+
             volume_balance = self._get_candidate_volume_balance(
                 repaired_candidate
             )
@@ -587,14 +599,14 @@ class OptimizationModel():
                 / (max_conc[reagent_i] - min_conc[reagent_i])
             )
 
-            lower_bound = float(np.clip(lower_bound, 0.0, 1.0))
-
             if lower_bound > 1.0:
                 raise ValueError(
                     f"Masked lower bound for {reagent_name} is above 1.0. "
                     "The reagent cannot reach a 5 uL executable transfer "
                     "within the configured concentration range."
                 )
+
+            lower_bound = float(np.clip(lower_bound, 0.0, 1.0))
 
             bounds.append((lower_bound, 1.0))
 
