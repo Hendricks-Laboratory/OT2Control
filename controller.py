@@ -2780,7 +2780,6 @@ class AutoContr(Controller):
 
             self.auto_model_performance_rows.append(row)
             self.auto_condition_counter += 1
-        
         self._update_auto_model_performance_closest_so_far()
     
     def _update_auto_model_performance_closest_so_far(self):
