@@ -2943,13 +2943,13 @@ class AutoContr(Controller):
 
         # Use a very light connecting line only as a visual guide for run
         # sequence. The points/error bars remain the primary data display.
-        ax.plot(
+        '''ax.plot(
             actual_x_values.to_numpy(),
             actual_means,
             color=actual_color,
             linewidth=0.8,
             alpha=0.20
-        )
+        )'''
 
         prediction_df = performance_df[has_prediction].copy()
 
@@ -2979,7 +2979,7 @@ class AutoContr(Controller):
                 label='GP prediction ± SD'
             )
 
-            if len(pred_x_values) > 1:
+            '''if len(pred_x_values) > 1:
                 ax.plot(
                     pred_x_values,
                     predicted_means,
@@ -2987,7 +2987,7 @@ class AutoContr(Controller):
                     linestyle='--',
                     linewidth=0.8,
                     alpha=0.35
-                )
+                )'''
 
         ax.axhline(
             target_lambda,
@@ -3002,9 +3002,9 @@ class AutoContr(Controller):
         ax.set_xticks(integer_ticks)
 
         ax.set_xlabel('Reaction condition number')
-        ax.set_ylabel('Lambda max (nm)')
+        ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
         ax.set_title(
-            f'Auto lambda progress after batch {batch_number}',
+            rf'Auto $\lambda_{{\max}}$ Progress After Batch {batch_number}',
             fontsize=11,
             fontweight='normal',
             pad=10
