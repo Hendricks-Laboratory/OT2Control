@@ -1311,6 +1311,50 @@ class OptimizationModel():
 
         return normalized_prediction * 600.0 + 300.0
 
+    def predict_lambda_distribution_nm(self, x):
+        '''
+        Predicts lambda max mean and GP predictive standard deviation in
+        nanometers for one normalized recipe point.
+
+        The Gaussian process model is trained on normalized Y values where:
+            0 corresponds to 300 nm
+            1 corresponds to 900 nm
+
+        This helper converts both the model-predicted mean and predictive
+        standard deviation back into nanometers. It is intended for Auto
+        reporting and should be called at recipe-selection time, before the
+        selected recipe is experimentally run and before the result is added
+        back into the training data.
+
+        params:
+            np.ndarray x:
+                One normalized recipe point with shape:
+                    n_dimensions
+                or:
+                    1 x n_dimensions
+
+        returns:
+            tuple(float, float):
+                Predicted lambda max mean in nanometers and GP predictive
+                standard deviation in nanometers.
+        '''
+        if self.gp_model is None:
+            return None, None
+
+        x = np.asarray(x, dtype=float).reshape(1, self._get_dimension())
+
+        normalized_mean, normalized_var = self.gp_model.predict(x)
+
+        normalized_mean = float(normalized_mean.flatten()[0])
+        normalized_var = float(normalized_var.flatten()[0])
+
+        normalized_var = max(normalized_var, 0.0)
+
+        predicted_lambda_mean_nm = normalized_mean * 600.0 + 300.0
+        predicted_lambda_std_nm = math.sqrt(normalized_var) * 600.0
+
+        return predicted_lambda_mean_nm, predicted_lambda_std_nm
+    
     def _target_distance_objective(self, x):
         '''
         Computes the target-distance objective for one normalized recipe point.
@@ -1568,6 +1612,10 @@ class OptimizationModel():
         dimensional experiments, self.predictions is set to None because the
         existing heatmap is only valid for two variable reagents.
 
+        The final selected recipe prediction is saved on the optimizer object
+        so the controller can record pre-experiment model performance before
+        the recipe is physically run.
+
         returns:
             list[np.ndarray]:
                 A single suggested normalized recipe point wrapped in a list.
@@ -1575,7 +1623,12 @@ class OptimizationModel():
                     [array([...])]
         '''
         best_x = self._optimize_target_distance_with_masks()
-        predicted_lambda_max = self._predict_lambda_max_nm(best_x)
+        predicted_lambda_max, predicted_lambda_std = (
+            self.predict_lambda_distribution_nm(best_x)
+        )
+
+        self.last_optimizer_predicted_lambda_mean_nm = predicted_lambda_max
+        self.last_optimizer_predicted_lambda_std_nm = predicted_lambda_std
 
         self._update_prediction_grid_for_plotting()
 
@@ -1600,7 +1653,8 @@ class OptimizationModel():
 
         print(
             f"<<optimizer>> suggested normalized recipe {best_x} "
-            f"with predicted lambda max {predicted_lambda_max:.4f} nm"
+            f"with predicted lambda max {predicted_lambda_max:.4f} nm "
+            f"and GP predictive std {predicted_lambda_std:.4f} nm"
         )
 
         return [best_x]

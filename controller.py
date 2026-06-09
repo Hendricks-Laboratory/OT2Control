@@ -2406,7 +2406,13 @@ class AutoContr(Controller):
         print(f"<<controller>> using {self.num_duplicates} replicate wells per unique Auto recipe")
         self.max_conc = list(self.get_max_conc().values())
         self.min_conc = list(self.get_min_conc().values())
-    
+        # Auto reporting layer.
+        # This list stores one row per unique reaction condition, not one row
+        # per physical duplicate well. It is separate from experiment_data.csv,
+        # which remains row-per-well for raw output and model training.
+        self.auto_model_performance_rows = []
+        self.auto_condition_counter = 0
+
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result, axis=1):
         # TODO: Reformat the instructions for csv output to make it export 
@@ -2500,6 +2506,351 @@ class AutoContr(Controller):
         print(self.experiment_data)
         print(f"<<controller>> experiment data updated successfully with {len(new_data)} new rows")
 
+    def _safe_float_or_none(self, value):
+        '''
+        Converts a numeric value to float while preserving missing values as
+        None.
+
+        This is used by the Auto performance log so optional values, such as
+        seed-recipe predictions, can remain blank in the exported CSV instead
+        of causing conversion errors.
+
+        params:
+            value:
+                Numeric value, None, NaN, or other value convertible to float.
+
+        returns:
+            float or None:
+                Float-converted value, or None if the input is missing.
+        '''
+        if value is None:
+            return None
+
+        try:
+            if pd.isna(value):
+                return None
+        except TypeError:
+            pass
+
+        return float(value)
+    
+    def _format_mask_for_report(self, mask):
+        '''
+        Converts a selected optimizer reagent mask into a compact string for
+        the Auto performance log.
+
+        Example:
+            np.array([1, 0]) becomes "[1, 0]"
+
+        params:
+            mask:
+                List, numpy array, or None representing the selected variable
+                reagent ON/OFF mask.
+
+        returns:
+            str:
+                Compact mask string, or an empty string if no mask is present.
+        '''
+        if mask is None:
+            return ""
+
+        mask_array = np.asarray(mask).astype(int).reshape(-1)
+
+        return "[" + ", ".join(str(int(x)) for x in mask_array) + "]"
+
+    def _get_active_variable_reagents_from_mask(self, mask):
+        '''
+        Converts a selected optimizer reagent mask into a comma-separated list
+        of active variable reagent names for the Auto performance log.
+
+        Example:
+            variable_reagents = ["silver_nitrate", "potassium_bromide"]
+            mask = np.array([1, 0])
+
+            returns:
+                "silver_nitrate"
+
+        params:
+            mask:
+                List, numpy array, or None representing the selected variable
+                reagent ON/OFF mask.
+
+        returns:
+            str:
+                Comma-separated active variable reagent names, or an empty
+                string if no mask is present.
+        '''
+        if mask is None:
+            return ""
+
+        mask_array = np.asarray(mask).astype(int).reshape(-1)
+
+        active_reagents = []
+
+        for reagent_i, is_active in enumerate(mask_array):
+            if is_active and reagent_i < len(self.variable_reagents):
+                active_reagents.append(str(self.variable_reagents[reagent_i]))
+
+        return ", ".join(active_reagents)
+    
+    def _summarize_duplicate_lambda_values(self, lambda_values):
+        '''
+        Computes the mean, sample standard deviation, and standard error of
+        the mean for duplicate lambda max measurements.
+
+        This is used by the Auto performance log to summarize multiple
+        physical replicate wells as one unique reaction condition.
+
+        If only one replicate is present, standard deviation and SEM are set
+        to 0.0 because replicate variability cannot be estimated.
+
+        params:
+            list lambda_values:
+                Lambda max values from the physical replicate wells for one
+                unique reaction condition.
+
+        returns:
+            tuple(float, float, float):
+                Mean lambda max, sample standard deviation, and standard error
+                of the mean. Returns (None, None, None) if no valid lambda max
+                values are present.
+        '''
+        lambda_values = [
+            float(value)
+            for value in lambda_values
+            if value is not None and not pd.isna(value)
+        ]
+
+        if len(lambda_values) == 0:
+            return None, None, None
+
+        actual_mean = float(np.mean(lambda_values))
+
+        if len(lambda_values) >= 2:
+            actual_sd = float(np.std(lambda_values, ddof=1))
+            actual_sem = float(actual_sd / math.sqrt(len(lambda_values)))
+        else:
+            actual_sd = 0.0
+            actual_sem = 0.0
+
+        return actual_mean, actual_sd, actual_sem
+    
+    def _append_auto_model_performance_rows(
+        self,
+        unique_recipes,
+        lambda_max_values,
+        condition_type,
+        batch_number,
+        prediction_metadata=None
+    ):
+        '''
+        Appends condition-level rows to the Auto model performance log.
+
+        This log stores one row per unique reaction condition. It does not
+        store one row per physical duplicate well. Raw duplicate-well results
+        remain preserved in experiment_data.csv and in the replicate-specific
+        columns of this performance log.
+
+        Duplicate wells are assumed to be contiguous because Auto mode expands
+        each unique recipe with duplicate_list_elements() before execution.
+
+        params:
+            np.ndarray unique_recipes:
+                One row per unique denormalized recipe condition.
+
+            list lambda_max_values:
+                Lambda max values from the physical replicate wells.
+
+            str condition_type:
+                Type of condition being logged. Expected values are:
+                    seed
+                    optimizer_selected
+
+            int batch_number:
+                Auto batch number for these conditions.
+
+            dict prediction_metadata:
+                Optional metadata captured before experiment execution, such
+                as selected mask, predicted lambda mean, and predicted lambda
+                standard deviation.
+
+        returns:
+            None
+        '''
+        unique_recipes = np.array(unique_recipes, dtype=float, copy=True)
+
+        if unique_recipes.ndim == 1:
+            unique_recipes = unique_recipes.reshape(1, -1)
+
+        lambda_max_values = list(lambda_max_values)
+
+        expected_lambda_count = unique_recipes.shape[0] * self.num_duplicates
+
+        if len(lambda_max_values) != expected_lambda_count:
+            raise ValueError(
+                "Cannot append Auto model performance rows because the number "
+                f"of lambda max values ({len(lambda_max_values)}) does not "
+                f"match unique recipes ({unique_recipes.shape[0]}) x "
+                f"num_duplicates ({self.num_duplicates}) = "
+                f"{expected_lambda_count}."
+            )
+
+        if prediction_metadata is None:
+            prediction_metadata = {}
+
+        target_lambda = self.getModelInfo()["target"]
+
+        for recipe_i, recipe in enumerate(unique_recipes):
+            start_i = recipe_i * self.num_duplicates
+            end_i = start_i + self.num_duplicates
+            replicate_lambda_values = lambda_max_values[start_i:end_i]
+
+            actual_mean, actual_sd, actual_sem = (
+                self._summarize_duplicate_lambda_values(
+                    replicate_lambda_values
+                )
+            )
+
+            predicted_mean = self._safe_float_or_none(
+                prediction_metadata.get('predicted_lambda_mean_nm')
+            )
+            predicted_std = self._safe_float_or_none(
+                prediction_metadata.get('predicted_lambda_std_nm')
+            )
+
+            if actual_mean is None:
+                target_error = None
+                prediction_error = None
+            else:
+                target_error = float(abs(actual_mean - target_lambda))
+
+                if predicted_mean is None:
+                    prediction_error = None
+                else:
+                    prediction_error = float(actual_mean - predicted_mean)
+
+            volume_balance = self._get_auto_recipe_volume_balance(recipe)
+            selected_mask = prediction_metadata.get('selected_mask')
+
+            row = {
+                'experiment_name': self.rxn_sheet_name,
+                'batch_number': int(batch_number),
+                'reaction_number': int(self.auto_condition_counter),
+                'condition_type': condition_type,
+                'selected_mask': self._format_mask_for_report(selected_mask),
+                'active_variable_reagents': (
+                    self._get_active_variable_reagents_from_mask(
+                        selected_mask
+                    )
+                ),
+                'target_lambda_max_nm': float(target_lambda),
+                'predicted_lambda_mean_nm': predicted_mean,
+                'predicted_lambda_std_nm': predicted_std,
+                'actual_lambda_mean_nm': actual_mean,
+                'actual_lambda_sd_nm': actual_sd,
+                'actual_lambda_sem_nm': actual_sem,
+                'target_error_nm': target_error,
+                'prediction_error_nm': prediction_error,
+                'fixed_volume_total_uL': volume_balance['fixed_volume_total'],
+                'variable_volume_total_uL': (
+                    volume_balance['variable_volume_total']
+                ),
+                'water_volume_uL': volume_balance['water_volume'],
+                'total_volume_uL': volume_balance['total_volume'],
+                'volume_feasible': volume_balance['volume_feasible'],
+                'water_transfer_executable': (
+                    volume_balance['water_transfer_executable']
+                ),
+                'notes': prediction_metadata.get('notes', ''),
+                'warnings': prediction_metadata.get('warnings', '')
+            }
+
+            for reagent_i, reagent_name in enumerate(self.variable_reagents):
+                reagent_name = str(reagent_name)
+                row[f'{reagent_name}_concentration'] = float(recipe[reagent_i])
+
+                variable_volumes = volume_balance['variable_transfer_volumes']
+                row[f'{reagent_name}_transfer_uL'] = float(
+                    variable_volumes[reagent_name]
+                )
+
+            for rep_i in range(self.num_duplicates):
+                col_name = f'actual_lambda_rep_{rep_i + 1}_nm'
+                row[col_name] = float(replicate_lambda_values[rep_i])
+
+            self.auto_model_performance_rows.append(row)
+            self.auto_condition_counter += 1
+        
+        self._update_auto_model_performance_closest_so_far()
+    
+    def _update_auto_model_performance_closest_so_far(self):
+        '''
+        Updates the closest-to-target-so-far flag for each condition-level row
+        in the Auto model performance log.
+
+        A row is marked True if it is the best observed condition at that point
+        in the run sequence. Otherwise, it is marked False.
+
+        This is useful for future progress plots and notebook reports because
+        it identifies when Auto discovers a new best condition.
+
+        params:
+            None
+
+        returns:
+            None
+        '''
+        best_error_so_far = None
+
+        for row in self.auto_model_performance_rows:
+            target_error = row.get('target_error_nm')
+
+            if target_error is None or pd.isna(target_error):
+                row['closest_to_target_so_far'] = False
+                continue
+
+            if best_error_so_far is None or target_error < best_error_so_far:
+                best_error_so_far = target_error
+                row['closest_to_target_so_far'] = True
+            else:
+                row['closest_to_target_so_far'] = False
+    
+    def _export_auto_model_performance_log(self):
+        '''
+        Exports the condition-level Auto model performance log as a CSV.
+
+        This CSV is the central reporting artifact for Auto mode. It stores
+        one row per unique reaction condition and is intended to support future
+        lambda-progress plots, all-batch comparison plots, notebook-ready run
+        reports, and model-performance diagnostics.
+
+        This does not replace experiment_data.csv. experiment_data.csv remains
+        the row-per-well raw output and model-training audit file.
+
+        params:
+            None
+
+        returns:
+            str:
+                Path to the exported Auto model performance log CSV.
+        '''
+        export_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            'auto_model_performance_log.csv'
+        )
+
+        performance_df = pd.DataFrame(self.auto_model_performance_rows)
+
+        performance_df.to_csv(export_path, index=False)
+
+        print(
+            f"<<controller>> exported Auto model performance log to "
+            f"{export_path}"
+        )
+
+        return export_path
+    
     def get_variable_reagents(self):
 
         # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
@@ -2719,6 +3070,19 @@ class AutoContr(Controller):
         # Lambda maxes are Y_intial
         Y_initial = find_max(scan_data)
         print(f"Lambda Maxes: {Y_initial}")
+
+        self._append_auto_model_performance_rows(
+            unique_recipes=X_Initial_Denormalized,
+            lambda_max_values=Y_initial,
+            condition_type='seed',
+            batch_number=self.batch_num,
+            prediction_metadata={
+                'notes': (
+                    'Initial seed design; no pre-experiment GP prediction '
+                    'available.'
+                )
+            }
+        )
         
         # Normalize the experimental lambda maxes to pass to the gpr model
         Y_initial_Normalized = normalize(np.array(Y_initial),300,900).reshape(-1,1)
@@ -2750,6 +3114,24 @@ class AutoContr(Controller):
             print("<<controller>> selecting next reaction from updated model")
             X_new = model.getNextReaction()
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
+
+            optimizer_prediction_metadata = {
+                'selected_mask': getattr(model, 'last_selected_mask', None),
+                'predicted_lambda_mean_nm': getattr(
+                    model,
+                    'last_optimizer_predicted_lambda_mean_nm',
+                    getattr(model, 'last_optimizer_predicted_lambda_max', None)
+                ),
+                'predicted_lambda_std_nm': getattr(
+                    model,
+                    'last_optimizer_predicted_lambda_std_nm',
+                    None
+                ),
+                'notes': (
+                    'Optimizer-selected recipe; prediction captured before '
+                    'experiment execution.'
+                )
+            }
 
             # Denormalize the recipe before sending it to the robot.
             X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
@@ -2798,6 +3180,14 @@ class AutoContr(Controller):
             Y_new = find_max(scan_data)
             print(f"Lambda Maxes: {Y_new}")
 
+            self._append_auto_model_performance_rows(
+                unique_recipes=X_new_Denormalized,
+                lambda_max_values=Y_new,
+                condition_type='optimizer_selected',
+                batch_number=self.batch_num,
+                prediction_metadata=optimizer_prediction_metadata
+            )
+
             # Normalize the lambda maxes and recipes to pass to the model.
             # Use a copy because Normalize_Denormalize_Recipes mutates its input,
             # and recipes should remain denormalized for experiment_data export.
@@ -2814,8 +3204,18 @@ class AutoContr(Controller):
             self._update_experiment_data(recipes, Y_new, axis=0) 
             self.batch_num += 1    
             
-        # Save the experiment data as a csv to pr_data
-        self.experiment_data.to_csv(f'{os.path.join(self.out_path, "pr_data")}/experiment_data.csv', index=False)
+        # Save the row-per-well experiment data used for raw output and model
+        # audit. This remains separate from the condition-level Auto
+        # performance log.
+        self.experiment_data.to_csv(
+            f'{os.path.join(self.out_path, "pr_data")}/experiment_data.csv',
+            index=False
+        )
+
+        # Save the row-per-condition Auto performance log used for reporting,
+        # plotting, and future notebook-ready summaries.
+        self._export_auto_model_performance_log()
+
         print("Success!!!")
         
         self.close_connection()
