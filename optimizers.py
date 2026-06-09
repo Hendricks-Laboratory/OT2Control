@@ -1343,15 +1343,18 @@ class OptimizationModel():
 
         x = np.asarray(x, dtype=float).reshape(1, self._get_dimension())
 
-        normalized_mean, normalized_var = self.gp_model.predict(x)
+        normalized_mean, normalized_std = self.gp_model.predict(x)
 
         normalized_mean = float(normalized_mean.flatten()[0])
-        normalized_var = float(normalized_var.flatten()[0])
+        normalized_std = float(normalized_std.flatten()[0])
 
-        normalized_var = max(normalized_var, 0.0)
+        # Numerical safety: predictive standard deviation should not be
+        # negative, but tiny negative values can appear from floating-point
+        # artifacts or model-wrapper behavior.
+        normalized_std = max(normalized_std, 0.0)
 
         predicted_lambda_mean_nm = normalized_mean * 600.0 + 300.0
-        predicted_lambda_std_nm = math.sqrt(normalized_var) * 600.0
+        predicted_lambda_std_nm = normalized_std * 600.0
 
         return predicted_lambda_mean_nm, predicted_lambda_std_nm
     
