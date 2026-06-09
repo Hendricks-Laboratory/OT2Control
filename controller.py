@@ -2850,6 +2850,136 @@ class AutoContr(Controller):
 
         return export_path
     
+    def _plot_lambda_progress_after_batch(self, batch_number):
+        '''
+        Generates a cumulative lambda max progress plot after a completed Auto
+        batch.
+
+        This plot is dimension-agnostic. It does not plot reagent-space
+        coordinates, so it can be used for any number of variable reagents.
+
+        Experimental results are plotted as condition-level lambda max means
+        with SEM error bars across duplicate wells. Model predictions, when
+        available, are plotted as pre-experiment GP-predicted lambda max means
+        with GP predictive standard deviation error bars.
+
+        Actual and model points are slightly offset around each reaction
+        condition number so overlapping error bars remain readable while still
+        clearly referring to the same reaction condition.
+
+        params:
+            int batch_number:
+                Highest completed batch number to include in the cumulative
+                plot.
+
+        returns:
+            str or None:
+                Path to the saved plot, or None if there are no rows to plot.
+        '''
+        if len(self.auto_model_performance_rows) == 0:
+            print(
+                "<<controller warning>> skipping lambda progress plot because "
+                "auto_model_performance_rows is empty"
+            )
+            return None
+
+        performance_df = pd.DataFrame(self.auto_model_performance_rows)
+
+        performance_df = performance_df[
+            performance_df['batch_number'] <= batch_number
+        ].copy()
+
+        if performance_df.empty:
+            print(
+                "<<controller warning>> skipping lambda progress plot because "
+                f"there are no performance rows through batch {batch_number}"
+            )
+            return None
+
+        performance_df = performance_df.sort_values('reaction_number')
+
+        x_values = performance_df['reaction_number'].to_numpy(dtype=float)
+        actual_means = performance_df['actual_lambda_mean_nm'].to_numpy()
+        actual_sems = (
+            performance_df['actual_lambda_sem_nm'].fillna(0.0).to_numpy()
+        )
+
+        target_lambda = float(performance_df['target_lambda_max_nm'].iloc[0])
+
+        actual_color = 'tab:blue'
+        model_color = 'tab:orange'
+        x_offset = 0.08
+
+        plt.figure(figsize=(7, 4.5), dpi=300)
+
+        plt.errorbar(
+            x_values - x_offset,
+            actual_means,
+            yerr=actual_sems,
+            fmt='o-',
+            color=actual_color,
+            ecolor=actual_color,
+            elinewidth=1.2,
+            capsize=4,
+            alpha=0.9,
+            label='Actual lambda max mean ± SEM'
+        )
+
+        prediction_df = performance_df.dropna(
+            subset=['predicted_lambda_mean_nm']
+        )
+
+        if not prediction_df.empty:
+            pred_x_values = prediction_df[
+                'reaction_number'
+            ].to_numpy(dtype=float)
+            predicted_means = prediction_df[
+                'predicted_lambda_mean_nm'
+            ].to_numpy()
+            predicted_stds = prediction_df[
+                'predicted_lambda_std_nm'
+            ].fillna(0.0).to_numpy()
+
+            plt.errorbar(
+                pred_x_values + x_offset,
+                predicted_means,
+                yerr=predicted_stds,
+                fmt='s--',
+                color=model_color,
+                ecolor=model_color,
+                elinewidth=1.2,
+                capsize=4,
+                alpha=0.9,
+                label='GP prediction ± predictive SD'
+            )
+
+        plt.axhline(
+            target_lambda,
+            linestyle=':',
+            linewidth=1.5,
+            label=f'Target = {target_lambda:.0f} nm'
+        )
+
+        plt.xlabel('Reaction condition number')
+        plt.ylabel('Lambda max (nm)')
+        plt.title(f'Auto lambda progress after batch {batch_number}')
+        plt.legend(frameon=False)
+        plt.tight_layout()
+
+        plot_path = os.path.join(
+            self.plot_path,
+            f'lambda_progress_after_batch_{batch_number}.png'
+        )
+
+        plt.savefig(plot_path)
+        plt.close()
+
+        print(
+            f"<<controller>> saved lambda progress plot to {plot_path}"
+        )
+
+        return plot_path
+    
     def get_variable_reagents(self):
 
         # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
@@ -3083,6 +3213,8 @@ class AutoContr(Controller):
             }
         )
         
+        self._plot_lambda_progress_after_batch(self.batch_num)
+
         # Normalize the experimental lambda maxes to pass to the gpr model
         Y_initial_Normalized = normalize(np.array(Y_initial),300,900).reshape(-1,1)
         
@@ -3152,6 +3284,27 @@ class AutoContr(Controller):
                 context_label=f"model-suggested batch {self.batch_num}"
             )
 
+            if not np.allclose(
+                X_new_Denormalized_before_repair,
+                X_new_Denormalized,
+                rtol=0.0,
+                atol=1e-12
+            ):
+                print(
+                    "<<controller warning>> true-zero repair changed the "
+                    f"optimizer-selected recipe for batch {self.batch_num}. "
+                    "This means the optimizer suggestion was not already in "
+                    "final executable true-zero form."
+                )
+                print(
+                    "<<controller warning>> optimizer-selected recipe before "
+                    f"repair: {X_new_Denormalized_before_repair}"
+                )
+                print(
+                    "<<controller warning>> optimizer-selected recipe after "
+                    f"repair: {X_new_Denormalized}"
+                )
+
             self._export_auto_batch_recipe_design(
                 repaired_recipes=X_new_Denormalized,
                 original_recipes=X_new_Denormalized_before_repair,
@@ -3186,6 +3339,8 @@ class AutoContr(Controller):
                 batch_number=self.batch_num,
                 prediction_metadata=optimizer_prediction_metadata
             )
+
+            self._plot_lambda_progress_after_batch(self.batch_num)
 
             # Normalize the lambda maxes and recipes to pass to the model.
             # Use a copy because Normalize_Denormalize_Recipes mutates its input,
