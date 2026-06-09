@@ -2925,7 +2925,7 @@ class AutoContr(Controller):
         model_color = 'tab:orange'
         target_color = '0.25'
 
-        fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=300)
+        fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
 
         ax.errorbar(
             actual_x_values.to_numpy(),
@@ -2983,11 +2983,11 @@ class AutoContr(Controller):
 
         ax.set_xlabel('Reaction condition number')
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
-        ax.set_title(
+        fig.suptitle(
             rf'Auto $\lambda_{{\max}}$ Progress After Batch {batch_number}',
             fontsize=11,
             fontweight='normal',
-            pad=10
+            y=0.97
         )
 
         y_values_for_limits = list(actual_means) + [target_lambda]
@@ -3018,15 +3018,26 @@ class AutoContr(Controller):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        ax.legend(
-            loc='lower center',
-            bbox_to_anchor=(0.5, 1.02),
+        handles, labels = ax.get_legend_handles_labels()
+
+        fig.legend(
+            handles,
+            labels,
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.915),
             ncol=3,
             frameon=False,
-            fontsize=8.5
+            fontsize=8.5,
+            handlelength=1.6,
+            columnspacing=1.4
         )
 
-        fig.tight_layout(rect=[0, 0, 1, 0.90])
+        fig.subplots_adjust(
+            left=0.12,
+            right=0.97,
+            bottom=0.14,
+            top=0.80
+        )
 
         plot_path = os.path.join(
             self.plot_path,
