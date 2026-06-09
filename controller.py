@@ -2863,9 +2863,10 @@ class AutoContr(Controller):
         available, are plotted as pre-experiment GP-predicted lambda max means
         with GP predictive standard deviation error bars.
 
-        Actual and model points are slightly offset around each reaction
-        condition number so overlapping error bars remain readable while still
-        clearly referring to the same reaction condition.
+        Actual and model points are slightly offset only for reaction
+        conditions that have both an actual result and a model prediction. Seed
+        conditions without model predictions remain centered on their integer
+        reaction numbers.
 
         params:
             int batch_number:
@@ -2898,7 +2899,21 @@ class AutoContr(Controller):
 
         performance_df = performance_df.sort_values('reaction_number')
 
-        x_values = performance_df['reaction_number'].to_numpy(dtype=float)
+        performance_df['reaction_number'] = performance_df[
+            'reaction_number'
+        ].astype(float)
+
+        has_prediction = performance_df[
+            'predicted_lambda_mean_nm'
+        ].notna()
+
+        x_offset = 0.08
+
+        actual_x_values = performance_df['reaction_number'].copy()
+        actual_x_values.loc[has_prediction] = (
+            actual_x_values.loc[has_prediction] - x_offset
+        )
+
         actual_means = performance_df['actual_lambda_mean_nm'].to_numpy()
         actual_sems = (
             performance_df['actual_lambda_sem_nm'].fillna(0.0).to_numpy()
@@ -2908,31 +2923,41 @@ class AutoContr(Controller):
 
         actual_color = 'tab:blue'
         model_color = 'tab:orange'
-        x_offset = 0.08
+        target_color = '0.25'
 
-        plt.figure(figsize=(7, 4.5), dpi=300)
+        fig, ax = plt.subplots(figsize=(7.2, 4.6), dpi=300)
 
-        plt.errorbar(
-            x_values - x_offset,
+        ax.errorbar(
+            actual_x_values.to_numpy(),
             actual_means,
             yerr=actual_sems,
-            fmt='o-',
+            fmt='o',
             color=actual_color,
             ecolor=actual_color,
-            elinewidth=1.2,
-            capsize=4,
+            elinewidth=1.0,
+            capsize=3,
+            markersize=4.8,
             alpha=0.9,
-            label='Actual lambda max mean ± SEM'
+            label='Observed mean ± SEM'
         )
 
-        prediction_df = performance_df.dropna(
-            subset=['predicted_lambda_mean_nm']
+        # Use a very light connecting line only as a visual guide for run
+        # sequence. The points/error bars remain the primary data display.
+        ax.plot(
+            actual_x_values.to_numpy(),
+            actual_means,
+            color=actual_color,
+            linewidth=0.8,
+            alpha=0.20
         )
+
+        prediction_df = performance_df[has_prediction].copy()
 
         if not prediction_df.empty:
-            pred_x_values = prediction_df[
-                'reaction_number'
-            ].to_numpy(dtype=float)
+            pred_x_values = (
+                prediction_df['reaction_number'].to_numpy(dtype=float)
+                + x_offset
+            )
             predicted_means = prediction_df[
                 'predicted_lambda_mean_nm'
             ].to_numpy()
@@ -2940,39 +2965,96 @@ class AutoContr(Controller):
                 'predicted_lambda_std_nm'
             ].fillna(0.0).to_numpy()
 
-            plt.errorbar(
-                pred_x_values + x_offset,
+            ax.errorbar(
+                pred_x_values,
                 predicted_means,
                 yerr=predicted_stds,
-                fmt='s--',
+                fmt='s',
                 color=model_color,
                 ecolor=model_color,
-                elinewidth=1.2,
-                capsize=4,
+                elinewidth=1.0,
+                capsize=3,
+                markersize=4.8,
                 alpha=0.9,
-                label='GP prediction ± predictive SD'
+                label='GP prediction ± SD'
             )
 
-        plt.axhline(
+            if len(pred_x_values) > 1:
+                ax.plot(
+                    pred_x_values,
+                    predicted_means,
+                    color=model_color,
+                    linestyle='--',
+                    linewidth=0.8,
+                    alpha=0.35
+                )
+
+        ax.axhline(
             target_lambda,
-            linestyle=':',
-            linewidth=1.5,
+            color=target_color,
+            linestyle='--',
+            linewidth=1.1,
+            alpha=0.8,
             label=f'Target = {target_lambda:.0f} nm'
         )
 
-        plt.xlabel('Reaction condition number')
-        plt.ylabel('Lambda max (nm)')
-        plt.title(f'Auto lambda progress after batch {batch_number}')
-        plt.legend(frameon=False)
-        plt.tight_layout()
+        integer_ticks = performance_df['reaction_number'].astype(int).to_list()
+        ax.set_xticks(integer_ticks)
+
+        ax.set_xlabel('Reaction condition number')
+        ax.set_ylabel('Lambda max (nm)')
+        ax.set_title(
+            f'Auto lambda progress after batch {batch_number}',
+            fontsize=11,
+            fontweight='normal',
+            pad=10
+        )
+
+        y_values_for_limits = list(actual_means) + [target_lambda]
+        y_values_for_limits.extend(list(actual_means - actual_sems))
+        y_values_for_limits.extend(list(actual_means + actual_sems))
+
+        if not prediction_df.empty:
+            y_values_for_limits.extend(
+                list(predicted_means - predicted_stds)
+            )
+            y_values_for_limits.extend(
+                list(predicted_means + predicted_stds)
+            )
+
+        y_min = min(y_values_for_limits)
+        y_max = max(y_values_for_limits)
+        y_padding = max((y_max - y_min) * 0.12, 15.0)
+
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+
+        ax.grid(
+            axis='y',
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        ax.legend(
+            loc='lower center',
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=3,
+            frameon=False,
+            fontsize=8.5
+        )
+
+        fig.tight_layout(rect=[0, 0, 1, 0.90])
 
         plot_path = os.path.join(
             self.plot_path,
             f'lambda_progress_after_batch_{batch_number}.png'
         )
 
-        plt.savefig(plot_path)
-        plt.close()
+        fig.savefig(plot_path)
+        plt.close(fig)
 
         print(
             f"<<controller>> saved lambda progress plot to {plot_path}"
