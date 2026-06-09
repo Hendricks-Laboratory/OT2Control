@@ -2941,16 +2941,6 @@ class AutoContr(Controller):
             label='Observed mean ± SEM'
         )
 
-        # Use a very light connecting line only as a visual guide for run
-        # sequence. The points/error bars remain the primary data display.
-        '''ax.plot(
-            actual_x_values.to_numpy(),
-            actual_means,
-            color=actual_color,
-            linewidth=0.8,
-            alpha=0.20
-        )'''
-
         prediction_df = performance_df[has_prediction].copy()
 
         if not prediction_df.empty:
@@ -2978,16 +2968,6 @@ class AutoContr(Controller):
                 alpha=0.9,
                 label='GP prediction ± SD'
             )
-
-            '''if len(pred_x_values) > 1:
-                ax.plot(
-                    pred_x_values,
-                    predicted_means,
-                    color=model_color,
-                    linestyle='--',
-                    linewidth=0.8,
-                    alpha=0.35
-                )'''
 
         ax.axhline(
             target_lambda,
