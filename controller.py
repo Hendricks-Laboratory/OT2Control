@@ -2863,10 +2863,9 @@ class AutoContr(Controller):
         available, are plotted as pre-experiment GP-predicted lambda max means
         with GP predictive standard deviation error bars.
 
-        Actual and model points are slightly offset only for reaction
-        conditions that have both an actual result and a model prediction. Seed
-        conditions without model predictions remain centered on their integer
-        reaction numbers.
+        Actual and model points are plotted at the same reaction condition
+        number when both are available. This keeps the visual meaning clear:
+        both values refer to the same recipe condition.
 
         params:
             int batch_number:
@@ -2907,13 +2906,11 @@ class AutoContr(Controller):
             'predicted_lambda_mean_nm'
         ].notna()
 
-        x_offset = 0.08
+        prediction_df = performance_df[has_prediction].copy()
 
-        actual_x_values = performance_df['reaction_number'].copy()
-        actual_x_values.loc[has_prediction] = (
-            actual_x_values.loc[has_prediction] - x_offset
+        actual_x_values = performance_df['reaction_number'].to_numpy(
+            dtype=float
         )
-
         actual_means = performance_df['actual_lambda_mean_nm'].to_numpy()
         actual_sems = (
             performance_df['actual_lambda_sem_nm'].fillna(0.0).to_numpy()
@@ -2927,35 +2924,32 @@ class AutoContr(Controller):
 
         fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
 
-        ax.errorbar(
-            actual_x_values.to_numpy(),
-            actual_means,
-            yerr=actual_sems,
-            fmt='o',
-            color=actual_color,
-            ecolor=actual_color,
-            elinewidth=1.0,
-            capsize=3,
-            markersize=4.8,
-            alpha=0.9,
-            label='Observed mean ± SEM'
+        target_handle = ax.axhline(
+            target_lambda,
+            color=target_color,
+            linestyle='--',
+            linewidth=1.1,
+            alpha=0.8,
+            zorder=1,
+            label=f'Target = {target_lambda:.0f} nm'
         )
 
-        prediction_df = performance_df[has_prediction].copy()
+        prediction_handle = None
 
         if not prediction_df.empty:
-            pred_x_values = (
-                prediction_df['reaction_number'].to_numpy(dtype=float)
-                + x_offset
-            )
+            pred_x_values = prediction_df[
+                'reaction_number'
+            ].to_numpy(dtype=float)
+
             predicted_means = prediction_df[
                 'predicted_lambda_mean_nm'
             ].to_numpy()
+
             predicted_stds = prediction_df[
                 'predicted_lambda_std_nm'
             ].fillna(0.0).to_numpy()
 
-            ax.errorbar(
+            prediction_handle = ax.errorbar(
                 pred_x_values,
                 predicted_means,
                 yerr=predicted_stds,
@@ -2965,17 +2959,24 @@ class AutoContr(Controller):
                 elinewidth=1.0,
                 capsize=3,
                 markersize=4.8,
-                alpha=0.9,
+                alpha=0.75,
+                zorder=2,
                 label='GP prediction ± SD'
             )
 
-        ax.axhline(
-            target_lambda,
-            color=target_color,
-            linestyle='--',
-            linewidth=1.1,
-            alpha=0.8,
-            label=f'Target = {target_lambda:.0f} nm'
+        observed_handle = ax.errorbar(
+            actual_x_values,
+            actual_means,
+            yerr=actual_sems,
+            fmt='o',
+            color=actual_color,
+            ecolor=actual_color,
+            elinewidth=1.0,
+            capsize=3,
+            markersize=4.8,
+            alpha=0.95,
+            zorder=3,
+            label='Observed mean ± SEM'
         )
 
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
@@ -2983,6 +2984,7 @@ class AutoContr(Controller):
 
         ax.set_xlabel('Reaction condition number')
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
+
         fig.suptitle(
             rf'Auto $\lambda_{{\max}}$ Progress After Batch {batch_number}',
             fontsize=11,
@@ -3018,14 +3020,22 @@ class AutoContr(Controller):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        handles, labels = ax.get_legend_handles_labels()
+        legend_handles = [observed_handle]
+        legend_labels = ['Observed mean ± SEM']
+
+        if prediction_handle is not None:
+            legend_handles.append(prediction_handle)
+            legend_labels.append('GP prediction ± SD')
+
+        legend_handles.append(target_handle)
+        legend_labels.append(f'Target = {target_lambda:.0f} nm')
 
         fig.legend(
-            handles,
-            labels,
+            legend_handles,
+            legend_labels,
             loc='upper center',
             bbox_to_anchor=(0.5, 0.915),
-            ncol=3,
+            ncol=len(legend_handles),
             frameon=False,
             fontsize=8.5,
             handlelength=1.6,
