@@ -2850,6 +2850,115 @@ class AutoContr(Controller):
 
         return export_path
     
+    def _update_auto_quit_from_condition_level_performance(
+        self,
+        model,
+        batch_number
+    ):
+        '''
+        Updates the Auto quit flag using condition-level duplicate statistics.
+
+        The optimizer receives physical replicate-well results, so raw
+        optimizer-side target stopping can stop too early if one random
+        duplicate happens to land near the target. This controller-side rule
+        evaluates the duplicate-aggregated condition mean and replicate
+        variability instead.
+
+        params:
+            OptimizationModel model:
+                Auto optimizer object whose quit flag should be updated.
+
+            int batch_number:
+                Completed batch number to evaluate for stopping.
+        '''
+        if len(self.auto_model_performance_rows) == 0:
+            return
+
+        performance_df = pd.DataFrame(self.auto_model_performance_rows)
+
+        batch_df = performance_df[
+            performance_df['batch_number'] == batch_number
+        ].copy()
+
+        if batch_df.empty:
+            print(
+                "<<controller warning>> could not evaluate condition-level "
+                f"Auto stop rule because batch {batch_number} has no "
+                "performance rows"
+            )
+            return
+
+        # Defaults are conservative. These can later be moved into the Header
+        # sheet if we want them user-configurable from the input spreadsheet.
+        target_tolerance_nm = float(
+            self.robo_params.get('target_tolerance_nm', 10.0)
+        )
+        replicate_sd_tolerance_nm = float(
+            self.robo_params.get('replicate_sd_tolerance_nm', 25.0)
+        )
+
+        target_error_values = pd.to_numeric(
+            batch_df['target_error_nm'],
+            errors='coerce'
+        )
+
+        replicate_sd_values = pd.to_numeric(
+            batch_df['actual_lambda_sd_nm'],
+            errors='coerce'
+        )
+
+        target_hit = target_error_values <= target_tolerance_nm
+
+        replicate_consistent = (
+            replicate_sd_values.isna()
+            | (replicate_sd_values <= replicate_sd_tolerance_nm)
+        )
+
+        validated_hit = target_hit & replicate_consistent
+
+        if validated_hit.any():
+            best_hit_row = batch_df.loc[
+                target_error_values[validated_hit].idxmin()
+            ]
+
+            model.quit = True
+
+            print(
+                "<<controller>> Exit due to validated condition-level target "
+                "hit"
+            )
+            print(
+                "<<controller>> stopping condition: "
+                f"mean lambda max = "
+                f"{best_hit_row['actual_lambda_mean_nm']:.4f} nm, "
+                f"target error = {best_hit_row['target_error_nm']:.4f} nm, "
+                f"replicate SD = "
+                f"{best_hit_row['actual_lambda_sd_nm']:.4f} nm"
+            )
+
+            return
+
+        if model.curr_iter >= model.max_iters:
+            model.quit = True
+            print("<<controller>> Exit due to max_iters")
+            return
+
+        model.quit = False
+
+        best_row_index = target_error_values.idxmin()
+        best_row = batch_df.loc[best_row_index]
+
+        print(
+            "<<controller>> continuing Auto: no validated condition-level "
+            "target hit"
+        )
+        print(
+            "<<controller>> best condition in latest batch: "
+            f"mean lambda max = {best_row['actual_lambda_mean_nm']:.4f} nm, "
+            f"target error = {best_row['target_error_nm']:.4f} nm, "
+            f"replicate SD = {best_row['actual_lambda_sd_nm']:.4f} nm"
+        )
+    
     def _plot_lambda_progress_after_batch(
         self,
         batch_number,
@@ -3326,6 +3435,14 @@ class AutoContr(Controller):
         # Create the model with initial normalized data
         model.initialize_optimizer(X_initial_normalized, Y_initial_Normalized)
 
+        # Evaluate whether the initial seed batch already contains a validated
+        # condition-level target hit. This uses duplicate-aggregated lambda max
+        # statistics rather than any single physical replicate well.
+        self._update_auto_quit_from_condition_level_performance(
+            model,
+            self.batch_num
+        )
+
         print(f"Model X: {model.optimizer.X}")
         print(f"Model Y: {model.optimizer.Y}")
 
@@ -3450,6 +3567,15 @@ class AutoContr(Controller):
 
             # Update the model with the new recipes and lambda maxes (normalized)
             model.update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized)
+
+            # Override optimizer-side quit behavior with the scientifically
+            # correct condition-level duplicate rule. This prevents Auto from
+            # stopping just because one physical replicate randomly hits the
+            # target while its duplicate does not.
+            self._update_auto_quit_from_condition_level_performance(
+                model,
+                self.batch_num
+            )
 
             # Add new denormalized data to the controller experiment_data
             self._update_experiment_data(recipes, Y_new, axis=0) 

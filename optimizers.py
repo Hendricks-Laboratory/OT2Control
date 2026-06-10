@@ -1678,16 +1678,18 @@ class OptimizationModel():
 
     def update_quit(self, X_new, Y_new):
         '''
-        Checks if the optimization process should be terminated based on the current iteration, maximum iterations, and the results.
-        params:
-        np.ndarray X_new: The latest parameter values from the experiments.
-        np.ndarray Y_new: The latest objective function values corresponding to X_new.
+        Checks whether the optimization process should terminate because the
+        maximum number of Auto iterations has been reached.
+
+        Target-based stopping is intentionally not handled here because Y_new
+        contains physical replicate-well results. In duplicate-based Auto mode,
+        stopping on any individual replicate is too permissive. The controller
+        applies the target stop rule later using condition-level duplicate
+        summary statistics.
         '''
         if self.curr_iter >= self.max_iters:
             self.quit = True
             print("Exit due to max_iters")
         else:
-            # Check if any of the new results meet the target threshold condition.
-            self.quit = any(y < self.threshold for y in Y_new)
-            print("Exit due to meeting target value")
+            self.quit = False
         
