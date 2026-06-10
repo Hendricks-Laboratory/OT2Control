@@ -2963,7 +2963,8 @@ class AutoContr(Controller):
         self,
         batch_number,
         plot_filename=None,
-        plot_title=None
+        plot_title=None,
+        y_axis_mode='robust'
     ):
         '''
         Generates a cumulative lambda max progress plot after a completed Auto
@@ -2985,6 +2986,11 @@ class AutoContr(Controller):
             int batch_number:
                 Highest completed batch number to include in the cumulative
                 plot.
+
+            str y_axis_mode:
+                Controls display-only y-axis scaling. Use 'robust' to keep
+                one very large uncertainty bar from stretching the entire plot,
+                or 'full' to include every SEM/SD bound in the y-axis limits.
 
         returns:
             str or None:
@@ -3085,9 +3091,12 @@ class AutoContr(Controller):
             fmt='o',
             color=actual_color,
             ecolor=actual_color,
+            markerfacecolor='white',
+            markeredgecolor=actual_color,
+            markeredgewidth=1.2,
             elinewidth=1.0,
             capsize=3,
-            markersize=4.8,
+            markersize=4.6,
             alpha=0.95,
             zorder=3,
             label='Observed mean ± SEM'
@@ -3112,20 +3121,64 @@ class AutoContr(Controller):
             y=0.97
         )
 
-        y_values_for_limits = list(actual_means) + [target_lambda]
-        y_values_for_limits.extend(list(actual_means - actual_sems))
-        y_values_for_limits.extend(list(actual_means + actual_sems))
-
-        if not prediction_df.empty:
-            y_values_for_limits.extend(
-                list(predicted_means - predicted_stds)
+        if y_axis_mode not in ['robust', 'full']:
+            print(
+                "<<controller warning>> unknown y_axis_mode "
+                f"'{y_axis_mode}', using robust y-axis scaling"
             )
-            y_values_for_limits.extend(
-                list(predicted_means + predicted_stds)
-            )
+            y_axis_mode = 'robust'
 
-        y_min = min(y_values_for_limits)
-        y_max = max(y_values_for_limits)
+        if y_axis_mode == 'full':
+            y_values_for_limits = list(actual_means) + [target_lambda]
+            y_values_for_limits.extend(list(actual_means - actual_sems))
+            y_values_for_limits.extend(list(actual_means + actual_sems))
+
+            if not prediction_df.empty:
+                y_values_for_limits.extend(
+                    list(predicted_means - predicted_stds)
+                )
+                y_values_for_limits.extend(
+                    list(predicted_means + predicted_stds)
+                )
+
+            y_min = min(y_values_for_limits)
+            y_max = max(y_values_for_limits)
+
+        else:
+            # Robust display scaling keeps one very large SEM/SD bar from
+            # making the scientifically important region unreadable. This only
+            # changes the display limits; it does not alter the plotted data or
+            # the exported CSV values.
+            y_values_for_limits = list(actual_means) + [target_lambda]
+
+            if not prediction_df.empty:
+                y_values_for_limits.extend(list(predicted_means))
+
+            y_min = min(y_values_for_limits)
+            y_max = max(y_values_for_limits)
+
+            moderate_error_values = list(actual_sems)
+
+            if not prediction_df.empty:
+                moderate_error_values.extend(list(predicted_stds))
+
+            finite_error_values = [
+                float(x)
+                for x in moderate_error_values
+                if pd.notna(x) and np.isfinite(x)
+            ]
+
+            if len(finite_error_values) > 0:
+                robust_error_padding = np.percentile(
+                    finite_error_values,
+                    75
+                )
+            else:
+                robust_error_padding = 0.0
+
+            y_min = y_min - robust_error_padding
+            y_max = y_max + robust_error_padding
+
         y_padding = max((y_max - y_min) * 0.12, 15.0)
 
         ax.set_ylim(y_min - y_padding, y_max + y_padding)
