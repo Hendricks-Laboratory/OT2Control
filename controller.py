@@ -2850,7 +2850,12 @@ class AutoContr(Controller):
 
         return export_path
     
-    def _plot_lambda_progress_after_batch(self, batch_number):
+    def _plot_lambda_progress_after_batch(
+        self,
+        batch_number,
+        plot_filename=None,
+        plot_title=None
+    ):
         '''
         Generates a cumulative lambda max progress plot after a completed Auto
         batch.
@@ -2985,8 +2990,14 @@ class AutoContr(Controller):
         ax.set_xlabel('Reaction condition number')
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
 
+        if plot_title is None:
+            plot_title = (
+                rf'Auto $\lambda_{{\max}}$ Progress After Batch '
+                f'{batch_number}'
+            )
+
         fig.suptitle(
-            rf'Auto $\lambda_{{\max}}$ Progress After Batch {batch_number}',
+            plot_title,
             fontsize=11,
             fontweight='normal',
             y=0.97
@@ -3049,9 +3060,12 @@ class AutoContr(Controller):
             top=0.80
         )
 
+        if plot_filename is None:
+            plot_filename = f'lambda_progress_after_batch_{batch_number}.png'
+
         plot_path = os.path.join(
             self.plot_path,
-            f'lambda_progress_after_batch_{batch_number}.png'
+            plot_filename
         )
 
         fig.savefig(plot_path)
@@ -3452,6 +3466,14 @@ class AutoContr(Controller):
         # Save the row-per-condition Auto performance log used for reporting,
         # plotting, and future notebook-ready summaries.
         self._export_auto_model_performance_log()
+
+        # Save one final cumulative lambda-progress summary plot for the
+        # completed Auto run.
+        self._plot_lambda_progress_after_batch(
+            self.batch_num - 1,
+            plot_filename='lambda_progress_final.png',
+            plot_title=rf'Final Auto $\lambda_{{\max}}$ Progress'
+        )
 
         print("Success!!!")
         
