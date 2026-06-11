@@ -3111,9 +3111,9 @@ class AutoContr(Controller):
                 plot.
 
             str y_axis_mode:
-                Controls display-only y-axis scaling. Use 'robust' to keep
-                one very large uncertainty bar from stretching the entire plot,
-                or 'full' to include every SEM/SD bound in the y-axis limits.
+                Controls display-only y-axis scaling. Use 'robust' to use
+                display-capped error bars for readable progress plots, or
+                'full' to include every raw SEM/SD bound in the y-axis limits.
 
             float errorbar_display_cap_nm:
                 Display-only maximum error bar size in nm. Error bars larger
@@ -3264,7 +3264,7 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number')
+        ax.set_xlabel('Reaction condition number', labelpad=9)
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
 
         if plot_title is None:
@@ -3306,8 +3306,8 @@ class AutoContr(Controller):
         else:
             # Robust display scaling keeps one very large SEM/SD bar from
             # making the scientifically important region unreadable. This only
-            # changes the display limits; it does not alter the plotted data or
-            # the exported CSV values.
+            # changes display limits and display error-bar length; it does not
+            # alter the raw plotted means or exported CSV values.
             y_values_for_limits = list(actual_means) + [target_lambda]
 
             y_values_for_limits.extend(
@@ -3393,7 +3393,7 @@ class AutoContr(Controller):
 
         if len(prediction_display_capped_condition_numbers) > 0:
             display_cap_note_parts.append(
-                "GP SD display-capped at conditions "
+                "GP SD: "
                 + _format_display_capped_condition_list(
                     prediction_display_capped_condition_numbers
                 )
@@ -3401,7 +3401,7 @@ class AutoContr(Controller):
 
         if len(actual_display_capped_condition_numbers) > 0:
             display_cap_note_parts.append(
-                "SEM display-capped at conditions "
+                "SEM: "
                 + _format_display_capped_condition_list(
                     actual_display_capped_condition_numbers
                 )
@@ -3409,21 +3409,22 @@ class AutoContr(Controller):
 
         if len(display_cap_note_parts) > 0:
             display_cap_note = (
-                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
+                f"Display-capped error bars "
+                f"({errorbar_display_cap_nm:.0f} nm max): "
                 + " | ".join(display_cap_note_parts)
             )
 
             fig.text(
                 0.5,
-                0.035,
+                0.025,
                 display_cap_note,
                 ha='center',
                 va='center',
-                fontsize=7.5,
+                fontsize=7.2,
                 color='0.35'
             )
 
-            bottom_margin = 0.18
+            bottom_margin = 0.24
         else:
             bottom_margin = 0.14
 
