@@ -3161,7 +3161,7 @@ class AutoContr(Controller):
         if y_axis_mode not in ['robust', 'full']:
             print(
                 "<<controller warning>> unknown y_axis_mode "
-                f"'{y_axis_mode}', using robust y-axis scaling"
+                f"'{y_axis_mode}', using robust display scaling"
             )
             y_axis_mode = 'robust'
 
