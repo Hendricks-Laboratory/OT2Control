@@ -3423,7 +3423,7 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.30
+            bottom_margin = 0.26
         else:
             bottom_margin = 0.14
 
