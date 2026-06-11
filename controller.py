@@ -738,26 +738,145 @@ class Controller(ABC):
         plt.close()
        
     def plot_2D_GPR(self, model):
-        plt.figure(figsize=(4.8,4), dpi=200)
-        plt.xlabel(f"{self.variable_reagents[0]} (mM)", fontsize = 12)
-        plt.ylabel(f"{self.variable_reagents[1]} (mM)", fontsize = 12)
-        plt.subplots_adjust(left=0.2, bottom=0.2, right=0.9, top=0.9)
-        plt.tick_params(axis = "both", width = 1.5)
-        plt.xlim(0, self.max_conc[0])
-        plt.ylim(0, self.max_conc[1])
-        plt.subplot().spines['bottom'].set_linewidth(1.5)
-        plt.subplot().spines['top'].set_linewidth(1.5)
-        plt.subplot().spines['left'].set_linewidth(1.5)
-        plt.subplot().spines['right'].set_linewidth(1.5)
-        plt.rc('axes', linewidth = 1.5)
-        One = np.linspace(0,self.max_conc[0],100)
-        Two = np.linspace(0,self.max_conc[1],100)
-        plt.pcolormesh(One, Two, model.predictions, cmap='inferno', shading='auto')
-        plt.colorbar(label="Lambda Max")
-        plot_filename = os.path.join(self.plot_path, f'gpr_predictions_batch_{self.batch_num}.png')
-        plt.savefig(plot_filename)
-        print(f"<<controller>> saved 2D_GPR plot to {plot_filename}")
-        plt.close()
+        '''
+        Saves 2D GP heatmaps for predicted lambda max and model uncertainty.
+
+        These plots are only meaningful when Auto mode has exactly two variable
+        reagents. The prediction heatmap shows the GP-predicted lambda max in
+        nm. The uncertainty heatmap shows the GP predictive standard deviation
+        in nm.
+
+        params:
+            OptimizationModel model:
+                Auto optimizer model containing 2D prediction grids.
+        '''
+        if len(self.variable_reagents) != 2:
+            print(
+                "<<controller>> skipping 2D_GPR plots because there are not "
+                "exactly two variable reagents"
+            )
+            return
+
+        if (
+            model is None
+            or not hasattr(model, 'predictions')
+            or model.predictions is None
+        ):
+            print(
+                "<<controller>> skipping 2D_GPR plots because 2D model "
+                "predictions are not available"
+            )
+            return
+
+        x_values = np.linspace(0, self.max_conc[0], model.predictions.shape[1])
+        y_values = np.linspace(0, self.max_conc[1], model.predictions.shape[0])
+
+        def _format_2d_gpr_axis(ax):
+            ax.set_xlabel(f"{self.variable_reagents[0]} (mM)", fontsize=12)
+            ax.set_ylabel(f"{self.variable_reagents[1]} (mM)", fontsize=12)
+            ax.tick_params(axis="both", width=1.5)
+            ax.set_xlim(0, self.max_conc[0])
+            ax.set_ylim(0, self.max_conc[1])
+
+            for spine in ax.spines.values():
+                spine.set_linewidth(1.5)
+
+        fig, ax = plt.subplots(figsize=(4.8, 4.0), dpi=200)
+
+        prediction_mesh = ax.pcolormesh(
+            x_values,
+            y_values,
+            model.predictions,
+            cmap='inferno',
+            shading='auto'
+        )
+
+        _format_2d_gpr_axis(ax)
+
+        ax.set_title(
+            rf'2D GP Predicted $\lambda_{{\max}}$ After Batch '
+            f'{self.batch_num}',
+            fontsize=10
+        )
+
+        fig.colorbar(
+            prediction_mesh,
+            ax=ax,
+            label=r'Predicted $\lambda_{\max}$ (nm)'
+        )
+
+        fig.subplots_adjust(
+            left=0.2,
+            bottom=0.2,
+            right=0.9,
+            top=0.88
+        )
+
+        prediction_plot_filename = os.path.join(
+            self.plot_path,
+            f'gpr_predictions_batch_{self.batch_num}.png'
+        )
+
+        fig.savefig(prediction_plot_filename)
+        plt.close(fig)
+
+        print(
+            f"<<controller>> saved 2D GP prediction plot to "
+            f"{prediction_plot_filename}"
+        )
+
+        if (
+            not hasattr(model, 'prediction_uncertainty')
+            or model.prediction_uncertainty is None
+        ):
+            print(
+                "<<controller>> skipping 2D GP uncertainty plot because "
+                "prediction_uncertainty is not available"
+            )
+            return
+
+        fig, ax = plt.subplots(figsize=(4.8, 4.0), dpi=200)
+
+        uncertainty_mesh = ax.pcolormesh(
+            x_values,
+            y_values,
+            model.prediction_uncertainty,
+            cmap='viridis',
+            shading='auto'
+        )
+
+        _format_2d_gpr_axis(ax)
+
+        ax.set_title(
+            rf'2D GP Predictive Uncertainty After Batch {self.batch_num}',
+            fontsize=10
+        )
+
+        fig.colorbar(
+            uncertainty_mesh,
+            ax=ax,
+            label='GP predictive SD (nm)'
+        )
+
+        fig.subplots_adjust(
+            left=0.2,
+            bottom=0.2,
+            right=0.9,
+            top=0.88
+        )
+
+        uncertainty_plot_filename = os.path.join(
+            self.plot_path,
+            f'gpr_uncertainty_batch_{self.batch_num}.png'
+        )
+
+        fig.savefig(uncertainty_plot_filename)
+        plt.close(fig)
+
+        print(
+            f"<<controller>> saved 2D GP uncertainty plot to "
+            f"{uncertainty_plot_filename}"
+        )
     
     # below until ~end is all not used yet needs to be worked up
     def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
@@ -1312,15 +1431,18 @@ class Controller(ABC):
         elif plot_type == '2D_GPR':
             # The initial seed batch can execute a plot row before the optimizer
             # has generated a prediction grid. Higher-dimensional experiments
-            # also cannot use the existing 2D heatmap, so skip cleanly instead
-            # of failing the run.
+            # also cannot use 2D heatmaps, so skip cleanly instead of failing
+            # the run.
             if (
                 model is None
                 or not hasattr(model, 'predictions')
                 or model.predictions is None
                 or len(self.variable_reagents) != 2
             ):
-                print("<<controller>> skipping 2D_GPR plot because 2D model predictions are not available")
+                print(
+                    "<<controller>> skipping 2D_GPR plots because 2D model "
+                    "predictions are not available"
+                )
                 return
 
             self.plot_2D_GPR(model)
