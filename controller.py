@@ -2964,7 +2964,8 @@ class AutoContr(Controller):
         batch_number,
         plot_filename=None,
         plot_title=None,
-        y_axis_mode='robust'
+        y_axis_mode='robust',
+        errorbar_display_cap_nm=75.0
     ):
         '''
         Generates a cumulative lambda max progress plot after a completed Auto
@@ -2991,6 +2992,12 @@ class AutoContr(Controller):
                 Controls display-only y-axis scaling. Use 'robust' to keep
                 one very large uncertainty bar from stretching the entire plot,
                 or 'full' to include every SEM/SD bound in the y-axis limits.
+
+            float errorbar_display_cap_nm:
+                Display-only maximum error bar size in nm. Error bars larger
+                than this are clipped visually so extreme dry-run uncertainty
+                does not dominate the progress plot. The original SEM/SD values
+                remain unchanged in the Auto performance log.
 
         returns:
             str or None:
@@ -3031,12 +3038,28 @@ class AutoContr(Controller):
         actual_x_values = performance_df['reaction_number'].to_numpy(
             dtype=float
         )
+
         actual_means = performance_df['actual_lambda_mean_nm'].to_numpy()
         actual_sems = (
             performance_df['actual_lambda_sem_nm'].fillna(0.0).to_numpy()
         )
 
+        actual_sems_display = np.minimum(
+            actual_sems,
+            errorbar_display_cap_nm
+        )
+
+        actual_errorbars_clipped = np.any(
+            actual_sems > errorbar_display_cap_nm
+        )
+
         target_lambda = float(performance_df['target_lambda_max_nm'].iloc[0])
+
+        observed_label = 'Observed mean ± SEM'
+        prediction_label = 'GP prediction ± SD'
+
+        if actual_errorbars_clipped:
+            observed_label = 'Observed mean ± SEM, clipped'
 
         actual_color = 'tab:blue'
         model_color = 'tab:orange'
@@ -3069,10 +3092,22 @@ class AutoContr(Controller):
                 'predicted_lambda_std_nm'
             ].fillna(0.0).to_numpy()
 
+            predicted_stds_display = np.minimum(
+                predicted_stds,
+                errorbar_display_cap_nm
+            )
+
+            prediction_errorbars_clipped = np.any(
+                predicted_stds > errorbar_display_cap_nm
+            )
+
+            if prediction_errorbars_clipped:
+                prediction_label = 'GP prediction ± SD, clipped'
+
             prediction_handle = ax.errorbar(
                 pred_x_values,
                 predicted_means,
-                yerr=predicted_stds,
+                yerr=predicted_stds_display,
                 fmt='s',
                 color=model_color,
                 ecolor=model_color,
@@ -3080,18 +3115,18 @@ class AutoContr(Controller):
                 markeredgecolor=model_color,
                 markeredgewidth=1.2,
                 elinewidth=1.0,
-                capsize=3,
-                markersize=4.8,
+                capsize=4,
+                markersize=4.0,
                 barsabove=True,
                 alpha=0.75,
                 zorder=2,
-                label='GP prediction ± SD'
+                label=prediction_label
             )
 
         observed_handle = ax.errorbar(
             actual_x_values,
             actual_means,
-            yerr=actual_sems,
+            yerr=actual_sems_display,
             fmt='o',
             color=actual_color,
             ecolor=actual_color,
@@ -3099,12 +3134,12 @@ class AutoContr(Controller):
             markeredgecolor=actual_color,
             markeredgewidth=1.2,
             elinewidth=1.0,
-            capsize=3,
-            markersize=4.6,
+            capsize=4,
+            markersize=4.0,
             barsabove=True,
             alpha=0.95,
             zorder=3,
-            label='Observed mean ± SEM'
+            label=observed_label
         )
 
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
@@ -3156,33 +3191,24 @@ class AutoContr(Controller):
             # the exported CSV values.
             y_values_for_limits = list(actual_means) + [target_lambda]
 
+            y_values_for_limits.extend(
+                list(actual_means - actual_sems_display)
+            )
+            y_values_for_limits.extend(
+                list(actual_means + actual_sems_display)
+            )
+
             if not prediction_df.empty:
                 y_values_for_limits.extend(list(predicted_means))
+                y_values_for_limits.extend(
+                    list(predicted_means - predicted_stds_display)
+                )
+                y_values_for_limits.extend(
+                    list(predicted_means + predicted_stds_display)
+                )
 
             y_min = min(y_values_for_limits)
             y_max = max(y_values_for_limits)
-
-            moderate_error_values = list(actual_sems)
-
-            if not prediction_df.empty:
-                moderate_error_values.extend(list(predicted_stds))
-
-            finite_error_values = [
-                float(x)
-                for x in moderate_error_values
-                if pd.notna(x) and np.isfinite(x)
-            ]
-
-            if len(finite_error_values) > 0:
-                robust_error_padding = np.percentile(
-                    finite_error_values,
-                    75
-                )
-            else:
-                robust_error_padding = 0.0
-
-            y_min = y_min - robust_error_padding
-            y_max = y_max + robust_error_padding
 
         y_padding = max((y_max - y_min) * 0.12, 15.0)
 
@@ -3199,11 +3225,11 @@ class AutoContr(Controller):
         ax.spines['right'].set_visible(False)
 
         legend_handles = [observed_handle]
-        legend_labels = ['Observed mean ± SEM']
+        legend_labels = [observed_label]
 
         if prediction_handle is not None:
             legend_handles.append(prediction_handle)
-            legend_labels.append('GP prediction ± SD')
+            legend_labels.append(prediction_label)
 
         legend_handles.append(target_handle)
         legend_labels.append(f'Target = {target_lambda:.0f} nm')
