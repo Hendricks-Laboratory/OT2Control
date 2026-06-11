@@ -3049,17 +3049,15 @@ class AutoContr(Controller):
             errorbar_display_cap_nm
         )
 
-        actual_errorbars_clipped = np.any(
-            actual_sems > errorbar_display_cap_nm
-        )
+        actual_clipped_condition_numbers = performance_df.loc[
+            actual_sems > errorbar_display_cap_nm,
+            'reaction_number'
+        ].astype(int).to_list()
 
         target_lambda = float(performance_df['target_lambda_max_nm'].iloc[0])
 
         observed_label = 'Observed mean ± SEM'
         prediction_label = 'GP prediction ± SD'
-
-        if actual_errorbars_clipped:
-            observed_label = 'Observed mean ± SEM, clipped'
 
         actual_color = 'tab:blue'
         model_color = 'tab:orange'
@@ -3078,6 +3076,7 @@ class AutoContr(Controller):
         )
 
         prediction_handle = None
+        prediction_clipped_condition_numbers = []
 
         if not prediction_df.empty:
             pred_x_values = prediction_df[
@@ -3097,12 +3096,10 @@ class AutoContr(Controller):
                 errorbar_display_cap_nm
             )
 
-            prediction_errorbars_clipped = np.any(
-                predicted_stds > errorbar_display_cap_nm
-            )
-
-            if prediction_errorbars_clipped:
-                prediction_label = 'GP prediction ± SD, clipped'
+            prediction_clipped_condition_numbers = prediction_df.loc[
+                predicted_stds > errorbar_display_cap_nm,
+                'reaction_number'
+            ].astype(int).to_list()
 
             prediction_handle = ax.errorbar(
                 pred_x_values,
@@ -3246,10 +3243,71 @@ class AutoContr(Controller):
             columnspacing=1.4
         )
 
+        def _format_clipped_condition_list(condition_numbers):
+            '''
+            Formats clipped reaction condition numbers for a compact plot note.
+            '''
+            if len(condition_numbers) == 0:
+                return 'none'
+
+            unique_condition_numbers = sorted(set(condition_numbers))
+
+            if len(unique_condition_numbers) <= 8:
+                return ", ".join(
+                    [str(x) for x in unique_condition_numbers]
+                )
+
+            first_values = ", ".join(
+                [str(x) for x in unique_condition_numbers[:6]]
+            )
+
+            return (
+                f"{len(unique_condition_numbers)} conditions "
+                f"({first_values}, ...)"
+            )
+
+        clipped_note_parts = []
+
+        if len(prediction_clipped_condition_numbers) > 0:
+            clipped_note_parts.append(
+                "GP SD clipped at conditions "
+                + _format_clipped_condition_list(
+                    prediction_clipped_condition_numbers
+                )
+            )
+
+        if len(actual_clipped_condition_numbers) > 0:
+            clipped_note_parts.append(
+                "SEM clipped at conditions "
+                + _format_clipped_condition_list(
+                    actual_clipped_condition_numbers
+                )
+            )
+
+        if len(clipped_note_parts) > 0:
+            clipped_note = (
+                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
+                + " | ".join(clipped_note_parts)
+            )
+
+            fig.text(
+                0.5,
+                0.035,
+                clipped_note,
+                ha='center',
+                va='center',
+                fontsize=7.5,
+                color='0.35'
+            )
+
+            bottom_margin = 0.18
+        else:
+            bottom_margin = 0.14
+
         fig.subplots_adjust(
             left=0.12,
             right=0.97,
-            bottom=0.14,
+            bottom=bottom_margin,
             top=0.80
         )
 
