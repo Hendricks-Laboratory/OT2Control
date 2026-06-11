@@ -174,55 +174,71 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     '''
     main function to launch an auto scientist that designs it's own experiments
     '''
-    if not rxn_sheet_name:
-        rxn_sheet_name = input('<<controller>> please input the sheet name ')
-    my_ip = socket.gethostbyname(socket.gethostname())
-    auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
-    #note shorter iterations for testing
-    #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
-    #print(auto.rxn_df.describe())
-    #print(auto.rxn_df.head(20))
-    #print(auto.rxn_df)
-    y_shape = auto.y_shape# number of reagents to learn on
-    #print("starting with y_shape:", y_shape)
-    reagent_info = auto.robo_params['reagent_df']
-    fixed_reagents = auto.get_fixed_reagents()
-    variable_reagents = auto.get_variable_reagents()
-    target_value = auto.getModelInfo()["target"] 
+    auto = None
+
     try:
-        min_conc = auto.get_min_conc()
-        print(f'min_conc for variable reagents: {min_conc}')
-        min_conc = list(min_conc.values())
-    except Exception as e:
-        print(f'Error getting min_conc: {e}')
-    # Generate bounds for each reagent, assuming concentrations range from 0 to 1
-    bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
-    # final_spectra not used?
-    print("<<controller>> setting up Auto optimization model")
-    
-    model = OptimizationModel(
-        bounds,
-        target_value,
-        reagent_info,
-        fixed_reagents,
-        variable_reagents,
-        initial_design_numdata=auto.getModelInfo()["initial_data"],
-        batch_size=1,
-        max_iters=auto.getModelInfo()["max_iterations"],
-        min_conc=auto.min_conc,
-        max_conc=auto.max_conc,
-        total_volume=auto.template_meta['tot_vol'],
-        fixed_reagent_volumes=auto._get_fixed_reagent_volumes(),
-        allow_true_zero=auto.robo_params.get('allow_true_zero', False)
-    )
-    
-    print(f"Target: {target_value}")
-    if not no_sim:
-        auto.run_simulation(no_pr=no_pr)
-    if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
-        auto._check_auto_well_capacity(model)
-        auto._check_auto_pipette_tip_capacity(model)
-        auto.run_protocol(simulate=simulate, model=model,no_pr=no_pr)
+        if not rxn_sheet_name:
+            rxn_sheet_name = input('<<controller>> please input the sheet name ')
+
+        my_ip = socket.gethostbyname(socket.gethostname())
+        auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+
+        #note shorter iterations for testing
+        #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
+        #print(auto.rxn_df.describe())
+        #print(auto.rxn_df.head(20))
+        #print(auto.rxn_df)
+
+        y_shape = auto.y_shape# number of reagents to learn on
+        #print("starting with y_shape:", y_shape)
+
+        reagent_info = auto.robo_params['reagent_df']
+        fixed_reagents = auto.get_fixed_reagents()
+        variable_reagents = auto.get_variable_reagents()
+        target_value = auto.getModelInfo()["target"] 
+
+        try:
+            min_conc = auto.get_min_conc()
+            print(f'min_conc for variable reagents: {min_conc}')
+            min_conc = list(min_conc.values())
+        except Exception as e:
+            print(f'Error getting min_conc: {e}')
+
+        # Generate bounds for each reagent, assuming concentrations range from 0 to 1
+        bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
+
+        # final_spectra not used?
+        print("<<controller>> setting up Auto optimization model")
+        
+        model = OptimizationModel(
+            bounds,
+            target_value,
+            reagent_info,
+            fixed_reagents,
+            variable_reagents,
+            initial_design_numdata=auto.getModelInfo()["initial_data"],
+            batch_size=1,
+            max_iters=auto.getModelInfo()["max_iterations"],
+            min_conc=auto.min_conc,
+            max_conc=auto.max_conc,
+            total_volume=auto.template_meta['tot_vol'],
+            fixed_reagent_volumes=auto._get_fixed_reagent_volumes(),
+            allow_true_zero=auto.robo_params.get('allow_true_zero', False)
+        )
+        
+        print(f"Target: {target_value}")
+
+        if not no_sim:
+            auto.run_simulation(no_pr=no_pr)
+
+        if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
+            auto._check_auto_well_capacity(model)
+            auto._check_auto_pipette_tip_capacity(model)
+            auto.run_protocol(simulate=simulate, model=model, no_pr=no_pr)
+
+    finally:
+        if auto is not None:
+            auto._stop_terminal_output_capture()
 
 
 
