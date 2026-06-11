@@ -111,18 +111,10 @@ def terminal_output_capture_guard(func):
     '''
     Ensures terminal output capture is finalized whether the run succeeds or
     errors.
-
-    If an exception occurs, the traceback is printed while stdout/stderr are
-    still being mirrored to Debug/terminal_output.txt.
     '''
     def wrapper(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
-
-        except Exception:
-            print("<<controller>> ERROR during run")
-            traceback.print_exc()
-            raise
 
         finally:
             stop_capture = getattr(
@@ -315,6 +307,10 @@ class Controller(ABC):
         Note that pr cannot be initialized until you know if you're simulating or not, so it
         is instantiated in run
         '''
+        self.terminal_log_file_handle = None
+        self.original_stdout = None
+        self.original_stderr = None
+        
         #set according to input
         self.cache_path=cache_path
         self._make_cache()
@@ -341,65 +337,80 @@ class Controller(ABC):
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
         self._make_out_dirs(header_data)
+        self._start_terminal_output_capture()
 
-        self.terminal_log_file_handle = None
-        self.original_stdout = None
-        self.original_stderr = None
+        try:
+            self.reaction_folder_name = None
+            self.rxn_df = self._load_rxn_df(input_data) #products init here
+            self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
+            #to the controller. It may make sense to build a class at some point
+            self._query_reagents(wks_key, credentials)
+            raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
+            #with a parsed reagent_df. This is exactly as is pulled from gsheets
+            empty_containers = self._get_empty_containers(raw_reagent_df)
+            self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
+            products_to_labware = self._get_products_to_labware(input_data)
+            self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
+            self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
+            self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
+            self.robo_params['product_df'] = self._get_product_df(products_to_labware)
 
+        except Exception:
+            print("<<controller>> ERROR during controller initialization")
+            traceback.print_exc()
+            self._stop_terminal_output_capture()
+            raise
+
+    def _start_terminal_output_capture(self):
+        '''
+        Starts mirroring stdout/stderr to Debug/terminal_output.txt.
+
+        The terminal still prints normally. This only adds a file copy of the
+        current Python process output for debugging.
+        '''
+        if self.terminal_log_file_handle is not None:
+            return
+        
         debug_dir = getattr(self, 'debug_path', None)
 
-        if debug_dir is not None:
-            terminal_log_path = os.path.join(
-                debug_dir,
-                'terminal_output.txt'
-            )
+        if debug_dir is None:
+            return
 
-            self.terminal_log_file_handle = open(
-                terminal_log_path,
-                'w',
-                encoding='utf-8'
-            )
+        terminal_log_path = os.path.join(
+            debug_dir,
+            'terminal_output.txt'
+        )
 
-            self.original_stdout = sys.stdout
-            self.original_stderr = sys.stderr
+        self.terminal_log_file_handle = open(
+            terminal_log_path,
+            'w',
+            encoding='utf-8'
+        )
 
-            sys.stdout = TeeTerminalOutput(
-                self.original_stdout,
-                self.terminal_log_file_handle
-            )
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
 
-            sys.stderr = TeeTerminalOutput(
-                self.original_stderr,
-                self.terminal_log_file_handle
-            )
+        sys.stdout = TeeTerminalOutput(
+            self.original_stdout,
+            self.terminal_log_file_handle
+        )
 
-            print(
-                f"<<controller>> saving terminal output to "
-                f"{terminal_log_path}"
-            )
+        sys.stderr = TeeTerminalOutput(
+            self.original_stderr,
+            self.terminal_log_file_handle
+        )
 
-        self.reaction_folder_name = None
-        self.rxn_df = self._load_rxn_df(input_data) #products init here
-        self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
-        #to the controller. It may make sense to build a class at some point
-        self._query_reagents(wks_key, credentials)
-        raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
-        #with a parsed reagent_df. This is exactly as is pulled from gsheets
-        empty_containers = self._get_empty_containers(raw_reagent_df)
-        self.robo_params['dry_containers'] = self._get_dry_containers(raw_reagent_df)
-        products_to_labware = self._get_products_to_labware(input_data)
-        self.robo_params['reagent_df'] = self._parse_raw_reagent_df(raw_reagent_df)
-        self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
-        self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
-        self.robo_params['product_df'] = self._get_product_df(products_to_labware)
-
+        print(
+            f"<<controller>> saving terminal output to "
+            f"{terminal_log_path}"
+        )
+    
     def _stop_terminal_output_capture(self):
         '''
         Restores stdout/stderr and closes the terminal output log file.
 
-        This should be called at the end of a run after all important terminal
-        messages have been printed. It prevents the terminal log file from
-        remaining open after Auto mode finishes.
+        Safe to call more than once. If terminal capture was never started,
+        this returns without doing anything.
         '''
         terminal_log_file_handle = getattr(
             self,
@@ -410,23 +421,24 @@ class Controller(ABC):
         if terminal_log_file_handle is None:
             return
 
+        original_stdout = getattr(self, 'original_stdout', None)
+        original_stderr = getattr(self, 'original_stderr', None)
+
         try:
             print("<<controller>> terminal output capture complete")
         finally:
-            original_stdout = getattr(self, 'original_stdout', None)
-            original_stderr = getattr(self, 'original_stderr', None)
-
             if original_stdout is not None:
                 sys.stdout = original_stdout
 
             if original_stderr is not None:
                 sys.stderr = original_stderr
 
-            terminal_log_file_handle.close()
-
-            self.terminal_log_file_handle = None
-            self.original_stdout = None
-            self.original_stderr = None
+            try:
+                terminal_log_file_handle.close()
+            finally:
+                self.terminal_log_file_handle = None
+                self.original_stdout = None
+                self.original_stderr = None
     
     def _insert_tot_vol_transfer(self):
         '''
