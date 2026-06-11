@@ -3393,7 +3393,7 @@ class AutoContr(Controller):
 
         if len(prediction_display_capped_condition_numbers) > 0:
             display_cap_note_parts.append(
-                "GP SD: "
+                "GP SD display-capped at conditions "
                 + _format_display_capped_condition_list(
                     prediction_display_capped_condition_numbers
                 )
@@ -3401,7 +3401,7 @@ class AutoContr(Controller):
 
         if len(actual_display_capped_condition_numbers) > 0:
             display_cap_note_parts.append(
-                "SEM: "
+                "SEM display-capped at conditions "
                 + _format_display_capped_condition_list(
                     actual_display_capped_condition_numbers
                 )
@@ -3409,8 +3409,7 @@ class AutoContr(Controller):
 
         if len(display_cap_note_parts) > 0:
             display_cap_note = (
-                f"Display-capped error bars "
-                f"({errorbar_display_cap_nm:.0f} nm max): "
+                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
                 + " | ".join(display_cap_note_parts)
             )
 
@@ -3420,7 +3419,7 @@ class AutoContr(Controller):
                 display_cap_note,
                 ha='center',
                 va='center',
-                fontsize=7.2,
+                fontsize=7.5,
                 color='0.35'
             )
 
