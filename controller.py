@@ -36,6 +36,8 @@ import argparse
 import re
 import functools
 import datetime
+import sys
+import traceback
 
 from bidict import bidict
 import gspread
@@ -65,6 +67,74 @@ from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
 
 
+class TeeTerminalOutput:
+
+    '''
+
+    Mirrors terminal output to a text file while preserving normal terminal
+
+    printing.
+
+    This is used to save a copy of the Auto run terminal output into the Debug
+
+    folder. It behaves like sys.stdout/sys.stderr, but writes each message to
+
+    both the original stream and a log file.
+
+    '''
+
+    def __init__(self, stream, log_file_handle):
+
+        self.stream = stream
+
+        self.log_file_handle = log_file_handle
+
+    def write(self, message):
+
+        self.stream.write(message)
+
+        self.log_file_handle.write(message)
+
+        self.log_file_handle.flush()
+
+    def flush(self):
+
+        self.stream.flush()
+
+        self.log_file_handle.flush()
+
+    def isatty(self):
+
+        return self.stream.isatty()
+
+def terminal_output_capture_guard(func):
+    '''
+    Ensures terminal output capture is finalized whether the run succeeds or
+    errors.
+
+    If an exception occurs, the traceback is printed while stdout/stderr are
+    still being mirrored to Debug/terminal_output.txt.
+    '''
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+
+        except Exception:
+            print("<<controller>> ERROR during run")
+            traceback.print_exc()
+            raise
+
+        finally:
+            stop_capture = getattr(
+                self,
+                '_stop_terminal_output_capture',
+                None
+            )
+
+            if callable(stop_capture):
+                stop_capture()
+
+    return wrapper
 
 def init_parser():
     parser = argparse.ArgumentParser()
@@ -271,6 +341,43 @@ class Controller(ABC):
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
         self._init_robo_header_params(header_data)
         self._make_out_dirs(header_data)
+
+        self.terminal_log_file_handle = None
+        self.original_stdout = None
+        self.original_stderr = None
+
+        debug_dir = getattr(self, 'debug_path', None)
+
+        if debug_dir is not None:
+            terminal_log_path = os.path.join(
+                debug_dir,
+                'terminal_output.txt'
+            )
+
+            self.terminal_log_file_handle = open(
+                terminal_log_path,
+                'w',
+                encoding='utf-8'
+            )
+
+            self.original_stdout = sys.stdout
+            self.original_stderr = sys.stderr
+
+            sys.stdout = TeeTerminalOutput(
+                self.original_stdout,
+                self.terminal_log_file_handle
+            )
+
+            sys.stderr = TeeTerminalOutput(
+                self.original_stderr,
+                self.terminal_log_file_handle
+            )
+
+            print(
+                f"<<controller>> saving terminal output to "
+                f"{terminal_log_path}"
+            )
+
         self.reaction_folder_name = None
         self.rxn_df = self._load_rxn_df(input_data) #products init here
         self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
@@ -286,6 +393,41 @@ class Controller(ABC):
         self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
         self.robo_params['product_df'] = self._get_product_df(products_to_labware)
 
+    def _stop_terminal_output_capture(self):
+        '''
+        Restores stdout/stderr and closes the terminal output log file.
+
+        This should be called at the end of a run after all important terminal
+        messages have been printed. It prevents the terminal log file from
+        remaining open after Auto mode finishes.
+        '''
+        terminal_log_file_handle = getattr(
+            self,
+            'terminal_log_file_handle',
+            None
+        )
+
+        if terminal_log_file_handle is None:
+            return
+
+        try:
+            print("<<controller>> terminal output capture complete")
+        finally:
+            original_stdout = getattr(self, 'original_stdout', None)
+            original_stderr = getattr(self, 'original_stderr', None)
+
+            if original_stdout is not None:
+                sys.stdout = original_stdout
+
+            if original_stderr is not None:
+                sys.stderr = original_stderr
+
+            terminal_log_file_handle.close()
+
+            self.terminal_log_file_handle = None
+            self.original_stdout = None
+            self.original_stderr = None
+    
     def _insert_tot_vol_transfer(self):
         '''
         inserts a row into self.rxn_df that transfers volume from WaterC1.0 to fill
@@ -3564,7 +3706,7 @@ class AutoContr(Controller):
         
         return X
 
-
+    @terminal_output_capture_guard
     @error_exit
     def _run(self, port, simulate, model, no_pr):
         '''
@@ -4909,9 +5051,15 @@ class AutoContr(Controller):
         export_df['water_transfer_executable'] = water_transfer_executable_values
         export_df['volume_feasible'] = volume_feasible_values
 
+        auto_recipe_design_debug_path = os.path.join(
+            self.debug_path,
+            'auto_recipe_design'
+        )
+
+        os.makedirs(auto_recipe_design_debug_path, exist_ok=True)
+
         export_path = os.path.join(
-            self.out_path,
-            'pr_data',
+            auto_recipe_design_debug_path,
             f'auto_recipe_design_{batch_label}.csv'
         )
 
