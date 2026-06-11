@@ -3264,7 +3264,7 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number', labelpad=9)
+        ax.set_xlabel('Reaction condition number', labelpad=2)
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
 
         if plot_title is None:
@@ -3415,15 +3415,15 @@ class AutoContr(Controller):
 
             fig.text(
                 0.5,
-                0.025,
+                0.018,
                 display_cap_note,
                 ha='center',
                 va='center',
-                fontsize=7.5,
+                fontsize=7.3,
                 color='0.35'
             )
 
-            bottom_margin = 0.24
+            bottom_margin = 0.30
         else:
             bottom_margin = 0.14
 
