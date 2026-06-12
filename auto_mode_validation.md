@@ -3,51 +3,80 @@
 **Repository:** Hendricks-Laboratory / OT2Control  
 **Branch context:** Auto mode development branch  
 **Prepared for:** Branch-local documentation / validation notes  
-**Date:** 2026-06-08  
+**Originally prepared:** 2026-06-08  
+**Updated through:** 2026-06-12  
 
 ---
 
-## 🎯 Purpose
+## Purpose
 
-This note documents the current **Auto mode optimizer implementation and validation status** based on recent branch history and dry/water-only testing. It is intended as a branch-specific record of:
+This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, and the latest debug-output validation work.
+
+It is intended as a branch-specific record of:
 
 - what has been implemented,
 - what has been validated,
+- what design decisions were made,
 - what remains deferred,
 - and what the next development steps should be.
 
 > [!NOTE]  
 > This note is **not** intended to describe the whole shared `OT2Control` repository.  
-> It specifically documents the Auto mode branch work around autonomous reaction selection, true-zero reagent handling, volume feasibility, mixed mask optimization, debug exports, and protocol validation.
+> It specifically documents Auto mode branch work around autonomous reaction selection, true-zero reagent handling, volume feasibility, mixed mask optimization, model-performance logging, plotting, debug exports, terminal-output capture, and protocol validation.
 
 ---
 
-# ✅ High-Level Status
+# High-Level Status
 
-The current Auto mode branch has reached a stable milestone for the new optimizer implementation.
+The current Auto mode branch has reached a substantially more mature validation milestone than the original June 8 notes. The branch now supports:
 
-The following behavior has been implemented and validated through dry-debug and water-only physical validation runs:
+- volume-safe Auto recipe generation,
+- true-zero variable reagent handling,
+- mixed discrete/continuous mask optimization,
+- condition-level model-performance logging,
+- condition-level stopping logic,
+- lambda-max progress plotting,
+- final Auto progress summary plotting,
+- optional display-capped error bars for readability,
+- 2D GP prediction heatmaps,
+- 2D GP uncertainty heatmaps,
+- organized debug output folders,
+- terminal-output capture to the run-specific Debug folder,
+- and a cleaner division between primary results and debug/audit artifacts.
+
+The latest validated debug run confirmed that the terminal-output capture and output-folder reorganization worked as intended.
 
 | Area | Current status |
 |---|---|
-| Normalized recipe generation | ✅ Implemented |
-| Concentration-to-volume conversion | ✅ Implemented |
-| Independent reagent bounds | ✅ Implemented |
-| True-zero variable reagent support | ✅ Implemented |
-| Variable reagent executable-volume handling | ✅ Implemented |
-| Water top-off feasibility | ✅ Implemented |
-| Fixed reagent parsing from original template | ✅ Implemented |
-| 200 µL well-volume preservation | ✅ Validated |
-| Multi-fixed-reagent sheets | ✅ Validated |
-| Mixed discrete/continuous mask optimizer | ✅ Implemented |
-| Controller final hard-stop | ✅ Preserved |
-| Recipe-level debug exports | ✅ Expanded |
-| Water-used tip handling | ⚠️ Deferred |
+| Normalized recipe generation | Implemented |
+| Concentration-to-volume conversion | Implemented |
+| Independent reagent bounds | Implemented |
+| True-zero variable reagent support | Implemented |
+| Variable reagent executable-volume handling | Implemented |
+| Water top-off feasibility | Implemented |
+| Fixed reagent parsing from original template | Implemented |
+| 200 µL well-volume preservation | Validated |
+| Multi-fixed-reagent sheets | Validated |
+| Mixed discrete/continuous mask optimizer | Implemented |
+| Controller final hard-stop | Preserved |
+| Condition-level Auto model-performance log | Implemented and validated |
+| Condition-level stopping rule | Implemented and validated |
+| Lambda-max progress plots | Implemented and validated |
+| Final lambda-max summary plot | Implemented and validated |
+| Optional error-bar display cap | Implemented and validated |
+| 2D GP prediction heatmap | Implemented and validated |
+| 2D GP uncertainty heatmap | Implemented and validated |
+| Terminal output saved to Debug folder | Implemented and validated |
+| Auto recipe-design exports moved to Debug subfolder | Implemented and validated |
+| Optimizer duplicate max-iteration print | Removed / controller owns user-facing stop print |
+| Water-used tip handling | Deferred |
+| Source/deck volume hard-stop | Deferred |
+| Uncertainty-aware acquisition | Deferred |
 
 Validated behavior includes:
 
 - Auto recipes are generated in normalized model space and converted to physical transfer volumes.
-- Variable reagents can be independently bounded by their own concentration/volume limits rather than being forced into an old equal-split/simplex-like search region.
+- Variable reagents can be independently bounded by their own concentration/volume limits rather than forced into an old equal-split/simplex-like search region.
 - True-zero behavior is supported for variable reagents when enabled in the Header.
 - Variable reagent transfers are treated as physically executable only when they are exactly `0 µL` or at least `5 µL`.
 - Water top-off is handled separately from true-zero reagent repair.
@@ -60,15 +89,19 @@ Validated behavior includes:
 - ON variable reagents are optimized continuously within executable transfer bounds.
 - The controller remains the final hard-stop layer before protocol execution.
 - Debug exports now include enough recipe-level information to verify concentration repair, transfer volumes, water top-off, and volume feasibility.
+- Auto performance logging now records condition-level model predictions and condition-level measured outcomes.
+- The lambda-progress plots show observed mean ± SEM and GP prediction ± SD across condition number.
+- The 2D GP uncertainty plot shows the GP model's predictive standard deviation in nanometers, not replicate variability.
+- Terminal output is mirrored to `Debug/terminal_output.txt` while preserving normal terminal printing.
 
 > [!IMPORTANT]  
-> The current implementation has passed recipe/protocol validation, but there are still deferred operational hardening tasks before scaling to larger autonomous runs.
+> The current implementation has passed software/protocol validation and debug-output validation. Before larger autonomous chemistry runs, the remaining operational hardening tasks are source/deck-volume validation, tip-contamination audit behavior, and real-chemistry spectral validation.
 
 ---
 
-# 🧾 Commit History Summary
+# Commit History and Development Summary
 
-The Auto mode branch history shows a progression from low-level dataframe and transfer debugging into volume-aware recipe validation, true-zero behavior, continuous optimization, and finally mixed mask optimization.
+The Auto mode branch history shows a progression from low-level dataframe and transfer debugging into volume-aware recipe validation, true-zero behavior, continuous optimization, mixed mask optimization, model-performance logging, plotting, terminal-output capture, and debug-output organization.
 
 ---
 
@@ -82,7 +115,7 @@ The Auto mode branch history shows a progression from low-level dataframe and tr
 
 ### Purpose
 
-These commits established the initial debug-export foundation needed to inspect how input recipe concentrations were translated into physical transfer volumes. This was important because the Auto mode workflow depends on safely converting model-space recipes into robot-executable liquid handling commands.
+These commits established the initial debug-export foundation needed to inspect how input recipe concentrations were translated into physical transfer volumes. Auto mode depends on safely converting model-space recipes into robot-executable liquid handling commands, so early CSV visibility was essential.
 
 The debug files made it possible to compare:
 
@@ -94,7 +127,7 @@ The debug files made it possible to compare:
 
 ### Outcome
 
-These exports became the basis for later diagnosing volume artifacts, zero-transfer behavior, and recipe feasibility.
+These exports became the basis for later diagnosing volume artifacts, zero-transfer behavior, recipe feasibility, and water top-off logic.
 
 ---
 
@@ -134,9 +167,7 @@ The practical reason for this work was to avoid robot commands being generated f
 
 ### Purpose
 
-This group focused on the experiment-data update path. The Auto mode model needs to append new observed outcomes after each batch so the optimizer can train/update on the most recent results.
-
-The commits improved construction of experiment-data dataframes and added or removed temporary prints as needed to debug the data update process.
+This group focused on the experiment-data update path. Auto mode needs to append new observed outcomes after each batch so the optimizer can train/update on the most recent results.
 
 ### Outcome
 
@@ -217,10 +248,7 @@ This group added pre-run safety and usability checks.
 The branch gained basic preflight safety around well capacity and tip capacity.
 
 > [!NOTE]  
-> These checks are useful but separate from the later volume-feasibility checks.  
-> Well capacity answers whether there are enough wells for the planned number of samples.  
-> Tip capacity estimates whether the protocol has enough tips.  
-> Later work added checks for whether each recipe physically fits in its well volume.
+> These checks are useful but separate from later physical recipe-feasibility checks. Well capacity answers whether there are enough wells for planned samples. Tip capacity estimates whether the protocol has enough tips. Later work added checks for whether each recipe physically fits in its well volume.
 
 ---
 
@@ -250,8 +278,6 @@ The initial Auto seed design was moved toward a maximin Latin-hypercube-style ap
 ### True-zero repair
 
 The true-zero repair work addressed a major physical reality of the robot: variable reagents cannot be treated as continuously meaningful between `0` and `5 µL`. That region is chemically/model-wise misleading because the robot cannot execute tiny reagent volumes reliably.
-
-The intended rule became:
 
 | Variable reagent state | Physical meaning |
 |---|---|
@@ -337,46 +363,38 @@ By the end of this stage, Auto mode had:
 
 This group was a major safety and correctness milestone. It added explicit physical volume feasibility logic for Auto-generated recipes.
 
-## Key decisions implemented
+### Key decisions implemented
 
-### 1. Independent variable reagent bounds
+#### 1. Independent variable reagent bounds
 
 Variable reagents are no longer artificially constrained by an equal-split assumption. Each variable reagent can have an independent maximum based on the remaining available volume after fixed reagents are accounted for.
 
-For example:
+High/high combinations may physically overfill the well, so those combinations are rejected by feasibility checks rather than prevented by artificial equal-split bounds.
 
-| Component | Volume |
-|---|---:|
-| Total volume | `200 µL` |
-| Fixed volume | `20 µL` |
-| Remaining volume | `180 µL` |
-
-Each variable reagent can independently have a maximum corresponding to the full `180 µL` remaining volume. High/high combinations may physically overfill the well, so those combinations are rejected by feasibility checks rather than being prevented by artificial equal-split bounds.
-
-### 2. Fixed reagent volume parsing from the original template
+#### 2. Fixed reagent volume parsing from the original template
 
 A bug was found where fixed reagent parsing could accidentally inspect mutated live dataframes after generated protocol rows had been added. This caused reagents such as Water, silver nitrate, and potassium bromide to be misclassified or confused as fixed reagents after batch 0.
 
 The fix was to parse fixed reagent volumes from the original input template and stored fixed reagent list rather than the live generated `rxn_df`.
 
-### 3. Water top-off feasibility
+#### 3. Water top-off feasibility
 
 Water is not treated like a true-zero reagent. Water is the top-off needed to keep the final well volume at the intended total.
 
 | Water top-off | Status | Reason |
 |---:|---|---|
-| `0 µL` | ✅ Valid | no water needed |
-| `>= 5 µL` | ✅ Valid | executable transfer |
-| `0 < water < 5 µL` | ❌ Invalid | required but not executable |
-| `< 0 µL` | ❌ Invalid | overflow |
+| `0 µL` | Valid | no water needed |
+| `>= 5 µL` | Valid | executable transfer |
+| `0 < water < 5 µL` | Invalid | required but not executable |
+| `< 0 µL` | Invalid | overflow |
 
 This rule is essential because skipping a required `1–4 µL` water top-off would underfill the well and change the actual concentrations.
 
-### 4. Controller hard-stop
+#### 4. Controller hard-stop
 
 The controller became the final authority for physical feasibility. Even if the optimizer suggests something bad, the controller checks the recipe before execution and hard-stops invalid volume combinations.
 
-### 5. Volume-aware initial seeding
+#### 5. Volume-aware initial seeding
 
 The initial maximin seed generator was repaired after an early failure mode where a full Latin hypercube design was rejected if any point overfilled.
 
@@ -406,12 +424,13 @@ The Auto branch could now generate seed recipes and optimizer-suggested recipes 
 
 - Add mixed mask optimizer scaffolding
 - Logic adjustments for last push
+- Add Auto mode validation notes
 
 ### Purpose
 
-This group added the first mixed discrete/continuous optimizer implementation.
+This group added the first mixed discrete/continuous optimizer implementation and captured the branch state in validation notes.
 
-## Core idea
+### Core idea
 
 The optimizer now uses binary reagent masks to separate reagent presence/absence from continuous concentration optimization.
 
@@ -424,9 +443,9 @@ ON reagents have lower bounds corresponding to executable transfer volume, curre
 
 The mask optimizer therefore avoids treating the forbidden `0–5 µL` region as a continuous chemical response region.
 
-## `allow_true_zero` behavior
+### `allow_true_zero` behavior
 
-### When `allow_true_zero = TRUE`
+#### When `allow_true_zero = TRUE`
 
 The optimizer considers all non-empty ON/OFF masks.
 
@@ -440,7 +459,7 @@ For a 2D variable-reagent system:
 
 The all-off mask is excluded by default because the workflow already uses blank/background subtraction.
 
-### When `allow_true_zero = FALSE`
+#### When `allow_true_zero = FALSE`
 
 The optimizer uses only the all-ON mask.
 
@@ -450,7 +469,7 @@ For a 2D variable-reagent system:
 [1, 1]
 ```
 
-## Implemented helpers
+### Implemented helpers
 
 - `_generate_reagent_masks()`
 - `_get_active_mask_indices()`
@@ -462,26 +481,13 @@ For a 2D variable-reagent system:
 - `_optimize_single_mask()`
 - `_optimize_target_distance_with_masks()`
 
-## Controller integration
+### Controller integration
 
 - `OptimizationModel` now accepts `allow_true_zero`.
 - `launch_auto()` passes `allow_true_zero` from `auto.robo_params`.
 - `getNextReaction()` now calls `_optimize_target_distance_with_masks()`.
 - `getNextReaction()` still returns `[best_x]`, preserving the controller-facing return format.
-- The optimizer prints the selected reagent mask and suggested recipe volume balance.
-
-## Logic adjustments after review
-
-- Fixed controller handoff so `allow_true_zero` is read from:
-
-```python
-auto.robo_params.get('allow_true_zero', False)
-```
-
-rather than a nonexistent `auto.allow_true_zero` attribute.
-
-- Corrected masked-bound validation so the `lower_bound > 1.0` check occurs before clipping.
-- Updated initial design generation to exclude all-off repaired seed recipes when true-zero is enabled, while still allowing partial-off recipes.
+- The optimizer stores the selected mask and prediction values for downstream logging.
 
 ### Outcome
 
@@ -489,9 +495,489 @@ The mixed mask optimizer now behaves consistently with the intended true-zero ch
 
 ---
 
-# 🧪 Validation Runs Completed
+## June 9, 2026 — Auto Model-Performance Logging and Lambda Progress Plot Foundation
+
+**Relevant commits:**
+
+- Add Auto mode model-performance logging
+- Adjusting std math logic
+- Add Auto progress plots and true-zero repair warning
+- Pushing the previous push but for real
+- Polish Auto lambda-progress plots
+- Adjusting Auto lambda-progress plots
+- Removing unused code
+- Adjusting lambda max progress plots
+- Remove plotting offsets
+
+### Purpose
+
+This group turned Auto mode from a protocol generator with debug CSVs into a more inspectable autonomous model loop. The key addition was condition-level model-performance logging and a first version of lambda-max progress plotting.
+
+### Condition-level performance logging
+
+The branch gained `auto_model_performance_log.csv`, a condition-level log separate from physical-well `experiment_data.csv`.
+
+The distinction is important:
+
+| File | Level | Purpose |
+|---|---|---|
+| `experiment_data.csv` | physical well / replicate | raw executed well-level data |
+| `auto_model_performance_log.csv` | unique condition | model-vs-outcome performance tracking |
+
+The performance log records one row per unique condition, including seed conditions and optimizer-selected conditions. Duplicate wells are summarized before being logged at the condition level.
+
+### Prediction logging
+
+For optimizer-selected rows, the branch logs:
+
+- GP predicted lambda max mean in nm,
+- GP predicted lambda max standard deviation in nm,
+- actual measured mean lambda max,
+- actual measured sample SD,
+- actual measured SEM,
+- target error,
+- prediction error,
+- closest-to-target-so-far information,
+- recipe feasibility fields.
+
+A key correction was made to the GP standard deviation conversion. The GP returns a predictive standard deviation in normalized model space, so the conversion to nanometers is:
+
+```python
+predicted_lambda_std_nm = normalized_std * 600.0
+```
+
+It should not be square-rooted again.
+
+### Lambda progress plots
+
+The first Auto lambda-progress plots were added. These plots show condition number on the x-axis and lambda max on the y-axis, with:
+
+- observed condition mean ± SEM,
+- GP prediction ± GP SD,
+- target lambda line,
+- batch-to-batch progress across Auto conditions.
+
+### Outcome
+
+By the end of this stage, Auto mode could produce a condition-level record of how well the GP model’s predictions matched observed results, and could visualize progress toward the target over time.
 
 ---
+
+## June 10, 2026 — Condition-Level Stop Rule, Final Summary Plot, and Plot Readability
+
+**Relevant commits:**
+
+- Add final Auto λmax progress summary plot
+- Fix Auto stopping rule to require validated duplicate-level target hit
+- Improve Auto λmax progress plot readability with robust y-axis scaling
+- Adjusting plot visuals
+
+### Purpose
+
+This group improved both scientific correctness and plot readability.
+
+### Condition-level stopping rule
+
+The stopping rule was moved away from raw physical-replicate logic and into condition-level duplicate summary logic.
+
+The reason was that a single physical replicate can accidentally hit the target even when the duplicate condition is not reliable. In duplicate-based Auto mode, stopping should not be triggered by one lucky or noisy well.
+
+The controller now checks condition-level summary metrics before accepting a target hit, including:
+
+- mean target error,
+- duplicate/replicate variability,
+- target tolerance,
+- replicate SD tolerance.
+
+The optimizer’s internal `update_quit()` still tracks max-iteration state, but target-based stopping is intentionally controlled by the controller using summarized condition-level data.
+
+### Final lambda progress plot
+
+The controller now produces a final summary plot:
+
+```text
+lambda_progress_final.png
+```
+
+This is exported alongside the batch-wise lambda-progress plots.
+
+### Robust y-axis scaling
+
+The lambda-progress plot moved toward robust y-axis scaling so outlier means or huge uncertainty values would not make the whole plot unreadable.
+
+### Outcome
+
+The Auto mode loop became less likely to terminate on a false-positive noisy replicate, and the final run output became more reviewable.
+
+---
+
+## June 11, 2026 — Error-Bar Display Capping, 2D GP Uncertainty Heatmaps, Plot Polishing, and Debug Logging
+
+**Relevant commits:**
+
+- Adding optional error bar visual capping
+- Adjusting clip functionality
+- Adjusting wording for scientific clarity
+- Warning adjustments
+- Implemented 2D GP uncertainty heatmap support for Auto mode.
+- Adjusting plot spacing
+- Restoring cap annotations
+- Tidying up graph axes titles
+- Adjust plot margins
+- Adjusting plot margin again
+- Finalizing lambda plot
+- Organize Auto debug outputs and save terminal logs
+- Improving auto terminal saving
+- Polish Auto debug logging and output organization
+
+### Purpose
+
+This was a large polish and output-validation stage. It focused on making Auto mode outputs scientifically interpretable, visually readable, and easier to debug after a run.
+
+### Optional lambda-progress error-bar display cap
+
+The lambda progress plot gained optional display capping for very large error bars.
+
+This feature is visual only. Raw SEM and GP SD values remain in the CSV logs. The display cap prevents one extremely large SEM or GP predictive SD from dominating the plot and making all other points unreadable.
+
+The terminology was intentionally changed from “clipped” to “display-capped” for scientific clarity.
+
+| Term | Meaning |
+|---|---|
+| raw SEM / raw GP SD | preserved in CSV/log values |
+| display-capped error bar | visually shortened for readability only |
+
+The plot annotation is shown only when a cap is actually applied. The preferred annotation content was restored as:
+
+```text
+Display cap: 75 nm | GP SD display-capped at conditions ... | SEM display-capped at conditions ...
+```
+
+### Plot axis and spacing polish
+
+The lambda-progress plot was refined through several iterations to reduce whitespace while avoiding overlap between the x-axis label and the display-cap annotation.
+
+The validated settings reached in this stage were:
+
+```python
+ax.set_xlabel('Reaction condition number', labelpad=2)
+```
+
+and, when the display-cap annotation is present:
+
+```python
+fig.text(
+    0.5,
+    0.018,
+    display_cap_note,
+    ha='center',
+    va='center',
+    fontsize=7.3,
+    color='0.35'
+)
+
+bottom_margin = 0.20
+```
+
+A later plot-margin adjustment was explored to provide slightly more spacing between the x-axis title and the annotation. The final margin should be treated as a visual parameter rather than a scientific/logical change.
+
+### 2D GP uncertainty heatmaps
+
+The 2D GPR plotting path was expanded from only predicted lambda max to both:
+
+```text
+gpr_predictions_batch_X.png
+gpr_uncertainty_batch_X.png
+```
+
+The prediction heatmap shows:
+
+```text
+GP predicted lambda max in nm
+```
+
+The uncertainty heatmap shows:
+
+```text
+GP predictive standard deviation of lambda max in nm
+```
+
+The uncertainty plot is model uncertainty, not replicate variability.
+
+In code, this comes from the GP prediction call:
+
+```python
+normalized_predictions, normalized_prediction_stds = self.gp_model.predict(grid_points)
+```
+
+and conversion back to nanometers:
+
+```python
+prediction_uncertainty_nm = normalized_prediction_std * 600.0
+```
+
+Therefore, an uncertainty heatmap colorbar value of `400` means:
+
+```text
+GP predictive SD ≈ 400 nm
+```
+
+It does not mean the predicted lambda max is 400 nm. It means the model is extremely uncertain there. Large uncertainty values are especially expected early in sparse runs.
+
+### 2D-only behavior
+
+The 2D heatmaps are intentionally only generated when exactly two variable reagents are active in the plotting context. For non-2D cases, the plotter skips cleanly rather than trying to visualize higher-dimensional surfaces incorrectly.
+
+### Terminal-output capture
+
+Auto mode now mirrors terminal output to:
+
+```text
+Debug/terminal_output.txt
+```
+
+while preserving normal terminal printing.
+
+The implementation uses:
+
+- `TeeTerminalOutput` to write each stdout/stderr message to both the original stream and a log file,
+- `_start_terminal_output_capture()` to start capture once after output folders exist,
+- `_stop_terminal_output_capture()` to restore stdout/stderr and close the file safely,
+- `terminal_output_capture_guard()` to finalize capture after `_run()` succeeds or fails,
+- and a `launch_auto()` outer cleanup guard to close capture if the run exits before `_run()` begins.
+
+The terminal capture is process-local. It wraps `sys.stdout` and `sys.stderr` only inside the running Python process. It does not alter the macOS Terminal app, other tabs, shell environment, PATH, or other processes.
+
+### Debug-output organization
+
+Auto recipe-design CSVs were moved out of `pr_data` and into:
+
+```text
+Debug/auto_recipe_design/
+```
+
+This separates debug/audit artifacts from primary plate-reader/model outputs.
+
+The intended output layout became:
+
+```text
+DEBUGRTG_007/
+  Plots/
+    lambda_progress_after_batch_*.png
+    lambda_progress_final.png
+    gpr_predictions_batch_*.png
+    gpr_uncertainty_batch_*.png
+
+  pr_data/
+    experiment_data.csv
+    auto_model_performance_log.csv
+    *_auto_scan-*.csv
+    *full_df.csv
+
+  Debug/
+    terminal_output.txt
+    auto_recipe_design/
+      auto_recipe_design_batch_*.csv
+
+  Eve_Files/
+    protocol_record.txt
+    wellmap.tsv
+    well_history.tsv
+    translated_wellmap.tsv
+```
+
+### Validation performed
+
+The terminal-output/debug-saves run validated that:
+
+- `Debug/terminal_output.txt` was created,
+- terminal output was captured from capture start through shutdown,
+- terminal output capture closed cleanly,
+- `auto_recipe_design_*.csv` files were written to `Debug/auto_recipe_design/`,
+- recipe-design files were no longer loose in `pr_data`,
+- lambda-progress plots were generated,
+- final lambda-progress plot was generated,
+- 2D GP prediction heatmaps were generated,
+- 2D GP uncertainty heatmaps were generated,
+- `auto_model_performance_log.csv` contained condition-level rows,
+- and the run completed successfully.
+
+### Outcome
+
+By the end of June 11, Auto mode had much cleaner output artifacts and much better post-run debuggability.
+
+---
+
+## June 12, 2026 — Plot Margin Fix and Optimizer Internal Quit Logic Cleanup
+
+**Relevant commits:**
+
+- Plot margin fix
+- Adjusting optimizer internal quit logic
+
+### Purpose
+
+This stage cleaned up the remaining visual and terminal-output polish issues noticed during debug-output validation.
+
+### Plot margin fix
+
+The lambda-progress annotation spacing was revisited after real debug images showed the display-cap annotation and x-axis label were close. The current working interpretation is that the visual margin is a plot-polish parameter and should be tuned by inspecting real generated output.
+
+The validated settings at one point were:
+
+```python
+labelpad=2
+annotation y=0.018
+fontsize=7.3
+bottom_margin=0.20
+```
+
+A later margin adjustment can increase bottom spacing slightly if needed, without affecting the data, model, or optimization logic.
+
+### Optimizer internal quit logic
+
+During terminal-log validation, the max-iteration exit message appeared twice:
+
+```text
+Exit due to max_iters
+<<controller>> Exit due to max_iters
+```
+
+The source was two print locations:
+
+1. `OptimizationModel.update_quit()` printed:
+
+```python
+print("Exit due to max_iters")
+```
+
+2. The controller printed:
+
+```python
+print("<<controller>> Exit due to max_iters")
+```
+
+The cleaner design is for the optimizer to silently maintain its internal `quit` flag and for the controller to own user-facing stop messages. This is also consistent with the current architecture where condition-level stopping and duplicate-aware validation are controller responsibilities.
+
+The optimizer `update_quit()` should therefore set:
+
+```python
+self.quit = True
+```
+
+when `curr_iter >= max_iters`, but should not print the user-facing max-iteration message.
+
+### Outcome
+
+Terminal output becomes less redundant, and stop-message ownership is cleaner:
+
+| Layer | Responsibility |
+|---|---|
+| optimizer | maintain internal `quit` state |
+| controller | report user-facing stop reason |
+
+---
+
+# Current Technical Architecture
+
+## 1. Optimizer model and masks
+
+The optimizer uses one GP model over full normalized recipe vectors. True-zero behavior is handled by candidate generation/search masks, not by creating separate model structures.
+
+- OFF reagents are exact zero.
+- ON reagents are optimized continuously.
+- Non-executable `0–5 µL` reagent regions are avoided.
+- The all-off mask is excluded when true-zero is enabled.
+- If true-zero is disabled, only the all-ON mask is used.
+
+## 2. Acquisition behavior
+
+The current acquisition remains target-distance exploitation:
+
+```text
+choose the candidate whose GP mean lambda max is closest to the target
+```
+
+The optimizer stores:
+
+- selected mask,
+- predicted lambda mean in nm,
+- predicted lambda SD in nm,
+- suggested recipe,
+- and volume balance information.
+
+Uncertainty-aware acquisition has not yet been implemented.
+
+## 3. Prediction and uncertainty units
+
+The model operates in normalized output space and converts back to nanometers.
+
+Predicted mean:
+
+```python
+predicted_lambda_mean_nm = normalized_mean * 600.0 + 300.0
+```
+
+Predicted standard deviation:
+
+```python
+predicted_lambda_std_nm = normalized_std * 600.0
+```
+
+The standard deviation is already a standard deviation and should not be square-rooted again.
+
+## 4. Condition-level logging
+
+The branch now keeps physical-well raw data and condition-level model-performance data separate.
+
+`experiment_data.csv` remains physical-well level.
+
+`auto_model_performance_log.csv` is condition-level and contains summarized duplicate statistics and model predictions.
+
+## 5. Plotting outputs
+
+The plot outputs are:
+
+| File | Meaning |
+|---|---|
+| `lambda_progress_after_batch_X.png` | cumulative lambda progress through batch X |
+| `lambda_progress_final.png` | final full-run lambda progress summary |
+| `gpr_predictions_batch_X.png` | 2D GP predicted lambda max surface |
+| `gpr_uncertainty_batch_X.png` | 2D GP predictive SD surface |
+
+## 6. Debug output organization
+
+Current intended structure:
+
+```text
+DEBUGRTG_###/
+  Plots/
+    lambda_progress_after_batch_*.png
+    lambda_progress_final.png
+    gpr_predictions_batch_*.png
+    gpr_uncertainty_batch_*.png
+
+  pr_data/
+    experiment_data.csv
+    auto_model_performance_log.csv
+    *_auto_scan-*.csv
+    *full_df.csv
+
+  Debug/
+    terminal_output.txt
+    auto_recipe_design/
+      auto_recipe_design_*.csv
+
+  Eve_Files/
+    protocol_record.txt
+    wellmap.tsv
+    well_history.tsv
+    translated_wellmap.tsv
+```
+
+---
+
+# Validation Runs Completed
 
 ## 1. Dry Debug Protocol Validation
 
@@ -535,8 +1021,7 @@ A water-only physical validation was performed using water in place of the actua
 This was intentionally **not** a chemistry validation. It was a liquid-handling and protocol validation.
 
 > [!WARNING]  
-> The output folder name did not exactly match the input sheet name because the working directory/experiment directory was accidentally left as `RTG_007`.  
-> The run should be interpreted according to the provided water-only input and output files, not the mismatched folder label alone.
+> One output folder name did not exactly match the input sheet name because the working directory/experiment directory was accidentally left as `RTG_007`. The run should be interpreted according to the provided water-only input and output files, not the mismatched folder label alone.
 
 ### Observed validation results
 
@@ -551,12 +1036,6 @@ This was intentionally **not** a chemistry validation. It was a liquid-handling 
 | sodium_borohydride | `20 µL` |
 | **Total fixed volume** | **`90 µL`** |
 
-The optimizer selected a mask such as:
-
-```text
-[1, 1]
-```
-
 One selected optimizer recipe had:
 
 | Volume component | Volume |
@@ -565,7 +1044,7 @@ One selected optimizer recipe had:
 | Variable volume | `95.5581 µL` |
 | Water | `14.4419 µL` |
 | **Total** | **`200.0000 µL`** |
-| Volume feasible | ✅ True |
+| Volume feasible | True |
 
 Water top-off was valid because:
 
@@ -585,80 +1064,95 @@ The water-only physical validation confirmed that the volume logic scales beyond
 
 The controller correctly accounted for multiple fixed reagents and still adjusted water to maintain `200 µL` total well volume.
 
-> [!IMPORTANT]  
-> This is an important milestone because the logic did not assume only one fixed reagent or only the earlier simple test case.
+---
+
+## 3. Multi-Iteration Debug Output Validation
+
+A later debug run validated the newer logging/plotting/output organization.
+
+### Observed output structure
+
+The expected files were generated:
+
+```text
+DEBUGRTG_007/
+  Debug/
+    terminal_output.txt
+    auto_recipe_design/
+      auto_recipe_design_batch_0.csv
+      auto_recipe_design_batch_1.csv
+      auto_recipe_design_batch_2.csv
+      auto_recipe_design_batch_3.csv
+      auto_recipe_design_batch_4.csv
+
+  Plots/
+    lambda_progress_after_batch_0.png
+    lambda_progress_after_batch_1.png
+    lambda_progress_after_batch_2.png
+    lambda_progress_after_batch_3.png
+    lambda_progress_after_batch_4.png
+    lambda_progress_final.png
+    gpr_predictions_batch_1.png
+    gpr_predictions_batch_2.png
+    gpr_predictions_batch_3.png
+    gpr_predictions_batch_4.png
+    gpr_uncertainty_batch_1.png
+    gpr_uncertainty_batch_2.png
+    gpr_uncertainty_batch_3.png
+    gpr_uncertainty_batch_4.png
+
+  pr_data/
+    experiment_data.csv
+    auto_model_performance_log.csv
+    DEBUGRTG_007_auto_scan-0.csv
+    DEBUGRTG_007_auto_scan-1.csv
+    DEBUGRTG_007_auto_scan-2.csv
+    DEBUGRTG_007_auto_scan-3.csv
+    DEBUGRTG_007_auto_scan-4.csv
+    DEBUGRTG_007full_df.csv
+```
+
+### Terminal log validation
+
+`Debug/terminal_output.txt` was created and captured the run from terminal-capture start through shutdown.
+
+It included the expected start marker:
+
+```text
+<<controller>> saving terminal output to .../DEBUGRTG_007/Debug/terminal_output.txt
+```
+
+It included the successful end of the run:
+
+```text
+Success!!!
+<<controller>> shutting down
+<<Reader>> executing: ... Terminate
+<<controller>> terminal output capture complete
+```
+
+No traceback or error markers were found in the validated successful run.
+
+### Performance log validation
+
+`auto_model_performance_log.csv` contained condition-level rows consistent with the run structure:
+
+- seed conditions,
+- optimizer-selected conditions,
+- prediction fields,
+- observed duplicate summary fields,
+- volume feasibility fields,
+- and closest-to-target tracking.
+
+The uncertainty values in early batches were large, which is expected because the GP model had sparse early data. Later batches showed lower GP predictive SD.
+
+### Interpretation
+
+This run validated the latest output organization and terminal-saving behavior.
 
 ---
 
-# ⚠️ Current Known Deferred Issue
-
-Water-used tips are currently treated as clean enough in `ot2_robot.py`.
-
-## Observed behavior
-
-The water-only physical run suggested that the robot/protocol may reuse water-used tips when switching from water to another reagent source. The protocol record indicated transitions where no visible drop/pickup occurred between `WaterC1.0` and `trisodium_citrateC12.5`.
-
-## Relevant code pattern
-
-`ot2_robot.py` appears to treat `WaterC1.0` as an acceptable/clean tip state in lists such as:
-
-```python
-['WaterC1.0', 'clean', src]
-```
-
-and:
-
-```python
-['clean', 'WaterC1.0']
-```
-
-## Why this matters
-
-For real chemistry, a water-used tip is not the same thing as a fresh tip. Even if water is chemically harmless, the tip may have contacted product wells, carried droplets, or overwritten prior history in `last_used`.
-
-The safer rule is:
-
-| Tip state | Should count as clean? |
-|---|---|
-| fresh / clean tip | ✅ Yes |
-| same source reagent, same transfer group | ✅ Reusable |
-| water-used tip | ❌ Not automatically clean |
-| different source reagent | ❌ Fresh tip required |
-
-## Current decision
-
-This issue is deferred for now and should be revisited before higher-risk or larger real chemistry runs.
-
-It does **not** invalidate the volume/optimizer validation, but it is relevant for contamination-sensitive chemistry.
-
-## Recommended later fix
-
-Remove `WaterC1.0` from clean-enough tip lists in `ot2_robot.py`, including logic in:
-
-- `_exec_transfer()`
-- `_get_clean_tips()`
-- `_liquid_transfer()`
-- `_mix()`
-
-## Recommended later debug enhancement
-
-Add a transfer/tip audit CSV at the robot-control layer logging:
-
-- transfer group starts,
-- source reagent name,
-- destination,
-- volume,
-- selected arm/pipette,
-- `last_used` before transfer,
-- `last_used` after transfer,
-- tip pickup events,
-- tip drop events.
-
-This would definitively distinguish between reusing the same pipette body and reusing the same physical tip.
-
----
-
-# 📐 Current Implementation Invariants
+# Current Implementation Invariants
 
 The current Auto mode branch should preserve these invariants.
 
@@ -698,9 +1192,9 @@ Water top-off should be either:
 
 | Water top-off | Status |
 |---:|---|
-| `0 µL` | ✅ Valid |
-| `>= 5 µL` | ✅ Valid |
-| `0 < water < 5 µL` | ❌ Invalid |
+| `0 µL` | Valid |
+| `>= 5 µL` | Valid |
+| `0 < water < 5 µL` | Invalid |
 
 Water top-off must not be in the range:
 
@@ -745,9 +1239,125 @@ Even if the optimizer suggests a bad candidate, the controller remains the final
 
 ---
 
-# 🚀 Suggested Next Steps
+## 7. Condition-Level Stop Invariant
+
+Auto mode should not stop based on one lucky replicate well. A target hit should be accepted only after duplicate-level/condition-level summary criteria are satisfied.
+
+The controller owns this user-facing stop decision.
 
 ---
+
+## 8. Terminal Capture Invariant
+
+Terminal capture should mirror output, not hijack it.
+
+The implementation should:
+
+- preserve normal terminal printing,
+- write a copy to `Debug/terminal_output.txt`,
+- restore stdout/stderr after success or error,
+- close the log if setup exits before `_run()` begins,
+- and avoid affecting other Terminal tabs or shell processes.
+
+---
+
+# Current Known Deferred Issues
+
+## 1. Water-used tips are currently treated as clean enough
+
+Water-used tips are currently treated as clean enough in `ot2_robot.py`.
+
+### Observed behavior
+
+The water-only physical run suggested that the robot/protocol may reuse water-used tips when switching from water to another reagent source. The protocol record indicated transitions where no visible drop/pickup occurred between `WaterC1.0` and `trisodium_citrateC12.5`.
+
+### Relevant code pattern
+
+`ot2_robot.py` appears to treat `WaterC1.0` as an acceptable/clean tip state in lists such as:
+
+```python
+['WaterC1.0', 'clean', src]
+```
+
+and:
+
+```python
+['clean', 'WaterC1.0']
+```
+
+### Why this matters
+
+For real chemistry, a water-used tip is not the same thing as a fresh tip. Even if water is chemically harmless, the tip may have contacted product wells, carried droplets, or overwritten prior history in `last_used`.
+
+The safer rule is:
+
+| Tip state | Should count as clean? |
+|---|---|
+| fresh / clean tip | Yes |
+| same source reagent, same transfer group | Usually reusable |
+| water-used tip | Not automatically clean |
+| different source reagent | Fresh tip required |
+
+### Current decision
+
+This issue is deferred for now and should be revisited before higher-risk or larger real chemistry runs.
+
+It does **not** invalidate the volume/optimizer validation, but it is relevant for contamination-sensitive chemistry.
+
+### Recommended later fix
+
+Remove `WaterC1.0` from clean-enough tip lists in `ot2_robot.py`, including logic in:
+
+- `_exec_transfer()`
+- `_get_clean_tips()`
+- `_liquid_transfer()`
+- `_mix()`
+
+### Recommended later debug enhancement
+
+Add a transfer/tip audit CSV at the robot-control layer logging:
+
+- transfer group starts,
+- source reagent name,
+- destination,
+- volume,
+- selected arm/pipette,
+- `last_used` before transfer,
+- `last_used` after transfer,
+- tip pickup events,
+- tip drop events.
+
+This would definitively distinguish between reusing the same pipette body and reusing the same physical tip.
+
+---
+
+## 2. Source/deck volume validation is not yet a hard-stop
+
+The controller currently checks whether each recipe fits into a well. It does not yet fully hard-stop a batch that demands too much total source volume from a reagent tube or reservoir.
+
+This should be added before scaling to larger autonomous runs.
+
+---
+
+## 3. Uncertainty-aware acquisition is not yet implemented
+
+The current optimizer uses target-distance exploitation based on GP mean lambda max.
+
+The new GP uncertainty logging and heatmaps are diagnostic outputs. They do not yet drive the acquisition policy.
+
+A later acquisition function could use model uncertainty directly.
+
+A likely first uncertainty-aware acquisition would be:
+
+```text
+maximize P(|lambda_max - target| <= tolerance)
+```
+
+or a related target-probability criterion using GP mean and SD.
+
+---
+
+# Recommended Next Steps
 
 ## 1. Small Real-Chemistry Validation
 
@@ -767,6 +1377,7 @@ The next scientific validation should be a small real-chemistry run using conser
 - Confirm the optimizer update path behaves with real data.
 - Confirm selected masks make chemical sense.
 - Verify debug CSVs still show valid volume behavior.
+- Verify terminal-output capture works during a real run as it did in debug validation.
 
 This run should be treated as a small validation run, not a full autonomous optimization campaign.
 
@@ -783,6 +1394,7 @@ For each allowed mask, export:
 - optimizer message,
 - objective value,
 - predicted lambda max,
+- predicted GP SD,
 - selected/not selected,
 - normalized full recipe,
 - active-only candidate,
@@ -806,10 +1418,6 @@ This would make optimizer decisions transparent. It would answer questions such 
 
 The next major safety feature before larger runs should be a batch-level deck/source-volume validator.
 
-The controller currently checks whether each recipe fits into a well. It does not yet fully hard-stop a batch that demands too much source volume from a reagent tube/reservoir.
-
-### Recommended behavior
-
 Before execution, calculate total required source volume for the full batch, including duplicates, for every source reagent:
 
 - Water,
@@ -824,7 +1432,17 @@ Independent reagent bounds make high-volume reagent usage more likely than the o
 
 ---
 
-## 4. Gradual Scale-Up Plan
+## 4. Consider Uncertainty-Plot Display Scaling
+
+The uncertainty heatmap currently shows raw GP predictive SD in nm. In sparse early batches this can be very large, sometimes hundreds of nm.
+
+This is technically correct, but may make the heatmap visually dominated by huge early uncertainty values.
+
+A later visualization-only improvement could add robust color scaling or a display cap for the uncertainty heatmap, while preserving raw uncertainty values in logs.
+
+---
+
+## 5. Gradual Scale-Up Plan
 
 After small real-chemistry validation passes, scale gradually.
 
@@ -857,7 +1475,7 @@ After small real-chemistry validation passes, scale gradually.
 
 ---
 
-## 5. Later Model/Chemistry Improvements
+## 6. Later Model/Chemistry Improvements
 
 Later improvements may include:
 
@@ -867,17 +1485,18 @@ Later improvements may include:
 - edge-maximum detection and rejection,
 - spectral smoothing or preprocessing,
 - acquisition-function alternatives beyond pure target-distance,
+- uncertainty-aware acquisition,
 - batch candidate selection,
 - deck-volume-aware optimizer penalties,
 - transfer/tip audit logging.
 
 ---
 
-# 🧭 Validation Summary
+# Validation Summary
 
 ## Current status
 
-The Auto mode branch has passed the main optimizer/protocol validation milestone for mixed mask optimization and volume-safe recipe generation.
+The Auto mode branch has passed the main optimizer/protocol validation milestone for mixed mask optimization and volume-safe recipe generation. It has also passed a major output-validation milestone for condition-level logging, lambda progress plotting, GP heatmaps, terminal-output capture, and debug-folder organization.
 
 ## Validated
 
@@ -888,7 +1507,16 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - water top-off logic,
 - `200 µL` well-volume preservation,
 - dry/debug protocol execution,
-- water-only physical liquid-handling volume validation.
+- water-only physical liquid-handling volume validation,
+- condition-level Auto model-performance logging,
+- condition-level stopping logic,
+- final lambda progress plot export,
+- display-capped error-bar annotation behavior,
+- 2D GP prediction heatmap generation,
+- 2D GP uncertainty heatmap generation,
+- terminal-output capture to `Debug/terminal_output.txt`,
+- recipe-design debug export relocation to `Debug/auto_recipe_design/`,
+- and optimizer/controller stop-message cleanup.
 
 ## Deferred
 
@@ -896,18 +1524,24 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - transfer/tip audit CSV,
 - deck/source-volume hard-stop,
 - real-chemistry spectral validation,
+- uncertainty-aware acquisition,
 - larger autonomous scale-up.
 
 ## Recommended immediate next step
 
-Run a small real-chemistry validation using the same conservative settings, then review:
+Run a small real-chemistry validation using conservative settings, then review:
 
 - spectra,
 - replicate consistency,
 - mask selection,
 - debug CSV volume fields,
+- `auto_model_performance_log.csv`,
+- lambda progress plots,
+- GP prediction heatmaps,
+- GP uncertainty heatmaps,
+- and `Debug/terminal_output.txt`.
 
-before scaling.
+Only after that should the system be scaled to larger autonomous optimization runs.
 
 ---
 
