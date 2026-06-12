@@ -1700,12 +1700,15 @@ class OptimizationModel():
         Target-based stopping is intentionally not handled here because Y_new
         contains physical replicate-well results. In duplicate-based Auto mode,
         stopping on any individual replicate is too permissive. The controller
-        applies the target stop rule later using condition-level duplicate
+        applies the final stop rule later using condition-level duplicate
         summary statistics.
+
+        This method intentionally does not print an exit message. The controller
+        owns user-facing stop messages so the terminal output does not contain
+        duplicate max-iteration notices.
         '''
         if self.curr_iter >= self.max_iters:
             self.quit = True
-            print("Exit due to max_iters")
         else:
             self.quit = False
         
