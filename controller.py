@@ -6301,7 +6301,7 @@ class ScanDataFrame():
 #         df['wellnameorder'] = wellnamenumbers
         
 #         # Split the 'wellnameorder' into two columns: 'num' and 'alpha'
-#         df['num'] = df['col'].str.extract(r'(\d+)').astype(int)
+#         df['num'] = df['col'].str.extract(r'(\\d+)').astype(int)
 #         df['alpha'] = df['col'].str.extract('([a-zA-Z]+)')
         
 #          # Sort by 'time', then 'num' and 'alpha'
