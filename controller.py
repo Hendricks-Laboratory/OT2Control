@@ -4525,12 +4525,13 @@ class AutoContr(Controller):
             legend_handles,
             legend_labels,
             loc='upper center',
-            bbox_to_anchor=(0.5, 0.905),
+            bbox_to_anchor=(0.5, 0.875),
             ncol=min(len(legend_handles), 4),
             frameon=False,
             fontsize=8.2,
             handlelength=1.5,
-            columnspacing=1.1
+            columnspacing=1.1,
+            borderaxespad=0.0
         )
 
         def _format_condition_list(condition_numbers):
@@ -4618,7 +4619,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.72
+            top=0.66
         )
 
         if plot_filename is None:
