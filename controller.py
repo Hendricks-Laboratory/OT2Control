@@ -4525,7 +4525,7 @@ class AutoContr(Controller):
             legend_handles,
             legend_labels,
             loc='lower center',
-            bbox_to_anchor=(0.5, 1.045),
+            bbox_to_anchor=(0.5, 1.015),
             ncol=min(len(legend_handles), 4),
             frameon=False,
             fontsize=8.0,
@@ -4612,15 +4612,15 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.26
+            bottom_margin = 0.22
         else:
-            bottom_margin = 0.14
+            bottom_margin = 0.13
 
         fig.subplots_adjust(
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.82
+            top=0.86
         )
 
         if plot_filename is None:
