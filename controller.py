@@ -4525,7 +4525,7 @@ class AutoContr(Controller):
             legend_handles,
             legend_labels,
             loc='lower center',
-            bbox_to_anchor=(0.5, 1.10),
+            bbox_to_anchor=(0.5, 1.045),
             ncol=min(len(legend_handles), 4),
             frameon=False,
             fontsize=8.0,
@@ -4620,7 +4620,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.72
+            top=0.82
         )
 
         if plot_filename is None:
