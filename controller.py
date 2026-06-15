@@ -3982,6 +3982,500 @@ class AutoContr(Controller):
 
         return plot_path
     
+    def _plot_lambda_replicate_progress_after_batch(
+        self,
+        batch_number,
+        plot_filename=None,
+        plot_title=None,
+        y_axis_mode='robust',
+        errorbar_display_cap_nm=75.0
+    ):
+        '''
+        Generates a cumulative replicate-level lambda max progress plot after a
+        completed Auto batch.
+
+        This companion plot preserves the GP prediction display from the main
+        lambda progress plot, but replaces the observed condition mean +/- SEM
+        with individual replicate lambda max points.
+
+        QC-included replicate values are plotted separately from QC-excluded
+        replicate values. Raw replicate values are not display-capped, so an
+        excluded extreme value remains visible. Only GP predictive SD error bars
+        are display-capped for readability.
+
+        params:
+            int batch_number:
+                Highest completed batch number to include in the cumulative
+                plot.
+
+            str plot_filename:
+                Optional output filename. If None, a batch-specific filename is
+                generated automatically.
+
+            str plot_title:
+                Optional plot title.
+
+            str y_axis_mode:
+                Controls display-only y-axis scaling. Use 'robust' to use
+                display-capped GP SD bars for readable progress plots, or 'full'
+                to include every raw GP SD bound in the y-axis limits.
+
+            float errorbar_display_cap_nm:
+                Display-only maximum GP SD error bar size in nm. Raw replicate
+                points are never capped.
+
+        returns:
+            str or None:
+                Path to the saved plot, or None if there are no rows to plot.
+        '''
+        if len(self.auto_model_performance_rows) == 0:
+            print(
+                "<<controller warning>> skipping lambda replicate progress "
+                "plot because auto_model_performance_rows is empty"
+            )
+            return None
+
+        performance_df = pd.DataFrame(self.auto_model_performance_rows)
+
+        performance_df = performance_df[
+            performance_df['batch_number'] <= batch_number
+        ].copy()
+
+        if performance_df.empty:
+            print(
+                "<<controller warning>> skipping lambda replicate progress "
+                f"plot because there are no performance rows through batch "
+                f"{batch_number}"
+            )
+            return None
+
+        performance_df = performance_df.sort_values('reaction_number')
+
+        performance_df['reaction_number'] = performance_df[
+            'reaction_number'
+        ].astype(float)
+
+        target_lambda = float(performance_df['target_lambda_max_nm'].iloc[0])
+
+        has_prediction = performance_df[
+            'predicted_lambda_mean_nm'
+        ].notna()
+
+        prediction_df = performance_df[has_prediction].copy()
+
+        replicate_value_columns = [
+            col for col in performance_df.columns
+            if (
+                col.startswith('actual_lambda_rep_')
+                and col.endswith('_nm')
+            )
+        ]
+
+        def _replicate_number_from_column(column_name):
+            '''
+            Extracts the replicate number from columns named like:
+            actual_lambda_rep_1_nm
+            '''
+            return int(
+                column_name.replace('actual_lambda_rep_', '').replace(
+                    '_nm',
+                    ''
+                )
+            )
+
+        replicate_value_columns = sorted(
+            replicate_value_columns,
+            key=_replicate_number_from_column
+        )
+
+        if len(replicate_value_columns) == 0:
+            print(
+                "<<controller warning>> skipping lambda replicate progress "
+                "plot because no actual_lambda_rep_*_nm columns were found"
+            )
+            return None
+
+        included_x_values = []
+        included_y_values = []
+        excluded_x_values = []
+        excluded_y_values = []
+
+        max_replicates = len(replicate_value_columns)
+
+        if max_replicates == 1:
+            replicate_offsets = [0.0]
+        else:
+            replicate_offsets = np.linspace(
+                -0.18,
+                0.18,
+                max_replicates
+            )
+
+        def _value_is_true(value):
+            '''
+            Converts bool/string/numeric QC inclusion values into a boolean.
+            Missing values default to True so older rows without QC flags still
+            plot as included observations.
+            '''
+            if value is None or pd.isna(value):
+                return True
+
+            if isinstance(value, str):
+                return value.strip().lower() in [
+                    'true',
+                    '1',
+                    'yes',
+                    'y'
+                ]
+
+            return bool(value)
+
+        for _, row in performance_df.iterrows():
+            reaction_number = float(row['reaction_number'])
+
+            for rep_i, value_column in enumerate(replicate_value_columns):
+                if value_column not in row.index:
+                    continue
+
+                replicate_value = row[value_column]
+
+                if replicate_value is None or pd.isna(replicate_value):
+                    continue
+
+                replicate_number = _replicate_number_from_column(value_column)
+
+                included_column = (
+                    f'actual_lambda_rep_{replicate_number}_included_in_qc'
+                )
+
+                included_in_qc = True
+
+                if included_column in row.index:
+                    included_in_qc = _value_is_true(row[included_column])
+
+                x_value = reaction_number + replicate_offsets[rep_i]
+                y_value = float(replicate_value)
+
+                if included_in_qc:
+                    included_x_values.append(x_value)
+                    included_y_values.append(y_value)
+                else:
+                    excluded_x_values.append(x_value)
+                    excluded_y_values.append(y_value)
+
+        if (
+            len(included_y_values) == 0
+            and len(excluded_y_values) == 0
+        ):
+            print(
+                "<<controller warning>> skipping lambda replicate progress "
+                "plot because no replicate lambda max values were available"
+            )
+            return None
+
+        target_color = '0.25'
+        included_color = 'tab:blue'
+        excluded_color = 'tab:red'
+        model_color = 'tab:orange'
+
+        fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
+
+        target_handle = ax.axhline(
+            target_lambda,
+            color=target_color,
+            linestyle='--',
+            linewidth=1.1,
+            alpha=0.8,
+            zorder=1,
+            label=f'Target = {target_lambda:.0f} nm'
+        )
+
+        prediction_handle = None
+        prediction_display_capped_condition_numbers = []
+
+        if not prediction_df.empty:
+            pred_x_values = prediction_df[
+                'reaction_number'
+            ].to_numpy(dtype=float)
+
+            predicted_means = prediction_df[
+                'predicted_lambda_mean_nm'
+            ].to_numpy()
+
+            predicted_stds = prediction_df[
+                'predicted_lambda_std_nm'
+            ].fillna(0.0).to_numpy()
+
+            predicted_stds_display = np.minimum(
+                predicted_stds,
+                errorbar_display_cap_nm
+            )
+
+            prediction_display_capped_condition_numbers = prediction_df.loc[
+                predicted_stds > errorbar_display_cap_nm,
+                'reaction_number'
+            ].astype(int).to_list()
+
+            prediction_handle = ax.errorbar(
+                pred_x_values,
+                predicted_means,
+                yerr=predicted_stds_display,
+                fmt='s',
+                color=model_color,
+                ecolor=model_color,
+                markerfacecolor='none',
+                markeredgecolor=model_color,
+                markeredgewidth=1.2,
+                elinewidth=1.0,
+                capsize=4,
+                markersize=4.0,
+                barsabove=True,
+                alpha=0.75,
+                zorder=2,
+                label='GP prediction ± SD'
+            )
+
+        included_handle = None
+        excluded_handle = None
+
+        if len(included_y_values) > 0:
+            included_handle = ax.scatter(
+                included_x_values,
+                included_y_values,
+                s=22,
+                marker='o',
+                facecolors='none',
+                edgecolors=included_color,
+                linewidths=1.0,
+                alpha=0.95,
+                zorder=4,
+                label='QC-included replicate'
+            )
+
+        if len(excluded_y_values) > 0:
+            excluded_handle = ax.scatter(
+                excluded_x_values,
+                excluded_y_values,
+                s=30,
+                marker='x',
+                color=excluded_color,
+                linewidths=1.2,
+                alpha=0.95,
+                zorder=5,
+                label='QC-excluded replicate'
+            )
+
+        integer_ticks = performance_df['reaction_number'].astype(int).to_list()
+        ax.set_xticks(integer_ticks)
+
+        ax.set_xlabel('Reaction condition number', labelpad=2)
+        ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
+
+        if plot_title is None:
+            plot_title = (
+                rf'Auto Replicate $\lambda_{{\max}}$ Values After Batch '
+                f'{batch_number}'
+            )
+
+        fig.suptitle(
+            plot_title,
+            fontsize=11,
+            fontweight='normal',
+            y=0.97
+        )
+
+        if y_axis_mode not in ['robust', 'full']:
+            print(
+                "<<controller warning>> unknown y_axis_mode "
+                f"'{y_axis_mode}', using robust display scaling"
+            )
+            y_axis_mode = 'robust'
+
+        raw_replicate_y_values = included_y_values + excluded_y_values
+
+        if y_axis_mode == 'full':
+            y_values_for_limits = list(raw_replicate_y_values) + [
+                target_lambda
+            ]
+
+            if not prediction_df.empty:
+                y_values_for_limits.extend(list(predicted_means))
+                y_values_for_limits.extend(
+                    list(predicted_means - predicted_stds)
+                )
+                y_values_for_limits.extend(
+                    list(predicted_means + predicted_stds)
+                )
+
+        else:
+            y_values_for_limits = list(raw_replicate_y_values) + [
+                target_lambda
+            ]
+
+            if not prediction_df.empty:
+                y_values_for_limits.extend(list(predicted_means))
+                y_values_for_limits.extend(
+                    list(predicted_means - predicted_stds_display)
+                )
+                y_values_for_limits.extend(
+                    list(predicted_means + predicted_stds_display)
+                )
+
+        y_min = min(y_values_for_limits)
+        y_max = max(y_values_for_limits)
+
+        y_padding = max((y_max - y_min) * 0.12, 15.0)
+
+        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+
+        ax.grid(
+            axis='y',
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        legend_handles = []
+        legend_labels = []
+
+        if included_handle is not None:
+            legend_handles.append(included_handle)
+            legend_labels.append('QC-included replicate')
+
+        if excluded_handle is not None:
+            legend_handles.append(excluded_handle)
+            legend_labels.append('QC-excluded replicate')
+
+        if prediction_handle is not None:
+            legend_handles.append(prediction_handle)
+            legend_labels.append('GP prediction ± SD')
+
+        legend_handles.append(target_handle)
+        legend_labels.append(f'Target = {target_lambda:.0f} nm')
+
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.915),
+            ncol=min(len(legend_handles), 4),
+            frameon=False,
+            fontsize=8.2,
+            handlelength=1.5,
+            columnspacing=1.1
+        )
+
+        def _format_condition_list(condition_numbers):
+            '''
+            Formats reaction condition numbers for a compact plot note.
+            '''
+            if len(condition_numbers) == 0:
+                return 'none'
+
+            unique_condition_numbers = sorted(set(condition_numbers))
+
+            if len(unique_condition_numbers) <= 8:
+                return ", ".join(
+                    [str(x) for x in unique_condition_numbers]
+                )
+
+            first_values = ", ".join(
+                [str(x) for x in unique_condition_numbers[:6]]
+            )
+
+            return (
+                f"{len(unique_condition_numbers)} conditions "
+                f"({first_values}, ...)"
+            )
+
+        excluded_condition_numbers = performance_df.loc[
+            performance_df.get(
+                'n_replicates_excluded',
+                pd.Series(0, index=performance_df.index)
+            ).fillna(0).astype(float) > 0,
+            'reaction_number'
+        ].astype(int).to_list()
+
+        flagged_condition_numbers = performance_df.loc[
+            performance_df.get(
+                'replicate_qc_status',
+                pd.Series('', index=performance_df.index)
+            ).fillna('').astype(str) == 'flagged_not_excluded',
+            'reaction_number'
+        ].astype(int).to_list()
+
+        note_parts = []
+
+        if len(prediction_display_capped_condition_numbers) > 0:
+            note_parts.append(
+                "GP SD display-capped at conditions "
+                + _format_condition_list(
+                    prediction_display_capped_condition_numbers
+                )
+            )
+
+        if len(excluded_condition_numbers) > 0:
+            note_parts.append(
+                "QC exclusions at conditions "
+                + _format_condition_list(excluded_condition_numbers)
+            )
+
+        if len(flagged_condition_numbers) > 0:
+            note_parts.append(
+                "QC flagged-not-excluded at conditions "
+                + _format_condition_list(flagged_condition_numbers)
+            )
+
+        if len(note_parts) > 0:
+            plot_note = (
+                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
+                + " | ".join(note_parts)
+            )
+
+            fig.text(
+                0.5,
+                0.018,
+                plot_note,
+                ha='center',
+                va='center',
+                fontsize=7.3,
+                color='0.35'
+            )
+
+            bottom_margin = 0.26
+        else:
+            bottom_margin = 0.14
+
+        fig.subplots_adjust(
+            left=0.12,
+            right=0.97,
+            bottom=bottom_margin,
+            top=0.80
+        )
+
+        if plot_filename is None:
+            plot_filename = (
+                f'lambda_replicates_after_batch_{batch_number}.png'
+            )
+
+        plot_path = os.path.join(
+            self.plot_path,
+            plot_filename
+        )
+
+        fig.savefig(plot_path)
+        plt.close(fig)
+
+        print(
+            "<<controller>> saved lambda replicate progress plot to "
+            f"{plot_path}"
+        )
+
+        return plot_path
+    
     def get_variable_reagents(self):
 
         # Find unique reagents where 'conc' is NaN and 'op' equals 'transfer'
@@ -4216,6 +4710,7 @@ class AutoContr(Controller):
         )
         
         self._plot_lambda_progress_after_batch(self.batch_num)
+        self._plot_lambda_replicate_progress_after_batch(self.batch_num)
 
         # Build QC-filtered seed data for GP model training. Raw replicate
         # results remain preserved in experiment_data.csv and in the Auto
@@ -4369,7 +4864,7 @@ class AutoContr(Controller):
             )
 
             self._plot_lambda_progress_after_batch(self.batch_num)
-
+            self._plot_lambda_replicate_progress_after_batch(self.batch_num)
             # Build QC-filtered optimizer-batch data for GP model training.
             # Raw replicate results remain preserved in experiment_data.csv and
             # in the Auto performance log, but excluded replicate outliers are
@@ -4434,6 +4929,12 @@ class AutoContr(Controller):
             self.batch_num - 1,
             plot_filename='lambda_progress_final.png',
             plot_title=rf'Final Auto $\lambda_{{\max}}$ Progress'
+        )
+
+        self._plot_lambda_replicate_progress_after_batch(
+            self.batch_num - 1,
+            plot_filename='lambda_replicates_final.png',
+            plot_title=rf'Final Auto Replicate $\lambda_{{\max}}$ Values'
         )
 
         print("Success!!!")
