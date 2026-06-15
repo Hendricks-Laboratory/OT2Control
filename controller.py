@@ -2951,13 +2951,26 @@ class AutoContr(Controller):
         condition-level summaries.
 
         Automatic exclusion is only applied when at least 3 valid replicate
-        lambda max values are present. For exactly 3 replicates, the rule is:
+        lambda max values are present.
+
+        For exactly 3 valid replicates, the rule is:
 
             1. Find the closest pair of lambda max values.
-            2. Compute the mean of that closest pair.
-            3. If the remaining third value is farther than
+            2. Only treat that pair as a reliable agreement if the pair
+               distance is less than or equal to
+               replicate_outlier_threshold_nm.
+            3. Compute the mean of that closest pair.
+            4. If the remaining third value is farther than
                replicate_outlier_threshold_nm from the closest-pair mean,
                exclude the third value.
+            5. If no pair is within replicate_outlier_threshold_nm, flag the
+               condition as suspicious but do not exclude automatically.
+
+        For 4 or more valid replicates, a conservative median-distance rule is
+        used. Values farther than replicate_outlier_threshold_nm from the
+        median are excluded only if at least two valid replicates would remain.
+        If the rule would leave fewer than two included replicates, the
+        condition is flagged but not automatically excluded.
 
         For fewer than 3 valid values, no automatic exclusion is applied.
 
@@ -3142,6 +3155,98 @@ class AutoContr(Controller):
             'replicate_outlier_threshold_nm': threshold_nm
         }
     
+    def _get_auto_model_training_decision_from_replicate_qc(
+        self,
+        replicate_qc
+    ):
+        '''
+        Converts replicate QC results into an explicit model-training decision.
+
+        This separates two scientific questions:
+
+            1. Which replicate values are included in the condition-level QC
+               summary?
+            2. Which replicate values should be used to train the GP model?
+
+        The policy is intentionally data-preserving:
+
+            - Clear isolated replicate artifacts are excluded from model
+              training.
+            - Ambiguous flagged conditions are retained for model training
+              because they may still contain useful information about the
+              experimental response or reproducibility.
+            - Conditions with no valid replicate values are skipped.
+
+        params:
+            dict replicate_qc:
+                Output from _run_lambda_replicate_qc().
+
+        returns:
+            dict:
+                Model-training decision metadata.
+        '''
+        qc_status = replicate_qc.get('qc_status')
+        n_replicates_used = int(replicate_qc.get('n_replicates_used', 0))
+        n_replicates_excluded = int(
+            replicate_qc.get('n_replicates_excluded', 0)
+        )
+        n_replicates_valid = int(replicate_qc.get('n_replicates_valid', 0))
+
+        if n_replicates_valid == 0:
+            return {
+                'use_for_model_training': False,
+                'model_training_status': 'skipped_no_valid_replicates',
+                'n_replicates_used_for_model_training': 0,
+                'model_training_reason': (
+                    'No valid replicate lambda max values were available.'
+                )
+            }
+
+        if n_replicates_used == 0:
+            return {
+                'use_for_model_training': False,
+                'model_training_status': 'skipped_no_qc_included_replicates',
+                'n_replicates_used_for_model_training': 0,
+                'model_training_reason': (
+                    'Replicate QC left no included values for model training.'
+                )
+            }
+
+        if qc_status == 'flagged_not_excluded':
+            return {
+                'use_for_model_training': True,
+                'model_training_status': 'used_flagged_condition',
+                'n_replicates_used_for_model_training': n_replicates_used,
+                'model_training_reason': (
+                    'Condition was flagged as suspicious or ambiguous by '
+                    'replicate QC, but no replicate was automatically excluded; '
+                    'all QC-included valid replicate values are retained for '
+                    'GP model training.'
+                )
+            }
+
+        if n_replicates_excluded > 0:
+            return {
+                'use_for_model_training': True,
+                'model_training_status': 'used_qc_included_only',
+                'n_replicates_used_for_model_training': n_replicates_used,
+                'model_training_reason': (
+                    'Clear replicate outlier(s) were excluded; only '
+                    'QC-included replicate values are used for GP model '
+                    'training.'
+                )
+            }
+
+        return {
+            'use_for_model_training': True,
+            'model_training_status': 'used_all_valid_replicates',
+            'n_replicates_used_for_model_training': n_replicates_used,
+            'model_training_reason': (
+                'Replicate QC passed or was not required; all valid replicate '
+                'values are used for GP model training.'
+            )
+        }
+    
     def _build_auto_qc_model_training_data(
         self,
         unique_recipes,
@@ -3152,13 +3257,18 @@ class AutoContr(Controller):
 
         Raw replicate results are preserved elsewhere. This method returns only
         the recipe/lambda pairs that should be added to the GP model after
-        conservative 3+ replicate QC.
+        conservative replicate QC and model-training eligibility review.
 
         For each unique recipe condition:
             - split its duplicate lambda max values
             - run replicate QC
-            - keep only QC-included replicate values
-            - repeat the unique recipe once for each included replicate value
+            - convert QC results into an explicit model-training decision
+            - keep QC-included replicate values for model-used conditions
+            - repeat the unique recipe once for each model-used replicate value
+
+        The policy is data-preserving: ambiguous flagged conditions are still
+        used for model training, while clear excluded replicate artifacts are
+        not.
 
         params:
             np.ndarray unique_recipes:
@@ -3172,12 +3282,12 @@ class AutoContr(Controller):
                 X_model_denormalized, Y_model_lambda_nm
 
                 X_model_denormalized:
-                    Denormalized recipe rows repeated only for QC-included
-                    replicate values.
+                    Denormalized recipe rows repeated only for replicate values
+                    used for model training.
 
                 Y_model_lambda_nm:
-                    Raw nm lambda max values corresponding to the included
-                    replicate rows.
+                    Raw nm lambda max values corresponding to the replicate
+                    rows used for model training.
         '''
         unique_recipes = np.array(unique_recipes, dtype=float, copy=True)
 
@@ -3200,6 +3310,8 @@ class AutoContr(Controller):
         model_recipes = []
         model_lambda_values = []
 
+        skipped_condition_count = 0
+
         for recipe_i, recipe in enumerate(unique_recipes):
             start_i = recipe_i * self.num_duplicates
             end_i = start_i + self.num_duplicates
@@ -3208,6 +3320,22 @@ class AutoContr(Controller):
             replicate_qc = self._run_lambda_replicate_qc(
                 replicate_lambda_values
             )
+
+            model_training_decision = (
+                self._get_auto_model_training_decision_from_replicate_qc(
+                    replicate_qc
+                )
+            )
+
+            if not model_training_decision['use_for_model_training']:
+                skipped_condition_count += 1
+                print(
+                    "<<controller warning>> skipping Auto condition "
+                    f"{recipe_i} for GP model training: "
+                    f"{model_training_decision['model_training_status']}; "
+                    f"{replicate_qc['qc_reason']}"
+                )
+                continue
 
             for included_value in replicate_qc['included_values']:
                 if included_value is None or pd.isna(included_value):
@@ -3218,9 +3346,17 @@ class AutoContr(Controller):
 
         if len(model_lambda_values) == 0:
             raise ValueError(
-                "Auto replicate QC removed or invalidated all lambda max "
-                "values. The GP model cannot be updated without at least one "
-                "valid observation."
+                "Auto replicate QC/model-training review removed or skipped "
+                "all lambda max values. The GP model cannot be updated without "
+                "at least one trusted observation."
+            )
+
+        if skipped_condition_count > 0:
+            print(
+                "<<controller warning>> skipped "
+                f"{skipped_condition_count} Auto condition(s) from GP model "
+                "training because no valid QC-included replicate values were "
+                "available."
             )
 
         return (
@@ -3317,6 +3453,12 @@ class AutoContr(Controller):
                 replicate_lambda_values
             )
 
+            model_training_decision = (
+                self._get_auto_model_training_decision_from_replicate_qc(
+                    replicate_qc
+                )
+            )
+
             qc_mean, qc_sd, qc_sem = (
                 self._summarize_duplicate_lambda_values(
                     replicate_qc['included_values']
@@ -3404,6 +3546,22 @@ class AutoContr(Controller):
                 'replicate_qc_reason': replicate_qc['qc_reason'],
                 'replicate_outlier_threshold_nm': (
                     replicate_qc['replicate_outlier_threshold_nm']
+                ),
+
+                # Explicit GP model-training decision.
+                'use_for_model_training': (
+                    model_training_decision['use_for_model_training']
+                ),
+                'model_training_status': (
+                    model_training_decision['model_training_status']
+                ),
+                'n_replicates_used_for_model_training': (
+                    model_training_decision[
+                        'n_replicates_used_for_model_training'
+                    ]
+                ),
+                'model_training_reason': (
+                    model_training_decision['model_training_reason']
                 ),
 
                 'target_error_nm': target_error,
