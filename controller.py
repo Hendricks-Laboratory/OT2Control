@@ -4524,8 +4524,9 @@ class AutoContr(Controller):
         fig.legend(
             legend_handles,
             legend_labels,
-            loc='upper center',
-            bbox_to_anchor=(0.5, 0.875),
+            loc='lower left',
+            bbox_to_anchor=(0.18, 0.785, 0.76, 0.08),
+            mode='expand',
             ncol=min(len(legend_handles), 4),
             frameon=False,
             fontsize=8.2,
@@ -4619,7 +4620,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.66
+            top=0.62
         )
 
         if plot_filename is None:
