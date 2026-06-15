@@ -3070,13 +3070,6 @@ class AutoContr(Controller):
                     f'{third_distance:.2f} nm; threshold='
                     f'{threshold_nm:.2f} nm'
                 )
-            else:
-                qc_status = 'passed'
-                qc_reason = (
-                    'no_replicate_excluded: farthest_value_distance='
-                    f'{third_distance:.2f} nm; threshold='
-                    f'{threshold_nm:.2f} nm'
-                )
 
         else:
             # For 4+ valid replicates, use a conservative median rule. This is
