@@ -2927,6 +2927,295 @@ class AutoContr(Controller):
 
         return actual_mean, actual_sd, actual_sem
     
+    def _get_auto_replicate_outlier_threshold_nm(self):
+        '''
+        Returns the lambda max replicate-outlier threshold in nm.
+
+        This controls the conservative 3+ replicate QC rule used by Auto mode.
+        A replicate is only excluded when it is clearly isolated from the other
+        replicates by more than this threshold.
+        '''
+        return float(
+            self.robo_params.get(
+                'replicate_outlier_threshold_nm',
+                50.0
+            )
+        )
+
+    def _run_lambda_replicate_qc(self, lambda_values):
+        '''
+        Runs conservative replicate-level QC for Auto lambda max values.
+
+        Raw values are always preserved. This method only decides which
+        replicate lambda max values should be used for model learning and
+        condition-level summaries.
+
+        Automatic exclusion is only applied when at least 3 valid replicate
+        lambda max values are present. For exactly 3 replicates, the rule is:
+
+            1. Find the closest pair of lambda max values.
+            2. Compute the mean of that closest pair.
+            3. If the remaining third value is farther than
+               replicate_outlier_threshold_nm from the closest-pair mean,
+               exclude the third value.
+
+        For fewer than 3 valid values, no automatic exclusion is applied.
+
+        params:
+            list lambda_values:
+                Raw replicate lambda max values for one unique reaction
+                condition.
+
+        returns:
+            dict:
+                QC result containing raw values, included values, excluded
+                indices, excluded values, status, and reason.
+        '''
+        raw_values = [
+            None if value is None or pd.isna(value) else float(value)
+            for value in lambda_values
+        ]
+
+        valid_pairs = [
+            (index, value)
+            for index, value in enumerate(raw_values)
+            if value is not None
+        ]
+
+        included_indices = [index for index, value in valid_pairs]
+        excluded_indices = []
+        excluded_values = []
+        threshold_nm = self._get_auto_replicate_outlier_threshold_nm()
+
+        qc_status = 'not_applied'
+        qc_reason = ''
+
+        if len(valid_pairs) < 3:
+            return {
+                'raw_values': raw_values,
+                'included_indices': included_indices,
+                'included_values': [value for index, value in valid_pairs],
+                'excluded_indices': excluded_indices,
+                'excluded_values': excluded_values,
+                'n_replicates_total': len(raw_values),
+                'n_replicates_valid': len(valid_pairs),
+                'n_replicates_used': len(included_indices),
+                'n_replicates_excluded': 0,
+                'qc_status': qc_status,
+                'qc_reason': 'fewer_than_3_valid_replicates',
+                'replicate_outlier_threshold_nm': threshold_nm
+            }
+
+        if len(valid_pairs) == 3:
+            closest_pair = None
+            closest_pair_distance = None
+
+            for i in range(len(valid_pairs)):
+                for j in range(i + 1, len(valid_pairs)):
+                    pair_distance = abs(valid_pairs[i][1] - valid_pairs[j][1])
+
+                    if (
+                        closest_pair_distance is None or
+                        pair_distance < closest_pair_distance
+                    ):
+                        closest_pair_distance = pair_distance
+                        closest_pair = (i, j)
+
+            pair_i, pair_j = closest_pair
+            pair_mean = float(
+                (
+                    valid_pairs[pair_i][1] +
+                    valid_pairs[pair_j][1]
+                ) / 2.0
+            )
+
+            third_position = list(
+                set(range(3)) - set([pair_i, pair_j])
+            )[0]
+
+            third_index, third_value = valid_pairs[third_position]
+            third_distance = float(abs(third_value - pair_mean))
+
+            if third_distance > threshold_nm:
+                included_indices = [
+                    valid_pairs[pair_i][0],
+                    valid_pairs[pair_j][0]
+                ]
+                excluded_indices = [third_index]
+                excluded_values = [third_value]
+                qc_status = 'excluded_replicate'
+                qc_reason = (
+                    'lambda_max_outlier: closest_pair_mean='
+                    f'{pair_mean:.2f} nm; excluded_value='
+                    f'{third_value:.2f} nm; distance='
+                    f'{third_distance:.2f} nm; threshold='
+                    f'{threshold_nm:.2f} nm'
+                )
+            else:
+                qc_status = 'passed'
+                qc_reason = (
+                    'no_replicate_excluded: farthest_value_distance='
+                    f'{third_distance:.2f} nm; threshold='
+                    f'{threshold_nm:.2f} nm'
+                )
+
+        else:
+            # For 4+ valid replicates, use a conservative median rule. This is
+            # less central for the current workflow, which usually uses
+            # triplicates, but keeps the function correct for n > 3.
+            values = np.asarray([value for index, value in valid_pairs], dtype=float)
+            median_value = float(np.median(values))
+            distances = np.abs(values - median_value)
+
+            outlier_positions = np.where(distances > threshold_nm)[0].tolist()
+
+            if len(outlier_positions) > 0:
+                excluded_indices = [
+                    valid_pairs[position][0]
+                    for position in outlier_positions
+                ]
+                excluded_values = [
+                    valid_pairs[position][1]
+                    for position in outlier_positions
+                ]
+                included_indices = [
+                    index
+                    for index, value in valid_pairs
+                    if index not in excluded_indices
+                ]
+
+                # Keep at least two included replicates. If the rule would
+                # exclude too many values, flag but do not exclude automatically.
+                if len(included_indices) < 2:
+                    included_indices = [index for index, value in valid_pairs]
+                    excluded_indices = []
+                    excluded_values = []
+                    qc_status = 'flagged_not_excluded'
+                    qc_reason = (
+                        'median_rule_would_leave_fewer_than_2_replicates'
+                    )
+                else:
+                    qc_status = 'excluded_replicate'
+                    qc_reason = (
+                        'lambda_max_outlier_median_rule: median='
+                        f'{median_value:.2f} nm; threshold='
+                        f'{threshold_nm:.2f} nm'
+                    )
+            else:
+                qc_status = 'passed'
+                qc_reason = (
+                    'no_replicate_excluded_by_median_rule: median='
+                    f'{median_value:.2f} nm; threshold='
+                    f'{threshold_nm:.2f} nm'
+                )
+
+        included_values = [
+            raw_values[index]
+            for index in included_indices
+            if raw_values[index] is not None
+        ]
+
+        return {
+            'raw_values': raw_values,
+            'included_indices': included_indices,
+            'included_values': included_values,
+            'excluded_indices': excluded_indices,
+            'excluded_values': excluded_values,
+            'n_replicates_total': len(raw_values),
+            'n_replicates_valid': len(valid_pairs),
+            'n_replicates_used': len(included_values),
+            'n_replicates_excluded': len(excluded_values),
+            'qc_status': qc_status,
+            'qc_reason': qc_reason,
+            'replicate_outlier_threshold_nm': threshold_nm
+        }
+    
+    def _build_auto_qc_model_training_data(
+        self,
+        unique_recipes,
+        lambda_max_values
+    ):
+        '''
+        Builds replicate-level model-training arrays after Auto replicate QC.
+
+        Raw replicate results are preserved elsewhere. This method returns only
+        the recipe/lambda pairs that should be added to the GP model after
+        conservative 3+ replicate QC.
+
+        For each unique recipe condition:
+            - split its duplicate lambda max values
+            - run replicate QC
+            - keep only QC-included replicate values
+            - repeat the unique recipe once for each included replicate value
+
+        params:
+            np.ndarray unique_recipes:
+                One row per unique denormalized recipe condition.
+
+            list lambda_max_values:
+                Raw lambda max values from physical duplicate wells.
+
+        returns:
+            tuple:
+                X_model_denormalized, Y_model_lambda_nm
+
+                X_model_denormalized:
+                    Denormalized recipe rows repeated only for QC-included
+                    replicate values.
+
+                Y_model_lambda_nm:
+                    Raw nm lambda max values corresponding to the included
+                    replicate rows.
+        '''
+        unique_recipes = np.array(unique_recipes, dtype=float, copy=True)
+
+        if unique_recipes.ndim == 1:
+            unique_recipes = unique_recipes.reshape(1, -1)
+
+        lambda_max_values = list(lambda_max_values)
+
+        expected_lambda_count = unique_recipes.shape[0] * self.num_duplicates
+
+        if len(lambda_max_values) != expected_lambda_count:
+            raise ValueError(
+                "Cannot build QC model training data because the number of "
+                f"lambda max values ({len(lambda_max_values)}) does not match "
+                f"unique recipes ({unique_recipes.shape[0]}) x "
+                f"num_duplicates ({self.num_duplicates}) = "
+                f"{expected_lambda_count}."
+            )
+
+        model_recipes = []
+        model_lambda_values = []
+
+        for recipe_i, recipe in enumerate(unique_recipes):
+            start_i = recipe_i * self.num_duplicates
+            end_i = start_i + self.num_duplicates
+            replicate_lambda_values = lambda_max_values[start_i:end_i]
+
+            replicate_qc = self._run_lambda_replicate_qc(
+                replicate_lambda_values
+            )
+
+            for included_value in replicate_qc['included_values']:
+                if included_value is None or pd.isna(included_value):
+                    continue
+
+                model_recipes.append(recipe.copy())
+                model_lambda_values.append(float(included_value))
+
+        if len(model_lambda_values) == 0:
+            raise ValueError(
+                "Auto replicate QC removed or invalidated all lambda max "
+                "values. The GP model cannot be updated without at least one "
+                "valid observation."
+            )
+
+        return (
+            np.asarray(model_recipes, dtype=float),
+            np.asarray(model_lambda_values, dtype=float)
+        )
+    
     def _append_auto_model_performance_rows(
         self,
         unique_recipes,
@@ -2945,6 +3234,15 @@ class AutoContr(Controller):
 
         Duplicate wells are assumed to be contiguous because Auto mode expands
         each unique recipe with duplicate_list_elements() before execution.
+
+        Replicate-level QC is applied before calculating the condition-level
+        actual lambda max used by Auto performance summaries. Raw replicate
+        values are preserved, while QC-cleaned values are used for:
+            - actual_lambda_mean_nm
+            - actual_lambda_sd_nm
+            - actual_lambda_sem_nm
+            - target_error_nm
+            - prediction_error_nm
 
         params:
             np.ndarray unique_recipes:
@@ -2997,11 +3295,30 @@ class AutoContr(Controller):
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
 
-            actual_mean, actual_sd, actual_sem = (
+            raw_mean, raw_sd, raw_sem = (
                 self._summarize_duplicate_lambda_values(
                     replicate_lambda_values
                 )
             )
+
+            replicate_qc = self._run_lambda_replicate_qc(
+                replicate_lambda_values
+            )
+
+            qc_mean, qc_sd, qc_sem = (
+                self._summarize_duplicate_lambda_values(
+                    replicate_qc['included_values']
+                )
+            )
+
+            if replicate_qc['n_replicates_excluded'] > 0:
+                print(
+                    "<<controller>> Auto replicate QC excluded "
+                    f"{replicate_qc['n_replicates_excluded']} replicate(s) "
+                    f"from batch {batch_number}, condition "
+                    f"{self.auto_condition_counter}: "
+                    f"{replicate_qc['qc_reason']}"
+                )
 
             predicted_mean = self._safe_float_or_none(
                 prediction_metadata.get('predicted_lambda_mean_nm')
@@ -3010,16 +3327,16 @@ class AutoContr(Controller):
                 prediction_metadata.get('predicted_lambda_std_nm')
             )
 
-            if actual_mean is None:
+            if qc_mean is None:
                 target_error = None
                 prediction_error = None
             else:
-                target_error = float(abs(actual_mean - target_lambda))
+                target_error = float(abs(qc_mean - target_lambda))
 
                 if predicted_mean is None:
                     prediction_error = None
                 else:
-                    prediction_error = float(actual_mean - predicted_mean)
+                    prediction_error = float(qc_mean - predicted_mean)
 
             volume_balance = self._get_auto_recipe_volume_balance(recipe)
             selected_mask = prediction_metadata.get('selected_mask')
@@ -3038,9 +3355,45 @@ class AutoContr(Controller):
                 'target_lambda_max_nm': float(target_lambda),
                 'predicted_lambda_mean_nm': predicted_mean,
                 'predicted_lambda_std_nm': predicted_std,
-                'actual_lambda_mean_nm': actual_mean,
-                'actual_lambda_sd_nm': actual_sd,
-                'actual_lambda_sem_nm': actual_sem,
+
+                # Backward-compatible actual_lambda_* columns now represent
+                # the QC-cleaned condition-level values used by Auto summaries.
+                'actual_lambda_mean_nm': qc_mean,
+                'actual_lambda_sd_nm': qc_sd,
+                'actual_lambda_sem_nm': qc_sem,
+                'actual_lambda_values_nm': replicate_qc['included_values'],
+
+                # Raw, unmodified replicate summary.
+                'actual_lambda_mean_raw_nm': raw_mean,
+                'actual_lambda_sd_raw_nm': raw_sd,
+                'actual_lambda_sem_raw_nm': raw_sem,
+                'actual_lambda_values_raw_nm': replicate_qc['raw_values'],
+
+                # Explicit QC-cleaned replicate summary.
+                'actual_lambda_mean_qc_nm': qc_mean,
+                'actual_lambda_sd_qc_nm': qc_sd,
+                'actual_lambda_sem_qc_nm': qc_sem,
+                'actual_lambda_values_qc_nm': replicate_qc['included_values'],
+
+                # Replicate QC metadata.
+                'n_replicates_total': replicate_qc['n_replicates_total'],
+                'n_replicates_valid': replicate_qc['n_replicates_valid'],
+                'n_replicates_used': replicate_qc['n_replicates_used'],
+                'n_replicates_excluded': (
+                    replicate_qc['n_replicates_excluded']
+                ),
+                'excluded_replicate_indices': (
+                    replicate_qc['excluded_indices']
+                ),
+                'excluded_lambda_values_nm': (
+                    replicate_qc['excluded_values']
+                ),
+                'replicate_qc_status': replicate_qc['qc_status'],
+                'replicate_qc_reason': replicate_qc['qc_reason'],
+                'replicate_outlier_threshold_nm': (
+                    replicate_qc['replicate_outlier_threshold_nm']
+                ),
+
                 'target_error_nm': target_error,
                 'prediction_error_nm': prediction_error,
                 'fixed_volume_total_uL': volume_balance['fixed_volume_total'],
@@ -3068,10 +3421,18 @@ class AutoContr(Controller):
 
             for rep_i in range(self.num_duplicates):
                 col_name = f'actual_lambda_rep_{rep_i + 1}_nm'
-                row[col_name] = float(replicate_lambda_values[rep_i])
+                include_col_name = f'actual_lambda_rep_{rep_i + 1}_included_in_qc'
+
+                raw_value = replicate_lambda_values[rep_i]
+
+                row[col_name] = self._safe_float_or_none(raw_value)
+                row[include_col_name] = (
+                    rep_i in replicate_qc['included_indices']
+                )
 
             self.auto_model_performance_rows.append(row)
             self.auto_condition_counter += 1
+
         self._update_auto_model_performance_closest_so_far()
     
     def _update_auto_model_performance_closest_so_far(self):
@@ -3856,19 +4217,37 @@ class AutoContr(Controller):
         
         self._plot_lambda_progress_after_batch(self.batch_num)
 
-        # Normalize the experimental lambda maxes to pass to the gpr model
-        Y_initial_Normalized = normalize(np.array(Y_initial),300,900).reshape(-1,1)
-        
-        # Normalize recipe concentrations to pass to the gpr model.
-        # Use a copy because Normalize_Denormalize_Recipes mutates its input,
-        # and recipes should remain denormalized for experiment_data export.
-        X_initial_normalized = self.Normalize_Denormalize_Recipes(
-            recipes.copy(),
+        # Build QC-filtered seed data for GP model training. Raw replicate
+        # results remain preserved in experiment_data.csv and in the Auto
+        # performance log, but excluded replicate outliers are not used as model
+        # knowledge.
+        qc_initial_recipes, qc_initial_lambda_values = (
+            self._build_auto_qc_model_training_data(
+                X_Initial_Denormalized,
+                Y_initial
+            )
+        )
+
+        # Normalize the QC-filtered lambda maxes to pass to the GP model.
+        qc_Y_initial_normalized = normalize(
+            np.array(qc_initial_lambda_values),
+            300,
+            900
+        ).reshape(-1, 1)
+
+        # Normalize the QC-filtered recipe concentrations to pass to the GP
+        # model. Use a copy because Normalize_Denormalize_Recipes mutates its
+        # input.
+        qc_X_initial_normalized = self.Normalize_Denormalize_Recipes(
+            qc_initial_recipes.copy(),
             normalize_flag=True
         )
 
-        # Create the model with initial normalized data
-        model.initialize_optimizer(X_initial_normalized, Y_initial_Normalized)
+        # Create the model with QC-filtered initial data.
+        model.initialize_optimizer(
+            qc_X_initial_normalized,
+            qc_Y_initial_normalized
+        )
 
         # Evaluate whether the initial seed batch already contains a validated
         # condition-level target hit. This uses duplicate-aggregated lambda max
@@ -3991,17 +4370,38 @@ class AutoContr(Controller):
 
             self._plot_lambda_progress_after_batch(self.batch_num)
 
-            # Normalize the lambda maxes and recipes to pass to the model.
-            # Use a copy because Normalize_Denormalize_Recipes mutates its input,
-            # and recipes should remain denormalized for experiment_data export.
-            Y_new_normalized = normalize(np.array(Y_new),300,900).reshape(-1,1)
-            X_new_normalized = self.Normalize_Denormalize_Recipes(
-                recipes.copy(),
+            # Build QC-filtered optimizer-batch data for GP model training.
+            # Raw replicate results remain preserved in experiment_data.csv and
+            # in the Auto performance log, but excluded replicate outliers are
+            # not used as model knowledge.
+            qc_new_recipes, qc_new_lambda_values = (
+                self._build_auto_qc_model_training_data(
+                    X_new_Denormalized,
+                    Y_new
+                )
+            )
+
+            # Normalize the QC-filtered lambda maxes and recipes to pass to the
+            # GP model. Use a copy because Normalize_Denormalize_Recipes mutates
+            # its input.
+            qc_Y_new_normalized = normalize(
+                np.array(qc_new_lambda_values),
+                300,
+                900
+            ).reshape(-1, 1)
+
+            qc_X_new_normalized = self.Normalize_Denormalize_Recipes(
+                qc_new_recipes.copy(),
                 normalize_flag=True
             )
 
-            # Update the model with the new recipes and lambda maxes (normalized)
-            model.update_experiment_data(np.vstack((model.optimizer.X, X_new_normalized)), np.vstack((model.optimizer.Y, Y_new_normalized)), X_new_normalized, Y_new_normalized)
+            # Update the model with only QC-included replicate observations.
+            model.update_experiment_data(
+                np.vstack((model.optimizer.X, qc_X_new_normalized)),
+                np.vstack((model.optimizer.Y, qc_Y_new_normalized)),
+                qc_X_new_normalized,
+                qc_Y_new_normalized
+            )
 
             # Override optimizer-side quit behavior with the scientifically
             # correct condition-level duplicate rule. This prevents Auto from
