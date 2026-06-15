@@ -3036,7 +3036,10 @@ class AutoContr(Controller):
             third_index, third_value = valid_pairs[third_position]
             third_distance = float(abs(third_value - pair_mean))
 
-            if third_distance > threshold_nm:
+            if (
+                closest_pair_distance <= threshold_nm
+                and third_distance > threshold_nm
+            ):
                 included_indices = [
                     valid_pairs[pair_i][0],
                     valid_pairs[pair_j][0]
@@ -3045,9 +3048,25 @@ class AutoContr(Controller):
                 excluded_values = [third_value]
                 qc_status = 'excluded_replicate'
                 qc_reason = (
-                    'lambda_max_outlier: closest_pair_mean='
+                    'lambda_max_outlier: closest_pair_distance='
+                    f'{closest_pair_distance:.2f} nm; closest_pair_mean='
                     f'{pair_mean:.2f} nm; excluded_value='
                     f'{third_value:.2f} nm; distance='
+                    f'{third_distance:.2f} nm; threshold='
+                    f'{threshold_nm:.2f} nm'
+                )
+            elif closest_pair_distance > threshold_nm:
+                qc_status = 'flagged_not_excluded'
+                qc_reason = (
+                    'triplicate_no_tight_pair: closest_pair_distance='
+                    f'{closest_pair_distance:.2f} nm; threshold='
+                    f'{threshold_nm:.2f} nm'
+                )
+            else:
+                qc_status = 'passed'
+                qc_reason = (
+                    'no_replicate_excluded: closest_pair_distance='
+                    f'{closest_pair_distance:.2f} nm; farthest_value_distance='
                     f'{third_distance:.2f} nm; threshold='
                     f'{threshold_nm:.2f} nm'
                 )
