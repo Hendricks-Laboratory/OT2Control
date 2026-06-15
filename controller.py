@@ -4270,16 +4270,11 @@ class AutoContr(Controller):
         excluded_x_values = []
         excluded_y_values = []
 
-        max_replicates = len(replicate_value_columns)
-
-        if max_replicates == 1:
-            replicate_offsets = [0.0]
-        else:
-            replicate_offsets = np.linspace(
-                -0.18,
-                0.18,
-                max_replicates
-            )
+        # Plot all replicate values directly above the same reaction condition.
+        # Do not horizontally jitter/offset replicate points; overlapping points
+        # intentionally indicate identical or very similar replicate lambda max
+        # values at the same condition.
+        replicate_offsets = [0.0] * len(replicate_value_columns)
 
         def _value_is_true(value):
             '''
@@ -4451,7 +4446,7 @@ class AutoContr(Controller):
             plot_title,
             fontsize=11,
             fontweight='normal',
-            y=0.97
+            y=0.985
         )
 
         if y_axis_mode not in ['robust', 'full']:
@@ -4530,7 +4525,7 @@ class AutoContr(Controller):
             legend_handles,
             legend_labels,
             loc='upper center',
-            bbox_to_anchor=(0.5, 0.915),
+            bbox_to_anchor=(0.5, 0.905),
             ncol=min(len(legend_handles), 4),
             frameon=False,
             fontsize=8.2,
@@ -4623,7 +4618,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.80
+            top=0.72
         )
 
         if plot_filename is None:
