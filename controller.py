@@ -4612,9 +4612,9 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.22
+            bottom_margin = 0.18
         else:
-            bottom_margin = 0.13
+            bottom_margin = 0.11
 
         fig.subplots_adjust(
             left=0.12,
