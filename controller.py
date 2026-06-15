@@ -4521,17 +4521,17 @@ class AutoContr(Controller):
         legend_handles.append(target_handle)
         legend_labels.append(f'Target = {target_lambda:.0f} nm')
 
-        fig.legend(
+        ax.legend(
             legend_handles,
             legend_labels,
-            loc='lower left',
-            bbox_to_anchor=(0.18, 0.785, 0.76, 0.08),
-            mode='expand',
+            loc='lower center',
+            bbox_to_anchor=(0.5, 1.10),
             ncol=min(len(legend_handles), 4),
             frameon=False,
-            fontsize=8.2,
-            handlelength=1.5,
-            columnspacing=1.1,
+            fontsize=8.0,
+            handlelength=1.2,
+            handletextpad=0.45,
+            columnspacing=0.9,
             borderaxespad=0.0
         )
 
@@ -4620,7 +4620,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.62
+            top=0.72
         )
 
         if plot_filename is None:
