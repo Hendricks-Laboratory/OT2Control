@@ -3763,8 +3763,15 @@ class AutoContr(Controller):
 
         robo_params = getattr(self, 'robo_params', {})
 
-        experiment_name = getattr(self, 'experiment_name', None)
-        target_lambda_max_nm = robo_params.get('target_lambda_max_nm', None)
+        experiment_name = getattr(
+            self,
+            'rxn_sheet_name',
+            getattr(self, 'experiment_name', None)
+        )
+        target_lambda_max_nm = robo_params.get(
+            'target',
+            robo_params.get('target_lambda_max_nm', None)
+        )
         initial_data = robo_params.get('initial_data', None)
         max_iterations = robo_params.get('max_iterations', None)
         num_duplicates = robo_params.get('num_duplicates', None)
@@ -4066,7 +4073,7 @@ class AutoContr(Controller):
                 f'{_format_value(predicted_lambda_std_nm, "nm")}'
             )
             lines.append(
-                f'- Prediction error: '
+                f'- Signed prediction error: '
                 f'{_format_value(prediction_error_nm, "nm")}'
             )
             lines.append('')
@@ -4155,21 +4162,21 @@ class AutoContr(Controller):
             lines.append('')
         else:
             lines.append(
-                'Prediction errors are calculated only where pre-experiment '
-                'model predictions were recorded before the experimental result '
-                'was added back into training.'
+                'Prediction errors are signed values calculated only where '
+                'pre-experiment model predictions were recorded before the '
+                'experimental result was added back into training.'
             )
             lines.append('')
             lines.append(
-                f'- Conditions with prediction-error values: '
+                f'- Conditions with signed prediction-error values: '
                 f'{prediction_rows}'
             )
             lines.append(
-                f'- Mean prediction error: '
+                f'- Mean signed prediction error: '
                 f'{_format_value(prediction_error_mean, "nm")}'
             )
             lines.append(
-                f'- Median prediction error: '
+                f'- Median signed prediction error: '
                 f'{_format_value(prediction_error_median, "nm")}'
             )
             lines.append(
@@ -4212,10 +4219,8 @@ class AutoContr(Controller):
             )
         )
         lines.append(
-            _file_line(
-                os.path.join('pr_data', 'auto_run_report.md'),
-                'Human-readable Auto run report'
-            )
+            '- Human-readable Auto run report: '
+            '`pr_data/auto_run_report.md` (present)'
         )
         lines.append(
             _file_line(
