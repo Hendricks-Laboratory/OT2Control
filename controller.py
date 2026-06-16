@@ -3842,6 +3842,1620 @@ class AutoContr(Controller):
         exists_text = 'present' if os.path.exists(full_path) else 'not found'
         return f'- {label}: `{relative_path}` ({exists_text})'
     
+    def _escape_auto_report_markdown_table_value(self, value):
+        '''
+        Escapes values for safe insertion into a Markdown table cell.
+
+        This prevents pipe characters or newlines inside values from breaking
+        Markdown table structure.
+
+        params:
+            value:
+                Value to escape.
+
+        returns:
+            str:
+                Markdown-safe table-cell text.
+        '''
+        value_text = str(value)
+        value_text = value_text.replace('|', '\\|')
+        value_text = value_text.replace('\n', ' ')
+        value_text = value_text.replace('\r', ' ')
+        return value_text
+
+    def _format_auto_report_table_value(
+        self,
+        value,
+        suffix='',
+        missing_value='—'
+    ):
+        '''
+        Formats a scalar value for compact Markdown tables.
+
+        This is intentionally more compact than _format_auto_report_value().
+        Missing values are represented with an em dash so table columns remain
+        readable and visually compact.
+
+        params:
+            value:
+                Value to format.
+
+            str suffix:
+                Optional unit suffix, such as "nm" or "uL".
+
+            str missing_value:
+                Display text for missing values.
+
+        returns:
+            str:
+                Markdown-safe formatted table value.
+        '''
+        if value is None:
+            return missing_value
+
+        try:
+            if pd.isna(value):
+                return missing_value
+        except Exception:
+            pass
+
+        if isinstance(value, float):
+            value_text = f'{value:.3f}'.rstrip('0').rstrip('.')
+        else:
+            value_text = str(value)
+
+        if value_text in ['not recorded', 'None', 'nan', 'NaN', '']:
+            return missing_value
+
+        if suffix and value_text != missing_value:
+            value_text = f'{value_text} {suffix}'
+
+        return self._escape_auto_report_markdown_table_value(value_text)
+
+    def _format_auto_report_replicate_list_value(
+        self,
+        value,
+        missing_value='—'
+    ):
+        '''
+        Formats replicate-list values for compact Markdown report tables.
+
+        Converts code-like list strings such as "[683.0, 824.0, 695.0]" into
+        cleaner report text such as "683, 824, 695".
+
+        params:
+            value:
+                Replicate list value. May be a list, tuple, numpy array, or
+                string representation of a list.
+
+            str missing_value:
+                Display text for missing values.
+
+        returns:
+            str:
+                Markdown-safe compact replicate-list text.
+        '''
+        if value is None:
+            return missing_value
+
+        try:
+            if pd.isna(value):
+                return missing_value
+        except Exception:
+            pass
+
+        parsed_value = value
+
+        if isinstance(value, str):
+            stripped_value = value.strip()
+
+            if stripped_value in [
+                '',
+                'not recorded',
+                'None',
+                'nan',
+                'NaN',
+                '[]'
+            ]:
+                return missing_value
+
+            if (
+                stripped_value.startswith('[')
+                and stripped_value.endswith(']')
+            ):
+                try:
+                    import ast
+                    parsed_value = ast.literal_eval(stripped_value)
+                except Exception:
+                    parsed_value = stripped_value
+
+        if isinstance(parsed_value, np.ndarray):
+            parsed_value = parsed_value.tolist()
+
+        if isinstance(parsed_value, (list, tuple)):
+            formatted_values = []
+
+            for item in parsed_value:
+                if item is None:
+                    continue
+
+                try:
+                    if pd.isna(item):
+                        continue
+                except Exception:
+                    pass
+
+                if isinstance(item, float):
+                    item_text = f'{item:.3f}'.rstrip('0').rstrip('.')
+                else:
+                    item_text = str(item)
+
+                if item_text not in ['', 'None', 'nan', 'NaN']:
+                    formatted_values.append(item_text)
+
+            if len(formatted_values) == 0:
+                return missing_value
+
+            return self._escape_auto_report_markdown_table_value(
+                ', '.join(formatted_values)
+            )
+
+        return self._escape_auto_report_markdown_table_value(parsed_value)
+
+    def _build_padded_auto_report_markdown_table(
+        self,
+        headers,
+        rows,
+        alignments=None
+    ):
+        '''
+        Builds a padded Markdown table so the raw Markdown source is readable.
+
+        Markdown renderers do not require aligned pipe columns, but padded
+        source tables are much easier to inspect in notebooks, text editors,
+        and Git diffs.
+
+        params:
+            list headers:
+                Table header labels.
+
+            list rows:
+                List of row lists. Each row must have the same number of cells
+                as headers. Values are converted to strings.
+
+            list alignments:
+                Optional list of alignment strings for each column. Supported
+                values are "left", "right", and "center".
+
+        returns:
+            list:
+                Markdown table lines.
+        '''
+        if alignments is None:
+            alignments = ['left'] * len(headers)
+
+        normalized_rows = []
+
+        for row in rows:
+            normalized_row = []
+
+            for value in row:
+                normalized_row.append(str(value))
+
+            normalized_rows.append(normalized_row)
+
+        table_values = [
+            [str(header) for header in headers]
+        ] + normalized_rows
+
+        column_widths = []
+
+        for column_i in range(len(headers)):
+            max_width = 0
+
+            for row in table_values:
+                if column_i < len(row):
+                    max_width = max(max_width, len(str(row[column_i])))
+
+            column_widths.append(max(max_width, 3))
+
+        def _format_cell(value, width, alignment):
+            value_text = str(value)
+
+            if alignment == 'right':
+                return value_text.rjust(width)
+
+            if alignment == 'center':
+                return value_text.center(width)
+
+            return value_text.ljust(width)
+
+        header_cells = []
+
+        for column_i, header in enumerate(headers):
+            header_cells.append(
+                _format_cell(
+                    header,
+                    column_widths[column_i],
+                    alignments[column_i]
+                )
+            )
+
+        table_lines = [
+            '| ' + ' | '.join(header_cells) + ' |'
+        ]
+
+        separator_cells = []
+
+        for column_i, alignment in enumerate(alignments):
+            width = column_widths[column_i]
+
+            if alignment == 'right':
+                separator_cells.append('-' * (width - 1) + ':')
+
+            elif alignment == 'center':
+                if width <= 3:
+                    separator_cells.append(':-:')
+                else:
+                    separator_cells.append(
+                        ':' + '-' * (width - 2) + ':'
+                    )
+
+            else:
+                separator_cells.append('-' * width)
+
+        table_lines.append(
+            '| ' + ' | '.join(separator_cells) + ' |'
+        )
+
+        for row in normalized_rows:
+            row_cells = []
+
+            for column_i in range(len(headers)):
+                if column_i < len(row):
+                    value = row[column_i]
+                else:
+                    value = ''
+
+                row_cells.append(
+                    _format_cell(
+                        value,
+                        column_widths[column_i],
+                        alignments[column_i]
+                    )
+                )
+
+            table_lines.append(
+                '| ' + ' | '.join(row_cells) + ' |'
+            )
+
+        return table_lines
+    
+    def _format_auto_design_axis_label(self, reagent_name):
+        '''
+        Formats reagent-axis labels for Auto design-space plots.
+
+        This intentionally matches the existing 2D GPR plot convention:
+        <reagent_name> (mM)
+        '''
+        return f"{str(reagent_name)} (mM)"
+
+    def _get_auto_design_concentration_column(self, reagent_name):
+        '''
+        Returns the expected Auto performance-log concentration column for a
+        variable reagent.
+        '''
+        return f"{str(reagent_name)}_concentration"
+
+    def _get_auto_design_columns(self, performance_df):
+        '''
+        Identifies available variable-reagent concentration columns for
+        design-space plotting.
+
+        This is read-only and follows self.variable_reagents order so labels
+        remain consistent with existing 2D GPR plots.
+        '''
+        design_columns = []
+
+        if performance_df is None or performance_df.empty:
+            return design_columns
+
+        variable_reagents = getattr(self, 'variable_reagents', [])
+
+        if variable_reagents is None:
+            variable_reagents = []
+
+        for reagent_name in variable_reagents:
+            column_name = self._get_auto_design_concentration_column(
+                reagent_name
+            )
+
+            if column_name in performance_df.columns:
+                design_columns.append(
+                    {
+                        'reagent_name': str(reagent_name),
+                        'column_name': column_name
+                    }
+                )
+
+        return design_columns
+
+    def _get_auto_design_plot_dataframe(self):
+        '''
+        Builds a private plotting dataframe for Auto design-space visualization.
+
+        This method copies self.auto_model_performance_rows and never mutates
+        Auto-loop data, experiment_data, recipes, QC data, model-training data,
+        or optimizer state.
+        '''
+        try:
+            performance_df = pd.DataFrame(
+                getattr(self, 'auto_model_performance_rows', [])
+            ).copy(deep=True)
+        except Exception:
+            performance_df = pd.DataFrame()
+
+        if performance_df.empty:
+            return performance_df, []
+
+        design_columns = self._get_auto_design_columns(performance_df)
+
+        for design_column in design_columns:
+            column_name = design_column['column_name']
+            performance_df[column_name] = pd.to_numeric(
+                performance_df[column_name],
+                errors='coerce'
+            )
+
+        for optional_numeric_column in [
+            'reaction_number',
+            'batch_number',
+            'target_error_nm',
+            'actual_lambda_mean_nm'
+        ]:
+            if optional_numeric_column in performance_df.columns:
+                performance_df[optional_numeric_column] = pd.to_numeric(
+                    performance_df[optional_numeric_column],
+                    errors='coerce'
+                )
+
+        design_column_names = [
+            design_column['column_name']
+            for design_column in design_columns
+        ]
+
+        if len(design_column_names) > 0:
+            performance_df = performance_df.dropna(
+                subset=design_column_names
+            ).copy(deep=True)
+
+        if 'reaction_number' in performance_df.columns:
+            performance_df = performance_df.sort_values(
+                'reaction_number'
+            ).copy(deep=True)
+
+        return performance_df, design_columns
+
+    def _get_auto_design_best_condition_number(self, performance_df):
+        '''
+        Returns the reaction_number with the smallest target_error_nm, if
+        available. Used only for plot highlighting.
+        '''
+        if (
+            performance_df is None
+            or performance_df.empty
+            or 'target_error_nm' not in performance_df.columns
+            or 'reaction_number' not in performance_df.columns
+        ):
+            return None
+
+        try:
+            target_errors = pd.to_numeric(
+                performance_df['target_error_nm'],
+                errors='coerce'
+            )
+
+            valid_target_errors = target_errors.dropna()
+
+            if len(valid_target_errors) == 0:
+                return None
+
+            best_index = valid_target_errors.idxmin()
+            best_condition_number = performance_df.loc[
+                best_index,
+                'reaction_number'
+            ]
+
+            if pd.isna(best_condition_number):
+                return None
+
+            return best_condition_number
+
+        except Exception:
+            return None
+
+    def _save_auto_design_plot(self, fig, plot_filename):
+        '''
+        Saves an Auto design-space plot to self.plot_path.
+        '''
+        os.makedirs(self.plot_path, exist_ok=True)
+
+        plot_path = os.path.join(
+            self.plot_path,
+            plot_filename
+        )
+
+        fig.savefig(plot_path, bbox_inches='tight')
+        plt.close(fig)
+
+        print(
+            "<<controller>> saved Auto design-space plot to "
+            f"{plot_path}"
+        )
+
+        return plot_path
+
+    def _plot_auto_design_grouped_points_2d(
+        self,
+        ax,
+        plot_df,
+        x_column,
+        y_column,
+        best_condition_number=None,
+        annotate_points=True
+    ):
+        '''
+        Draws seed, optimizer-selected, and best-condition points on a 2D axis.
+        '''
+        legend_handles = []
+        legend_labels = []
+
+        condition_type_series = plot_df.get(
+            'condition_type',
+            pd.Series('', index=plot_df.index)
+        ).fillna('').astype(str)
+
+        seed_mask = condition_type_series == 'seed'
+        optimizer_mask = condition_type_series == 'optimizer_selected'
+        other_mask = ~(seed_mask | optimizer_mask)
+
+        if seed_mask.any():
+            seed_handle = ax.scatter(
+                plot_df.loc[seed_mask, x_column],
+                plot_df.loc[seed_mask, y_column],
+                s=36,
+                marker='o',
+                facecolors='none',
+                edgecolors='tab:blue',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Seed condition'
+            )
+            legend_handles.append(seed_handle)
+            legend_labels.append('Seed condition')
+
+        if optimizer_mask.any():
+            optimizer_handle = ax.scatter(
+                plot_df.loc[optimizer_mask, x_column],
+                plot_df.loc[optimizer_mask, y_column],
+                s=38,
+                marker='s',
+                facecolors='none',
+                edgecolors='tab:orange',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Optimizer-selected'
+            )
+            legend_handles.append(optimizer_handle)
+            legend_labels.append('Optimizer-selected')
+
+        if other_mask.any():
+            other_handle = ax.scatter(
+                plot_df.loc[other_mask, x_column],
+                plot_df.loc[other_mask, y_column],
+                s=32,
+                marker='^',
+                facecolors='none',
+                edgecolors='0.35',
+                linewidths=1.0,
+                alpha=0.85,
+                label='Other condition'
+            )
+            legend_handles.append(other_handle)
+            legend_labels.append('Other condition')
+
+        if (
+            best_condition_number is not None
+            and 'reaction_number' in plot_df.columns
+        ):
+            try:
+                best_mask = (
+                    plot_df['reaction_number'].astype(float)
+                    == float(best_condition_number)
+                )
+            except Exception:
+                best_mask = pd.Series(False, index=plot_df.index)
+
+            if best_mask.any():
+                best_handle = ax.scatter(
+                    plot_df.loc[best_mask, x_column],
+                    plot_df.loc[best_mask, y_column],
+                    s=95,
+                    marker='*',
+                    color='tab:red',
+                    linewidths=0.8,
+                    alpha=0.95,
+                    label='Best observed condition'
+                )
+                legend_handles.append(best_handle)
+                legend_labels.append('Best observed condition')
+
+        if annotate_points and 'reaction_number' in plot_df.columns:
+            for _, row in plot_df.iterrows():
+                try:
+                    ax.annotate(
+                        str(int(row['reaction_number'])),
+                        (row[x_column], row[y_column]),
+                        xytext=(3, 3),
+                        textcoords='offset points',
+                        fontsize=7.0,
+                        alpha=0.75
+                    )
+                except Exception:
+                    continue
+
+        return legend_handles, legend_labels
+
+    def _plot_initial_training_design_1d(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_1d.png'
+    ):
+        '''
+        Generates a one-dimensional Auto design-space strip plot.
+        '''
+        if plot_df.empty or len(design_columns) != 1:
+            return None
+
+        design_column = design_columns[0]
+        reagent_name = design_column['reagent_name']
+        x_column = design_column['column_name']
+
+        fig, ax = plt.subplots(figsize=(6.8, 2.6), dpi=300)
+
+        condition_type_series = plot_df.get(
+            'condition_type',
+            pd.Series('', index=plot_df.index)
+        ).fillna('').astype(str)
+
+        seed_mask = condition_type_series == 'seed'
+        optimizer_mask = condition_type_series == 'optimizer_selected'
+        other_mask = ~(seed_mask | optimizer_mask)
+
+        if seed_mask.any():
+            ax.scatter(
+                plot_df.loc[seed_mask, x_column],
+                [0.0] * int(seed_mask.sum()),
+                s=36,
+                marker='o',
+                facecolors='none',
+                edgecolors='tab:blue',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Seed condition'
+            )
+
+        if optimizer_mask.any():
+            ax.scatter(
+                plot_df.loc[optimizer_mask, x_column],
+                [0.08] * int(optimizer_mask.sum()),
+                s=38,
+                marker='s',
+                facecolors='none',
+                edgecolors='tab:orange',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Optimizer-selected'
+            )
+
+        if other_mask.any():
+            ax.scatter(
+                plot_df.loc[other_mask, x_column],
+                [-0.08] * int(other_mask.sum()),
+                s=32,
+                marker='^',
+                facecolors='none',
+                edgecolors='0.35',
+                linewidths=1.0,
+                alpha=0.85,
+                label='Other condition'
+            )
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            plot_df
+        )
+
+        if (
+            best_condition_number is not None
+            and 'reaction_number' in plot_df.columns
+        ):
+            try:
+                best_mask = (
+                    plot_df['reaction_number'].astype(float)
+                    == float(best_condition_number)
+                )
+            except Exception:
+                best_mask = pd.Series(False, index=plot_df.index)
+
+            if best_mask.any():
+                ax.scatter(
+                    plot_df.loc[best_mask, x_column],
+                    [0.0] * int(best_mask.sum()),
+                    s=95,
+                    marker='*',
+                    color='tab:red',
+                    linewidths=0.8,
+                    alpha=0.95,
+                    label='Best observed condition'
+                )
+
+        if 'reaction_number' in plot_df.columns and len(plot_df) <= 20:
+            for _, row in plot_df.iterrows():
+                try:
+                    ax.annotate(
+                        str(int(row['reaction_number'])),
+                        (row[x_column], 0.0),
+                        xytext=(3, 5),
+                        textcoords='offset points',
+                        fontsize=7.0,
+                        alpha=0.75
+                    )
+                except Exception:
+                    continue
+
+        ax.set_xlabel(
+            self._format_auto_design_axis_label(reagent_name),
+            fontsize=12
+        )
+        ax.set_yticks([])
+        ax.set_title(
+            'Initial Training Design and Optimizer-Selected Conditions',
+            fontsize=11,
+            fontweight='normal'
+        )
+        ax.grid(
+            axis='x',
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+
+        ax.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, 1.24),
+            ncol=3,
+            frameon=False,
+            fontsize=8.0
+        )
+
+        fig.subplots_adjust(
+            left=0.08,
+            right=0.97,
+            bottom=0.25,
+            top=0.72
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+
+    def _plot_initial_training_design_2d(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_2d.png'
+    ):
+        '''
+        Generates a two-dimensional Auto design-space scatter plot.
+        '''
+        if plot_df.empty or len(design_columns) != 2:
+            return None
+
+        x_design = design_columns[0]
+        y_design = design_columns[1]
+
+        x_column = x_design['column_name']
+        y_column = y_design['column_name']
+
+        fig, ax = plt.subplots(figsize=(5.4, 4.6), dpi=300)
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            plot_df
+        )
+
+        legend_handles, legend_labels = (
+            self._plot_auto_design_grouped_points_2d(
+                ax=ax,
+                plot_df=plot_df,
+                x_column=x_column,
+                y_column=y_column,
+                best_condition_number=best_condition_number,
+                annotate_points=(len(plot_df) <= 20)
+            )
+        )
+
+        ax.set_xlabel(
+            self._format_auto_design_axis_label(x_design['reagent_name']),
+            fontsize=12
+        )
+        ax.set_ylabel(
+            self._format_auto_design_axis_label(y_design['reagent_name']),
+            fontsize=12
+        )
+        ax.set_title(
+            'Initial Training Design and Optimizer-Selected Conditions',
+            fontsize=11,
+            fontweight='normal'
+        )
+        ax.grid(
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        if len(legend_handles) > 0:
+            ax.legend(
+                legend_handles,
+                legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 1.22),
+                ncol=min(len(legend_handles), 4),
+                frameon=False,
+                fontsize=8.0,
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=0.9
+            )
+
+        fig.subplots_adjust(
+            left=0.16,
+            right=0.96,
+            bottom=0.14,
+            top=0.78
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+    
+    def _plot_initial_training_design_3d(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_3d.png'
+    ):
+        '''
+        Generates a three-dimensional Auto design-space scatter plot.
+
+        This plot is always generated for exactly three variable reagents when
+        the required concentration columns are available.
+        '''
+        if plot_df.empty or len(design_columns) != 3:
+            return None
+
+        fig = plt.figure(figsize=(6.4, 5.4), dpi=300)
+        ax = fig.add_subplot(111, projection='3d')
+
+        x_design = design_columns[0]
+        y_design = design_columns[1]
+        z_design = design_columns[2]
+
+        x_column = x_design['column_name']
+        y_column = y_design['column_name']
+        z_column = z_design['column_name']
+
+        condition_type_series = plot_df.get(
+            'condition_type',
+            pd.Series('', index=plot_df.index)
+        ).fillna('').astype(str)
+
+        seed_mask = condition_type_series == 'seed'
+        optimizer_mask = condition_type_series == 'optimizer_selected'
+        other_mask = ~(seed_mask | optimizer_mask)
+
+        if seed_mask.any():
+            ax.scatter(
+                plot_df.loc[seed_mask, x_column],
+                plot_df.loc[seed_mask, y_column],
+                plot_df.loc[seed_mask, z_column],
+                s=36,
+                marker='o',
+                facecolors='none',
+                edgecolors='tab:blue',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Seed condition'
+            )
+
+        if optimizer_mask.any():
+            ax.scatter(
+                plot_df.loc[optimizer_mask, x_column],
+                plot_df.loc[optimizer_mask, y_column],
+                plot_df.loc[optimizer_mask, z_column],
+                s=38,
+                marker='s',
+                facecolors='none',
+                edgecolors='tab:orange',
+                linewidths=1.1,
+                alpha=0.95,
+                label='Optimizer-selected'
+            )
+
+        if other_mask.any():
+            ax.scatter(
+                plot_df.loc[other_mask, x_column],
+                plot_df.loc[other_mask, y_column],
+                plot_df.loc[other_mask, z_column],
+                s=32,
+                marker='^',
+                facecolors='none',
+                edgecolors='0.35',
+                linewidths=1.0,
+                alpha=0.85,
+                label='Other condition'
+            )
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            plot_df
+        )
+
+        if (
+            best_condition_number is not None
+            and 'reaction_number' in plot_df.columns
+        ):
+            try:
+                best_mask = (
+                    plot_df['reaction_number'].astype(float)
+                    == float(best_condition_number)
+                )
+            except Exception:
+                best_mask = pd.Series(False, index=plot_df.index)
+
+            if best_mask.any():
+                ax.scatter(
+                    plot_df.loc[best_mask, x_column],
+                    plot_df.loc[best_mask, y_column],
+                    plot_df.loc[best_mask, z_column],
+                    s=95,
+                    marker='*',
+                    color='tab:red',
+                    linewidths=0.8,
+                    alpha=0.95,
+                    label='Best observed condition'
+                )
+
+        if 'reaction_number' in plot_df.columns and len(plot_df) <= 20:
+            for _, row in plot_df.iterrows():
+                try:
+                    ax.text(
+                        row[x_column],
+                        row[y_column],
+                        row[z_column],
+                        str(int(row['reaction_number'])),
+                        fontsize=7.0,
+                        alpha=0.75
+                    )
+                except Exception:
+                    continue
+
+        ax.set_xlabel(
+            self._format_auto_design_axis_label(
+                x_design['reagent_name']
+            ),
+            fontsize=9
+        )
+        ax.set_ylabel(
+            self._format_auto_design_axis_label(
+                y_design['reagent_name']
+            ),
+            fontsize=9
+        )
+        ax.set_zlabel(
+            self._format_auto_design_axis_label(
+                z_design['reagent_name']
+            ),
+            fontsize=9
+        )
+
+        ax.set_title(
+            '3D Initial Training Design and Optimizer-Selected Conditions',
+            fontsize=11,
+            fontweight='normal',
+            pad=18
+        )
+
+        ax.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=2,
+            frameon=False,
+            fontsize=8.0
+        )
+
+        fig.subplots_adjust(
+            left=0.02,
+            right=0.98,
+            bottom=0.03,
+            top=0.86
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+
+    def _plot_initial_training_design_pairwise(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_pairwise.png',
+        compact=False,
+        max_compact_dimensions=6
+    ):
+        '''
+        Generates pairwise two-dimensional design-space projections.
+
+        For 3-6 variables, all pairwise projections are shown. For 7+ variables,
+        compact=True limits the matrix to the first max_compact_dimensions
+        variable reagents in self.variable_reagents order.
+        '''
+        if plot_df.empty or len(design_columns) < 2:
+            return None
+
+        plot_design_columns = list(design_columns)
+
+        if compact and len(plot_design_columns) > max_compact_dimensions:
+            plot_design_columns = plot_design_columns[
+                :max_compact_dimensions
+            ]
+
+        n_dimensions = len(plot_design_columns)
+
+        if n_dimensions < 2:
+            return None
+
+        pairs = []
+
+        for i in range(n_dimensions):
+            for j in range(i + 1, n_dimensions):
+                pairs.append((i, j))
+
+        n_pairs = len(pairs)
+
+        if n_pairs == 0:
+            return None
+
+        if n_pairs <= 3:
+            n_cols = n_pairs
+        elif n_pairs <= 6:
+            n_cols = 3
+        else:
+            n_cols = 4
+
+        n_rows = int(np.ceil(n_pairs / n_cols))
+
+        fig, axes = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(3.2 * n_cols, 3.0 * n_rows),
+            dpi=300
+        )
+
+        axes = np.array(axes).reshape(-1)
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            plot_df
+        )
+
+        annotate_points = len(plot_df) <= 12 and n_pairs <= 6
+
+        final_legend_handles = []
+        final_legend_labels = []
+
+        for pair_i, (x_i, y_i) in enumerate(pairs):
+            ax = axes[pair_i]
+
+            x_design = plot_design_columns[x_i]
+            y_design = plot_design_columns[y_i]
+
+            legend_handles, legend_labels = (
+                self._plot_auto_design_grouped_points_2d(
+                    ax=ax,
+                    plot_df=plot_df,
+                    x_column=x_design['column_name'],
+                    y_column=y_design['column_name'],
+                    best_condition_number=best_condition_number,
+                    annotate_points=annotate_points
+                )
+            )
+
+            if len(final_legend_handles) == 0:
+                final_legend_handles = legend_handles
+                final_legend_labels = legend_labels
+
+            ax.set_xlabel(
+                self._format_auto_design_axis_label(
+                    x_design['reagent_name']
+                ),
+                fontsize=8.5
+            )
+            ax.set_ylabel(
+                self._format_auto_design_axis_label(
+                    y_design['reagent_name']
+                ),
+                fontsize=8.5
+            )
+
+            ax.grid(
+                linestyle=':',
+                linewidth=0.5,
+                alpha=0.3
+            )
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.tick_params(labelsize=7.5)
+
+        for empty_ax in axes[n_pairs:]:
+            empty_ax.axis('off')
+
+        if compact and len(design_columns) > len(plot_design_columns):
+            title_text = (
+                'Compact Pairwise Design-Space Projections '
+                f'({len(plot_design_columns)} of {len(design_columns)} '
+                'variables shown)'
+            )
+        else:
+            title_text = 'Pairwise Design-Space Projections'
+
+        fig.suptitle(
+            title_text,
+            fontsize=11,
+            fontweight='normal',
+            y=0.985
+        )
+
+        if len(final_legend_handles) > 0:
+            fig.legend(
+                final_legend_handles,
+                final_legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.955),
+                ncol=min(len(final_legend_handles), 4),
+                frameon=False,
+                fontsize=8.0,
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=0.9
+            )
+
+            top_margin = 0.89
+        else:
+            top_margin = 0.92
+
+        fig.subplots_adjust(
+            left=0.075,
+            right=0.975,
+            bottom=0.08,
+            top=top_margin,
+            hspace=0.38,
+            wspace=0.32
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+
+    def _plot_initial_training_design_parallel_coordinates(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_parallel_coordinates.png'
+    ):
+        '''
+        Generates a parallel-coordinate recipe summary for higher-dimensional
+        Auto design spaces.
+
+        Values are min-max normalized within each reagent dimension for display
+        only. Raw concentrations are not modified.
+        '''
+        if plot_df.empty or len(design_columns) < 2:
+            return None
+
+        column_names = [
+            design_column['column_name']
+            for design_column in design_columns
+        ]
+
+        reagent_names = [
+            design_column['reagent_name']
+            for design_column in design_columns
+        ]
+
+        display_df = plot_df.copy(deep=True)
+
+        normalized_values = []
+
+        for column_name in column_names:
+            values = pd.to_numeric(
+                display_df[column_name],
+                errors='coerce'
+            ).to_numpy(dtype=float)
+
+            value_min = np.nanmin(values)
+            value_max = np.nanmax(values)
+
+            if not np.isfinite(value_min) or not np.isfinite(value_max):
+                normalized = np.full_like(values, np.nan, dtype=float)
+            elif value_max == value_min:
+                normalized = np.full_like(values, 0.5, dtype=float)
+            else:
+                normalized = (values - value_min) / (value_max - value_min)
+
+            normalized_values.append(normalized)
+
+        normalized_array = np.vstack(normalized_values).T
+
+        if normalized_array.size == 0:
+            return None
+
+        fig, ax = plt.subplots(
+            figsize=(max(7.0, len(column_names) * 0.75), 4.6),
+            dpi=300
+        )
+
+        x_positions = np.arange(len(column_names))
+
+        condition_type_series = display_df.get(
+            'condition_type',
+            pd.Series('', index=display_df.index)
+        ).fillna('').astype(str)
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            display_df
+        )
+
+        for row_i, (_, row) in enumerate(display_df.iterrows()):
+            if row_i >= normalized_array.shape[0]:
+                continue
+
+            y_values = normalized_array[row_i, :]
+
+            if np.isnan(y_values).all():
+                continue
+
+            condition_type = condition_type_series.iloc[row_i]
+
+            if condition_type == 'seed':
+                line_color = 'tab:blue'
+                line_alpha = 0.55
+                line_width = 1.1
+            elif condition_type == 'optimizer_selected':
+                line_color = 'tab:orange'
+                line_alpha = 0.7
+                line_width = 1.2
+            else:
+                line_color = '0.45'
+                line_alpha = 0.45
+                line_width = 1.0
+
+            if (
+                best_condition_number is not None
+                and 'reaction_number' in display_df.columns
+            ):
+                try:
+                    if (
+                        float(row['reaction_number'])
+                        == float(best_condition_number)
+                    ):
+                        line_color = 'tab:red'
+                        line_alpha = 0.95
+                        line_width = 2.1
+                except Exception:
+                    pass
+
+            ax.plot(
+                x_positions,
+                y_values,
+                color=line_color,
+                alpha=line_alpha,
+                linewidth=line_width
+            )
+
+            if (
+                'reaction_number' in display_df.columns
+                and len(display_df) <= 20
+            ):
+                try:
+                    ax.text(
+                        x_positions[-1] + 0.03,
+                        y_values[-1],
+                        str(int(row['reaction_number'])),
+                        fontsize=6.8,
+                        alpha=0.65,
+                        va='center'
+                    )
+                except Exception:
+                    pass
+
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(
+            reagent_names,
+            rotation=35,
+            ha='right',
+            fontsize=8.5
+        )
+        ax.set_ylabel('Normalized concentration within reagent range')
+        ax.set_ylim(-0.05, 1.05)
+
+        ax.set_title(
+            'Parallel-Coordinate Auto Design-Space Summary',
+            fontsize=11,
+            fontweight='normal'
+        )
+
+        ax.grid(
+            axis='y',
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        seed_handle = plt.Line2D(
+            [0],
+            [0],
+            color='tab:blue',
+            linewidth=1.4,
+            label='Seed condition'
+        )
+        optimizer_handle = plt.Line2D(
+            [0],
+            [0],
+            color='tab:orange',
+            linewidth=1.4,
+            label='Optimizer-selected'
+        )
+        best_handle = plt.Line2D(
+            [0],
+            [0],
+            color='tab:red',
+            linewidth=2.1,
+            label='Best observed condition'
+        )
+
+        ax.legend(
+            handles=[seed_handle, optimizer_handle, best_handle],
+            loc='upper center',
+            bbox_to_anchor=(0.5, 1.18),
+            ncol=3,
+            frameon=False,
+            fontsize=8.0
+        )
+
+        fig.subplots_adjust(
+            left=0.11,
+            right=0.96,
+            bottom=0.24,
+            top=0.77
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+
+    def _plot_initial_training_design_pca(
+        self,
+        plot_df,
+        design_columns,
+        plot_filename='initial_training_design_pca.png'
+    ):
+        '''
+        Generates a NumPy/SVD-based PCA projection for high-dimensional Auto
+        design spaces.
+
+        This is display-only and does not depend on sklearn. Concentration
+        values are min-max scaled for projection only. Raw data are not changed.
+        '''
+        if plot_df.empty or len(design_columns) < 2 or len(plot_df) < 2:
+            return None
+
+        column_names = [
+            design_column['column_name']
+            for design_column in design_columns
+        ]
+
+        try:
+            x_matrix = plot_df[column_names].apply(
+                pd.to_numeric,
+                errors='coerce'
+            ).to_numpy(dtype=float)
+
+            valid_rows = ~np.isnan(x_matrix).any(axis=1)
+            x_matrix = x_matrix[valid_rows, :]
+
+            if x_matrix.shape[0] < 2 or x_matrix.shape[1] < 2:
+                return None
+
+            x_min = np.nanmin(x_matrix, axis=0)
+            x_max = np.nanmax(x_matrix, axis=0)
+            x_range = x_max - x_min
+            x_range[x_range == 0] = 1.0
+
+            x_scaled = (x_matrix - x_min) / x_range
+            x_centered = x_scaled - np.mean(x_scaled, axis=0)
+
+            _, singular_values, vt_matrix = np.linalg.svd(
+                x_centered,
+                full_matrices=False
+            )
+
+            if vt_matrix.shape[0] < 2:
+                return None
+
+            scores = x_centered @ vt_matrix.T
+
+            variance_values = singular_values ** 2
+            variance_total = np.sum(variance_values)
+
+            if variance_total > 0:
+                explained_variance = variance_values / variance_total
+            else:
+                explained_variance = np.zeros_like(variance_values)
+
+            pca_df = plot_df.loc[valid_rows].copy(deep=True)
+            pca_df['PC1'] = scores[:, 0]
+            pca_df['PC2'] = scores[:, 1]
+
+        except Exception as exc:
+            print(
+                "<<controller warning>> PCA design-space projection failed; "
+                f"continuing without PCA plot. Error: {exc}"
+            )
+            return None
+
+        fig, ax = plt.subplots(figsize=(5.6, 4.6), dpi=300)
+
+        best_condition_number = self._get_auto_design_best_condition_number(
+            pca_df
+        )
+
+        legend_handles, legend_labels = (
+            self._plot_auto_design_grouped_points_2d(
+                ax=ax,
+                plot_df=pca_df,
+                x_column='PC1',
+                y_column='PC2',
+                best_condition_number=best_condition_number,
+                annotate_points=(len(pca_df) <= 20)
+            )
+        )
+
+        pc1_label = 'PC1'
+        pc2_label = 'PC2'
+
+        if len(explained_variance) >= 2:
+            pc1_label = f"PC1 ({explained_variance[0] * 100:.1f}%)"
+            pc2_label = f"PC2 ({explained_variance[1] * 100:.1f}%)"
+
+        ax.set_xlabel(pc1_label)
+        ax.set_ylabel(pc2_label)
+
+        ax.set_title(
+            'PCA Projection of Auto Design Space',
+            fontsize=11,
+            fontweight='normal'
+        )
+
+        ax.grid(
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        if len(legend_handles) > 0:
+            ax.legend(
+                legend_handles,
+                legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 1.22),
+                ncol=min(len(legend_handles), 4),
+                frameon=False,
+                fontsize=8.0
+            )
+
+        fig.subplots_adjust(
+            left=0.15,
+            right=0.96,
+            bottom=0.14,
+            top=0.78
+        )
+
+        return self._save_auto_design_plot(fig, plot_filename)
+
+    def _plot_initial_training_designs_after_run(self):
+        '''
+        Generates dimension-aware Auto design-space plots after an Auto run.
+
+        This method is strictly report/plot-only. It reads a deep copy of
+        self.auto_model_performance_rows and never modifies the Auto loop data,
+        recipe data, QC data, model-training data, or experiment_data.
+
+        Automatic plot behavior:
+            0 variables:
+                no plot; warning only
+
+            1 variable:
+                initial_training_design_1d.png
+
+            2 variables:
+                initial_training_design_2d.png
+
+            3 variables:
+                initial_training_design_pairwise.png
+                initial_training_design_3d.png
+
+            4-6 variables:
+                initial_training_design_pairwise.png
+                initial_training_design_parallel_coordinates.png
+
+            7+ variables:
+                initial_training_design_pairwise_compact.png
+                initial_training_design_parallel_coordinates.png
+                initial_training_design_pca.png
+
+        returns:
+            list:
+                Successfully generated plot paths.
+        '''
+        generated_plot_paths = []
+
+        plot_df, design_columns = self._get_auto_design_plot_dataframe()
+
+        if plot_df.empty:
+            print(
+                "<<controller warning>> skipping Auto design-space plots "
+                "because no condition-level rows were available"
+            )
+            return generated_plot_paths
+
+        n_design_dimensions = len(design_columns)
+
+        if n_design_dimensions == 0:
+            print(
+                "<<controller warning>> skipping Auto design-space plots "
+                "because no variable reagent concentration columns were "
+                "detected"
+            )
+            return generated_plot_paths
+
+        def _try_design_plot(plot_function, plot_description):
+            try:
+                plot_path = plot_function()
+
+                if plot_path is not None:
+                    generated_plot_paths.append(plot_path)
+
+            except Exception as exc:
+                print(
+                    f"<<controller warning>> failed to generate "
+                    f"{plot_description}; continuing Auto mode. "
+                    f"Error: {exc}"
+                )
+
+        if n_design_dimensions == 1:
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_1d(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_1d.png'
+                ),
+                '1D initial training design plot'
+            )
+
+        elif n_design_dimensions == 2:
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_2d(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_2d.png'
+                ),
+                '2D initial training design plot'
+            )
+
+        elif n_design_dimensions == 3:
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_pairwise(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_pairwise.png',
+                    compact=False
+                ),
+                'pairwise initial training design plot'
+            )
+
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_3d(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_3d.png'
+                ),
+                '3D initial training design plot'
+            )
+
+        elif n_design_dimensions <= 6:
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_pairwise(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_pairwise.png',
+                    compact=False
+                ),
+                'pairwise initial training design plot'
+            )
+
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_parallel_coordinates(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename=(
+                        'initial_training_design_parallel_coordinates.png'
+                    )
+                ),
+                'parallel-coordinate initial training design plot'
+            )
+
+        else:
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_pairwise(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_pairwise_compact.png',
+                    compact=True
+                ),
+                'compact pairwise initial training design plot'
+            )
+
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_parallel_coordinates(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename=(
+                        'initial_training_design_parallel_coordinates.png'
+                    )
+                ),
+                'parallel-coordinate initial training design plot'
+            )
+
+            _try_design_plot(
+                lambda: self._plot_initial_training_design_pca(
+                    plot_df=plot_df,
+                    design_columns=design_columns,
+                    plot_filename='initial_training_design_pca.png'
+                ),
+                'PCA initial training design plot'
+            )
+
+        if len(generated_plot_paths) == 0:
+            print(
+                "<<controller warning>> Auto design-space plotting completed "
+                "without generating any plot files"
+            )
+        else:
+            print(
+                "<<controller>> generated Auto design-space plots: "
+                + ", ".join(generated_plot_paths)
+            )
+
+        return generated_plot_paths
+    
     def _write_auto_run_report(self):
         '''
         Writes a human-readable Markdown report for the completed Auto mode run.
@@ -4251,18 +5865,6 @@ class AutoContr(Controller):
                 f'data and excluding only clearer isolated outliers.'
             )
 
-        def _markdown_safe(value):
-            value_text = str(value)
-            value_text = value_text.replace('|', '\\|')
-            value_text = value_text.replace('\n', ' ')
-            return value_text
-
-        def _condition_table_value(row, column, suffix=''):
-            value = self._safe_auto_report_get(row, column)
-            return _markdown_safe(
-                self._format_auto_report_value(value, suffix=suffix)
-            )
-
         condition_table_lines = []
 
         if performance_df.empty:
@@ -4270,63 +5872,123 @@ class AutoContr(Controller):
                 'No condition-level rows were available for tabulation.'
             )
         else:
-            condition_table_lines.append(
-                '| Condition | Batch | Type | Predicted λmax | GP SD | '
-                'Raw λmax values | QC-used λmax values | Mean λmax | '
-                'Target error | QC status |'
-            )
-            condition_table_lines.append(
-                '|---:|---:|---|---:|---:|---|---|---:|---:|---|'
-            )
+            condition_table_headers = [
+                'Condition',
+                'Batch',
+                'Type',
+                'Predicted λmax',
+                'GP SD',
+                'Raw λmax values',
+                'QC-used λmax values',
+                'Mean λmax',
+                'Target error',
+                'QC status'
+            ]
+
+            condition_table_alignments = [
+                'right',
+                'right',
+                'left',
+                'right',
+                'right',
+                'left',
+                'left',
+                'right',
+                'right',
+                'left'
+            ]
+
+            condition_table_rows = []
 
             for _, row in performance_df.sort_values(
                 'reaction_number'
             ).iterrows():
-                condition_table_lines.append(
-                    '| '
-                    + _condition_table_value(row, 'reaction_number')
-                    + ' | '
-                    + _condition_table_value(row, 'batch_number')
-                    + ' | '
-                    + _condition_table_value(row, 'condition_type')
-                    + ' | '
-                    + _condition_table_value(
-                        row,
-                        'predicted_lambda_mean_nm',
-                        'nm'
-                    )
-                    + ' | '
-                    + _condition_table_value(
-                        row,
-                        'predicted_lambda_std_nm',
-                        'nm'
-                    )
-                    + ' | '
-                    + _markdown_safe(
-                        self._safe_auto_report_get(
-                            row,
-                            'actual_lambda_values_raw_nm'
+                condition_table_rows.append(
+                    [
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'reaction_number',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'batch_number',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'condition_type',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'predicted_lambda_mean_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'predicted_lambda_std_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_replicate_list_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'actual_lambda_values_raw_nm',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_replicate_list_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'actual_lambda_values_nm',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'actual_lambda_mean_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'target_error_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'replicate_qc_status',
+                                None
+                            )
                         )
-                    )
-                    + ' | '
-                    + _markdown_safe(
-                        self._safe_auto_report_get(
-                            row,
-                            'actual_lambda_values_nm'
-                        )
-                    )
-                    + ' | '
-                    + _condition_table_value(
-                        row,
-                        'actual_lambda_mean_nm',
-                        'nm'
-                    )
-                    + ' | '
-                    + _condition_table_value(row, 'target_error_nm', 'nm')
-                    + ' | '
-                    + _condition_table_value(row, 'replicate_qc_status')
-                    + ' |'
+                    ]
                 )
+
+            condition_table_lines.extend(
+                self._build_padded_auto_report_markdown_table(
+                    headers=condition_table_headers,
+                    rows=condition_table_rows,
+                    alignments=condition_table_alignments
+                )
+            )
 
         lines = []
 
