@@ -3673,6 +3673,656 @@ class AutoContr(Controller):
 
         return export_path
     
+    def _write_auto_run_report(self):
+        '''
+        Writes a human-readable Markdown report for the completed Auto mode run.
+
+        The report is generated from the condition-level Auto performance rows
+        and is intended to be notebook-ready. It summarizes Auto settings, best
+        observed condition, replicate QC behavior, model prediction performance,
+        volume feasibility, generated files, and run-level notes.
+
+        This method is report-only. It does not change optimizer behavior, model
+        training, recipe generation, plotting, robot actions, or raw data export.
+
+        params:
+            None
+
+        returns:
+            str:
+                Path to the exported Auto run report Markdown file.
+        '''
+        report_dir = os.path.join(self.out_path, 'pr_data')
+        os.makedirs(report_dir, exist_ok=True)
+
+        report_path = os.path.join(report_dir, 'auto_run_report.md')
+
+        def _safe_get(obj, key, default='not recorded'):
+            try:
+                value = obj.get(key, default)
+            except Exception:
+                value = default
+
+            if value is None:
+                return default
+
+            try:
+                if pd.isna(value):
+                    return default
+            except Exception:
+                pass
+
+            return value
+
+        def _safe_numeric(series_or_value):
+            try:
+                return pd.to_numeric(series_or_value, errors='coerce')
+            except Exception:
+                return series_or_value
+
+        def _format_value(value, suffix=''):
+            if value is None:
+                return 'not recorded'
+
+            try:
+                if pd.isna(value):
+                    return 'not recorded'
+            except Exception:
+                pass
+
+            if isinstance(value, float):
+                value_text = f'{value:.3f}'.rstrip('0').rstrip('.')
+            else:
+                value_text = str(value)
+
+            if suffix and value_text != 'not recorded':
+                return f'{value_text} {suffix}'
+
+            return value_text
+
+        def _count_status(df, column, status):
+            if df.empty or column not in df.columns:
+                return 0
+
+            try:
+                return int((df[column] == status).sum())
+            except Exception:
+                return 0
+
+        def _file_line(relative_path, label):
+            full_path = os.path.join(self.out_path, relative_path)
+            exists_text = 'present' if os.path.exists(full_path) else 'not found'
+            return f'- {label}: `{relative_path}` ({exists_text})'
+
+        n_conditions = len(getattr(self, 'auto_model_performance_rows', []))
+
+        try:
+            performance_df = pd.DataFrame(self.auto_model_performance_rows)
+        except Exception:
+            performance_df = pd.DataFrame()
+
+        robo_params = getattr(self, 'robo_params', {})
+
+        experiment_name = getattr(self, 'experiment_name', None)
+        target_lambda_max_nm = robo_params.get('target_lambda_max_nm', None)
+        initial_data = robo_params.get('initial_data', None)
+        max_iterations = robo_params.get('max_iterations', None)
+        num_duplicates = robo_params.get('num_duplicates', None)
+        allow_true_zero = robo_params.get('allow_true_zero', None)
+        replicate_outlier_threshold_nm = robo_params.get(
+            'replicate_outlier_threshold_nm',
+            50.0
+        )
+
+        seed_conditions = _count_status(
+            performance_df,
+            'condition_type',
+            'seed'
+        )
+        optimizer_conditions = _count_status(
+            performance_df,
+            'condition_type',
+            'optimizer_selected'
+        )
+
+        best_condition_row = None
+
+        if (
+            not performance_df.empty
+            and 'target_error_nm' in performance_df.columns
+        ):
+            try:
+                target_error_series = _safe_numeric(
+                    performance_df['target_error_nm']
+                )
+                valid_target_errors = target_error_series.dropna()
+
+                if len(valid_target_errors) > 0:
+                    best_index = valid_target_errors.idxmin()
+                    best_condition_row = performance_df.loc[best_index]
+            except Exception:
+                best_condition_row = None
+
+        qc_passed = _count_status(
+            performance_df,
+            'replicate_qc_status',
+            'passed'
+        )
+        qc_not_applied = _count_status(
+            performance_df,
+            'replicate_qc_status',
+            'not_applied'
+        )
+        qc_excluded = _count_status(
+            performance_df,
+            'replicate_qc_status',
+            'excluded_replicate'
+        )
+        qc_flagged = _count_status(
+            performance_df,
+            'replicate_qc_status',
+            'flagged_not_excluded'
+        )
+
+        model_used_all = _count_status(
+            performance_df,
+            'model_training_status',
+            'used_all_valid_replicates'
+        )
+        model_used_qc_only = _count_status(
+            performance_df,
+            'model_training_status',
+            'used_qc_included_only'
+        )
+        model_used_flagged = _count_status(
+            performance_df,
+            'model_training_status',
+            'used_flagged_condition'
+        )
+
+        volume_infeasible_count = 0
+        water_not_executable_count = 0
+
+        if not performance_df.empty:
+            if 'volume_feasible' in performance_df.columns:
+                try:
+                    volume_infeasible_count = int(
+                        (performance_df['volume_feasible'] == False).sum()
+                    )
+                except Exception:
+                    volume_infeasible_count = 0
+
+            if 'water_transfer_executable' in performance_df.columns:
+                try:
+                    water_not_executable_count = int(
+                        (
+                            performance_df['water_transfer_executable']
+                            == False
+                        ).sum()
+                    )
+                except Exception:
+                    water_not_executable_count = 0
+
+        prediction_error_mean = None
+        prediction_error_median = None
+        prediction_rows = 0
+
+        if (
+            not performance_df.empty
+            and 'prediction_error_nm' in performance_df.columns
+        ):
+            try:
+                prediction_errors = _safe_numeric(
+                    performance_df['prediction_error_nm']
+                ).dropna()
+
+                prediction_rows = int(len(prediction_errors))
+
+                if prediction_rows > 0:
+                    prediction_error_mean = float(prediction_errors.mean())
+                    prediction_error_median = float(prediction_errors.median())
+            except Exception:
+                prediction_error_mean = None
+                prediction_error_median = None
+                prediction_rows = 0
+
+        target_error_mean = None
+        target_error_median = None
+
+        if (
+            not performance_df.empty
+            and 'target_error_nm' in performance_df.columns
+        ):
+            try:
+                target_errors = _safe_numeric(
+                    performance_df['target_error_nm']
+                ).dropna()
+
+                if len(target_errors) > 0:
+                    target_error_mean = float(target_errors.mean())
+                    target_error_median = float(target_errors.median())
+            except Exception:
+                target_error_mean = None
+                target_error_median = None
+
+        lines = []
+
+        lines.append('# Auto Mode Run Report')
+        lines.append('')
+        lines.append('## Experiment Overview')
+        lines.append('')
+        lines.append(f'- Experiment name: `{experiment_name}`')
+        lines.append(f'- Experiment output path: `{self.out_path}`')
+        lines.append(f'- Total condition-level rows: {n_conditions}')
+        lines.append(f'- Seed conditions: {seed_conditions}')
+        lines.append(
+            f'- Optimizer-selected conditions: {optimizer_conditions}'
+        )
+        lines.append('')
+        lines.append('## Auto Settings')
+        lines.append('')
+        lines.append(
+            f'- Target λmax: '
+            f'{_format_value(target_lambda_max_nm, "nm")}'
+        )
+        lines.append(
+            f'- Initial seed conditions requested: '
+            f'{_format_value(initial_data)}'
+        )
+        lines.append(
+            f'- Maximum optimizer iterations requested: '
+            f'{_format_value(max_iterations)}'
+        )
+        lines.append(
+            f'- Replicates / duplicates per condition: '
+            f'{_format_value(num_duplicates)}'
+        )
+        lines.append(
+            f'- True-zero mixed masks allowed: '
+            f'{_format_value(allow_true_zero)}'
+        )
+        lines.append(
+            f'- Replicate outlier threshold: '
+            f'{_format_value(replicate_outlier_threshold_nm, "nm")}'
+        )
+        lines.append('')
+        lines.append('## Optimization Objective')
+        lines.append('')
+        lines.append(
+            'Auto mode selected recipes using the current GP-guided target '
+            'optimizer. The current objective is to propose reaction conditions '
+            'whose predicted λmax is close to the requested target wavelength, '
+            'while preserving volume feasibility and true-zero reagent behavior '
+            'where enabled.'
+        )
+        lines.append('')
+        lines.append(
+            'Current model uncertainty is logged and plotted where available, '
+            'but the optimizer should still be described as GP-guided target '
+            'optimization rather than fully uncertainty-aware acquisition.'
+        )
+        lines.append('')
+        lines.append('## Best Condition Found')
+        lines.append('')
+
+        if best_condition_row is None:
+            lines.append(
+                'No best condition could be identified because no valid '
+                '`target_error_nm` values were available in the condition-level '
+                'performance rows.'
+            )
+            lines.append('')
+        else:
+            reaction_number = _safe_get(best_condition_row, 'reaction_number')
+            batch_number = _safe_get(best_condition_row, 'batch_number')
+            condition_type = _safe_get(best_condition_row, 'condition_type')
+            actual_lambda_mean_nm = _safe_get(
+                best_condition_row,
+                'actual_lambda_mean_nm'
+            )
+            actual_lambda_sem_nm = _safe_get(
+                best_condition_row,
+                'actual_lambda_sem_nm'
+            )
+            target_error_nm = _safe_get(
+                best_condition_row,
+                'target_error_nm'
+            )
+            actual_lambda_values_nm = _safe_get(
+                best_condition_row,
+                'actual_lambda_values_nm'
+            )
+            actual_lambda_values_raw_nm = _safe_get(
+                best_condition_row,
+                'actual_lambda_values_raw_nm'
+            )
+            replicate_qc_status = _safe_get(
+                best_condition_row,
+                'replicate_qc_status'
+            )
+            replicate_qc_reason = _safe_get(
+                best_condition_row,
+                'replicate_qc_reason'
+            )
+            model_training_status = _safe_get(
+                best_condition_row,
+                'model_training_status'
+            )
+            predicted_lambda_mean_nm = _safe_get(
+                best_condition_row,
+                'predicted_lambda_mean_nm'
+            )
+            predicted_lambda_std_nm = _safe_get(
+                best_condition_row,
+                'predicted_lambda_std_nm'
+            )
+            prediction_error_nm = _safe_get(
+                best_condition_row,
+                'prediction_error_nm'
+            )
+
+            lines.append(
+                'The best observed condition is defined as the condition with '
+                'the smallest absolute QC-cleaned target error recorded in '
+                '`auto_model_performance_log.csv`.'
+            )
+            lines.append('')
+            lines.append(f'- Reaction condition number: {reaction_number}')
+            lines.append(f'- Batch number: {batch_number}')
+            lines.append(f'- Condition type: {condition_type}')
+            lines.append(
+                f'- Target λmax: '
+                f'{_format_value(target_lambda_max_nm, "nm")}'
+            )
+            lines.append(
+                f'- Observed QC-cleaned mean λmax: '
+                f'{_format_value(actual_lambda_mean_nm, "nm")}'
+            )
+            lines.append(
+                f'- Observed QC-cleaned SEM: '
+                f'{_format_value(actual_lambda_sem_nm, "nm")}'
+            )
+            lines.append(
+                f'- Target error: {_format_value(target_error_nm, "nm")}'
+            )
+            lines.append(
+                f'- Raw replicate λmax values: {actual_lambda_values_raw_nm}'
+            )
+            lines.append(
+                f'- QC-included replicate λmax values: '
+                f'{actual_lambda_values_nm}'
+            )
+            lines.append(f'- Replicate QC status: {replicate_qc_status}')
+            lines.append(f'- Replicate QC reason: {replicate_qc_reason}')
+            lines.append(
+                f'- Model-training status: {model_training_status}'
+            )
+            lines.append(
+                f'- Pre-experiment predicted λmax: '
+                f'{_format_value(predicted_lambda_mean_nm, "nm")}'
+            )
+            lines.append(
+                f'- Pre-experiment GP predictive SD: '
+                f'{_format_value(predicted_lambda_std_nm, "nm")}'
+            )
+            lines.append(
+                f'- Prediction error: '
+                f'{_format_value(prediction_error_nm, "nm")}'
+            )
+            lines.append('')
+
+        lines.append('## Replicate QC Summary')
+        lines.append('')
+        lines.append(
+            'Replicate QC is conservative and data-preserving. Raw replicate '
+            'values are preserved in the performance log. Clear isolated '
+            'outliers may be excluded from QC-cleaned condition summaries and '
+            'model training, but ambiguous noisy conditions are flagged rather '
+            'than automatically removed.'
+        )
+        lines.append('')
+        lines.append(f'- QC passed conditions: {qc_passed}')
+        lines.append(f'- QC not applied conditions: {qc_not_applied}')
+        lines.append(f'- Conditions with excluded replicate(s): {qc_excluded}')
+        lines.append(
+            f'- Flagged but not excluded conditions: {qc_flagged}'
+        )
+        lines.append(f'- Model rows using all valid replicates: {model_used_all}')
+        lines.append(
+            f'- Model rows using QC-included replicates only: '
+            f'{model_used_qc_only}'
+        )
+        lines.append(
+            f'- Model rows using flagged conditions: {model_used_flagged}'
+        )
+        lines.append('')
+
+        if (
+            not performance_df.empty
+            and 'replicate_qc_status' in performance_df.columns
+        ):
+            qc_detail_df = performance_df[
+                performance_df['replicate_qc_status'].isin(
+                    ['excluded_replicate', 'flagged_not_excluded']
+                )
+            ]
+
+            if len(qc_detail_df) > 0:
+                lines.append('### QC Details')
+                lines.append('')
+
+                for _, row in qc_detail_df.iterrows():
+                    reaction_number = _safe_get(row, 'reaction_number')
+                    qc_status = _safe_get(row, 'replicate_qc_status')
+                    qc_reason = _safe_get(row, 'replicate_qc_reason')
+                    raw_values = _safe_get(
+                        row,
+                        'actual_lambda_values_raw_nm'
+                    )
+                    qc_values = _safe_get(
+                        row,
+                        'actual_lambda_values_nm'
+                    )
+                    excluded_values = _safe_get(
+                        row,
+                        'excluded_lambda_values_nm'
+                    )
+                    model_status = _safe_get(
+                        row,
+                        'model_training_status'
+                    )
+
+                    lines.append(f'- Condition {reaction_number}:')
+                    lines.append(f'  - QC status: {qc_status}')
+                    lines.append(f'  - Raw values: {raw_values}')
+                    lines.append(f'  - QC-included values: {qc_values}')
+                    lines.append(f'  - Excluded values: {excluded_values}')
+                    lines.append(f'  - QC reason: {qc_reason}')
+                    lines.append(f'  - Model-training status: {model_status}')
+
+                lines.append('')
+
+        lines.append('## Model Prediction Performance')
+        lines.append('')
+
+        if prediction_rows == 0:
+            lines.append(
+                'No pre-experiment prediction-error summary is available. '
+                'This is expected for seed-only runs or runs where prediction '
+                'columns were not populated before the model observed the '
+                'experimental outcome.'
+            )
+            lines.append('')
+        else:
+            lines.append(
+                'Prediction errors are calculated only where pre-experiment '
+                'model predictions were recorded before the experimental result '
+                'was added back into training.'
+            )
+            lines.append('')
+            lines.append(
+                f'- Conditions with prediction-error values: '
+                f'{prediction_rows}'
+            )
+            lines.append(
+                f'- Mean prediction error: '
+                f'{_format_value(prediction_error_mean, "nm")}'
+            )
+            lines.append(
+                f'- Median prediction error: '
+                f'{_format_value(prediction_error_median, "nm")}'
+            )
+            lines.append(
+                f'- Mean target error across conditions: '
+                f'{_format_value(target_error_mean, "nm")}'
+            )
+            lines.append(
+                f'- Median target error across conditions: '
+                f'{_format_value(target_error_median, "nm")}'
+            )
+            lines.append('')
+
+        lines.append('## Recipe and Volume Feasibility Summary')
+        lines.append('')
+        lines.append(
+            'Auto mode preserves raw recipe and volume information in the '
+            'condition-level performance log. Final controller-side feasibility '
+            'checks remain the authoritative guardrail for physical execution.'
+        )
+        lines.append('')
+        lines.append(f'- Volume-infeasible condition rows: {volume_infeasible_count}')
+        lines.append(
+            f'- Water-transfer-not-executable condition rows: '
+            f'{water_not_executable_count}'
+        )
+        lines.append('')
+
+        lines.append('## Generated Files')
+        lines.append('')
+        lines.append(
+            _file_line(
+                os.path.join('pr_data', 'experiment_data.csv'),
+                'Raw well-level experiment data'
+            )
+        )
+        lines.append(
+            _file_line(
+                os.path.join('pr_data', 'auto_model_performance_log.csv'),
+                'Condition-level Auto performance log'
+            )
+        )
+        lines.append(
+            _file_line(
+                os.path.join('pr_data', 'auto_run_report.md'),
+                'Human-readable Auto run report'
+            )
+        )
+        lines.append(
+            _file_line(
+                os.path.join('Plots', 'lambda_progress_final.png'),
+                'Final condition-level lambda progress plot'
+            )
+        )
+        lines.append(
+            _file_line(
+                os.path.join('Plots', 'lambda_replicates_final.png'),
+                'Final replicate-level lambda diagnostic plot'
+            )
+        )
+        lines.append(
+            _file_line(
+                os.path.join('Debug', 'terminal_output.txt'),
+                'Captured terminal output'
+            )
+        )
+        lines.append('')
+
+        lines.append('## Notes and Warnings')
+        lines.append('')
+
+        if volume_infeasible_count == 0 and water_not_executable_count == 0:
+            lines.append(
+                '- No volume feasibility or water-transfer execution problems '
+                'were detected in the condition-level performance rows.'
+            )
+        else:
+            lines.append(
+                '- One or more volume or water-transfer feasibility warnings '
+                'were detected. Review `auto_model_performance_log.csv` before '
+                'interpreting the run.'
+            )
+
+        if qc_excluded > 0:
+            lines.append(
+                '- At least one replicate was excluded by QC. Excluded values '
+                'are preserved in the raw/QC columns and visualized in the '
+                'replicate diagnostic plot.'
+            )
+
+        if qc_flagged > 0:
+            lines.append(
+                '- At least one condition was flagged but not excluded. These '
+                'conditions are intentionally retained for model training under '
+                'the current data-preserving policy.'
+            )
+
+        if prediction_rows == 0:
+            lines.append(
+                '- Prediction-performance metrics may be unavailable for seed '
+                'conditions or early-stop runs without optimizer-selected '
+                'conditions.'
+            )
+
+        lines.append('')
+        lines.append('## Conclusion')
+        lines.append('')
+
+        if best_condition_row is None:
+            lines.append(
+                'The Auto mode run report was generated, but no best condition '
+                'could be identified from target-error values. Review the raw '
+                'experiment data and condition-level performance log.'
+            )
+        else:
+            best_reaction_number = _safe_get(
+                best_condition_row,
+                'reaction_number'
+            )
+            best_lambda_mean = _safe_get(
+                best_condition_row,
+                'actual_lambda_mean_nm'
+            )
+            best_target_error = _safe_get(
+                best_condition_row,
+                'target_error_nm'
+            )
+
+            lines.append(
+                f'The closest observed condition to the requested target was '
+                f'condition {best_reaction_number}, with QC-cleaned mean λmax '
+                f'{_format_value(best_lambda_mean, "nm")} and target error '
+                f'{_format_value(best_target_error, "nm")}.'
+            )
+
+        lines.append('')
+        lines.append('---')
+        lines.append('')
+        lines.append(
+            'Report generated automatically by OT2Control Auto mode from '
+            '`auto_model_performance_log.csv`.'
+        )
+        lines.append('')
+
+        with open(report_path, 'w', encoding='utf-8') as report_file:
+            report_file.write('\n'.join(lines))
+
+        print(
+            f"<<controller>> exported Auto run report to "
+            f"{report_path}"
+        )
+
+        return report_path
+    
     def _update_auto_quit_from_condition_level_performance(
         self,
         model,
@@ -4446,7 +5096,7 @@ class AutoContr(Controller):
             plot_title,
             fontsize=11,
             fontweight='normal',
-            y=0.985
+            y=0.965
         )
 
         if y_axis_mode not in ['robust', 'full']:
@@ -5103,6 +5753,11 @@ class AutoContr(Controller):
             plot_filename='lambda_replicates_final.png',
             plot_title=rf'Final Auto Replicate $\lambda_{{\max}}$ Values'
         )
+
+        # Save the human-readable Auto run report after the core CSVs and final
+        # plots have been exported, so the generated-files section can detect
+        # them correctly.
+        self._write_auto_run_report()
 
         print("Success!!!")
         
