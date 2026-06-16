@@ -3673,14 +3673,184 @@ class AutoContr(Controller):
 
         return export_path
     
+    def _safe_auto_report_get(self, obj, key, default='not recorded'):
+        '''
+        Safely retrieves a value from a row-like object for Auto run reporting.
+
+        This helper prevents report generation from failing if a field is
+        missing, None, NaN, or unavailable in older output formats.
+
+        params:
+            obj:
+                Row-like object, usually a pandas Series.
+
+            str key:
+                Column/key to retrieve.
+
+            default:
+                Value to return when the field is absent or invalid.
+
+        returns:
+            object:
+                Retrieved value or default.
+        '''
+        try:
+            value = obj.get(key, default)
+        except Exception:
+            value = default
+
+        if value is None:
+            return default
+
+        try:
+            if pd.isna(value):
+                return default
+        except Exception:
+            pass
+
+        return value
+
+    def _safe_auto_report_numeric(self, series_or_value):
+        '''
+        Converts a report value or pandas Series to numeric where possible.
+
+        Invalid values are coerced to NaN. This is used for summary statistics
+        without risking report-generation failure.
+
+        params:
+            series_or_value:
+                Value or pandas Series to convert.
+
+        returns:
+            pandas Series or numeric-like object:
+                Numeric-converted value where possible.
+        '''
+        try:
+            return pd.to_numeric(series_or_value, errors='coerce')
+        except Exception:
+            return series_or_value
+
+    def _format_auto_report_value(self, value, suffix=''):
+        '''
+        Formats values for human-readable Auto run Markdown reports.
+
+        Floats are rounded to three decimal places and trailing zeros are
+        removed. Missing values are reported as "not recorded".
+
+        params:
+            value:
+                Value to format.
+
+            str suffix:
+                Optional unit suffix, such as "nm" or "uL".
+
+        returns:
+            str:
+                Formatted display value.
+        '''
+        if value is None:
+            return 'not recorded'
+
+        try:
+            if pd.isna(value):
+                return 'not recorded'
+        except Exception:
+            pass
+
+        if isinstance(value, float):
+            value_text = f'{value:.3f}'.rstrip('0').rstrip('.')
+        else:
+            value_text = str(value)
+
+        if suffix and value_text != 'not recorded':
+            return f'{value_text} {suffix}'
+
+        return value_text
+
+    def _count_auto_report_status(self, df, column, status):
+        '''
+        Counts condition-level rows matching a categorical status.
+
+        params:
+            pandas.DataFrame df:
+                Auto model performance dataframe.
+
+            str column:
+                Column containing the categorical status.
+
+            str status:
+                Status value to count.
+
+        returns:
+            int:
+                Number of matching rows.
+        '''
+        if df.empty or column not in df.columns:
+            return 0
+
+        try:
+            return int((df[column] == status).sum())
+        except Exception:
+            return 0
+
+    def _format_auto_report_condition_list(self, condition_numbers):
+        '''
+        Formats reaction condition numbers for compact Markdown text.
+
+        params:
+            list condition_numbers:
+                Reaction condition numbers.
+
+        returns:
+            str:
+                Compact condition list.
+        '''
+        if len(condition_numbers) == 0:
+            return 'none'
+
+        unique_condition_numbers = sorted(set(condition_numbers))
+
+        if len(unique_condition_numbers) <= 8:
+            return ', '.join([str(x) for x in unique_condition_numbers])
+
+        first_values = ', '.join(
+            [str(x) for x in unique_condition_numbers[:6]]
+        )
+
+        return (
+            f'{len(unique_condition_numbers)} conditions '
+            f'({first_values}, ...)'
+        )
+
+    def _auto_report_file_line(self, relative_path, label):
+        '''
+        Creates a Markdown bullet describing whether an expected output file is
+        present.
+
+        params:
+            str relative_path:
+                Path relative to self.out_path.
+
+            str label:
+                Human-readable file label.
+
+        returns:
+            str:
+                Markdown bullet line.
+        '''
+        full_path = os.path.join(self.out_path, relative_path)
+        exists_text = 'present' if os.path.exists(full_path) else 'not found'
+        return f'- {label}: `{relative_path}` ({exists_text})'
+    
     def _write_auto_run_report(self):
         '''
         Writes a human-readable Markdown report for the completed Auto mode run.
 
-        The report is generated from the condition-level Auto performance rows
-        and is intended to be notebook-ready. It summarizes Auto settings, best
-        observed condition, replicate QC behavior, model prediction performance,
-        volume feasibility, generated files, and run-level notes.
+        This v2 report is intended to function as an automated scientific
+        notebook write-up. It summarizes the run, identifies the best condition,
+        reports replicate QC behavior, interprets model prediction performance,
+        summarizes recipe/volume feasibility, includes a compact condition
+        table, and embeds references to final plots.
 
         This method is report-only. It does not change optimizer behavior, model
         training, recipe generation, plotting, robot actions, or raw data export.
@@ -3697,63 +3867,6 @@ class AutoContr(Controller):
 
         report_path = os.path.join(report_dir, 'auto_run_report.md')
 
-        def _safe_get(obj, key, default='not recorded'):
-            try:
-                value = obj.get(key, default)
-            except Exception:
-                value = default
-
-            if value is None:
-                return default
-
-            try:
-                if pd.isna(value):
-                    return default
-            except Exception:
-                pass
-
-            return value
-
-        def _safe_numeric(series_or_value):
-            try:
-                return pd.to_numeric(series_or_value, errors='coerce')
-            except Exception:
-                return series_or_value
-
-        def _format_value(value, suffix=''):
-            if value is None:
-                return 'not recorded'
-
-            try:
-                if pd.isna(value):
-                    return 'not recorded'
-            except Exception:
-                pass
-
-            if isinstance(value, float):
-                value_text = f'{value:.3f}'.rstrip('0').rstrip('.')
-            else:
-                value_text = str(value)
-
-            if suffix and value_text != 'not recorded':
-                return f'{value_text} {suffix}'
-
-            return value_text
-
-        def _count_status(df, column, status):
-            if df.empty or column not in df.columns:
-                return 0
-
-            try:
-                return int((df[column] == status).sum())
-            except Exception:
-                return 0
-
-        def _file_line(relative_path, label):
-            full_path = os.path.join(self.out_path, relative_path)
-            exists_text = 'present' if os.path.exists(full_path) else 'not found'
-            return f'- {label}: `{relative_path}` ({exists_text})'
-
         n_conditions = len(getattr(self, 'auto_model_performance_rows', []))
 
         try:
@@ -3768,10 +3881,12 @@ class AutoContr(Controller):
             'rxn_sheet_name',
             getattr(self, 'experiment_name', None)
         )
+
         target_lambda_max_nm = robo_params.get(
             'target',
             robo_params.get('target_lambda_max_nm', None)
         )
+
         initial_data = robo_params.get('initial_data', None)
         max_iterations = robo_params.get('max_iterations', None)
         num_duplicates = robo_params.get('num_duplicates', None)
@@ -3781,15 +3896,58 @@ class AutoContr(Controller):
             50.0
         )
 
-        seed_conditions = _count_status(
+        seed_conditions = self._count_auto_report_status(
             performance_df,
             'condition_type',
             'seed'
         )
-        optimizer_conditions = _count_status(
+
+        optimizer_conditions = self._count_auto_report_status(
             performance_df,
             'condition_type',
             'optimizer_selected'
+        )
+
+        qc_passed = self._count_auto_report_status(
+            performance_df,
+            'replicate_qc_status',
+            'passed'
+        )
+
+        qc_not_applied = self._count_auto_report_status(
+            performance_df,
+            'replicate_qc_status',
+            'not_applied'
+        )
+
+        qc_excluded = self._count_auto_report_status(
+            performance_df,
+            'replicate_qc_status',
+            'excluded_replicate'
+        )
+
+        qc_flagged = self._count_auto_report_status(
+            performance_df,
+            'replicate_qc_status',
+            'flagged_not_excluded'
+        )
+
+        conditions_used_all = self._count_auto_report_status(
+            performance_df,
+            'model_training_status',
+            'used_all_valid_replicates'
+        )
+
+        conditions_used_qc_only = self._count_auto_report_status(
+            performance_df,
+            'model_training_status',
+            'used_qc_included_only'
+        )
+
+        conditions_used_flagged = self._count_auto_report_status(
+            performance_df,
+            'model_training_status',
+            'used_flagged_condition'
         )
 
         best_condition_row = None
@@ -3799,7 +3957,7 @@ class AutoContr(Controller):
             and 'target_error_nm' in performance_df.columns
         ):
             try:
-                target_error_series = _safe_numeric(
+                target_error_series = self._safe_auto_report_numeric(
                     performance_df['target_error_nm']
                 )
                 valid_target_errors = target_error_series.dropna()
@@ -3810,42 +3968,82 @@ class AutoContr(Controller):
             except Exception:
                 best_condition_row = None
 
-        qc_passed = _count_status(
-            performance_df,
-            'replicate_qc_status',
-            'passed'
-        )
-        qc_not_applied = _count_status(
-            performance_df,
-            'replicate_qc_status',
-            'not_applied'
-        )
-        qc_excluded = _count_status(
-            performance_df,
-            'replicate_qc_status',
-            'excluded_replicate'
-        )
-        qc_flagged = _count_status(
-            performance_df,
-            'replicate_qc_status',
-            'flagged_not_excluded'
+        prediction_rows = 0
+        prediction_error_mean = None
+        prediction_error_median = None
+        prediction_abs_error_mean = None
+        prediction_abs_error_median = None
+        prediction_bias_text = (
+            'Prediction-bias interpretation was unavailable because no '
+            'pre-experiment prediction errors were recorded.'
         )
 
-        model_used_all = _count_status(
-            performance_df,
-            'model_training_status',
-            'used_all_valid_replicates'
-        )
-        model_used_qc_only = _count_status(
-            performance_df,
-            'model_training_status',
-            'used_qc_included_only'
-        )
-        model_used_flagged = _count_status(
-            performance_df,
-            'model_training_status',
-            'used_flagged_condition'
-        )
+        if (
+            not performance_df.empty
+            and 'prediction_error_nm' in performance_df.columns
+        ):
+            try:
+                prediction_errors = self._safe_auto_report_numeric(
+                    performance_df['prediction_error_nm']
+                ).dropna()
+
+                prediction_rows = int(len(prediction_errors))
+
+                if prediction_rows > 0:
+                    prediction_error_mean = float(prediction_errors.mean())
+                    prediction_error_median = float(prediction_errors.median())
+                    prediction_abs_error_mean = float(
+                        prediction_errors.abs().mean()
+                    )
+                    prediction_abs_error_median = float(
+                        prediction_errors.abs().median()
+                    )
+
+                    if prediction_error_mean > 0:
+                        prediction_bias_text = (
+                            'On average, observed λmax values were higher than '
+                            'the pre-experiment GP predictions, indicating '
+                            'model underprediction during the optimizer-selected '
+                            'portion of this run.'
+                        )
+                    elif prediction_error_mean < 0:
+                        prediction_bias_text = (
+                            'On average, observed λmax values were lower than '
+                            'the pre-experiment GP predictions, indicating '
+                            'model overprediction during the optimizer-selected '
+                            'portion of this run.'
+                        )
+                    else:
+                        prediction_bias_text = (
+                            'The mean signed prediction error was approximately '
+                            'zero, suggesting no directional prediction bias in '
+                            'the recorded optimizer-selected conditions.'
+                        )
+            except Exception:
+                prediction_rows = 0
+                prediction_error_mean = None
+                prediction_error_median = None
+                prediction_abs_error_mean = None
+                prediction_abs_error_median = None
+
+        target_error_mean = None
+        target_error_median = None
+
+        if (
+            not performance_df.empty
+            and 'target_error_nm' in performance_df.columns
+        ):
+            try:
+                target_errors = self._safe_auto_report_numeric(
+                    performance_df['target_error_nm']
+                ).dropna()
+
+                if len(target_errors) > 0:
+                    target_error_mean = float(target_errors.mean())
+                    target_error_median = float(target_errors.median())
+            except Exception:
+                target_error_mean = None
+                target_error_median = None
 
         volume_infeasible_count = 0
         water_not_executable_count = 0
@@ -3870,51 +4068,273 @@ class AutoContr(Controller):
                 except Exception:
                     water_not_executable_count = 0
 
-        prediction_error_mean = None
-        prediction_error_median = None
-        prediction_rows = 0
+        water_min = None
+        water_max = None
+        variable_volume_min = None
+        variable_volume_max = None
+        total_volume_min = None
+        total_volume_max = None
 
-        if (
-            not performance_df.empty
-            and 'prediction_error_nm' in performance_df.columns
-        ):
+        if not performance_df.empty:
+            if 'water_volume_uL' in performance_df.columns:
+                try:
+                    water_values = self._safe_auto_report_numeric(
+                        performance_df['water_volume_uL']
+                    ).dropna()
+
+                    if len(water_values) > 0:
+                        water_min = float(water_values.min())
+                        water_max = float(water_values.max())
+                except Exception:
+                    water_min = None
+                    water_max = None
+
+            if 'variable_volume_total_uL' in performance_df.columns:
+                try:
+                    variable_values = self._safe_auto_report_numeric(
+                        performance_df['variable_volume_total_uL']
+                    ).dropna()
+
+                    if len(variable_values) > 0:
+                        variable_volume_min = float(variable_values.min())
+                        variable_volume_max = float(variable_values.max())
+                except Exception:
+                    variable_volume_min = None
+                    variable_volume_max = None
+
+            if 'total_volume_uL' in performance_df.columns:
+                try:
+                    total_values = self._safe_auto_report_numeric(
+                        performance_df['total_volume_uL']
+                    ).dropna()
+
+                    if len(total_values) > 0:
+                        total_volume_min = float(total_values.min())
+                        total_volume_max = float(total_values.max())
+                except Exception:
+                    total_volume_min = None
+                    total_volume_max = None
+
+        best_reaction_number = 'not recorded'
+        best_batch_number = 'not recorded'
+        best_condition_type = 'not recorded'
+        best_lambda_mean = None
+        best_target_error = None
+        best_qc_status = 'not recorded'
+
+        if best_condition_row is not None:
+            best_reaction_number = self._safe_auto_report_get(
+                best_condition_row,
+                'reaction_number'
+            )
+            best_batch_number = self._safe_auto_report_get(
+                best_condition_row,
+                'batch_number'
+            )
+            best_condition_type = self._safe_auto_report_get(
+                best_condition_row,
+                'condition_type'
+            )
+            best_lambda_mean = self._safe_auto_report_get(
+                best_condition_row,
+                'actual_lambda_mean_nm',
+                None
+            )
+            best_target_error = self._safe_auto_report_get(
+                best_condition_row,
+                'target_error_nm',
+                None
+            )
+            best_qc_status = self._safe_auto_report_get(
+                best_condition_row,
+                'replicate_qc_status'
+            )
+
+        if best_condition_row is None:
+            executive_summary = (
+                f'Auto mode completed {n_conditions} condition-level rows, but '
+                'no best condition could be identified because no valid '
+                '`target_error_nm` values were available.'
+            )
+        else:
+            executive_summary = (
+                f'Auto mode completed {n_conditions} unique reaction '
+                f'conditions, including {seed_conditions} seed condition(s) '
+                f'and {optimizer_conditions} optimizer-selected condition(s). '
+                f'The target λmax was '
+                f'{self._format_auto_report_value(target_lambda_max_nm, "nm")}. '
+                f'The closest observed QC-cleaned condition was condition '
+                f'{best_reaction_number}, with mean λmax '
+                f'{self._format_auto_report_value(best_lambda_mean, "nm")} '
+                f'and target error '
+                f'{self._format_auto_report_value(best_target_error, "nm")}. '
+                f'Replicate QC excluded clear outlier replicate(s) in '
+                f'{qc_excluded} condition(s) and flagged {qc_flagged} '
+                f'ambiguous condition(s) without automatic exclusion. '
+                f'Volume-infeasible condition rows: '
+                f'{volume_infeasible_count}; water-transfer-not-executable '
+                f'condition rows: {water_not_executable_count}.'
+            )
+
+        if best_condition_row is None:
+            best_interpretation = (
+                'No best-condition interpretation is available because no '
+                'valid target-error values were recorded.'
+            )
+        elif best_condition_type == 'optimizer_selected':
+            best_interpretation = (
+                'The best observed condition was optimizer-selected rather '
+                'than part of the initial seed design, suggesting that the '
+                'GP-guided target optimizer identified a condition at least as '
+                'close to the target as the initial design during this run.'
+            )
+        elif best_condition_type == 'seed':
+            best_interpretation = (
+                'The best observed condition came from the initial seed design. '
+                'In this run, later optimizer-selected conditions did not '
+                'surpass the best seed condition with respect to absolute '
+                'target error.'
+            )
+        else:
+            best_interpretation = (
+                'The best observed condition was identified, but its condition '
+                'type was not recorded clearly enough for interpretation.'
+            )
+
+        if best_target_error is not None:
             try:
-                prediction_errors = _safe_numeric(
-                    performance_df['prediction_error_nm']
-                ).dropna()
-
-                prediction_rows = int(len(prediction_errors))
-
-                if prediction_rows > 0:
-                    prediction_error_mean = float(prediction_errors.mean())
-                    prediction_error_median = float(prediction_errors.median())
+                if float(best_target_error) <= 10.0:
+                    best_interpretation += (
+                        ' The best condition was within 10 nm of the target, '
+                        'which is a strong target hit for this reporting layer.'
+                    )
+                elif float(best_target_error) <= 25.0:
+                    best_interpretation += (
+                        ' The best condition was within 25 nm of the target, '
+                        'indicating close approach to the requested wavelength.'
+                    )
+                else:
+                    best_interpretation += (
+                        ' The best condition approached the requested target '
+                        'but did not reach a close-target threshold in this run.'
+                    )
             except Exception:
-                prediction_error_mean = None
-                prediction_error_median = None
-                prediction_rows = 0
+                pass
 
-        target_error_mean = None
-        target_error_median = None
+        if qc_excluded == 0 and qc_flagged == 0:
+            qc_interpretation = (
+                'Replicate QC did not identify excluded or flagged conditions. '
+                'The replicate data appear internally consistent under the '
+                'current QC threshold.'
+            )
+        elif qc_excluded > 0 and qc_flagged == 0:
+            qc_interpretation = (
+                f'Replicate QC excluded clear isolated outlier replicate(s) in '
+                f'{qc_excluded} condition(s). No ambiguous flagged conditions '
+                f'were recorded. This suggests the QC system removed isolated '
+                f'outliers while otherwise preserving condition-level data.'
+            )
+        elif qc_excluded == 0 and qc_flagged > 0:
+            qc_interpretation = (
+                f'Replicate QC flagged {qc_flagged} condition(s) but did not '
+                f'exclude replicates. This indicates ambiguous replicate '
+                f'variability where no clear two-against-one outlier pattern '
+                f'was detected, so the data-preserving policy retained the '
+                f'condition(s) for model training.'
+            )
+        else:
+            qc_interpretation = (
+                f'Replicate QC excluded clear isolated outlier replicate(s) in '
+                f'{qc_excluded} condition(s) and flagged {qc_flagged} '
+                f'ambiguous condition(s) without exclusion. This indicates '
+                f'measurable replicate variability, while preserving ambiguous '
+                f'data and excluding only clearer isolated outliers.'
+            )
 
-        if (
-            not performance_df.empty
-            and 'target_error_nm' in performance_df.columns
-        ):
-            try:
-                target_errors = _safe_numeric(
-                    performance_df['target_error_nm']
-                ).dropna()
+        def _markdown_safe(value):
+            value_text = str(value)
+            value_text = value_text.replace('|', '\\|')
+            value_text = value_text.replace('\n', ' ')
+            return value_text
 
-                if len(target_errors) > 0:
-                    target_error_mean = float(target_errors.mean())
-                    target_error_median = float(target_errors.median())
-            except Exception:
-                target_error_mean = None
-                target_error_median = None
+        def _condition_table_value(row, column, suffix=''):
+            value = self._safe_auto_report_get(row, column)
+            return _markdown_safe(
+                self._format_auto_report_value(value, suffix=suffix)
+            )
+
+        condition_table_lines = []
+
+        if performance_df.empty:
+            condition_table_lines.append(
+                'No condition-level rows were available for tabulation.'
+            )
+        else:
+            condition_table_lines.append(
+                '| Condition | Batch | Type | Predicted λmax | GP SD | '
+                'Raw λmax values | QC-used λmax values | Mean λmax | '
+                'Target error | QC status |'
+            )
+            condition_table_lines.append(
+                '|---:|---:|---|---:|---:|---|---|---:|---:|---|'
+            )
+
+            for _, row in performance_df.sort_values(
+                'reaction_number'
+            ).iterrows():
+                condition_table_lines.append(
+                    '| '
+                    + _condition_table_value(row, 'reaction_number')
+                    + ' | '
+                    + _condition_table_value(row, 'batch_number')
+                    + ' | '
+                    + _condition_table_value(row, 'condition_type')
+                    + ' | '
+                    + _condition_table_value(
+                        row,
+                        'predicted_lambda_mean_nm',
+                        'nm'
+                    )
+                    + ' | '
+                    + _condition_table_value(
+                        row,
+                        'predicted_lambda_std_nm',
+                        'nm'
+                    )
+                    + ' | '
+                    + _markdown_safe(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_values_raw_nm'
+                        )
+                    )
+                    + ' | '
+                    + _markdown_safe(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_values_nm'
+                        )
+                    )
+                    + ' | '
+                    + _condition_table_value(
+                        row,
+                        'actual_lambda_mean_nm',
+                        'nm'
+                    )
+                    + ' | '
+                    + _condition_table_value(row, 'target_error_nm', 'nm')
+                    + ' | '
+                    + _condition_table_value(row, 'replicate_qc_status')
+                    + ' |'
+                )
 
         lines = []
 
         lines.append('# Auto Mode Run Report')
+        lines.append('')
+        lines.append('## Executive Scientific Summary')
+        lines.append('')
+        lines.append(executive_summary)
         lines.append('')
         lines.append('## Experiment Overview')
         lines.append('')
@@ -3930,27 +4350,27 @@ class AutoContr(Controller):
         lines.append('')
         lines.append(
             f'- Target λmax: '
-            f'{_format_value(target_lambda_max_nm, "nm")}'
+            f'{self._format_auto_report_value(target_lambda_max_nm, "nm")}'
         )
         lines.append(
             f'- Initial seed conditions requested: '
-            f'{_format_value(initial_data)}'
+            f'{self._format_auto_report_value(initial_data)}'
         )
         lines.append(
             f'- Maximum optimizer iterations requested: '
-            f'{_format_value(max_iterations)}'
+            f'{self._format_auto_report_value(max_iterations)}'
         )
         lines.append(
             f'- Replicates / duplicates per condition: '
-            f'{_format_value(num_duplicates)}'
+            f'{self._format_auto_report_value(num_duplicates)}'
         )
         lines.append(
             f'- True-zero mixed masks allowed: '
-            f'{_format_value(allow_true_zero)}'
+            f'{self._format_auto_report_value(allow_true_zero)}'
         )
         lines.append(
             f'- Replicate outlier threshold: '
-            f'{_format_value(replicate_outlier_threshold_nm, "nm")}'
+            f'{self._format_auto_report_value(replicate_outlier_threshold_nm, "nm")}'
         )
         lines.append('')
         lines.append('## Optimization Objective')
@@ -3980,104 +4400,40 @@ class AutoContr(Controller):
             )
             lines.append('')
         else:
-            reaction_number = _safe_get(best_condition_row, 'reaction_number')
-            batch_number = _safe_get(best_condition_row, 'batch_number')
-            condition_type = _safe_get(best_condition_row, 'condition_type')
-            actual_lambda_mean_nm = _safe_get(
-                best_condition_row,
-                'actual_lambda_mean_nm'
-            )
-            actual_lambda_sem_nm = _safe_get(
-                best_condition_row,
-                'actual_lambda_sem_nm'
-            )
-            target_error_nm = _safe_get(
-                best_condition_row,
-                'target_error_nm'
-            )
-            actual_lambda_values_nm = _safe_get(
-                best_condition_row,
-                'actual_lambda_values_nm'
-            )
-            actual_lambda_values_raw_nm = _safe_get(
-                best_condition_row,
-                'actual_lambda_values_raw_nm'
-            )
-            replicate_qc_status = _safe_get(
-                best_condition_row,
-                'replicate_qc_status'
-            )
-            replicate_qc_reason = _safe_get(
-                best_condition_row,
-                'replicate_qc_reason'
-            )
-            model_training_status = _safe_get(
-                best_condition_row,
-                'model_training_status'
-            )
-            predicted_lambda_mean_nm = _safe_get(
-                best_condition_row,
-                'predicted_lambda_mean_nm'
-            )
-            predicted_lambda_std_nm = _safe_get(
-                best_condition_row,
-                'predicted_lambda_std_nm'
-            )
-            prediction_error_nm = _safe_get(
-                best_condition_row,
-                'prediction_error_nm'
-            )
-
             lines.append(
                 'The best observed condition is defined as the condition with '
                 'the smallest absolute QC-cleaned target error recorded in '
                 '`auto_model_performance_log.csv`.'
             )
             lines.append('')
-            lines.append(f'- Reaction condition number: {reaction_number}')
-            lines.append(f'- Batch number: {batch_number}')
-            lines.append(f'- Condition type: {condition_type}')
+            lines.append(
+                f'- Reaction condition number: {best_reaction_number}'
+            )
+            lines.append(f'- Batch number: {best_batch_number}')
+            lines.append(f'- Condition type: {best_condition_type}')
             lines.append(
                 f'- Target λmax: '
-                f'{_format_value(target_lambda_max_nm, "nm")}'
+                f'{self._format_auto_report_value(target_lambda_max_nm, "nm")}'
             )
             lines.append(
                 f'- Observed QC-cleaned mean λmax: '
-                f'{_format_value(actual_lambda_mean_nm, "nm")}'
+                f'{self._format_auto_report_value(best_lambda_mean, "nm")}'
             )
             lines.append(
-                f'- Observed QC-cleaned SEM: '
-                f'{_format_value(actual_lambda_sem_nm, "nm")}'
+                f'- Target error: '
+                f'{self._format_auto_report_value(best_target_error, "nm")}'
             )
-            lines.append(
-                f'- Target error: {_format_value(target_error_nm, "nm")}'
-            )
-            lines.append(
-                f'- Raw replicate λmax values: {actual_lambda_values_raw_nm}'
-            )
-            lines.append(
-                f'- QC-included replicate λmax values: '
-                f'{actual_lambda_values_nm}'
-            )
-            lines.append(f'- Replicate QC status: {replicate_qc_status}')
-            lines.append(f'- Replicate QC reason: {replicate_qc_reason}')
-            lines.append(
-                f'- Model-training status: {model_training_status}'
-            )
-            lines.append(
-                f'- Pre-experiment predicted λmax: '
-                f'{_format_value(predicted_lambda_mean_nm, "nm")}'
-            )
-            lines.append(
-                f'- Pre-experiment GP predictive SD: '
-                f'{_format_value(predicted_lambda_std_nm, "nm")}'
-            )
-            lines.append(
-                f'- Signed prediction error: '
-                f'{_format_value(prediction_error_nm, "nm")}'
-            )
+            lines.append(f'- Replicate QC status: {best_qc_status}')
             lines.append('')
 
+        lines.append('### Best Condition Interpretation')
+        lines.append('')
+        lines.append(best_interpretation)
+        lines.append('')
+        lines.append('## Compact Condition Table')
+        lines.append('')
+        lines.extend(condition_table_lines)
+        lines.append('')
         lines.append('## Replicate QC Summary')
         lines.append('')
         lines.append(
@@ -4094,14 +4450,22 @@ class AutoContr(Controller):
         lines.append(
             f'- Flagged but not excluded conditions: {qc_flagged}'
         )
-        lines.append(f'- Model rows using all valid replicates: {model_used_all}')
         lines.append(
-            f'- Model rows using QC-included replicates only: '
-            f'{model_used_qc_only}'
+            f'- Conditions using all valid replicates for model training: '
+            f'{conditions_used_all}'
         )
         lines.append(
-            f'- Model rows using flagged conditions: {model_used_flagged}'
+            f'- Conditions using QC-included replicates only for model '
+            f'training: {conditions_used_qc_only}'
         )
+        lines.append(
+            f'- Flagged conditions retained for model training: '
+            f'{conditions_used_flagged}'
+        )
+        lines.append('')
+        lines.append('### QC Interpretation')
+        lines.append('')
+        lines.append(qc_interpretation)
         lines.append('')
 
         if (
@@ -4119,22 +4483,31 @@ class AutoContr(Controller):
                 lines.append('')
 
                 for _, row in qc_detail_df.iterrows():
-                    reaction_number = _safe_get(row, 'reaction_number')
-                    qc_status = _safe_get(row, 'replicate_qc_status')
-                    qc_reason = _safe_get(row, 'replicate_qc_reason')
-                    raw_values = _safe_get(
+                    reaction_number = self._safe_auto_report_get(
+                        row,
+                        'reaction_number'
+                    )
+                    qc_status = self._safe_auto_report_get(
+                        row,
+                        'replicate_qc_status'
+                    )
+                    qc_reason = self._safe_auto_report_get(
+                        row,
+                        'replicate_qc_reason'
+                    )
+                    raw_values = self._safe_auto_report_get(
                         row,
                         'actual_lambda_values_raw_nm'
                     )
-                    qc_values = _safe_get(
+                    qc_values = self._safe_auto_report_get(
                         row,
                         'actual_lambda_values_nm'
                     )
-                    excluded_values = _safe_get(
+                    excluded_values = self._safe_auto_report_get(
                         row,
                         'excluded_lambda_values_nm'
                     )
-                    model_status = _safe_get(
+                    model_status = self._safe_auto_report_get(
                         row,
                         'model_training_status'
                     )
@@ -4173,20 +4546,32 @@ class AutoContr(Controller):
             )
             lines.append(
                 f'- Mean signed prediction error: '
-                f'{_format_value(prediction_error_mean, "nm")}'
+                f'{self._format_auto_report_value(prediction_error_mean, "nm")}'
             )
             lines.append(
                 f'- Median signed prediction error: '
-                f'{_format_value(prediction_error_median, "nm")}'
+                f'{self._format_auto_report_value(prediction_error_median, "nm")}'
+            )
+            lines.append(
+                f'- Mean absolute prediction error: '
+                f'{self._format_auto_report_value(prediction_abs_error_mean, "nm")}'
+            )
+            lines.append(
+                f'- Median absolute prediction error: '
+                f'{self._format_auto_report_value(prediction_abs_error_median, "nm")}'
             )
             lines.append(
                 f'- Mean target error across conditions: '
-                f'{_format_value(target_error_mean, "nm")}'
+                f'{self._format_auto_report_value(target_error_mean, "nm")}'
             )
             lines.append(
                 f'- Median target error across conditions: '
-                f'{_format_value(target_error_median, "nm")}'
+                f'{self._format_auto_report_value(target_error_median, "nm")}'
             )
+            lines.append('')
+            lines.append('### Prediction Interpretation')
+            lines.append('')
+            lines.append(prediction_bias_text)
             lines.append('')
 
         lines.append('## Recipe and Volume Feasibility Summary')
@@ -4202,18 +4587,44 @@ class AutoContr(Controller):
             f'- Water-transfer-not-executable condition rows: '
             f'{water_not_executable_count}'
         )
+        lines.append(
+            f'- Water top-off range: '
+            f'{self._format_auto_report_value(water_min, "uL")} to '
+            f'{self._format_auto_report_value(water_max, "uL")}'
+        )
+        lines.append(
+            f'- Variable reagent volume range: '
+            f'{self._format_auto_report_value(variable_volume_min, "uL")} to '
+            f'{self._format_auto_report_value(variable_volume_max, "uL")}'
+        )
+        lines.append(
+            f'- Final total volume range: '
+            f'{self._format_auto_report_value(total_volume_min, "uL")} to '
+            f'{self._format_auto_report_value(total_volume_max, "uL")}'
+        )
         lines.append('')
-
+        lines.append('## Key Plots')
+        lines.append('')
+        lines.append('### Final λmax Progress Plot')
+        lines.append('')
+        lines.append('![Final λmax Progress](../Plots/lambda_progress_final.png)')
+        lines.append('')
+        lines.append('### Final Replicate Diagnostic Plot')
+        lines.append('')
+        lines.append(
+            '![Final Replicate Diagnostic](../Plots/lambda_replicates_final.png)'
+        )
+        lines.append('')
         lines.append('## Generated Files')
         lines.append('')
         lines.append(
-            _file_line(
+            self._auto_report_file_line(
                 os.path.join('pr_data', 'experiment_data.csv'),
                 'Raw well-level experiment data'
             )
         )
         lines.append(
-            _file_line(
+            self._auto_report_file_line(
                 os.path.join('pr_data', 'auto_model_performance_log.csv'),
                 'Condition-level Auto performance log'
             )
@@ -4223,25 +4634,24 @@ class AutoContr(Controller):
             '`pr_data/auto_run_report.md` (present)'
         )
         lines.append(
-            _file_line(
+            self._auto_report_file_line(
                 os.path.join('Plots', 'lambda_progress_final.png'),
                 'Final condition-level lambda progress plot'
             )
         )
         lines.append(
-            _file_line(
+            self._auto_report_file_line(
                 os.path.join('Plots', 'lambda_replicates_final.png'),
                 'Final replicate-level lambda diagnostic plot'
             )
         )
         lines.append(
-            _file_line(
+            self._auto_report_file_line(
                 os.path.join('Debug', 'terminal_output.txt'),
                 'Captured terminal output'
             )
         )
         lines.append('')
-
         lines.append('## Notes and Warnings')
         lines.append('')
 
@@ -4289,24 +4699,13 @@ class AutoContr(Controller):
                 'experiment data and condition-level performance log.'
             )
         else:
-            best_reaction_number = _safe_get(
-                best_condition_row,
-                'reaction_number'
-            )
-            best_lambda_mean = _safe_get(
-                best_condition_row,
-                'actual_lambda_mean_nm'
-            )
-            best_target_error = _safe_get(
-                best_condition_row,
-                'target_error_nm'
-            )
-
             lines.append(
                 f'The closest observed condition to the requested target was '
                 f'condition {best_reaction_number}, with QC-cleaned mean λmax '
-                f'{_format_value(best_lambda_mean, "nm")} and target error '
-                f'{_format_value(best_target_error, "nm")}.'
+                f'{self._format_auto_report_value(best_lambda_mean, "nm")} '
+                f'and target error '
+                f'{self._format_auto_report_value(best_target_error, "nm")}. '
+                f'{best_interpretation}'
             )
 
         lines.append('')
