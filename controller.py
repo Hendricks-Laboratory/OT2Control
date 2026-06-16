@@ -4437,13 +4437,96 @@ class AutoContr(Controller):
             f"replicate SD = {best_row['actual_lambda_sd_nm']:.4f} nm"
         )
     
+    def _clip_errorbars_to_lambda_display_window(
+        self,
+        means,
+        errors,
+        condition_numbers,
+        y_min_nm=300.0,
+        y_max_nm=1000.0
+    ):
+        '''
+        Clips vertical error bars to the displayed lambda-max window.
+
+        This is display-only. Raw SEM/SD values remain unchanged in the Auto
+        performance log. Error bars are allowed to span the full visible
+        lambda-max display range. If a raw error bar would extend below or above
+        that display window, the displayed bar is clipped to the window and the
+        condition number is returned for plot annotation.
+
+        params:
+            array-like means:
+                Mean lambda values for plotted points.
+
+            array-like errors:
+                Raw SEM or GP predictive SD values.
+
+            array-like condition_numbers:
+                Reaction condition numbers corresponding to the plotted points.
+
+            float y_min_nm:
+                Lower displayed lambda-max bound.
+
+            float y_max_nm:
+                Upper displayed lambda-max bound.
+
+        returns:
+            tuple:
+                display_yerr:
+                    2 x N numpy array of asymmetric display error bars suitable
+                    for matplotlib yerr.
+
+                clipped_condition_numbers:
+                    List of condition numbers where the raw error bar exceeded
+                    the display window.
+        '''
+        means = np.array(means, dtype=float)
+        errors = np.array(errors, dtype=float)
+        condition_numbers = np.array(condition_numbers, dtype=float)
+
+        errors = np.nan_to_num(
+            errors,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0
+        )
+
+        lower_available = np.maximum(means - y_min_nm, 0.0)
+        upper_available = np.maximum(y_max_nm - means, 0.0)
+
+        lower_display_errors = np.minimum(errors, lower_available)
+        upper_display_errors = np.minimum(errors, upper_available)
+
+        raw_lower_bounds = means - errors
+        raw_upper_bounds = means + errors
+
+        clipped_mask = (
+            (raw_lower_bounds < y_min_nm)
+            | (raw_upper_bounds > y_max_nm)
+        )
+
+        clipped_condition_numbers = condition_numbers[
+            clipped_mask
+        ].astype(int).tolist()
+
+        display_yerr = np.vstack(
+            [
+                lower_display_errors,
+                upper_display_errors
+            ]
+        )
+
+        return display_yerr, clipped_condition_numbers
+    
     def _plot_lambda_progress_after_batch(
         self,
         batch_number,
         plot_filename=None,
         plot_title=None,
         y_axis_mode='robust',
-        errorbar_display_cap_nm=75.0
+        errorbar_display_cap_nm=75.0,
+        y_display_min_nm=300.0,
+        y_display_max_nm=1000.0
     ):
         '''
         Generates a cumulative lambda max progress plot after a completed Auto
@@ -4461,21 +4544,37 @@ class AutoContr(Controller):
         number when both are available. This keeps the visual meaning clear:
         both values refer to the same recipe condition.
 
+        Error bars are displayed within the lambda-max scan/display window,
+        default 300-1000 nm. Raw SEM/SD values remain unchanged in the Auto
+        performance log. If an error bar would extend outside the display
+        window, it is clipped at the display boundary and the condition number
+        is noted in the plot annotation.
+
         params:
             int batch_number:
                 Highest completed batch number to include in the cumulative
                 plot.
 
+            str plot_filename:
+                Optional filename for the saved plot.
+
+            str plot_title:
+                Optional title for the saved plot.
+
             str y_axis_mode:
-                Controls display-only y-axis scaling. Use 'robust' to use
-                display-capped error bars for readable progress plots, or
-                'full' to include every raw SEM/SD bound in the y-axis limits.
+                Retained for backward compatibility. The plot now uses a fixed
+                lambda display window defined by y_display_min_nm and
+                y_display_max_nm.
 
             float errorbar_display_cap_nm:
-                Display-only maximum error bar size in nm. Error bars larger
-                than this are display-capped so extreme dry-run uncertainty
-                does not dominate the progress plot. The original SEM/SD values
-                remain unchanged in the Auto performance log.
+                Retained for backward compatibility. The previous arbitrary
+                fixed-size display cap is no longer used.
+
+            float y_display_min_nm:
+                Lower displayed lambda-max bound.
+
+            float y_display_max_nm:
+                Upper displayed lambda-max bound.
 
         returns:
             str or None:
@@ -4517,20 +4616,25 @@ class AutoContr(Controller):
             dtype=float
         )
 
-        actual_means = performance_df['actual_lambda_mean_nm'].to_numpy()
-        actual_sems = (
-            performance_df['actual_lambda_sem_nm'].fillna(0.0).to_numpy()
-        )
+        actual_means = pd.to_numeric(
+            performance_df['actual_lambda_mean_nm'],
+            errors='coerce'
+        ).to_numpy(dtype=float)
 
-        actual_sems_display = np.minimum(
-            actual_sems,
-            errorbar_display_cap_nm
-        )
+        actual_sems = pd.to_numeric(
+            performance_df['actual_lambda_sem_nm'],
+            errors='coerce'
+        ).fillna(0.0).to_numpy(dtype=float)
 
-        actual_display_capped_condition_numbers = performance_df.loc[
-            actual_sems > errorbar_display_cap_nm,
-            'reaction_number'
-        ].astype(int).to_list()
+        actual_display_yerr, actual_clipped_condition_numbers = (
+            self._clip_errorbars_to_lambda_display_window(
+                means=actual_means,
+                errors=actual_sems,
+                condition_numbers=actual_x_values,
+                y_min_nm=y_display_min_nm,
+                y_max_nm=y_display_max_nm
+            )
+        )
 
         target_lambda = float(performance_df['target_lambda_max_nm'].iloc[0])
 
@@ -4554,35 +4658,37 @@ class AutoContr(Controller):
         )
 
         prediction_handle = None
-        prediction_display_capped_condition_numbers = []
+        prediction_clipped_condition_numbers = []
 
         if not prediction_df.empty:
             pred_x_values = prediction_df[
                 'reaction_number'
             ].to_numpy(dtype=float)
 
-            predicted_means = prediction_df[
-                'predicted_lambda_mean_nm'
-            ].to_numpy()
+            predicted_means = pd.to_numeric(
+                prediction_df['predicted_lambda_mean_nm'],
+                errors='coerce'
+            ).to_numpy(dtype=float)
 
-            predicted_stds = prediction_df[
-                'predicted_lambda_std_nm'
-            ].fillna(0.0).to_numpy()
+            predicted_stds = pd.to_numeric(
+                prediction_df['predicted_lambda_std_nm'],
+                errors='coerce'
+            ).fillna(0.0).to_numpy(dtype=float)
 
-            predicted_stds_display = np.minimum(
-                predicted_stds,
-                errorbar_display_cap_nm
+            predicted_display_yerr, prediction_clipped_condition_numbers = (
+                self._clip_errorbars_to_lambda_display_window(
+                    means=predicted_means,
+                    errors=predicted_stds,
+                    condition_numbers=pred_x_values,
+                    y_min_nm=y_display_min_nm,
+                    y_max_nm=y_display_max_nm
+                )
             )
-
-            prediction_display_capped_condition_numbers = prediction_df.loc[
-                predicted_stds > errorbar_display_cap_nm,
-                'reaction_number'
-            ].astype(int).to_list()
 
             prediction_handle = ax.errorbar(
                 pred_x_values,
                 predicted_means,
-                yerr=predicted_stds_display,
+                yerr=predicted_display_yerr,
                 fmt='s',
                 color=model_color,
                 ecolor=model_color,
@@ -4601,7 +4707,7 @@ class AutoContr(Controller):
         observed_handle = ax.errorbar(
             actual_x_values,
             actual_means,
-            yerr=actual_sems_display,
+            yerr=actual_display_yerr,
             fmt='o',
             color=actual_color,
             ecolor=actual_color,
@@ -4636,58 +4742,7 @@ class AutoContr(Controller):
             y=0.97
         )
 
-        if y_axis_mode not in ['robust', 'full']:
-            print(
-                "<<controller warning>> unknown y_axis_mode "
-                f"'{y_axis_mode}', using robust display scaling"
-            )
-            y_axis_mode = 'robust'
-
-        if y_axis_mode == 'full':
-            y_values_for_limits = list(actual_means) + [target_lambda]
-            y_values_for_limits.extend(list(actual_means - actual_sems))
-            y_values_for_limits.extend(list(actual_means + actual_sems))
-
-            if not prediction_df.empty:
-                y_values_for_limits.extend(
-                    list(predicted_means - predicted_stds)
-                )
-                y_values_for_limits.extend(
-                    list(predicted_means + predicted_stds)
-                )
-
-            y_min = min(y_values_for_limits)
-            y_max = max(y_values_for_limits)
-
-        else:
-            # Robust display scaling keeps one very large SEM/SD bar from
-            # making the scientifically important region unreadable. This only
-            # changes display limits and display error-bar length; it does not
-            # alter the raw plotted means or exported CSV values.
-            y_values_for_limits = list(actual_means) + [target_lambda]
-
-            y_values_for_limits.extend(
-                list(actual_means - actual_sems_display)
-            )
-            y_values_for_limits.extend(
-                list(actual_means + actual_sems_display)
-            )
-
-            if not prediction_df.empty:
-                y_values_for_limits.extend(list(predicted_means))
-                y_values_for_limits.extend(
-                    list(predicted_means - predicted_stds_display)
-                )
-                y_values_for_limits.extend(
-                    list(predicted_means + predicted_stds_display)
-                )
-
-            y_min = min(y_values_for_limits)
-            y_max = max(y_values_for_limits)
-
-        y_padding = max((y_max - y_min) * 0.12, 15.0)
-
-        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+        ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
         ax.grid(
             axis='y',
@@ -4721,10 +4776,9 @@ class AutoContr(Controller):
             columnspacing=1.4
         )
 
-        def _format_display_capped_condition_list(condition_numbers):
+        def _format_clipped_condition_list(condition_numbers):
             '''
-            Formats display-capped reaction condition numbers for a compact
-            plot note.
+            Formats clipped reaction condition numbers for a compact plot note.
             '''
             if len(condition_numbers) == 0:
                 return 'none'
@@ -4745,34 +4799,35 @@ class AutoContr(Controller):
                 f"({first_values}, ...)"
             )
 
-        display_cap_note_parts = []
+        display_note_parts = []
 
-        if len(prediction_display_capped_condition_numbers) > 0:
-            display_cap_note_parts.append(
-                "GP SD display-capped at conditions "
-                + _format_display_capped_condition_list(
-                    prediction_display_capped_condition_numbers
+        if len(prediction_clipped_condition_numbers) > 0:
+            display_note_parts.append(
+                "GP SD clipped at conditions "
+                + _format_clipped_condition_list(
+                    prediction_clipped_condition_numbers
                 )
             )
 
-        if len(actual_display_capped_condition_numbers) > 0:
-            display_cap_note_parts.append(
-                "SEM display-capped at conditions "
-                + _format_display_capped_condition_list(
-                    actual_display_capped_condition_numbers
+        if len(actual_clipped_condition_numbers) > 0:
+            display_note_parts.append(
+                "SEM clipped at conditions "
+                + _format_clipped_condition_list(
+                    actual_clipped_condition_numbers
                 )
             )
 
-        if len(display_cap_note_parts) > 0:
-            display_cap_note = (
-                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
-                + " | ".join(display_cap_note_parts)
+        if len(display_note_parts) > 0:
+            display_note = (
+                f"Display window: {y_display_min_nm:.0f}–"
+                f"{y_display_max_nm:.0f} nm | "
+                + " | ".join(display_note_parts)
             )
 
             fig.text(
                 0.5,
                 0.018,
-                display_cap_note,
+                display_note,
                 ha='center',
                 va='center',
                 fontsize=7.3,
@@ -4813,7 +4868,9 @@ class AutoContr(Controller):
         plot_filename=None,
         plot_title=None,
         y_axis_mode='robust',
-        errorbar_display_cap_nm=75.0
+        errorbar_display_cap_nm=75.0,
+        y_display_min_nm=300.0,
+        y_display_max_nm=1000.0
     ):
         '''
         Generates a cumulative replicate-level lambda max progress plot after a
@@ -4824,9 +4881,11 @@ class AutoContr(Controller):
         with individual replicate lambda max points.
 
         QC-included replicate values are plotted separately from QC-excluded
-        replicate values. Raw replicate values are not display-capped, so an
-        excluded extreme value remains visible. Only GP predictive SD error bars
-        are display-capped for readability.
+        replicate values. Raw replicate values are not altered. GP predictive
+        SD error bars are displayed within the lambda-max scan/display window,
+        default 300-1000 nm. If a GP SD error bar would extend outside the
+        display window, it is clipped at the display boundary and the condition
+        number is noted in the plot annotation.
 
         params:
             int batch_number:
@@ -4841,13 +4900,19 @@ class AutoContr(Controller):
                 Optional plot title.
 
             str y_axis_mode:
-                Controls display-only y-axis scaling. Use 'robust' to use
-                display-capped GP SD bars for readable progress plots, or 'full'
-                to include every raw GP SD bound in the y-axis limits.
+                Retained for backward compatibility. The plot now uses a fixed
+                lambda display window defined by y_display_min_nm and
+                y_display_max_nm.
 
             float errorbar_display_cap_nm:
-                Display-only maximum GP SD error bar size in nm. Raw replicate
-                points are never capped.
+                Retained for backward compatibility. The previous arbitrary
+                fixed-size display cap is no longer used.
+
+            float y_display_min_nm:
+                Lower displayed lambda-max bound.
+
+            float y_display_max_nm:
+                Upper displayed lambda-max bound.
 
         returns:
             str or None:
@@ -5011,35 +5076,37 @@ class AutoContr(Controller):
         )
 
         prediction_handle = None
-        prediction_display_capped_condition_numbers = []
+        prediction_clipped_condition_numbers = []
 
         if not prediction_df.empty:
             pred_x_values = prediction_df[
                 'reaction_number'
             ].to_numpy(dtype=float)
 
-            predicted_means = prediction_df[
-                'predicted_lambda_mean_nm'
-            ].to_numpy()
+            predicted_means = pd.to_numeric(
+                prediction_df['predicted_lambda_mean_nm'],
+                errors='coerce'
+            ).to_numpy(dtype=float)
 
-            predicted_stds = prediction_df[
-                'predicted_lambda_std_nm'
-            ].fillna(0.0).to_numpy()
+            predicted_stds = pd.to_numeric(
+                prediction_df['predicted_lambda_std_nm'],
+                errors='coerce'
+            ).fillna(0.0).to_numpy(dtype=float)
 
-            predicted_stds_display = np.minimum(
-                predicted_stds,
-                errorbar_display_cap_nm
+            predicted_display_yerr, prediction_clipped_condition_numbers = (
+                self._clip_errorbars_to_lambda_display_window(
+                    means=predicted_means,
+                    errors=predicted_stds,
+                    condition_numbers=pred_x_values,
+                    y_min_nm=y_display_min_nm,
+                    y_max_nm=y_display_max_nm
+                )
             )
-
-            prediction_display_capped_condition_numbers = prediction_df.loc[
-                predicted_stds > errorbar_display_cap_nm,
-                'reaction_number'
-            ].astype(int).to_list()
 
             prediction_handle = ax.errorbar(
                 pred_x_values,
                 predicted_means,
-                yerr=predicted_stds_display,
+                yerr=predicted_display_yerr,
                 fmt='s',
                 color=model_color,
                 ecolor=model_color,
@@ -5104,49 +5171,7 @@ class AutoContr(Controller):
             y=0.965
         )
 
-        if y_axis_mode not in ['robust', 'full']:
-            print(
-                "<<controller warning>> unknown y_axis_mode "
-                f"'{y_axis_mode}', using robust display scaling"
-            )
-            y_axis_mode = 'robust'
-
-        raw_replicate_y_values = included_y_values + excluded_y_values
-
-        if y_axis_mode == 'full':
-            y_values_for_limits = list(raw_replicate_y_values) + [
-                target_lambda
-            ]
-
-            if not prediction_df.empty:
-                y_values_for_limits.extend(list(predicted_means))
-                y_values_for_limits.extend(
-                    list(predicted_means - predicted_stds)
-                )
-                y_values_for_limits.extend(
-                    list(predicted_means + predicted_stds)
-                )
-
-        else:
-            y_values_for_limits = list(raw_replicate_y_values) + [
-                target_lambda
-            ]
-
-            if not prediction_df.empty:
-                y_values_for_limits.extend(list(predicted_means))
-                y_values_for_limits.extend(
-                    list(predicted_means - predicted_stds_display)
-                )
-                y_values_for_limits.extend(
-                    list(predicted_means + predicted_stds_display)
-                )
-
-        y_min = min(y_values_for_limits)
-        y_max = max(y_values_for_limits)
-
-        y_padding = max((y_max - y_min) * 0.12, 15.0)
-
-        ax.set_ylim(y_min - y_padding, y_max + y_padding)
+        ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
         ax.grid(
             axis='y',
@@ -5231,11 +5256,11 @@ class AutoContr(Controller):
 
         note_parts = []
 
-        if len(prediction_display_capped_condition_numbers) > 0:
+        if len(prediction_clipped_condition_numbers) > 0:
             note_parts.append(
-                "GP SD display-capped at conditions "
+                "GP SD clipped at conditions "
                 + _format_condition_list(
-                    prediction_display_capped_condition_numbers
+                    prediction_clipped_condition_numbers
                 )
             )
 
@@ -5253,7 +5278,8 @@ class AutoContr(Controller):
 
         if len(note_parts) > 0:
             plot_note = (
-                f"Display cap: {errorbar_display_cap_nm:.0f} nm | "
+                f"Display window: {y_display_min_nm:.0f}–"
+                f"{y_display_max_nm:.0f} nm | "
                 + " | ".join(note_parts)
             )
 
