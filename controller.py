@@ -4433,7 +4433,7 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number', labelpad=2)
+        ax.set_xlabel('Reaction condition number', labelpad=5)
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
 
         if plot_title is None:
@@ -4612,9 +4612,9 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.18
+            bottom_margin = 0.195
         else:
-            bottom_margin = 0.11
+            bottom_margin = 0.12
 
         fig.subplots_adjust(
             left=0.12,
