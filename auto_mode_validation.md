@@ -4,13 +4,13 @@
 **Branch context:** Auto mode development branch  
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-06-12  
+**Updated through:** 2026-06-15  
 
 ---
 
 ## Purpose
 
-This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, and the latest debug-output validation work.
+This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, RTG_008 real-reagent validation, later RTG_009/DEBUGRTG-style output validation, and the latest replicate-QC/plot-layout validation work.
 
 It is intended as a branch-specific record of:
 
@@ -63,6 +63,8 @@ The latest validated debug run confirmed that the terminal-output capture and ou
 | Condition-level stopping rule | Implemented and validated |
 | Lambda-max progress plots | Implemented and validated |
 | Final lambda-max summary plot | Implemented and validated |
+| Replicate-level lambda diagnostic plots | Implemented and validated |
+| Replicate QC metadata and model-training flags | Implemented and validated |
 | Optional error-bar display cap | Implemented and validated |
 | 2D GP prediction heatmap | Implemented and validated |
 | 2D GP uncertainty heatmap | Implemented and validated |
@@ -95,7 +97,7 @@ Validated behavior includes:
 - Terminal output is mirrored to `Debug/terminal_output.txt` while preserving normal terminal printing.
 
 > [!IMPORTANT]  
-> The current implementation has passed software/protocol validation and debug-output validation. Before larger autonomous chemistry runs, the remaining operational hardening tasks are source/deck-volume validation, tip-contamination audit behavior, and real-chemistry spectral validation.
+> The current implementation has passed software/protocol validation, water-only physical validation, debug-output validation, and at least one small real-reagent closed-loop validation. Before larger autonomous chemistry runs, the remaining operational hardening tasks are source/deck-volume validation, tip-contamination audit behavior, broader real-chemistry reproducibility testing, and eventual uncertainty-aware acquisition.
 
 ---
 
@@ -878,6 +880,329 @@ Terminal output becomes less redundant, and stop-message ownership is cleaner:
 
 ---
 
+## June 13–15, 2026 — Real-Reagent Baseline, Replicate QC, Model-Training Metadata, and Replicate Diagnostic Plots
+
+**Relevant development work:**
+
+- Validated RTG_008 as the first real-reagent Auto mode closed-loop baseline.
+- Added condition-level replicate QC fields to `auto_model_performance_log.csv`.
+- Added raw and QC-cleaned lambda summary columns.
+- Added model-training decision metadata so flagged or QC-excluded conditions remain auditable.
+- Integrated QC-filtered replicate values into GP model training while preserving raw well-level values.
+- Added companion replicate-level lambda diagnostic plots.
+- Added spreadsheet-triggered UV-vis overlay support alongside 2D GPR plots.
+- Iteratively refined replicate diagnostic plot layout through `controller(141).py` to `controller(147).py`.
+
+### RTG_008 real-reagent validation baseline
+
+RTG_008 should be treated as a successful small real-reagent validation of the Auto mode pipeline.
+
+Observed behavior:
+
+- Auto mode generated initial seed recipes.
+- Real reagents were transferred.
+- Real spectra were collected.
+- Lambda max values were extracted.
+- `experiment_data.csv` was updated.
+- The optimizer selected a subsequent recipe.
+- True-zero / mask logic worked.
+- Volume accounting worked.
+- Water top-off worked.
+- Total well volume remained `200 µL`.
+- The run reached the normal success message:
+
+```text
+Success!!!
+```
+
+A post-success Eve/serial teardown error occurred after the success message. This is interpreted as a shutdown/communication teardown issue, not an optimizer, recipe, volume, scan, or model-update failure.
+
+Important RTG_008 result:
+
+| Metric | Value |
+|---|---:|
+| Target lambda max | `650 nm` |
+| Optimizer-selected replicate 1 | `689 nm` |
+| Optimizer-selected replicate 2 | `648 nm` |
+| Duplicate mean | `668.5 nm` |
+| Mean error from target | `18.5 nm` |
+| Closest individual replicate | `648 nm` |
+
+Interpretation:
+
+- The real-reagent loop worked end-to-end.
+- One duplicate landed extremely close to the 650 nm target.
+- The condition-level mean was still outside a strict 10 nm target window, supporting the later duplicate/replicate-aware stopping-rule design.
+
+### RTG_008 volume validation
+
+The fixed reagent total in the real validation was `90 µL`:
+
+| Fixed reagent | Volume |
+|---|---:|
+| trisodium_citrate | `20 µL` |
+| hydrogen_peroxide | `50 µL` |
+| sodium_borohydride | `20 µL` |
+| **Total fixed volume** | **`90 µL`** |
+
+Example optimizer-selected batch recipe:
+
+| Volume component | Volume |
+|---|---:|
+| Fixed volume | `90.000000 µL` |
+| Variable volume | `88.891374 µL` |
+| Water | `21.108626 µL` |
+| **Total** | **`200.000000 µL`** |
+| Volume feasible | True |
+| Water transfer executable | True |
+
+This confirmed that the water top-off rule and 200 µL final-volume invariant held during real-reagent execution.
+
+### Replicate QC policy
+
+Replicate QC was added to distinguish raw well-level observations from QC-cleaned condition summaries.
+
+Important functions added or refined:
+
+- `_get_auto_replicate_outlier_threshold_nm()`
+- `_run_lambda_replicate_qc(lambda_values)`
+- `_get_auto_model_training_decision_from_replicate_qc(replicate_qc)`
+- `_build_auto_qc_model_training_data(unique_recipes, lambda_max_values)`
+
+Default replicate outlier threshold:
+
+```text
+50 nm
+```
+
+Triplicate behavior:
+
+1. Find the closest pair of valid replicate lambda values.
+2. Treat that pair as agreement only if the closest-pair distance is `<= replicate_outlier_threshold_nm`.
+3. If the third value is more than the threshold away from the closest-pair mean, exclude the third value.
+4. If no tight pair exists, flag the condition as `flagged_not_excluded` and preserve all valid replicates.
+
+Examples:
+
+| Replicates | QC result | Training behavior |
+|---|---|---|
+| `650, 653, 980` | `excluded_replicate` | train on `650, 653` |
+| `650, 720, 790` | `flagged_not_excluded` | train on all valid replicates, but tag condition |
+| `650, 660, 670` | `passed` | train on all valid replicates |
+| `650, 650, 900, 900` | `flagged_not_excluded` | train on all valid replicates, no automatic exclusion |
+
+The guiding design choice was conservative data preservation. A suspicious replicate is excluded only when there is a clear internally consistent pair and one outlier. Ambiguous spread is flagged but not discarded.
+
+### Model-training metadata
+
+The performance log now separates replicate QC status from model-training decisions.
+
+Model-training policy:
+
+| QC status | Model-training behavior |
+|---|---|
+| `passed` | use all valid replicates |
+| `excluded_replicate` | use QC-included replicates only |
+| `flagged_not_excluded` | still use all valid replicates, tagged as `used_flagged_condition` |
+| no valid usable values | skip condition / fail cleanly if no training data remain |
+
+Important model-training metadata columns:
+
+- `use_for_model_training`
+- `model_training_status`
+- `n_replicates_used_for_model_training`
+- `model_training_reason`
+
+This allows the GP model to learn from as much data as possible while keeping questionable or QC-altered conditions auditable.
+
+### Expanded `auto_model_performance_log.csv`
+
+The performance log now includes raw replicate values, QC-cleaned values, replicate inclusion flags, QC status, and model-training metadata.
+
+Important added columns include:
+
+- `actual_lambda_values_raw_nm`
+- `actual_lambda_mean_raw_nm`
+- `actual_lambda_sd_raw_nm`
+- `actual_lambda_sem_raw_nm`
+- `actual_lambda_values_qc_nm`
+- `actual_lambda_mean_qc_nm`
+- `actual_lambda_sd_qc_nm`
+- `actual_lambda_sem_qc_nm`
+- `actual_lambda_rep_1_nm`
+- `actual_lambda_rep_2_nm`
+- `actual_lambda_rep_3_nm`
+- `actual_lambda_rep_1_included_in_qc`
+- `actual_lambda_rep_2_included_in_qc`
+- `actual_lambda_rep_3_included_in_qc`
+- `n_replicates_total`
+- `n_replicates_valid`
+- `n_replicates_used`
+- `n_replicates_excluded`
+- `excluded_replicate_indices`
+- `excluded_lambda_values_nm`
+- `replicate_qc_status`
+- `replicate_qc_reason`
+- `replicate_outlier_threshold_nm`
+- `use_for_model_training`
+- `model_training_status`
+- `model_training_reason`
+
+Backward-compatible columns remain:
+
+- `actual_lambda_mean_nm`
+- `actual_lambda_sd_nm`
+- `actual_lambda_sem_nm`
+- `target_error_nm`
+- `prediction_error_nm`
+
+These backward-compatible fields now represent QC-cleaned condition summaries.
+
+### Replicate diagnostic plots
+
+A new companion plotting function was added:
+
+```text
+_plot_lambda_replicate_progress_after_batch()
+```
+
+Generated outputs:
+
+```text
+lambda_replicates_after_batch_X.png
+lambda_replicates_final.png
+```
+
+These plots are companion diagnostic plots and do not replace the main condition-level lambda-progress plots.
+
+The replicate plots show:
+
+- QC-included replicate lambda values as blue open circles.
+- QC-excluded replicate lambda values as red x markers.
+- GP prediction ± GP SD as orange square/errorbar.
+- Target lambda max as a dashed gray horizontal line.
+- Bottom annotation notes for display-capped GP SD, QC exclusions, and flagged-not-excluded conditions.
+
+Important display decisions:
+
+- Raw replicate values are not display-capped.
+- GP SD error bars are display-capped for readability.
+- Replicates are plotted at the exact same x-position for the same reaction condition.
+- No horizontal jitter is used because the user preferred exact condition alignment.
+- Identical replicate values therefore overplot exactly and may visually look like fewer points.
+
+Possible future refinement:
+
+- Add multiplicity annotations such as `×2` or `×3` for exactly overlapping replicate markers.
+- Do not add jitter unless the user explicitly requests it.
+
+### Replicate diagnostic plot layout status
+
+The replicate diagnostic plot underwent several layout refinements to fit the title, legend/key, plot body, x-axis title, and bottom annotations without overlap.
+
+Latest validated file in the prior chat:
+
+```text
+controller(147).py
+```
+
+Validated settings in `controller(147).py`:
+
+```python
+bbox_to_anchor=(0.5, 1.015)
+top=0.86
+bottom_margin = 0.18   # when annotation note is present
+bottom_margin = 0.11   # when no annotation note is present
+```
+
+A fake-data plot was generated from the verbatim uploaded function and looked substantially improved.
+
+Latest requested small adjustment, not yet validated in a new uploaded file at the time of this note:
+
+```python
+ax.set_xlabel('Reaction condition number', labelpad=5)
+```
+
+and:
+
+```python
+bottom_margin = 0.195  # when annotation note is present
+bottom_margin = 0.12   # when no annotation note is present
+```
+
+Keep unchanged:
+
+```python
+bbox_to_anchor=(0.5, 1.015)
+top=0.86
+```
+
+This adjustment is only intended to add slight breathing room between:
+
+- x-axis ticks/axis and the x-axis title,
+- and the x-axis title and the bottom annotations.
+
+It should not alter optimization, QC, model training, or scientific data values.
+
+### Spreadsheet-triggered plots
+
+The spreadsheet protocol now supports both GP model plots and UV-vis overlay plots.
+
+Recommended plot rows:
+
+```text
+operation = plot
+scan filename = auto_scan
+plot filename = auto_plot
+plot protocol = 2d_gpr
+Template = 1
+```
+
+and:
+
+```text
+operation = plot
+scan filename = auto_scan
+plot filename = auto_uv_overlay
+plot protocol = OVERLAY
+Template = 1
+```
+
+The `2d_gpr` plot generates:
+
+- `gpr_predictions_batch_X.png`
+- `gpr_uncertainty_batch_X.png`
+
+The `OVERLAY` plot generates raw UV-vis overlay plots and includes all wells, including QC-excluded wells, for auditability.
+
+### Key debug-output observations from later runs
+
+A later replicate/debug output confirmed that QC and model-training metadata behaved as intended.
+
+Example condition outcomes:
+
+| Condition | Replicates | QC status | Model-training behavior |
+|---:|---|---|---|
+| 0 | `689, 683, 683` | `passed` | use all |
+| 1 | `689, 689, 689` | `passed` | use all |
+| 2 | `684, 824, 630` | `flagged_not_excluded` | use all, tagged |
+| 3 | `824, 683, 824` | `excluded_replicate` | use `824, 824`; exclude `683` |
+
+Another debug output showed that apparent missing replicate points were actually overplotted identical values because replicate x-offsets are intentionally zero.
+
+Example:
+
+| Condition | Values | Visual result |
+|---:|---|---|
+| 0 | `689, 824, 824` | red x at 689; two blue circles exactly overlap at 824 |
+| 1 | `824, 824, 630` | two blue circles exactly overlap at 824; red x at 630 |
+| 3 | `824, 824, 824` | three blue circles exactly overlap at 824 |
+
+This is expected with no jitter.
+
+
+---
+
 # Current Technical Architecture
 
 ## 1. Optimizer model and masks
@@ -1359,9 +1684,9 @@ or a related target-probability criterion using GP mean and SD.
 
 # Recommended Next Steps
 
-## 1. Small Real-Chemistry Validation
+## 1. Continued Small Real-Chemistry Validation / Scale-Up
 
-The next scientific validation should be a small real-chemistry run using conservative settings.
+The first small real-reagent validation has passed. The next scientific validation should remain conservative and should test repeatability, reporting outputs, replicate QC behavior, and modestly larger Auto loops rather than jumping directly to a large autonomous campaign.
 
 | Setting | Value |
 |---|---:|
@@ -1523,13 +1848,13 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - water-used tip behavior in `ot2_robot.py`,
 - transfer/tip audit CSV,
 - deck/source-volume hard-stop,
-- real-chemistry spectral validation,
+- broader real-chemistry reproducibility / scale-up validation,
 - uncertainty-aware acquisition,
 - larger autonomous scale-up.
 
 ## Recommended immediate next step
 
-Run a small real-chemistry validation using conservative settings, then review:
+Continue with small, cautious real-chemistry validation/scale-up using conservative settings, then review:
 
 - spectra,
 - replicate consistency,
