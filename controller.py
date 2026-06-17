@@ -5456,6 +5456,53 @@ class AutoContr(Controller):
 
         return generated_plot_paths
     
+    def _auto_report_plot_markdown_if_exists(
+        self,
+        plot_filename,
+        title,
+        caption=None
+    ):
+        '''
+        Returns Markdown lines embedding a plot if the plot file exists.
+
+        params:
+            str plot_filename:
+                Filename inside the Plots directory.
+
+            str title:
+                Section title for the plot.
+
+            str caption:
+                Optional explanatory caption.
+
+        returns:
+            list:
+                Markdown lines. Empty list if the plot does not exist.
+        '''
+        plot_path = os.path.join(
+            self.plot_path,
+            plot_filename
+        )
+
+        if not os.path.exists(plot_path):
+            return []
+
+        lines = []
+
+        lines.append(f'### {title}')
+        lines.append('')
+
+        if caption is not None:
+            lines.append(caption)
+            lines.append('')
+
+        lines.append(
+            f'![{title}](../Plots/{plot_filename})'
+        )
+        lines.append('')
+
+        return lines
+    
     def _write_auto_run_report(self):
         '''
         Writes a human-readable Markdown report for the completed Auto mode run.
@@ -6277,6 +6324,111 @@ class AutoContr(Controller):
             '![Final Replicate Diagnostic](../Plots/lambda_replicates_final.png)'
         )
         lines.append('')
+
+        design_plot_lines = []
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_1d.png',
+                title='Initial Training Design: 1D Reagent Space',
+                caption=(
+                    'The initial seed design and optimizer-selected conditions '
+                    'are shown in one-dimensional executable reagent space. '
+                    'This plot is generated from copied condition-level Auto '
+                    'performance rows and does not modify run data.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_2d.png',
+                title='Initial Training Design: 2D Reagent Space',
+                caption=(
+                    'The initial seed design and optimizer-selected conditions '
+                    'are shown in two-dimensional executable reagent space. '
+                    'Axis labels follow the same reagent-name and mM convention '
+                    'used by the existing 2D GPR prediction and uncertainty '
+                    'plots.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_pairwise.png',
+                title='Pairwise Design-Space Projections',
+                caption=(
+                    'Pairwise projections show the Auto conditions across all '
+                    'two-reagent combinations. These projections are the primary '
+                    'static visualization for three-dimensional and moderate '
+                    'higher-dimensional reagent spaces.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_3d.png',
+                title='3D Initial Training Design',
+                caption=(
+                    'For three-variable Auto runs, this 3D scatter plot shows '
+                    'the full reagent-space position of the initial seed and '
+                    'optimizer-selected conditions.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_parallel_coordinates.png',
+                title='Parallel-Coordinate Design-Space Summary',
+                caption=(
+                    'The parallel-coordinate plot summarizes higher-dimensional '
+                    'recipe structure by min-max normalizing each reagent axis '
+                    'for display only. Raw concentration values are not modified.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_pairwise_compact.png',
+                title='Compact Pairwise Design-Space Projections',
+                caption=(
+                    'For high-dimensional Auto runs, the compact pairwise plot '
+                    'shows a limited set of reagent-pair projections to keep the '
+                    'report readable.'
+                )
+            )
+        )
+
+        design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='initial_training_design_pca.png',
+                title='PCA Projection of Auto Design Space',
+                caption=(
+                    'The PCA plot provides a two-dimensional summary of global '
+                    'design-space dispersion. PCA axes are reduced-dimensional '
+                    'coordinates and should not be interpreted as physical '
+                    'reagent axes.'
+                )
+            )
+        )
+
+        if len(design_plot_lines) > 0:
+            lines.append('## Initial Training Design Visualization')
+            lines.append('')
+            lines.append(
+                'The following plots visualize the initial seed design and any '
+                'optimizer-selected conditions in executable reagent-design '
+                'space. These plots are generated after the Auto run from copied '
+                'condition-level performance rows and are report-only '
+                'diagnostics.'
+            )
+            lines.append('')
+            lines.extend(design_plot_lines)
+
         lines.append('## Generated Files')
         lines.append('')
         lines.append(
@@ -6307,6 +6459,56 @@ class AutoContr(Controller):
                 'Final replicate-level lambda diagnostic plot'
             )
         )
+        
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join('Plots', 'initial_training_design_1d.png'),
+                'Initial training design 1D plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join('Plots', 'initial_training_design_2d.png'),
+                'Initial training design 2D plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join('Plots', 'initial_training_design_pairwise.png'),
+                'Initial training design pairwise projection plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join('Plots', 'initial_training_design_3d.png'),
+                'Initial training design 3D plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    'initial_training_design_parallel_coordinates.png'
+                ),
+                'Initial training design parallel-coordinate plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    'initial_training_design_pairwise_compact.png'
+                ),
+                'Initial training design compact pairwise plot'
+            )
+        )
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join('Plots', 'initial_training_design_pca.png'),
+                'Initial training design PCA plot'
+            )
+        )
+        
         lines.append(
             self._auto_report_file_line(
                 os.path.join('Debug', 'terminal_output.txt'),
