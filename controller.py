@@ -7846,6 +7846,18 @@ class AutoContr(Controller):
             plot_title=rf'Final Auto Replicate $\lambda_{{\max}}$ Values'
         )
 
+        # Save final design-space plots after the condition-level performance
+        # log and final lambda plots have been exported. These plots are
+        # report-only diagnostics and must never block Auto mode completion.
+        try:
+            self._plot_initial_training_designs_after_run()
+        except Exception as exc:
+            print(
+                "<<controller warning>> initial training design plotting "
+                "failed; continuing Auto mode without design-space plots. "
+                f"Error: {exc}"
+            )
+
         # Save the human-readable Auto run report after the core CSVs and final
         # plots have been exported, so the generated-files section can detect
         # them correctly.
