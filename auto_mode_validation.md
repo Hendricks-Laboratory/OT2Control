@@ -4,13 +4,13 @@
 **Branch context:** Auto mode development branch  
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-06-15  
+**Updated through:** 2026-06-16  
 
 ---
 
 ## Purpose
 
-This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, RTG_008 real-reagent validation, later RTG_009/DEBUGRTG-style output validation, and the latest replicate-QC/plot-layout validation work.
+This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, RTG_008 real-reagent validation, later RTG_009/DEBUGRTG-style output validation, and the latest replicate-QC/plot-layout validation work, notebook-ready report formatting work, and read-only design-space plotting/report embedding work.
 
 It is intended as a branch-specific record of:
 
@@ -37,11 +37,15 @@ The current Auto mode branch has reached a substantially more mature validation 
 - condition-level stopping logic,
 - lambda-max progress plotting,
 - final Auto progress summary plotting,
-- optional display-capped error bars for readability,
+- fixed 300–1000 nm lambda-display-window plotting with error bars clipped only at the display boundary,
 - 2D GP prediction heatmaps,
 - 2D GP uncertainty heatmaps,
 - organized debug output folders,
 - terminal-output capture to the run-specific Debug folder,
+- notebook-ready Auto run report generation,
+- source-aligned padded Markdown condition tables,
+- read-only dimension-aware initial-training/design-space plotting,
+- conditional report embedding of generated design-space plots,
 - and a cleaner division between primary results and debug/audit artifacts.
 
 The latest validated debug run confirmed that the terminal-output capture and output-folder reorganization worked as intended.
@@ -69,6 +73,10 @@ The latest validated debug run confirmed that the terminal-output capture and ou
 | 2D GP prediction heatmap | Implemented and validated |
 | 2D GP uncertainty heatmap | Implemented and validated |
 | Terminal output saved to Debug folder | Implemented and validated |
+| Notebook-ready Auto run report | Implemented and validated |
+| Padded Markdown compact condition table | Implemented and validated |
+| Read-only initial-training/design-space plots | Implemented and wired defensively |
+| Conditional design-plot report embedding | Implemented and validated by compile |
 | Auto recipe-design exports moved to Debug subfolder | Implemented and validated |
 | Optimizer duplicate max-iteration print | Removed / controller owns user-facing stop print |
 | Water-used tip handling | Deferred |
@@ -1203,6 +1211,181 @@ This is expected with no jitter.
 
 ---
 
+## June 16, 2026 — Notebook-Ready Report Tables and Read-Only Design-Space Visualization
+
+### Purpose
+
+This update improved the Auto mode reporting layer without changing optimizer behavior, recipe generation, QC handling, model training, robot execution, spreadsheet-triggered plot rows, or the existing 2D GPR prediction/uncertainty heatmaps.
+
+The objective was to make each completed Auto run more self-documenting and notebook-ready by:
+
+- cleaning up the compact condition table in `auto_run_report.md`,
+- preserving raw Markdown readability for Git diffs and notebook review,
+- adding read-only design-space visualizations of initial seed and optimizer-selected conditions,
+- wiring design-space plot generation defensively into the final run export path,
+- and conditionally embedding generated design-space plots in the Markdown report.
+
+### Report table formatting update
+
+The Auto report now uses reusable Markdown table-formatting helpers rather than manually concatenated pipe-table strings.
+
+New report-helper behavior includes:
+
+- escaping pipe characters and line breaks inside table cells,
+- replacing missing compact-table values with `—`,
+- formatting scalar numeric values more compactly,
+- formatting replicate lists as clean comma-separated values rather than code-like list strings,
+- and generating padded Markdown source tables so raw `.md` output aligns cleanly in text editors and Git diffs.
+
+This fixes the issue where the rendered Markdown table was valid but the raw inline table grid appeared visually misaligned in source view.
+
+### Compact condition table behavior
+
+The compact condition table remains condition-level and includes:
+
+- condition number,
+- batch number,
+- condition type,
+- predicted λmax,
+- GP SD,
+- raw λmax replicate values,
+- QC-used λmax replicate values,
+- mean λmax,
+- target error,
+- and replicate QC status.
+
+The update is formatting-only. It does not change the condition-level data, raw well-level data, QC-cleaned values, excluded replicate preservation, prediction values, or target-error calculations.
+
+### Design-space plotting subsystem
+
+A read-only, dimension-aware plotting subsystem was added for initial-training/design-space visualization.
+
+The subsystem reads from a deep copy of:
+
+```python
+self.auto_model_performance_rows
+```
+
+and detects variable reagent concentration columns based on the existing convention:
+
+```text
+<reagent_name>_concentration
+```
+
+Visible axis labels follow the same convention already used by the existing 2D GPR heatmaps:
+
+```text
+<reagent_name> (mM)
+```
+
+This keeps the new 2D design-space plots visually consistent with the already implemented 2D GPR prediction and uncertainty plots.
+
+### Automatic design-space plot behavior
+
+The dispatcher `_plot_initial_training_designs_after_run()` generates plots based on the number of detected variable reagent concentration columns.
+
+| Variable reagent count | Automatically generated design-space plots |
+|---:|---|
+| 0 | no plot; warning only |
+| 1 | `initial_training_design_1d.png` |
+| 2 | `initial_training_design_2d.png` |
+| 3 | `initial_training_design_pairwise.png` and `initial_training_design_3d.png` |
+| 4–6 | `initial_training_design_pairwise.png` and `initial_training_design_parallel_coordinates.png` |
+| 7+ | `initial_training_design_pairwise_compact.png`, `initial_training_design_parallel_coordinates.png`, and `initial_training_design_pca.png` |
+
+For exactly three variable reagents, the 3D scatter plot is intentionally generated every time, not treated as optional.
+
+### Defensive plotting behavior
+
+Design-space plotting is deliberately non-critical. The final `_run()` path now calls the dispatcher after final lambda plots and before report generation:
+
+```text
+_export_auto_model_performance_log()
+_plot_lambda_progress_after_batch(... final ...)
+_plot_lambda_replicate_progress_after_batch(... final ...)
+_plot_initial_training_designs_after_run()
+_write_auto_run_report()
+```
+
+The design-space plotting call is wrapped in `try/except`, and each individual plot type is also guarded inside the dispatcher.
+
+Expected failure behavior:
+
+- a plotting failure prints a controller warning,
+- Auto mode continues,
+- robot shutdown is not blocked,
+- CSV export is not blocked,
+- final lambda plots are not blocked,
+- and report generation is not blocked.
+
+### Report embedding behavior
+
+The report now conditionally embeds generated design-space plots. The helper `_auto_report_plot_markdown_if_exists()` checks whether a plot exists before adding Markdown image references.
+
+The report can now include:
+
+- 1D reagent-space design plots,
+- 2D reagent-space design plots,
+- pairwise design-space projections,
+- mandatory 3D design-space scatter plots for three-variable runs,
+- parallel-coordinate design summaries,
+- compact pairwise high-dimensional summaries,
+- and PCA design-space summaries.
+
+Only plots that actually exist are embedded in the report. The `Generated Files` section lists all possible design-space plot outputs as present or not generated.
+
+### Spreadsheet input-template decision
+
+No change was made to the spreadsheet-triggered plotting rows.
+
+The current recommended plot rows remain:
+
+```text
+plot | auto_scan | auto_plot       | 2d_gpr
+plot | auto_scan | auto_uv_overlay | OVERLAY
+```
+
+The new design-space plots are intentionally generated from the controller after the Auto run is complete, rather than from the spreadsheet input template. This prevents the new reporting plots from interfering with existing scan-driven plot behavior.
+
+This preserves the existing roles:
+
+| Plot family | Trigger/source | Purpose |
+|---|---|---|
+| `2d_gpr` | spreadsheet plot row | GP prediction and uncertainty heatmaps |
+| `OVERLAY` | spreadsheet plot row | UV-vis scan overlays |
+| `initial_training_design_*` | final controller export path | executable design-space visualization |
+
+### Validation checkpoint
+
+`controller(162).py` was syntax/compile validated after these changes.
+
+Confirmed implementation state:
+
+- report table helpers present once,
+- old `_markdown_safe` and `_condition_table_value` references removed,
+- read-only design-space plot methods present once,
+- design-space dispatcher present once,
+- design-space plotting wired into `_run()` with defensive `try/except`,
+- design-space plots generated before report generation,
+- optional report plot-embedding helper present,
+- `auto_run_report.md` conditionally embeds generated design-space plots,
+- `Generated Files` records design-space plot presence/absence,
+- existing spreadsheet-driven `2d_gpr` and `OVERLAY` behavior preserved,
+- no changes made to optimizer, QC, model training, recipe generation, robot execution, or loop data.
+
+### Remaining validation task
+
+The next validation task is to run or simulate against a completed Auto output folder such as `DEBUGRTG_007` and confirm:
+
+- expected design-space PNG files are created for the detected dimensionality,
+- generated plots use correct reagent labels and units,
+- report image links render correctly,
+- padded Markdown condition table aligns in raw source view,
+- `Generated Files` correctly marks design plots as present or not generated,
+- and design-space plotting remains warning-only if a plot fails.
+
+---
+
 # Current Technical Architecture
 
 ## 1. Optimizer model and masks
@@ -1821,7 +2004,7 @@ Later improvements may include:
 
 ## Current status
 
-The Auto mode branch has passed the main optimizer/protocol validation milestone for mixed mask optimization and volume-safe recipe generation. It has also passed a major output-validation milestone for condition-level logging, lambda progress plotting, GP heatmaps, terminal-output capture, and debug-folder organization.
+The Auto mode branch has passed the main optimizer/protocol validation milestone for mixed mask optimization and volume-safe recipe generation. It has also passed a major output-validation milestone for condition-level logging, lambda progress plotting, GP heatmaps, terminal-output capture, debug-folder organization, notebook-ready report formatting, and read-only design-space plot/report integration.
 
 ## Validated
 
@@ -1836,11 +2019,15 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - condition-level Auto model-performance logging,
 - condition-level stopping logic,
 - final lambda progress plot export,
-- display-capped error-bar annotation behavior,
+- fixed-window lambda display with boundary-clipped error-bar annotation behavior,
 - 2D GP prediction heatmap generation,
 - 2D GP uncertainty heatmap generation,
 - terminal-output capture to `Debug/terminal_output.txt`,
 - recipe-design debug export relocation to `Debug/auto_recipe_design/`,
+- notebook-ready report table formatting,
+- read-only design-space plotting methods,
+- defensive design-space plot generation from `_run()`,
+- conditional design-space plot embedding in `auto_run_report.md`,
 - and optimizer/controller stop-message cleanup.
 
 ## Deferred
@@ -1853,7 +2040,7 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - larger autonomous scale-up.
 
 ## Recommended immediate next step
-
+Dry Debug run after break
 Continue with small, cautious real-chemistry validation/scale-up using conservative settings, then review:
 
 - spectra,
