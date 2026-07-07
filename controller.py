@@ -6706,16 +6706,20 @@ class AutoContr(Controller):
         errors,
         condition_numbers,
         y_min_nm=300.0,
-        y_max_nm=1000.0
+        y_max_nm=1000.0,
+        cap_visibility_pad_nm=5.0
     ):
         '''
         Clips vertical error bars to the displayed lambda-max window.
 
         This is display-only. Raw SEM/SD values remain unchanged in the Auto
-        performance log. Error bars are allowed to span the full visible
+        performance log. Error bars are allowed to span nearly the full visible
         lambda-max display range. If a raw error bar would extend below or above
-        that display window, the displayed bar is clipped to the window and the
-        condition number is returned for plot annotation.
+        that display window, the displayed bar is clipped slightly inside the
+        window and the condition number is returned for plot annotation.
+
+        The small cap_visibility_pad_nm offset keeps clipped error-bar caps
+        visible instead of drawing them exactly underneath the plot axes.
 
         params:
             array-like means:
@@ -6732,6 +6736,10 @@ class AutoContr(Controller):
 
             float y_max_nm:
                 Upper displayed lambda-max bound.
+
+            float cap_visibility_pad_nm:
+                Display-only padding used to keep clipped error-bar caps visible
+                just inside the axis limits.
 
         returns:
             tuple:
@@ -6754,18 +6762,47 @@ class AutoContr(Controller):
             neginf=0.0
         )
 
-        lower_available = np.maximum(means - y_min_nm, 0.0)
-        upper_available = np.maximum(y_max_nm - means, 0.0)
-
-        lower_display_errors = np.minimum(errors, lower_available)
-        upper_display_errors = np.minimum(errors, upper_available)
-
         raw_lower_bounds = means - errors
         raw_upper_bounds = means + errors
 
-        clipped_mask = (
-            (raw_lower_bounds < y_min_nm)
-            | (raw_upper_bounds > y_max_nm)
+        clipped_low_mask = raw_lower_bounds < y_min_nm
+        clipped_high_mask = raw_upper_bounds > y_max_nm
+
+        clipped_mask = clipped_low_mask | clipped_high_mask
+
+        lower_clip_boundary = y_min_nm + cap_visibility_pad_nm
+        upper_clip_boundary = y_max_nm - cap_visibility_pad_nm
+
+        if lower_clip_boundary >= upper_clip_boundary:
+            lower_clip_boundary = y_min_nm
+            upper_clip_boundary = y_max_nm
+
+        lower_available_to_axis = np.maximum(means - y_min_nm, 0.0)
+        upper_available_to_axis = np.maximum(y_max_nm - means, 0.0)
+
+        lower_available_to_visible_cap = np.maximum(
+            means - lower_clip_boundary,
+            0.0
+        )
+
+        upper_available_to_visible_cap = np.maximum(
+            upper_clip_boundary - means,
+            0.0
+        )
+
+        lower_display_errors = np.minimum(errors, lower_available_to_axis)
+        upper_display_errors = np.minimum(errors, upper_available_to_axis)
+
+        lower_display_errors = np.where(
+            clipped_low_mask,
+            lower_available_to_visible_cap,
+            lower_display_errors
+        )
+
+        upper_display_errors = np.where(
+            clipped_high_mask,
+            upper_available_to_visible_cap,
+            upper_display_errors
         )
 
         clipped_condition_numbers = condition_numbers[
