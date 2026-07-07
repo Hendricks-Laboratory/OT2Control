@@ -6707,7 +6707,8 @@ class AutoContr(Controller):
         condition_numbers,
         y_min_nm=300.0,
         y_max_nm=1000.0,
-        cap_visibility_pad_nm=5.0
+        lower_cap_visibility_pad_nm=15.0,
+        upper_cap_visibility_pad_nm=5.0
     ):
         '''
         Clips vertical error bars to the displayed lambda-max window.
@@ -6718,8 +6719,10 @@ class AutoContr(Controller):
         that display window, the displayed bar is clipped slightly inside the
         window and the condition number is returned for plot annotation.
 
-        The small cap_visibility_pad_nm offset keeps clipped error-bar caps
-        visible instead of drawing them exactly underneath the plot axes.
+        The lower and upper cap visibility pads are intentionally separate.
+        The lower cap needs more padding to remain visible above the thick
+        x-axis spine, while the upper cap can stay closer to the 1000 nm display
+        boundary.
 
         params:
             array-like means:
@@ -6737,9 +6740,13 @@ class AutoContr(Controller):
             float y_max_nm:
                 Upper displayed lambda-max bound.
 
-            float cap_visibility_pad_nm:
-                Display-only padding used to keep clipped error-bar caps visible
-                just inside the axis limits.
+            float lower_cap_visibility_pad_nm:
+                Display-only padding used to keep lower clipped error-bar caps
+                visible just above the lower axis limit.
+
+            float upper_cap_visibility_pad_nm:
+                Display-only padding used to keep upper clipped error-bar caps
+                visible just below the upper axis limit.
 
         returns:
             tuple:
@@ -6770,8 +6777,8 @@ class AutoContr(Controller):
 
         clipped_mask = clipped_low_mask | clipped_high_mask
 
-        lower_clip_boundary = y_min_nm + cap_visibility_pad_nm
-        upper_clip_boundary = y_max_nm - cap_visibility_pad_nm
+        lower_clip_boundary = y_min_nm + lower_cap_visibility_pad_nm
+        upper_clip_boundary = y_max_nm - upper_cap_visibility_pad_nm
 
         if lower_clip_boundary >= upper_clip_boundary:
             lower_clip_boundary = y_min_nm
