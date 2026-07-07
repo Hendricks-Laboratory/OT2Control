@@ -6765,8 +6765,8 @@ class AutoContr(Controller):
         raw_lower_bounds = means - errors
         raw_upper_bounds = means + errors
 
-        clipped_low_mask = raw_lower_bounds < y_min_nm
-        clipped_high_mask = raw_upper_bounds > y_max_nm
+        clipped_low_mask = raw_lower_bounds <= y_min_nm
+        clipped_high_mask = raw_upper_bounds >= y_max_nm
 
         clipped_mask = clipped_low_mask | clipped_high_mask
 
@@ -7026,7 +7026,7 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number', labelpad=2)
+        ax.set_xlabel('Reaction condition number', labelpad=5)
         ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
 
         if plot_title is None:
@@ -7039,8 +7039,8 @@ class AutoContr(Controller):
             plot_title,
             fontsize=11,
             fontweight='normal',
-            y=0.97
-        )
+            y=0.965
+            )
 
         ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
@@ -7064,16 +7064,18 @@ class AutoContr(Controller):
         legend_handles.append(target_handle)
         legend_labels.append(f'Target = {target_lambda:.0f} nm')
 
-        fig.legend(
+        ax.legend(
             legend_handles,
             legend_labels,
-            loc='upper center',
-            bbox_to_anchor=(0.5, 0.915),
-            ncol=len(legend_handles),
+            loc='lower center',
+            bbox_to_anchor=(0.5, 1.015),
+            ncol=min(len(legend_handles), 4),
             frameon=False,
-            fontsize=8.5,
-            handlelength=1.6,
-            columnspacing=1.4
+            fontsize=8.0,
+            handlelength=1.2,
+            handletextpad=0.45,
+            columnspacing=0.9,
+            borderaxespad=0.0
         )
 
         def _format_clipped_condition_list(condition_numbers):
