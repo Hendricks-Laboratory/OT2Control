@@ -7144,7 +7144,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=bottom_margin,
-            top=0.80
+            top=0.86
         )
 
         if plot_filename is None:
