@@ -3842,6 +3842,152 @@ class AutoContr(Controller):
         exists_text = 'present' if os.path.exists(full_path) else 'not found'
         return f'- {label}: `{relative_path}` ({exists_text})'
     
+    def _summarize_auto_run_status_for_report(self):
+        '''
+        Summarizes terminal-output run status for the Auto Markdown report.
+
+        This is report-only. It reads Debug/terminal_output.txt if present and
+        attempts to distinguish true Auto run failure from post-success cleanup
+        warnings.
+
+        params:
+            None
+
+        returns:
+            dict:
+                Run-status summary fields for auto_run_report.md.
+        '''
+        terminal_path = os.path.join(
+            self.out_path,
+            'Debug',
+            'terminal_output.txt'
+        )
+
+        terminal_text = ''
+        terminal_output_present = False
+        terminal_read_error = None
+
+        try:
+            if os.path.exists(terminal_path):
+                terminal_output_present = True
+                with open(
+                    terminal_path,
+                    'r',
+                    encoding='utf-8',
+                    errors='replace'
+                ) as terminal_file:
+                    terminal_text = terminal_file.read()
+        except Exception as exc:
+            terminal_read_error = str(exc)
+            terminal_text = ''
+
+        success_marker_found = 'Success!!!' in terminal_text
+
+        if 'Exit due to max_iters' in terminal_text:
+            exit_reason = 'max_iters reached'
+        elif 'max_iters' in terminal_text:
+            exit_reason = 'max_iters mentioned'
+        elif success_marker_found:
+            exit_reason = 'success marker reached'
+        elif terminal_output_present:
+            exit_reason = 'not identified from terminal output'
+        else:
+            exit_reason = 'terminal output not found'
+
+        success_index = terminal_text.find('Success!!!')
+
+        if success_index >= 0:
+            pre_success_text = terminal_text[:success_index]
+            post_success_text = terminal_text[success_index:]
+        else:
+            pre_success_text = terminal_text
+            post_success_text = ''
+
+        pre_success_traceback_found = 'Traceback' in pre_success_text
+
+        pre_success_exception_found = (
+            'Exception' in pre_success_text
+            or 'exception' in pre_success_text
+        )
+
+        post_success_cleanup_warning_found = False
+
+        if success_marker_found:
+            post_success_cleanup_warning_found = (
+                'Traceback' in post_success_text
+                or 'Exception' in post_success_text
+                or 'exception' in post_success_text
+                or 'WARNING' in post_success_text
+                or 'warning' in post_success_text
+                or 'Eve' in post_success_text
+                or 'serial' in post_success_text
+                or 'teardown' in post_success_text
+            )
+
+        report_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            'auto_run_report.md'
+        )
+
+        performance_log_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            'auto_model_performance_log.csv'
+        )
+
+        experiment_data_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            'experiment_data.csv'
+        )
+
+        final_progress_plot_path = os.path.join(
+            self.out_path,
+            'Plots',
+            'lambda_progress_final.png'
+        )
+
+        final_replicate_plot_path = os.path.join(
+            self.out_path,
+            'Plots',
+            'lambda_replicates_final.png'
+        )
+
+        if success_marker_found and not pre_success_traceback_found:
+            completion_status = 'Success'
+        elif pre_success_traceback_found or pre_success_exception_found:
+            completion_status = 'Possible failure before success marker'
+        elif terminal_output_present:
+            completion_status = 'Unknown'
+        else:
+            completion_status = 'Unknown; terminal output not found'
+
+        if terminal_read_error is not None:
+            completion_status = 'Unknown; terminal output read error'
+
+        return {
+            'completion_status': completion_status,
+            'exit_reason': exit_reason,
+            'terminal_output_present': terminal_output_present,
+            'terminal_read_error': terminal_read_error,
+            'success_marker_found': success_marker_found,
+            'pre_success_traceback_found': pre_success_traceback_found,
+            'pre_success_exception_found': pre_success_exception_found,
+            'post_success_cleanup_warning_found': (
+                post_success_cleanup_warning_found
+            ),
+            'experiment_data_exported': os.path.exists(experiment_data_path),
+            'performance_log_exported': os.path.exists(performance_log_path),
+            'report_export_path': report_path,
+            'final_progress_plot_exported': os.path.exists(
+                final_progress_plot_path
+            ),
+            'final_replicate_plot_exported': os.path.exists(
+                final_replicate_plot_path
+            )
+        }
+    
     def _escape_auto_report_markdown_table_value(self, value):
         '''
         Escapes values for safe insertion into a Markdown table cell.
@@ -5530,6 +5676,8 @@ class AutoContr(Controller):
 
         n_conditions = len(getattr(self, 'auto_model_performance_rows', []))
 
+        run_status_summary = self._summarize_auto_run_status_for_report()
+
         try:
             performance_df = pd.DataFrame(self.auto_model_performance_rows)
         except Exception:
@@ -6044,6 +6192,115 @@ class AutoContr(Controller):
         lines.append('## Executive Scientific Summary')
         lines.append('')
         lines.append(executive_summary)
+        lines.append('')
+
+        lines.append('## Run Status')
+        lines.append('')
+
+        run_status_rows = [
+            [
+                'Completion status',
+                run_status_summary['completion_status']
+            ],
+            [
+                'Exit reason',
+                run_status_summary['exit_reason']
+            ],
+            [
+                'Terminal output present',
+                'yes' if run_status_summary[
+                    'terminal_output_present'
+                ] else 'no'
+            ],
+            [
+                'Success marker found',
+                'yes' if run_status_summary[
+                    'success_marker_found'
+                ] else 'no'
+            ],
+            [
+                'Pre-success traceback detected',
+                'yes' if run_status_summary[
+                    'pre_success_traceback_found'
+                ] else 'no'
+            ],
+            [
+                'Pre-success exception detected',
+                'yes' if run_status_summary[
+                    'pre_success_exception_found'
+                ] else 'no'
+            ],
+            [
+                'Post-success cleanup warning detected',
+                'yes' if run_status_summary[
+                    'post_success_cleanup_warning_found'
+                ] else 'no'
+            ],
+            [
+                'Experiment data exported',
+                'yes' if run_status_summary[
+                    'experiment_data_exported'
+                ] else 'no'
+            ],
+            [
+                'Performance log exported',
+                'yes' if run_status_summary[
+                    'performance_log_exported'
+                ] else 'no'
+            ],
+            [
+                'Final progress plot exported',
+                'yes' if run_status_summary[
+                    'final_progress_plot_exported'
+                ] else 'no'
+            ],
+            [
+                'Final replicate plot exported',
+                'yes' if run_status_summary[
+                    'final_replicate_plot_exported'
+                ] else 'no'
+            ]
+        ]
+
+        lines.extend(
+            self._build_padded_auto_report_markdown_table(
+                ['Field', 'Value'],
+                run_status_rows,
+                alignments=['left', 'left']
+            )
+        )
+
+        lines.append('')
+
+        if run_status_summary['completion_status'] == 'Success':
+            if run_status_summary[
+                'post_success_cleanup_warning_found'
+            ]:
+                lines.append(
+                    'The Auto run appears to have completed successfully. '
+                    'A possible post-success cleanup warning was detected in '
+                    'the terminal output, so review `Debug/terminal_output.txt` '
+                    'if device shutdown behavior needs to be audited.'
+                )
+            else:
+                lines.append(
+                    'The Auto run appears to have completed successfully, and '
+                    'no post-success cleanup warning was detected.'
+                )
+        else:
+            lines.append(
+                'The Auto run status could not be confirmed as a clean '
+                'success from the terminal output. Review '
+                '`Debug/terminal_output.txt` before treating this run as final.'
+            )
+
+        if run_status_summary['terminal_read_error'] is not None:
+            lines.append('')
+            lines.append(
+                'Terminal-output read error: '
+                f"`{run_status_summary['terminal_read_error']}`"
+            )
+
         lines.append('')
         lines.append('## Experiment Overview')
         lines.append('')
