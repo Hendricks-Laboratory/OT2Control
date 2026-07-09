@@ -7202,13 +7202,43 @@ class AutoContr(Controller):
             spine.set_linewidth(0.9)
             spine.set_color('0.2')
 
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+
         ax.tick_params(
             axis='both',
             which='both',
             direction='out',
             top=False,
-            right=False
+            right=False,
+            labelsize=font_sizes['tick_label']
         )
+    
+    def _get_auto_lambda_plot_font_sizes(self, scale_factor=1.25):
+        '''
+        Returns centralized font sizes for Auto lambda progress and replicate
+        diagnostic plots.
+
+        The scale factor makes the exported plots more readable in slides while
+        keeping the proportions controlled and consistent between companion
+        lambda plots.
+
+        params:
+            float scale_factor:
+                Multiplicative font-size scale applied to the previous base
+                Auto lambda plot font sizes.
+
+        returns:
+            dict:
+                Font-size values for titles, labels, ticks, legends, and footer
+                annotations.
+        '''
+        return {
+            'title': 11.0 * scale_factor,
+            'axis_label': 10.0 * scale_factor,
+            'tick_label': 10.0 * scale_factor,
+            'legend': 8.0 * scale_factor,
+            'footer': 7.3 * scale_factor
+        }
     
     def _plot_lambda_progress_after_batch(
         self,
@@ -7337,6 +7367,8 @@ class AutoContr(Controller):
         model_color = 'tab:orange'
         target_color = '0.25'
 
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+
         fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
 
         target_handle = ax.axhline(
@@ -7418,8 +7450,16 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number', labelpad=5)
-        ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
+        ax.set_xlabel(
+            'Reaction condition number',
+            fontsize=font_sizes['axis_label'],
+            labelpad=5
+        )
+
+        ax.set_ylabel(
+            r'$\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
 
         if plot_title is None:
             plot_title = (
@@ -7429,10 +7469,10 @@ class AutoContr(Controller):
 
         fig.suptitle(
             plot_title,
-            fontsize=11,
+            fontsize=font_sizes['title'],
             fontweight='normal',
             y=0.965
-            )
+        )
 
         ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
@@ -7455,7 +7495,7 @@ class AutoContr(Controller):
             bbox_to_anchor=(0.5, 1.015),
             ncol=min(len(legend_handles), 4),
             frameon=False,
-            fontsize=8.0,
+            fontsize=font_sizes['legend'],
             handlelength=1.2,
             handletextpad=0.45,
             columnspacing=0.9,
@@ -7516,7 +7556,7 @@ class AutoContr(Controller):
                 display_note,
                 ha='center',
                 va='center',
-                fontsize=7.3,
+                fontsize=font_sizes['footer'],
                 color='0.35'
             )
 
@@ -7749,6 +7789,8 @@ class AutoContr(Controller):
         excluded_color = 'tab:red'
         model_color = 'tab:orange'
 
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+
         fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
 
         target_handle = ax.axhline(
@@ -7841,8 +7883,16 @@ class AutoContr(Controller):
         integer_ticks = performance_df['reaction_number'].astype(int).to_list()
         ax.set_xticks(integer_ticks)
 
-        ax.set_xlabel('Reaction condition number', labelpad=5)
-        ax.set_ylabel(r'$\lambda_{\max}$ (nm)')
+        ax.set_xlabel(
+            'Reaction condition number',
+            fontsize=font_sizes['axis_label'],
+            labelpad=5
+        )
+
+        ax.set_ylabel(
+            r'$\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
 
         if plot_title is None:
             plot_title = (
@@ -7852,7 +7902,7 @@ class AutoContr(Controller):
 
         fig.suptitle(
             plot_title,
-            fontsize=11,
+            fontsize=font_sizes['title'],
             fontweight='normal',
             y=0.965
         )
@@ -7886,7 +7936,7 @@ class AutoContr(Controller):
             bbox_to_anchor=(0.5, 1.015),
             ncol=min(len(legend_handles), 4),
             frameon=False,
-            fontsize=8.0,
+            fontsize=font_sizes['legend'],
             handlelength=1.2,
             handletextpad=0.45,
             columnspacing=0.9,
@@ -7967,7 +8017,7 @@ class AutoContr(Controller):
                 plot_note,
                 ha='center',
                 va='center',
-                fontsize=7.3,
+                fontsize=font_sizes['footer'],
                 color='0.35'
             )
 
