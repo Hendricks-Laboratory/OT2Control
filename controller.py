@@ -4169,6 +4169,7 @@ class AutoContr(Controller):
         updated_report_text = (
             report_text[:section_start]
             + refreshed_status_text
+            + '\n'
             + report_text[section_end:]
         )
 
