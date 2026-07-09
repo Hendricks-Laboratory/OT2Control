@@ -3924,11 +3924,6 @@ class AutoContr(Controller):
                 or 'teardown' in post_success_text
             )
 
-        report_path = os.path.join(
-            self.out_path,
-            'pr_data',
-            'auto_run_report.md'
-        )
 
         performance_log_path = os.path.join(
             self.out_path,
@@ -3979,7 +3974,6 @@ class AutoContr(Controller):
             ),
             'experiment_data_exported': os.path.exists(experiment_data_path),
             'performance_log_exported': os.path.exists(performance_log_path),
-            'report_export_path': report_path,
             'final_progress_plot_exported': os.path.exists(
                 final_progress_plot_path
             ),
