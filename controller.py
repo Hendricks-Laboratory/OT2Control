@@ -7062,8 +7062,8 @@ class AutoContr(Controller):
         condition_numbers,
         y_min_nm=300.0,
         y_max_nm=1000.0,
-        lower_cap_visibility_pad_nm=15.0,
-        upper_cap_visibility_pad_nm=5.0
+        lower_cap_visibility_pad_nm=2.0,
+        upper_cap_visibility_pad_nm=2.0
     ):
         '''
         Clips vertical error bars to the displayed lambda-max window.
@@ -7074,10 +7074,9 @@ class AutoContr(Controller):
         that display window, the displayed bar is clipped slightly inside the
         window and the condition number is returned for plot annotation.
 
-        The lower and upper cap visibility pads are intentionally separate.
-        The lower cap needs more padding to remain visible above the thick
-        x-axis spine, while the upper cap can stay closer to the 1000 nm display
-        boundary.
+        The lower and upper cap visibility pads are intentionally configurable.
+        They keep clipped caps just inside the boxed plot frame while preserving
+        the fixed displayed lambda-max window.
 
         params:
             array-like means:
