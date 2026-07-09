@@ -3982,6 +3982,213 @@ class AutoContr(Controller):
             )
         }
     
+    def _build_auto_run_status_report_lines(self, run_status_summary):
+        '''
+        Builds the Auto Run Status Markdown section.
+
+        This helper is used both when auto_run_report.md is first written and
+        when the Run Status section is refreshed later after the terminal log
+        has received the final success/shutdown output.
+
+        params:
+            dict run_status_summary:
+                Output from _summarize_auto_run_status_for_report().
+
+        returns:
+            list:
+                Markdown lines for the Run Status section.
+        '''
+        lines = []
+
+        lines.append('## Run Status')
+        lines.append('')
+
+        run_status_rows = [
+            [
+                'Completion status',
+                run_status_summary['completion_status']
+            ],
+            [
+                'Exit reason',
+                run_status_summary['exit_reason']
+            ],
+            [
+                'Terminal output present',
+                'yes' if run_status_summary[
+                    'terminal_output_present'
+                ] else 'no'
+            ],
+            [
+                'Success marker found',
+                'yes' if run_status_summary[
+                    'success_marker_found'
+                ] else 'no'
+            ],
+            [
+                'Pre-success traceback detected',
+                'yes' if run_status_summary[
+                    'pre_success_traceback_found'
+                ] else 'no'
+            ],
+            [
+                'Pre-success exception detected',
+                'yes' if run_status_summary[
+                    'pre_success_exception_found'
+                ] else 'no'
+            ],
+            [
+                'Post-success cleanup warning detected',
+                'yes' if run_status_summary[
+                    'post_success_cleanup_warning_found'
+                ] else 'no'
+            ],
+            [
+                'Experiment data exported',
+                'yes' if run_status_summary[
+                    'experiment_data_exported'
+                ] else 'no'
+            ],
+            [
+                'Performance log exported',
+                'yes' if run_status_summary[
+                    'performance_log_exported'
+                ] else 'no'
+            ],
+            [
+                'Final progress plot exported',
+                'yes' if run_status_summary[
+                    'final_progress_plot_exported'
+                ] else 'no'
+            ],
+            [
+                'Final replicate plot exported',
+                'yes' if run_status_summary[
+                    'final_replicate_plot_exported'
+                ] else 'no'
+            ]
+        ]
+
+        lines.extend(
+            self._build_padded_auto_report_markdown_table(
+                ['Field', 'Value'],
+                run_status_rows,
+                alignments=['left', 'left']
+            )
+        )
+
+        lines.append('')
+
+        if run_status_summary['completion_status'] == 'Success':
+            if run_status_summary[
+                'post_success_cleanup_warning_found'
+            ]:
+                lines.append(
+                    'The Auto run appears to have completed successfully. '
+                    'A possible post-success cleanup warning was detected in '
+                    'the terminal output, so review `Debug/terminal_output.txt` '
+                    'if device shutdown behavior needs to be audited.'
+                )
+            else:
+                lines.append(
+                    'The Auto run appears to have completed successfully, and '
+                    'no post-success cleanup warning was detected.'
+                )
+        else:
+            lines.append(
+                'The Auto run status could not be confirmed as a clean '
+                'success from the terminal output. Review '
+                '`Debug/terminal_output.txt` before treating this run as final.'
+            )
+
+        if run_status_summary['terminal_read_error'] is not None:
+            lines.append('')
+            lines.append(
+                'Terminal-output read error: '
+                f"`{run_status_summary['terminal_read_error']}`"
+            )
+
+        lines.append('')
+
+        return lines
+
+    def _refresh_auto_run_status_section_in_report(self):
+        '''
+        Refreshes only the Run Status section in auto_run_report.md.
+
+        This is used after the final success marker and normal shutdown steps
+        have written additional terminal output. It keeps the scientific report
+        content unchanged while updating the Run Status section from the more
+        complete terminal log.
+
+        params:
+            None
+
+        returns:
+            bool:
+                True if the Run Status section was refreshed, otherwise False.
+        '''
+        report_path = os.path.join(
+            self.out_path,
+            'pr_data',
+            'auto_run_report.md'
+        )
+
+        if not os.path.exists(report_path):
+            print(
+                '<<controller warning>> Auto run report status refresh skipped: '
+                f'report not found at {report_path}'
+            )
+            return False
+
+        try:
+            with open(report_path, 'r', encoding='utf-8') as report_file:
+                report_text = report_file.read()
+        except Exception as exc:
+            print(
+                '<<controller warning>> Auto run report status refresh skipped: '
+                f'could not read report: {exc}'
+            )
+            return False
+
+        section_start = report_text.find('## Run Status')
+        section_end = report_text.find('## Experiment Overview')
+
+        if section_start < 0 or section_end < 0 or section_end <= section_start:
+            print(
+                '<<controller warning>> Auto run report status refresh skipped: '
+                'could not locate Run Status section boundaries.'
+            )
+            return False
+
+        run_status_summary = self._summarize_auto_run_status_for_report()
+
+        refreshed_status_text = '\n'.join(
+            self._build_auto_run_status_report_lines(run_status_summary)
+        )
+
+        updated_report_text = (
+            report_text[:section_start]
+            + refreshed_status_text
+            + report_text[section_end:]
+        )
+
+        try:
+            with open(report_path, 'w', encoding='utf-8') as report_file:
+                report_file.write(updated_report_text)
+        except Exception as exc:
+            print(
+                '<<controller warning>> Auto run report status refresh failed: '
+                f'could not write report: {exc}'
+            )
+            return False
+
+        print(
+            '<<controller>> refreshed Auto run report Run Status section '
+            f'at {report_path}'
+        )
+
+        return True
+    
     def _escape_auto_report_markdown_table_value(self, value):
         '''
         Escapes values for safe insertion into a Markdown table cell.
@@ -6188,114 +6395,10 @@ class AutoContr(Controller):
         lines.append(executive_summary)
         lines.append('')
 
-        lines.append('## Run Status')
-        lines.append('')
-
-        run_status_rows = [
-            [
-                'Completion status',
-                run_status_summary['completion_status']
-            ],
-            [
-                'Exit reason',
-                run_status_summary['exit_reason']
-            ],
-            [
-                'Terminal output present',
-                'yes' if run_status_summary[
-                    'terminal_output_present'
-                ] else 'no'
-            ],
-            [
-                'Success marker found',
-                'yes' if run_status_summary[
-                    'success_marker_found'
-                ] else 'no'
-            ],
-            [
-                'Pre-success traceback detected',
-                'yes' if run_status_summary[
-                    'pre_success_traceback_found'
-                ] else 'no'
-            ],
-            [
-                'Pre-success exception detected',
-                'yes' if run_status_summary[
-                    'pre_success_exception_found'
-                ] else 'no'
-            ],
-            [
-                'Post-success cleanup warning detected',
-                'yes' if run_status_summary[
-                    'post_success_cleanup_warning_found'
-                ] else 'no'
-            ],
-            [
-                'Experiment data exported',
-                'yes' if run_status_summary[
-                    'experiment_data_exported'
-                ] else 'no'
-            ],
-            [
-                'Performance log exported',
-                'yes' if run_status_summary[
-                    'performance_log_exported'
-                ] else 'no'
-            ],
-            [
-                'Final progress plot exported',
-                'yes' if run_status_summary[
-                    'final_progress_plot_exported'
-                ] else 'no'
-            ],
-            [
-                'Final replicate plot exported',
-                'yes' if run_status_summary[
-                    'final_replicate_plot_exported'
-                ] else 'no'
-            ]
-        ]
-
         lines.extend(
-            self._build_padded_auto_report_markdown_table(
-                ['Field', 'Value'],
-                run_status_rows,
-                alignments=['left', 'left']
-            )
+            self._build_auto_run_status_report_lines(run_status_summary)
         )
 
-        lines.append('')
-
-        if run_status_summary['completion_status'] == 'Success':
-            if run_status_summary[
-                'post_success_cleanup_warning_found'
-            ]:
-                lines.append(
-                    'The Auto run appears to have completed successfully. '
-                    'A possible post-success cleanup warning was detected in '
-                    'the terminal output, so review `Debug/terminal_output.txt` '
-                    'if device shutdown behavior needs to be audited.'
-                )
-            else:
-                lines.append(
-                    'The Auto run appears to have completed successfully, and '
-                    'no post-success cleanup warning was detected.'
-                )
-        else:
-            lines.append(
-                'The Auto run status could not be confirmed as a clean '
-                'success from the terminal output. Review '
-                '`Debug/terminal_output.txt` before treating this run as final.'
-            )
-
-        if run_status_summary['terminal_read_error'] is not None:
-            lines.append('')
-            lines.append(
-                'Terminal-output read error: '
-                f"`{run_status_summary['terminal_read_error']}`"
-            )
-
-        lines.append('')
         lines.append('## Experiment Overview')
         lines.append('')
         lines.append(f'- Experiment name: `{experiment_name}`')
@@ -8363,10 +8466,12 @@ class AutoContr(Controller):
         self._write_auto_run_report()
 
         print("Success!!!")
-        
+
         self.close_connection()
         self.pr.shutdown()
-            
+
+        self._refresh_auto_run_status_section_in_report()
+
         return
     
     def duplicate_list_elements(self, list1, factor):
