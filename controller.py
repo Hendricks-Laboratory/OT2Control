@@ -7180,6 +7180,37 @@ class AutoContr(Controller):
 
         return display_yerr, clipped_condition_numbers
     
+    def _apply_auto_lambda_plot_lab_frame_style(self, ax):
+        '''
+        Applies lab-standard axis styling to Auto lambda plots.
+
+        This styling removes background grid lines while preserving explicitly
+        drawn scientific reference lines such as the target lambda line. It also
+        makes all four plot spines visible so exported plots have a complete
+        boxed frame.
+
+        params:
+            matplotlib.axes.Axes ax:
+                Axis object to style.
+
+        returns:
+            None
+        '''
+        ax.grid(False)
+
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.9)
+            spine.set_color('0.2')
+
+        ax.tick_params(
+            axis='both',
+            which='both',
+            direction='out',
+            top=False,
+            right=False
+        )
+    
     def _plot_lambda_progress_after_batch(
         self,
         batch_number,
@@ -7406,15 +7437,7 @@ class AutoContr(Controller):
 
         ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
-        ax.grid(
-            axis='y',
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
-        )
-
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        self._apply_auto_lambda_plot_lab_frame_style(ax)
 
         legend_handles = [observed_handle]
         legend_labels = [observed_label]
@@ -7837,15 +7860,7 @@ class AutoContr(Controller):
 
         ax.set_ylim(y_display_min_nm, y_display_max_nm)
 
-        ax.grid(
-            axis='y',
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
-        )
-
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        self._apply_auto_lambda_plot_lab_frame_style(ax)
 
         legend_handles = []
         legend_labels = []
