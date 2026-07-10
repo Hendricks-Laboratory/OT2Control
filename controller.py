@@ -7369,7 +7369,7 @@ class AutoContr(Controller):
 
         font_sizes = self._get_auto_lambda_plot_font_sizes()
 
-        fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=300)
 
         target_handle = ax.axhline(
             target_lambda,
@@ -7791,7 +7791,7 @@ class AutoContr(Controller):
 
         font_sizes = self._get_auto_lambda_plot_font_sizes()
 
-        fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=300)
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=300)
 
         target_handle = ax.axhline(
             target_lambda,
