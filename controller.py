@@ -4488,6 +4488,134 @@ class AutoContr(Controller):
         '''
         return f"{str(reagent_name)} (mM)"
 
+    def _get_auto_design_plot_font_sizes(self, scale_factor=1.25):
+        '''
+        Returns centralized font sizes for Auto design-space plots.
+
+        The standard sizes are intended to remain readable when figures are
+        inserted into slides while preserving smaller proportional text for
+        dense pairwise and three-dimensional figures.
+
+        params:
+            float scale_factor:
+                Multiplicative scale applied to the original design-plot font
+                sizes.
+
+        returns:
+            dict:
+                Font sizes for standard, compact, and 3D design-space plots.
+        '''
+        return {
+            'title': 11.0 * scale_factor,
+            'axis_label': 10.0 * scale_factor,
+            'tick_label': 10.0 * scale_factor,
+            'legend': 8.0 * scale_factor,
+            'annotation': 7.0 * scale_factor,
+            'compact_axis_label': 8.5 * scale_factor,
+            'compact_tick_label': 8.0 * scale_factor,
+            'three_d_axis_label': 9.0 * scale_factor,
+            'three_d_tick_label': 9.0 * scale_factor
+        }
+
+    def _apply_auto_design_plot_lab_frame_style(
+        self,
+        ax,
+        grid_axis='both',
+        compact=False
+    ):
+        '''
+        Applies lab-standard styling to two-dimensional Auto design-space axes.
+
+        Grid lines remain visible because they help communicate reagent-space
+        position. All four axis spines are shown to create a complete boxed
+        frame, and tick-label sizes use the centralized presentation-ready font
+        settings.
+
+        params:
+            matplotlib.axes.Axes ax:
+                Two-dimensional axis to style.
+
+            str grid_axis:
+                Matplotlib grid axis selection: x, y, or both.
+
+            bool compact:
+                Uses smaller tick text for dense pairwise projection figures.
+
+        returns:
+            None
+        '''
+        font_sizes = self._get_auto_design_plot_font_sizes()
+
+        ax.grid(
+            True,
+            axis=grid_axis,
+            linestyle=':',
+            linewidth=0.6,
+            alpha=0.35
+        )
+
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.9)
+            spine.set_color('0.2')
+
+        if compact:
+            tick_label_size = font_sizes['compact_tick_label']
+        else:
+            tick_label_size = font_sizes['tick_label']
+
+        ax.tick_params(
+            axis='both',
+            which='both',
+            direction='out',
+            top=False,
+            right=False,
+            labelsize=tick_label_size
+        )
+
+    def _apply_auto_design_plot_3d_lab_frame_style(self, ax):
+        '''
+        Applies lab-standard styling to three-dimensional Auto design-space axes.
+
+        Three-dimensional Matplotlib axes use pane edges instead of ordinary
+        top/right spines. This helper keeps the 3D grid visible, strengthens the
+        surrounding pane edges, and applies presentation-ready tick-label sizes.
+
+        params:
+            mpl_toolkits.mplot3d.axes3d.Axes3D ax:
+                Three-dimensional axis to style.
+
+        returns:
+            None
+        '''
+        font_sizes = self._get_auto_design_plot_font_sizes()
+
+        ax.grid(True)
+
+        for axis_name in ['x', 'y', 'z']:
+            try:
+                ax.tick_params(
+                    axis=axis_name,
+                    which='major',
+                    labelsize=font_sizes['three_d_tick_label']
+                )
+            except Exception:
+                pass
+
+        for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
+            try:
+                axis.pane.set_visible(True)
+                axis.pane.set_edgecolor('0.2')
+                axis.pane.set_linewidth(0.9)
+            except Exception:
+                pass
+
+            try:
+                axis.line.set_color('0.2')
+                axis.line.set_linewidth(0.9)
+            except Exception:
+                pass
+    
     def _get_auto_design_concentration_column(self, reagent_name):
         '''
         Returns the expected Auto performance-log concentration column for a
@@ -4653,10 +4781,46 @@ class AutoContr(Controller):
         annotate_points=True
     ):
         '''
-        Draws seed, optimizer-selected, and best-condition points on a 2D axis.
+        Draws seed, optimizer-selected, other, and best-condition points on a
+        two-dimensional Auto design-space axis.
+
+        This shared renderer is used by the standard 2D design plot, pairwise
+        projections, and PCA projections. Condition-number annotations use the
+        centralized design-plot font sizes for presentation readability.
+
+        params:
+            matplotlib.axes.Axes ax:
+                Axis on which the points are drawn.
+
+            pandas.DataFrame plot_df:
+                Copied condition-level plotting dataframe.
+
+            str x_column:
+                Dataframe column plotted on the x-axis.
+
+            str y_column:
+                Dataframe column plotted on the y-axis.
+
+            numeric or None best_condition_number:
+                Reaction condition number highlighted with a red star. Pass
+                None when generating a seed-only maximin design figure.
+
+            bool annotate_points:
+                Whether reaction condition numbers should be displayed beside
+                the plotted points.
+
+        returns:
+            tuple:
+                legend_handles:
+                    Matplotlib handles for categories that were plotted.
+
+                legend_labels:
+                    Corresponding legend labels.
         '''
         legend_handles = []
         legend_labels = []
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         condition_type_series = plot_df.get(
             'condition_type',
@@ -4671,11 +4835,11 @@ class AutoContr(Controller):
             seed_handle = ax.scatter(
                 plot_df.loc[seed_mask, x_column],
                 plot_df.loc[seed_mask, y_column],
-                s=36,
+                s=42,
                 marker='o',
                 facecolors='none',
                 edgecolors='tab:blue',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
                 label='Seed condition'
             )
@@ -4686,11 +4850,11 @@ class AutoContr(Controller):
             optimizer_handle = ax.scatter(
                 plot_df.loc[optimizer_mask, x_column],
                 plot_df.loc[optimizer_mask, y_column],
-                s=38,
+                s=44,
                 marker='s',
                 facecolors='none',
                 edgecolors='tab:orange',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
                 label='Optimizer-selected'
             )
@@ -4701,11 +4865,11 @@ class AutoContr(Controller):
             other_handle = ax.scatter(
                 plot_df.loc[other_mask, x_column],
                 plot_df.loc[other_mask, y_column],
-                s=32,
+                s=38,
                 marker='^',
                 facecolors='none',
                 edgecolors='0.35',
-                linewidths=1.0,
+                linewidths=1.1,
                 alpha=0.85,
                 label='Other condition'
             )
@@ -4728,10 +4892,10 @@ class AutoContr(Controller):
                 best_handle = ax.scatter(
                     plot_df.loc[best_mask, x_column],
                     plot_df.loc[best_mask, y_column],
-                    s=95,
+                    s=115,
                     marker='*',
                     color='tab:red',
-                    linewidths=0.8,
+                    linewidths=0.9,
                     alpha=0.95,
                     label='Best observed condition'
                 )
@@ -4744,10 +4908,10 @@ class AutoContr(Controller):
                     ax.annotate(
                         str(int(row['reaction_number'])),
                         (row[x_column], row[y_column]),
-                        xytext=(3, 3),
+                        xytext=(4, 4),
                         textcoords='offset points',
-                        fontsize=7.0,
-                        alpha=0.75
+                        fontsize=font_sizes['annotation'],
+                        alpha=0.8
                     )
                 except Exception:
                     continue
@@ -4758,19 +4922,58 @@ class AutoContr(Controller):
         self,
         plot_df,
         design_columns,
-        plot_filename='initial_training_design_1d.png'
+        plot_filename='initial_training_design_1d.png',
+        plot_title='Auto Design-Space Exploration',
+        include_best_condition=True
     ):
         '''
         Generates a one-dimensional Auto design-space strip plot.
+
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. This allows the same renderer to create
+        both the initial maximin seed-design plot and the full Auto
+        design-space exploration plot.
+
+        The figure uses the same title-above-legend layout and centralized
+        presentation-ready font sizing as the Auto lambda progress and
+        replicate diagnostic plots. The plotting area has a complete boxed
+        frame, while vertical grid lines remain visible to show reagent-space
+        position.
+
+        params:
+            pandas.DataFrame plot_df:
+                Copied condition-level Auto performance rows to plot.
+
+            list design_columns:
+                One variable-reagent concentration-column definition.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Figure title displayed above the legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for the seed-only maximin design plot.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
         if plot_df.empty or len(design_columns) != 1:
             return None
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         design_column = design_columns[0]
         reagent_name = design_column['reagent_name']
         x_column = design_column['column_name']
 
-        fig, ax = plt.subplots(figsize=(6.8, 2.6), dpi=300)
+        fig, ax = plt.subplots(
+            figsize=(7.6, 3.4),
+            dpi=300
+        )
 
         condition_type_series = plot_df.get(
             'condition_type',
@@ -4781,48 +4984,77 @@ class AutoContr(Controller):
         optimizer_mask = condition_type_series == 'optimizer_selected'
         other_mask = ~(seed_mask | optimizer_mask)
 
+        # Small vertical offsets separate overlapping condition categories while
+        # preserving reagent concentration as the only quantitative axis.
+        y_positions = pd.Series(
+            0.0,
+            index=plot_df.index,
+            dtype=float
+        )
+
+        y_positions.loc[optimizer_mask] = 0.08
+        y_positions.loc[other_mask] = -0.08
+
+        legend_handles = []
+        legend_labels = []
+
         if seed_mask.any():
-            ax.scatter(
+            seed_handle = ax.scatter(
                 plot_df.loc[seed_mask, x_column],
-                [0.0] * int(seed_mask.sum()),
-                s=36,
+                y_positions.loc[seed_mask],
+                s=42,
                 marker='o',
                 facecolors='none',
                 edgecolors='tab:blue',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
-                label='Seed condition'
+                label='Seed condition',
+                zorder=3
             )
 
+            legend_handles.append(seed_handle)
+            legend_labels.append('Seed condition')
+
         if optimizer_mask.any():
-            ax.scatter(
+            optimizer_handle = ax.scatter(
                 plot_df.loc[optimizer_mask, x_column],
-                [0.08] * int(optimizer_mask.sum()),
-                s=38,
+                y_positions.loc[optimizer_mask],
+                s=44,
                 marker='s',
                 facecolors='none',
                 edgecolors='tab:orange',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
-                label='Optimizer-selected'
+                label='Optimizer-selected',
+                zorder=3
             )
 
+            legend_handles.append(optimizer_handle)
+            legend_labels.append('Optimizer-selected')
+
         if other_mask.any():
-            ax.scatter(
+            other_handle = ax.scatter(
                 plot_df.loc[other_mask, x_column],
-                [-0.08] * int(other_mask.sum()),
-                s=32,
+                y_positions.loc[other_mask],
+                s=38,
                 marker='^',
                 facecolors='none',
                 edgecolors='0.35',
-                linewidths=1.0,
+                linewidths=1.1,
                 alpha=0.85,
-                label='Other condition'
+                label='Other condition',
+                zorder=3
             )
 
-        best_condition_number = self._get_auto_design_best_condition_number(
-            plot_df
-        )
+            legend_handles.append(other_handle)
+            legend_labels.append('Other condition')
+
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(plot_df)
+            )
 
         if (
             best_condition_number is not None
@@ -4837,79 +5069,145 @@ class AutoContr(Controller):
                 best_mask = pd.Series(False, index=plot_df.index)
 
             if best_mask.any():
-                ax.scatter(
+                best_handle = ax.scatter(
                     plot_df.loc[best_mask, x_column],
-                    [0.0] * int(best_mask.sum()),
-                    s=95,
+                    y_positions.loc[best_mask],
+                    s=115,
                     marker='*',
                     color='tab:red',
-                    linewidths=0.8,
+                    linewidths=0.9,
                     alpha=0.95,
-                    label='Best observed condition'
+                    label='Best observed condition',
+                    zorder=4
                 )
 
+                legend_handles.append(best_handle)
+                legend_labels.append('Best observed condition')
+
         if 'reaction_number' in plot_df.columns and len(plot_df) <= 20:
-            for _, row in plot_df.iterrows():
+            for row_index, row in plot_df.iterrows():
                 try:
                     ax.annotate(
                         str(int(row['reaction_number'])),
-                        (row[x_column], 0.0),
-                        xytext=(3, 5),
+                        (
+                            row[x_column],
+                            y_positions.loc[row_index]
+                        ),
+                        xytext=(4, 5),
                         textcoords='offset points',
-                        fontsize=7.0,
-                        alpha=0.75
+                        fontsize=font_sizes['annotation'],
+                        alpha=0.8
                     )
                 except Exception:
                     continue
 
         ax.set_xlabel(
             self._format_auto_design_axis_label(reagent_name),
-            fontsize=12
+            fontsize=font_sizes['axis_label']
         )
-        ax.set_yticks([])
-        ax.set_title(
-            'Initial Training Design and Optimizer-Selected Conditions',
-            fontsize=11,
-            fontweight='normal'
-        )
-        ax.grid(
-            axis='x',
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
-        )
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_visible(False)
 
-        ax.legend(
-            loc='upper center',
-            bbox_to_anchor=(0.5, 1.24),
-            ncol=3,
-            frameon=False,
-            fontsize=8.0
+        ax.set_ylim(-0.19, 0.19)
+        ax.set_yticks([])
+        ax.margins(x=0.05)
+
+        # The center line represents the primary one-dimensional design axis.
+        ax.axhline(
+            y=0.0,
+            color='0.7',
+            linewidth=0.8,
+            zorder=1
         )
+
+        self._apply_auto_design_plot_lab_frame_style(
+            ax=ax,
+            grid_axis='x',
+            compact=False
+        )
+
+        # Preserve a clean 1D strip by hiding numerical y ticks while retaining
+        # the complete surrounding frame.
+        ax.set_yticks([])
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.965
+        )
+
+        if len(legend_handles) > 0:
+            fig.legend(
+                legend_handles,
+                legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.84),
+                ncol=min(len(legend_handles), 4),
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=1.0
+            )
 
         fig.subplots_adjust(
-            left=0.08,
+            left=0.09,
             right=0.97,
             bottom=0.25,
-            top=0.72
+            top=0.67
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
 
     def _plot_initial_training_design_2d(
         self,
         plot_df,
         design_columns,
-        plot_filename='initial_training_design_2d.png'
+        plot_filename='initial_training_design_2d.png',
+        plot_title='Auto Design-Space Exploration',
+        include_best_condition=True
     ):
         '''
         Generates a two-dimensional Auto design-space scatter plot.
+
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. This allows the same plotting function
+        to generate both the initial maximin seed-design figure and the full
+        Auto design-space exploration figure.
+
+        The title is placed above the legend, matching the layout convention
+        used by the Auto lambda progress and replicate diagnostic plots. The
+        plotting area retains horizontal and vertical grid lines because they
+        help communicate reagent-space coverage, while all four axis spines are
+        visible to provide a complete boxed frame.
+
+        params:
+            pandas.DataFrame plot_df:
+                Copied condition-level Auto performance rows to plot.
+
+            list design_columns:
+                Two variable-reagent concentration-column definitions.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Figure title displayed above the legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for the seed-only maximin design plot.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
         if plot_df.empty or len(design_columns) != 2:
             return None
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         x_design = design_columns[0]
         y_design = design_columns[1]
@@ -4917,11 +5215,17 @@ class AutoContr(Controller):
         x_column = x_design['column_name']
         y_column = y_design['column_name']
 
-        fig, ax = plt.subplots(figsize=(5.4, 4.6), dpi=300)
-
-        best_condition_number = self._get_auto_design_best_condition_number(
-            plot_df
+        fig, ax = plt.subplots(
+            figsize=(6.8, 5.2),
+            dpi=300
         )
+
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(plot_df)
+            )
 
         legend_handles, legend_labels = (
             self._plot_auto_design_grouped_points_2d(
@@ -4935,66 +5239,104 @@ class AutoContr(Controller):
         )
 
         ax.set_xlabel(
-            self._format_auto_design_axis_label(x_design['reagent_name']),
-            fontsize=12
+            self._format_auto_design_axis_label(
+                x_design['reagent_name']
+            ),
+            fontsize=font_sizes['axis_label']
         )
+
         ax.set_ylabel(
-            self._format_auto_design_axis_label(y_design['reagent_name']),
-            fontsize=12
+            self._format_auto_design_axis_label(
+                y_design['reagent_name']
+            ),
+            fontsize=font_sizes['axis_label']
         )
-        ax.set_title(
-            'Initial Training Design and Optimizer-Selected Conditions',
-            fontsize=11,
-            fontweight='normal'
+
+        self._apply_auto_design_plot_lab_frame_style(
+            ax=ax,
+            grid_axis='both',
+            compact=False
         )
-        ax.grid(
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
         )
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
 
         if len(legend_handles) > 0:
-            ax.legend(
+            fig.legend(
                 legend_handles,
                 legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 1.22),
+                bbox_to_anchor=(0.5, 0.905),
                 ncol=min(len(legend_handles), 4),
                 frameon=False,
-                fontsize=8.0,
+                fontsize=font_sizes['legend'],
                 handlelength=1.2,
                 handletextpad=0.45,
-                columnspacing=0.9
+                columnspacing=1.0
             )
 
         fig.subplots_adjust(
             left=0.16,
             right=0.96,
-            bottom=0.14,
+            bottom=0.15,
             top=0.78
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
-    
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
+
     def _plot_initial_training_design_3d(
         self,
         plot_df,
         design_columns,
-        plot_filename='initial_training_design_3d.png'
+        plot_filename='initial_training_design_3d.png',
+        plot_title='Auto Design-Space Exploration',
+        include_best_condition=True
     ):
         '''
         Generates a three-dimensional Auto design-space scatter plot.
 
-        This plot is always generated for exactly three variable reagents when
-        the required concentration columns are available.
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. This allows the same renderer to create
+        both the initial maximin seed-design plot and the full Auto
+        design-space exploration plot.
+
+        The title is displayed above the legend, matching the Auto lambda
+        progress and replicate diagnostic plots. The three-dimensional grid and
+        pane boundaries remain visible because they help communicate the
+        location of conditions within reagent space.
+
+        params:
+            pandas.DataFrame plot_df:
+                Copied condition-level Auto performance rows to plot.
+
+            list design_columns:
+                Three variable-reagent concentration-column definitions.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Figure title displayed above the legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for the seed-only maximin design plot.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
         if plot_df.empty or len(design_columns) != 3:
             return None
 
-        fig = plt.figure(figsize=(6.4, 5.4), dpi=300)
-        ax = fig.add_subplot(111, projection='3d')
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         x_design = design_columns[0]
         y_design = design_columns[1]
@@ -5003,6 +5345,16 @@ class AutoContr(Controller):
         x_column = x_design['column_name']
         y_column = y_design['column_name']
         z_column = z_design['column_name']
+
+        fig = plt.figure(
+            figsize=(7.2, 6.2),
+            dpi=300
+        )
+
+        ax = fig.add_subplot(
+            111,
+            projection='3d'
+        )
 
         condition_type_series = plot_df.get(
             'condition_type',
@@ -5013,51 +5365,69 @@ class AutoContr(Controller):
         optimizer_mask = condition_type_series == 'optimizer_selected'
         other_mask = ~(seed_mask | optimizer_mask)
 
+        legend_handles = []
+        legend_labels = []
+
         if seed_mask.any():
-            ax.scatter(
+            seed_handle = ax.scatter(
                 plot_df.loc[seed_mask, x_column],
                 plot_df.loc[seed_mask, y_column],
                 plot_df.loc[seed_mask, z_column],
-                s=36,
+                s=46,
                 marker='o',
                 facecolors='none',
                 edgecolors='tab:blue',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
-                label='Seed condition'
+                label='Seed condition',
+                depthshade=False
             )
 
+            legend_handles.append(seed_handle)
+            legend_labels.append('Seed condition')
+
         if optimizer_mask.any():
-            ax.scatter(
+            optimizer_handle = ax.scatter(
                 plot_df.loc[optimizer_mask, x_column],
                 plot_df.loc[optimizer_mask, y_column],
                 plot_df.loc[optimizer_mask, z_column],
-                s=38,
+                s=48,
                 marker='s',
                 facecolors='none',
                 edgecolors='tab:orange',
-                linewidths=1.1,
+                linewidths=1.2,
                 alpha=0.95,
-                label='Optimizer-selected'
+                label='Optimizer-selected',
+                depthshade=False
             )
 
+            legend_handles.append(optimizer_handle)
+            legend_labels.append('Optimizer-selected')
+
         if other_mask.any():
-            ax.scatter(
+            other_handle = ax.scatter(
                 plot_df.loc[other_mask, x_column],
                 plot_df.loc[other_mask, y_column],
                 plot_df.loc[other_mask, z_column],
-                s=32,
+                s=42,
                 marker='^',
                 facecolors='none',
                 edgecolors='0.35',
-                linewidths=1.0,
+                linewidths=1.1,
                 alpha=0.85,
-                label='Other condition'
+                label='Other condition',
+                depthshade=False
             )
 
-        best_condition_number = self._get_auto_design_best_condition_number(
-            plot_df
-        )
+            legend_handles.append(other_handle)
+            legend_labels.append('Other condition')
+
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(plot_df)
+            )
 
         if (
             best_condition_number is not None
@@ -5069,20 +5439,27 @@ class AutoContr(Controller):
                     == float(best_condition_number)
                 )
             except Exception:
-                best_mask = pd.Series(False, index=plot_df.index)
+                best_mask = pd.Series(
+                    False,
+                    index=plot_df.index
+                )
 
             if best_mask.any():
-                ax.scatter(
+                best_handle = ax.scatter(
                     plot_df.loc[best_mask, x_column],
                     plot_df.loc[best_mask, y_column],
                     plot_df.loc[best_mask, z_column],
-                    s=95,
+                    s=125,
                     marker='*',
                     color='tab:red',
-                    linewidths=0.8,
+                    linewidths=0.9,
                     alpha=0.95,
-                    label='Best observed condition'
+                    label='Best observed condition',
+                    depthshade=False
                 )
+
+                legend_handles.append(best_handle)
+                legend_labels.append('Best observed condition')
 
         if 'reaction_number' in plot_df.columns and len(plot_df) <= 20:
             for _, row in plot_df.iterrows():
@@ -5092,8 +5469,8 @@ class AutoContr(Controller):
                         row[y_column],
                         row[z_column],
                         str(int(row['reaction_number'])),
-                        fontsize=7.0,
-                        alpha=0.75
+                        fontsize=font_sizes['annotation'],
+                        alpha=0.8
                     )
                 except Exception:
                     continue
@@ -5102,62 +5479,128 @@ class AutoContr(Controller):
             self._format_auto_design_axis_label(
                 x_design['reagent_name']
             ),
-            fontsize=9
+            fontsize=font_sizes['three_d_axis_label'],
+            labelpad=10
         )
+
         ax.set_ylabel(
             self._format_auto_design_axis_label(
                 y_design['reagent_name']
             ),
-            fontsize=9
+            fontsize=font_sizes['three_d_axis_label'],
+            labelpad=10
         )
+
         ax.set_zlabel(
             self._format_auto_design_axis_label(
                 z_design['reagent_name']
             ),
-            fontsize=9
+            fontsize=font_sizes['three_d_axis_label'],
+            labelpad=10
         )
 
-        ax.set_title(
-            '3D Initial Training Design and Optimizer-Selected Conditions',
-            fontsize=11,
+        self._apply_auto_design_plot_3d_lab_frame_style(ax)
+
+        # Use a stable viewing angle that exposes all three reagent axes without
+        # materially changing the underlying coordinate representation.
+        ax.view_init(
+            elev=22,
+            azim=-55
+        )
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
             fontweight='normal',
-            pad=18
+            y=0.975
         )
 
-        ax.legend(
-            loc='upper center',
-            bbox_to_anchor=(0.5, 1.02),
-            ncol=2,
-            frameon=False,
-            fontsize=8.0
-        )
+        if len(legend_handles) > 0:
+            fig.legend(
+                legend_handles,
+                legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.905),
+                ncol=min(len(legend_handles), 4),
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=1.0
+            )
 
         fig.subplots_adjust(
             left=0.02,
-            right=0.98,
-            bottom=0.03,
-            top=0.86
+            right=0.96,
+            bottom=0.06,
+            top=0.79
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
 
     def _plot_initial_training_design_pairwise(
         self,
         plot_df,
         design_columns,
         plot_filename='initial_training_design_pairwise.png',
+        plot_title='Auto Design-Space Exploration: Pairwise Projections',
+        include_best_condition=True,
         compact=False,
         max_compact_dimensions=6
     ):
         '''
-        Generates pairwise two-dimensional design-space projections.
+        Generates pairwise two-dimensional Auto design-space projections.
 
-        For 3-6 variables, all pairwise projections are shown. For 7+ variables,
-        compact=True limits the matrix to the first max_compact_dimensions
-        variable reagents in self.variable_reagents order.
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. This allows the same renderer to create
+        both the initial maximin seed-design projections and the full Auto
+        design-space exploration projections.
+
+        For three through six variable reagents, all two-reagent combinations
+        are displayed. For seven or more variables, compact=True limits the
+        figure to the first max_compact_dimensions reagents in the established
+        variable-reagent order.
+
+        Every active subplot retains horizontal and vertical design-space grid
+        lines and a complete boxed frame. Figure titles are placed above the
+        shared legend, matching the layout convention used by the Auto lambda
+        progress and replicate diagnostic plots.
+
+        params:
+            pandas.DataFrame plot_df:
+                Copied condition-level Auto performance rows to plot.
+
+            list design_columns:
+                Variable-reagent concentration-column definitions.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Main figure title displayed above the shared legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for seed-only maximin figures.
+
+            bool compact:
+                If True, limits the number of dimensions shown and uses the
+                compact multi-panel formatting.
+
+            int max_compact_dimensions:
+                Maximum number of reagent dimensions shown when compact=True.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
         if plot_df.empty or len(design_columns) < 2:
             return None
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         plot_design_columns = list(design_columns)
 
@@ -5173,9 +5616,9 @@ class AutoContr(Controller):
 
         pairs = []
 
-        for i in range(n_dimensions):
-            for j in range(i + 1, n_dimensions):
-                pairs.append((i, j))
+        for x_index in range(n_dimensions):
+            for y_index in range(x_index + 1, n_dimensions):
+                pairs.append((x_index, y_index))
 
         n_pairs = len(pairs)
 
@@ -5191,29 +5634,54 @@ class AutoContr(Controller):
 
         n_rows = int(np.ceil(n_pairs / n_cols))
 
+        # Multi-panel figures need slightly more room than the previous plots so
+        # the enlarged slide-readable axis and tick fonts do not crowd adjacent
+        # panels.
+        panel_width = 4.0
+        panel_height = 3.6
+
         fig, axes = plt.subplots(
             n_rows,
             n_cols,
-            figsize=(3.2 * n_cols, 3.0 * n_rows),
-            dpi=300
+            figsize=(
+                panel_width * n_cols,
+                panel_height * n_rows
+            ),
+            dpi=300,
+            squeeze=False
         )
 
-        axes = np.array(axes).reshape(-1)
+        axes = np.asarray(axes).reshape(-1)
 
-        best_condition_number = self._get_auto_design_best_condition_number(
-            plot_df
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(plot_df)
+            )
+
+        annotate_points = (
+            len(plot_df) <= 12
+            and n_pairs <= 6
         )
 
-        annotate_points = len(plot_df) <= 12 and n_pairs <= 6
+        # Dense figures use the compact centralized font tier. Three-panel
+        # figures retain the standard axis-label size for maximum readability.
+        use_compact_style = compact or n_pairs > 3
+
+        if use_compact_style:
+            axis_label_size = font_sizes['compact_axis_label']
+        else:
+            axis_label_size = font_sizes['axis_label']
 
         final_legend_handles = []
         final_legend_labels = []
 
-        for pair_i, (x_i, y_i) in enumerate(pairs):
-            ax = axes[pair_i]
+        for pair_number, (x_index, y_index) in enumerate(pairs):
+            ax = axes[pair_number]
 
-            x_design = plot_design_columns[x_i]
-            y_design = plot_design_columns[y_i]
+            x_design = plot_design_columns[x_index]
+            y_design = plot_design_columns[y_index]
 
             legend_handles, legend_labels = (
                 self._plot_auto_design_grouped_points_2d(
@@ -5234,39 +5702,37 @@ class AutoContr(Controller):
                 self._format_auto_design_axis_label(
                     x_design['reagent_name']
                 ),
-                fontsize=8.5
+                fontsize=axis_label_size
             )
+
             ax.set_ylabel(
                 self._format_auto_design_axis_label(
                     y_design['reagent_name']
                 ),
-                fontsize=8.5
+                fontsize=axis_label_size
             )
 
-            ax.grid(
-                linestyle=':',
-                linewidth=0.5,
-                alpha=0.3
+            self._apply_auto_design_plot_lab_frame_style(
+                ax=ax,
+                grid_axis='both',
+                compact=use_compact_style
             )
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.tick_params(labelsize=7.5)
 
         for empty_ax in axes[n_pairs:]:
-            empty_ax.axis('off')
+            empty_ax.set_visible(False)
+
+        display_title = plot_title
 
         if compact and len(design_columns) > len(plot_design_columns):
-            title_text = (
-                'Compact Pairwise Design-Space Projections '
-                f'({len(plot_design_columns)} of {len(design_columns)} '
-                'variables shown)'
+            display_title = (
+                f'{plot_title} '
+                f'({len(plot_design_columns)} of '
+                f'{len(design_columns)} variables shown)'
             )
-        else:
-            title_text = 'Pairwise Design-Space Projections'
 
         fig.suptitle(
-            title_text,
-            fontsize=11,
+            display_title,
+            fontsize=font_sizes['title'],
             fontweight='normal',
             y=0.985
         )
@@ -5276,45 +5742,90 @@ class AutoContr(Controller):
                 final_legend_handles,
                 final_legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.955),
+                bbox_to_anchor=(0.5, 0.945),
                 ncol=min(len(final_legend_handles), 4),
                 frameon=False,
-                fontsize=8.0,
+                fontsize=font_sizes['legend'],
                 handlelength=1.2,
                 handletextpad=0.45,
-                columnspacing=0.9
+                columnspacing=1.0
             )
 
-            top_margin = 0.89
+            top_margin = 0.865
         else:
-            top_margin = 0.92
+            top_margin = 0.91
 
         fig.subplots_adjust(
             left=0.075,
             right=0.975,
-            bottom=0.08,
+            bottom=0.09,
             top=top_margin,
-            hspace=0.38,
-            wspace=0.32
+            hspace=0.45,
+            wspace=0.38
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
 
     def _plot_initial_training_design_parallel_coordinates(
         self,
         plot_df,
         design_columns,
-        plot_filename='initial_training_design_parallel_coordinates.png'
+        plot_filename=(
+            'initial_training_design_parallel_coordinates.png'
+        ),
+        plot_title=(
+            'Auto Design-Space Exploration: Parallel Coordinates'
+        ),
+        include_best_condition=True
     ):
         '''
-        Generates a parallel-coordinate recipe summary for higher-dimensional
-        Auto design spaces.
+        Generates a parallel-coordinate summary of a higher-dimensional Auto
+        reagent design space.
 
-        Values are min-max normalized within each reagent dimension for display
-        only. Raw concentrations are not modified.
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. This allows the same renderer to create
+        both the initial maximin seed-design plot and the complete Auto
+        design-space exploration plot.
+
+        Concentrations are normalized for display against the configured
+        executable minimum and maximum concentration bounds when those bounds
+        are available. Raw concentrations and logged run data are not changed.
+        If executable bounds are unavailable for a dimension, the function
+        falls back to the finite observed range for that dimension.
+
+        The title is placed above the shared legend, matching the Auto lambda
+        progress and replicate diagnostic plots. Horizontal normalized-value
+        guides and vertical reagent-axis guides remain visible, and the plotting
+        area uses a complete boxed frame.
+
+        params:
+            pandas.DataFrame plot_df:
+                Copied condition-level Auto performance rows to plot.
+
+            list design_columns:
+                Variable-reagent concentration-column definitions.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Figure title displayed above the legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for the seed-only maximin design plot.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
         if plot_df.empty or len(design_columns) < 2:
             return None
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         column_names = [
             design_column['column_name']
@@ -5322,52 +5833,148 @@ class AutoContr(Controller):
         ]
 
         reagent_names = [
-            design_column['reagent_name']
+            str(design_column['reagent_name'])
             for design_column in design_columns
         ]
 
         display_df = plot_df.copy(deep=True)
 
+        raw_minimum_bounds = getattr(
+            self,
+            'min_conc',
+            []
+        )
+
+        raw_maximum_bounds = getattr(
+            self,
+            'max_conc',
+            []
+        )
+
+        minimum_bounds = (
+            list(raw_minimum_bounds)
+            if raw_minimum_bounds is not None
+            else []
+        )
+
+        maximum_bounds = (
+            list(raw_maximum_bounds)
+            if raw_maximum_bounds is not None
+            else []
+        )
+
         normalized_values = []
 
-        for column_name in column_names:
+        for dimension_index, column_name in enumerate(column_names):
             values = pd.to_numeric(
                 display_df[column_name],
                 errors='coerce'
             ).to_numpy(dtype=float)
 
-            value_min = np.nanmin(values)
-            value_max = np.nanmax(values)
+            finite_values = values[np.isfinite(values)]
 
-            if not np.isfinite(value_min) or not np.isfinite(value_max):
-                normalized = np.full_like(values, np.nan, dtype=float)
-            elif value_max == value_min:
-                normalized = np.full_like(values, 0.5, dtype=float)
+            value_min = np.nan
+            value_max = np.nan
+
+            if (
+                dimension_index < len(minimum_bounds)
+                and dimension_index < len(maximum_bounds)
+            ):
+                try:
+                    configured_min = float(
+                        minimum_bounds[dimension_index]
+                    )
+
+                    configured_max = float(
+                        maximum_bounds[dimension_index]
+                    )
+
+                    if (
+                        np.isfinite(configured_min)
+                        and np.isfinite(configured_max)
+                        and configured_max > configured_min
+                    ):
+                        value_min = configured_min
+                        value_max = configured_max
+
+                except Exception:
+                    pass
+
+            # Fall back to the finite observed range only if configured
+            # executable bounds were unavailable or invalid.
+            if (
+                not np.isfinite(value_min)
+                or not np.isfinite(value_max)
+                or value_max <= value_min
+            ):
+                if finite_values.size == 0:
+                    normalized = np.full_like(
+                        values,
+                        np.nan,
+                        dtype=float
+                    )
+
+                    normalized_values.append(normalized)
+                    continue
+
+                value_min = float(np.min(finite_values))
+                value_max = float(np.max(finite_values))
+
+            if value_max == value_min:
+                normalized = np.full_like(
+                    values,
+                    0.5,
+                    dtype=float
+                )
             else:
-                normalized = (values - value_min) / (value_max - value_min)
+                normalized = (
+                    values - value_min
+                ) / (
+                    value_max - value_min
+                )
 
             normalized_values.append(normalized)
 
-        normalized_array = np.vstack(normalized_values).T
+        normalized_array = np.vstack(
+            normalized_values
+        ).T
 
         if normalized_array.size == 0:
             return None
 
         fig, ax = plt.subplots(
-            figsize=(max(7.0, len(column_names) * 0.75), 4.6),
+            figsize=(
+                max(
+                    8.4,
+                    len(column_names) * 1.15
+                ),
+                5.4
+            ),
             dpi=300
         )
 
-        x_positions = np.arange(len(column_names))
+        x_positions = np.arange(
+            len(column_names)
+        )
 
         condition_type_series = display_df.get(
             'condition_type',
             pd.Series('', index=display_df.index)
         ).fillna('').astype(str)
 
-        best_condition_number = self._get_auto_design_best_condition_number(
-            display_df
-        )
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(
+                    display_df
+                )
+            )
+
+        seed_present = False
+        optimizer_present = False
+        other_present = False
+        best_present = False
 
         for row_i, (_, row) in enumerate(display_df.iterrows()):
             if row_i >= normalized_array.shape[0]:
@@ -5382,38 +5989,52 @@ class AutoContr(Controller):
 
             if condition_type == 'seed':
                 line_color = 'tab:blue'
-                line_alpha = 0.55
-                line_width = 1.1
+                line_alpha = 0.58
+                line_width = 1.2
+                seed_present = True
+
             elif condition_type == 'optimizer_selected':
                 line_color = 'tab:orange'
-                line_alpha = 0.7
-                line_width = 1.2
+                line_alpha = 0.74
+                line_width = 1.3
+                optimizer_present = True
+
             else:
                 line_color = '0.45'
-                line_alpha = 0.45
-                line_width = 1.0
+                line_alpha = 0.48
+                line_width = 1.1
+                other_present = True
+
+            is_best_condition = False
 
             if (
-                best_condition_number is not None
+                include_best_condition
+                and best_condition_number is not None
                 and 'reaction_number' in display_df.columns
             ):
                 try:
-                    if (
+                    is_best_condition = (
                         float(row['reaction_number'])
                         == float(best_condition_number)
-                    ):
-                        line_color = 'tab:red'
-                        line_alpha = 0.95
-                        line_width = 2.1
+                    )
                 except Exception:
-                    pass
+                    is_best_condition = False
+
+            if is_best_condition:
+                line_color = 'tab:red'
+                line_alpha = 0.98
+                line_width = 2.3
+                best_present = True
 
             ax.plot(
                 x_positions,
                 y_values,
                 color=line_color,
                 alpha=line_alpha,
-                linewidth=line_width
+                linewidth=line_width,
+                marker='o',
+                markersize=3.2,
+                zorder=4 if is_best_condition else 3
             )
 
             if (
@@ -5422,242 +6043,612 @@ class AutoContr(Controller):
             ):
                 try:
                     ax.text(
-                        x_positions[-1] + 0.03,
+                        x_positions[-1] + 0.05,
                         y_values[-1],
                         str(int(row['reaction_number'])),
-                        fontsize=6.8,
-                        alpha=0.65,
+                        fontsize=font_sizes['annotation'],
+                        alpha=0.75,
                         va='center'
                     )
                 except Exception:
                     pass
 
         ax.set_xticks(x_positions)
+
+        ax.set_ylabel(
+            'Normalized concentration within executable reagent range',
+            fontsize=font_sizes['axis_label']
+        )
+
+        ax.set_xlim(
+            -0.15,
+            len(column_names) - 1 + 0.35
+        )
+
+        ax.set_ylim(
+            -0.05,
+            1.05
+        )
+
+        self._apply_auto_design_plot_lab_frame_style(
+            ax=ax,
+            grid_axis='both',
+            compact=True
+        )
+
         ax.set_xticklabels(
             reagent_names,
             rotation=35,
             ha='right',
-            fontsize=8.5
-        )
-        ax.set_ylabel('Normalized concentration within reagent range')
-        ax.set_ylim(-0.05, 1.05)
-
-        ax.set_title(
-            'Parallel-Coordinate Auto Design-Space Summary',
-            fontsize=11,
-            fontweight='normal'
+            fontsize=font_sizes['compact_axis_label']
         )
 
-        ax.grid(
-            axis='y',
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
-        )
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        legend_handles = []
+        legend_labels = []
 
-        seed_handle = plt.Line2D(
-            [0],
-            [0],
-            color='tab:blue',
-            linewidth=1.4,
-            label='Seed condition'
-        )
-        optimizer_handle = plt.Line2D(
-            [0],
-            [0],
-            color='tab:orange',
-            linewidth=1.4,
-            label='Optimizer-selected'
-        )
-        best_handle = plt.Line2D(
-            [0],
-            [0],
-            color='tab:red',
-            linewidth=2.1,
-            label='Best observed condition'
+        if seed_present:
+            legend_handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color='tab:blue',
+                    linewidth=1.5,
+                    marker='o',
+                    markersize=4.0
+                )
+            )
+            legend_labels.append('Seed condition')
+
+        if optimizer_present:
+            legend_handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color='tab:orange',
+                    linewidth=1.5,
+                    marker='o',
+                    markersize=4.0
+                )
+            )
+            legend_labels.append('Optimizer-selected')
+
+        if other_present:
+            legend_handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color='0.45',
+                    linewidth=1.4,
+                    marker='o',
+                    markersize=4.0
+                )
+            )
+            legend_labels.append('Other condition')
+
+        if best_present:
+            legend_handles.append(
+                plt.Line2D(
+                    [0],
+                    [0],
+                    color='tab:red',
+                    linewidth=2.3,
+                    marker='o',
+                    markersize=4.0
+                )
+            )
+            legend_labels.append('Best observed condition')
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
         )
 
-        ax.legend(
-            handles=[seed_handle, optimizer_handle, best_handle],
-            loc='upper center',
-            bbox_to_anchor=(0.5, 1.18),
-            ncol=3,
-            frameon=False,
-            fontsize=8.0
-        )
+        if len(legend_handles) > 0:
+            fig.legend(
+                legend_handles,
+                legend_labels,
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.895),
+                ncol=min(len(legend_handles), 4),
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.4,
+                handletextpad=0.5,
+                columnspacing=1.0
+            )
+
+            top_margin = 0.77
+        else:
+            top_margin = 0.84
 
         fig.subplots_adjust(
             left=0.11,
-            right=0.96,
-            bottom=0.24,
-            top=0.77
+            right=0.94,
+            bottom=0.25,
+            top=top_margin
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
 
     def _plot_initial_training_design_pca(
         self,
         plot_df,
         design_columns,
-        plot_filename='initial_training_design_pca.png'
+        plot_filename='initial_training_design_pca.png',
+        plot_title='Auto Design-Space Exploration: PCA Projection',
+        include_best_condition=True,
+        projection_reference_df=None
     ):
         '''
-        Generates a NumPy/SVD-based PCA projection for high-dimensional Auto
-        design spaces.
+        Generates a two-component PCA projection of a higher-dimensional Auto
+        reagent design space using NumPy singular-value decomposition.
 
-        This is display-only and does not depend on sklearn. Concentration
-        values are min-max scaled for projection only. Raw data are not changed.
+        The caller may provide either the complete condition-level dataframe or
+        a filtered seed-only dataframe. A separate projection_reference_df may
+        be supplied so seed-only and full-exploration figures use the same PCA
+        scaling, center, and component directions. This makes the two exported
+        figures directly comparable.
+
+        Concentrations are scaled against configured executable reagent bounds
+        when valid bounds are available. Otherwise, scaling falls back to the
+        finite range in the projection-reference dataframe. Scaling and PCA are
+        display-only and do not modify raw run data, optimizer inputs, recipes,
+        or model-training values.
+
+        The title is displayed above the legend, matching the Auto lambda
+        progress and replicate diagnostic figures. Horizontal and vertical grid
+        lines remain visible, and the plotting area uses a complete boxed frame.
+
+        params:
+            pandas.DataFrame plot_df:
+                Condition-level rows that should appear in the exported plot.
+
+            list design_columns:
+                Variable-reagent concentration-column definitions.
+
+            str plot_filename:
+                Filename for the saved plot.
+
+            str plot_title:
+                Figure title displayed above the legend.
+
+            bool include_best_condition:
+                If True, highlights the condition with the smallest recorded
+                target error. Set False for the seed-only maximin design plot.
+
+            pandas.DataFrame or None projection_reference_df:
+                Optional dataframe used to calculate PCA scaling, centering,
+                and component directions. When generating a seed-only plot,
+                pass the complete condition dataframe here so the seed-only and
+                full-exploration PCA plots share the same coordinate system.
+
+        returns:
+            str or None:
+                Saved plot path, or None when the inputs are unsuitable.
         '''
-        if plot_df.empty or len(design_columns) < 2 or len(plot_df) < 2:
+        if plot_df.empty or len(design_columns) < 2:
             return None
+
+        if projection_reference_df is None:
+            projection_reference_df = plot_df
+
+        if projection_reference_df.empty:
+            return None
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         column_names = [
             design_column['column_name']
             for design_column in design_columns
         ]
 
-        try:
-            x_matrix = plot_df[column_names].apply(
-                pd.to_numeric,
-                errors='coerce'
-            ).to_numpy(dtype=float)
+        reagent_names = [
+            str(design_column['reagent_name'])
+            for design_column in design_columns
+        ]
 
-            valid_rows = ~np.isnan(x_matrix).any(axis=1)
-            x_matrix = x_matrix[valid_rows, :]
+        missing_display_columns = [
+            column_name
+            for column_name in column_names
+            if column_name not in plot_df.columns
+        ]
 
-            if x_matrix.shape[0] < 2 or x_matrix.shape[1] < 2:
-                return None
+        missing_reference_columns = [
+            column_name
+            for column_name in column_names
+            if column_name not in projection_reference_df.columns
+        ]
 
-            x_min = np.nanmin(x_matrix, axis=0)
-            x_max = np.nanmax(x_matrix, axis=0)
-            x_range = x_max - x_min
-            x_range[x_range == 0] = 1.0
-
-            x_scaled = (x_matrix - x_min) / x_range
-            x_centered = x_scaled - np.mean(x_scaled, axis=0)
-
-            _, singular_values, vt_matrix = np.linalg.svd(
-                x_centered,
-                full_matrices=False
-            )
-
-            if vt_matrix.shape[0] < 2:
-                return None
-
-            scores = x_centered @ vt_matrix.T
-
-            variance_values = singular_values ** 2
-            variance_total = np.sum(variance_values)
-
-            if variance_total > 0:
-                explained_variance = variance_values / variance_total
-            else:
-                explained_variance = np.zeros_like(variance_values)
-
-            pca_df = plot_df.loc[valid_rows].copy(deep=True)
-            pca_df['PC1'] = scores[:, 0]
-            pca_df['PC2'] = scores[:, 1]
-
-        except Exception as exc:
-            print(
-                "<<controller warning>> PCA design-space projection failed; "
-                f"continuing without PCA plot. Error: {exc}"
-            )
+        if (
+            len(missing_display_columns) > 0
+            or len(missing_reference_columns) > 0
+        ):
             return None
 
-        fig, ax = plt.subplots(figsize=(5.6, 4.6), dpi=300)
-
-        best_condition_number = self._get_auto_design_best_condition_number(
-            pca_df
+        display_numeric_df = plot_df[column_names].apply(
+            pd.to_numeric,
+            errors='coerce'
         )
+
+        reference_numeric_df = projection_reference_df[
+            column_names
+        ].apply(
+            pd.to_numeric,
+            errors='coerce'
+        )
+
+        display_matrix = display_numeric_df.to_numpy(
+            dtype=float
+        )
+
+        reference_matrix = reference_numeric_df.to_numpy(
+            dtype=float
+        )
+
+        display_valid_mask = np.isfinite(
+            display_matrix
+        ).all(axis=1)
+
+        reference_valid_mask = np.isfinite(
+            reference_matrix
+        ).all(axis=1)
+
+        display_matrix = display_matrix[
+            display_valid_mask,
+            :
+        ]
+
+        reference_matrix = reference_matrix[
+            reference_valid_mask,
+            :
+        ]
+
+        display_plot_df = plot_df.loc[
+            display_valid_mask
+        ].copy(deep=True)
+
+        if (
+            display_matrix.shape[0] == 0
+            or reference_matrix.shape[0] < 2
+            or reference_matrix.shape[1] < 2
+        ):
+            return None
+
+        raw_minimum_bounds = getattr(
+            self,
+            'min_conc',
+            []
+        )
+
+        raw_maximum_bounds = getattr(
+            self,
+            'max_conc',
+            []
+        )
+
+        def _get_configured_bound(
+            raw_bounds,
+            dimension_index,
+            reagent_name
+        ):
+            '''
+            Returns one configured concentration bound when available.
+            '''
+            try:
+                if isinstance(raw_bounds, dict):
+                    if reagent_name in raw_bounds:
+                        return float(raw_bounds[reagent_name])
+
+                    reagent_name_string = str(reagent_name)
+
+                    for bound_name, bound_value in raw_bounds.items():
+                        if str(bound_name) == reagent_name_string:
+                            return float(bound_value)
+
+                    return np.nan
+
+                if (
+                    raw_bounds is not None
+                    and dimension_index < len(raw_bounds)
+                ):
+                    return float(raw_bounds[dimension_index])
+
+            except Exception:
+                pass
+
+            return np.nan
+
+        scaling_minimums = []
+        scaling_maximums = []
+
+        for dimension_index, reagent_name in enumerate(reagent_names):
+            configured_minimum = _get_configured_bound(
+                raw_minimum_bounds,
+                dimension_index,
+                reagent_name
+            )
+
+            configured_maximum = _get_configured_bound(
+                raw_maximum_bounds,
+                dimension_index,
+                reagent_name
+            )
+
+            if (
+                np.isfinite(configured_minimum)
+                and np.isfinite(configured_maximum)
+                and configured_maximum > configured_minimum
+            ):
+                dimension_minimum = configured_minimum
+                dimension_maximum = configured_maximum
+
+            else:
+                dimension_values = reference_matrix[
+                    :,
+                    dimension_index
+                ]
+
+                dimension_minimum = float(
+                    np.min(dimension_values)
+                )
+
+                dimension_maximum = float(
+                    np.max(dimension_values)
+                )
+
+                if dimension_maximum <= dimension_minimum:
+                    dimension_maximum = (
+                        dimension_minimum + 1.0
+                    )
+
+            scaling_minimums.append(
+                dimension_minimum
+            )
+
+            scaling_maximums.append(
+                dimension_maximum
+            )
+
+        scaling_minimums = np.asarray(
+            scaling_minimums,
+            dtype=float
+        )
+
+        scaling_maximums = np.asarray(
+            scaling_maximums,
+            dtype=float
+        )
+
+        scaling_ranges = (
+            scaling_maximums - scaling_minimums
+        )
+
+        scaling_ranges[
+            ~np.isfinite(scaling_ranges)
+            | (scaling_ranges <= 0)
+        ] = 1.0
+
+        reference_scaled = (
+            reference_matrix - scaling_minimums
+        ) / scaling_ranges
+
+        display_scaled = (
+            display_matrix - scaling_minimums
+        ) / scaling_ranges
+
+        reference_center = np.mean(
+            reference_scaled,
+            axis=0
+        )
+
+        reference_centered = (
+            reference_scaled - reference_center
+        )
+
+        try:
+            _, singular_values, component_matrix = np.linalg.svd(
+                reference_centered,
+                full_matrices=False
+            )
+        except np.linalg.LinAlgError:
+            return None
+
+        if component_matrix.shape[0] < 2:
+            return None
+
+        display_centered = (
+            display_scaled - reference_center
+        )
+
+        display_scores = (
+            display_centered @ component_matrix.T
+        )
+
+        variance_values = singular_values ** 2
+        variance_total = float(
+            np.sum(variance_values)
+        )
+
+        if variance_total > 0:
+            explained_variance = (
+                variance_values / variance_total
+            )
+        else:
+            explained_variance = np.zeros_like(
+                variance_values
+            )
+
+        pc1_variance_percent = (
+            100.0 * float(explained_variance[0])
+            if len(explained_variance) > 0
+            else 0.0
+        )
+
+        pc2_variance_percent = (
+            100.0 * float(explained_variance[1])
+            if len(explained_variance) > 1
+            else 0.0
+        )
+
+        pc1_column = '_auto_design_pc1'
+        pc2_column = '_auto_design_pc2'
+
+        display_plot_df[pc1_column] = (
+            display_scores[:, 0]
+        )
+
+        display_plot_df[pc2_column] = (
+            display_scores[:, 1]
+        )
+
+        fig, ax = plt.subplots(
+            figsize=(6.8, 5.2),
+            dpi=300
+        )
+
+        best_condition_number = None
+
+        if include_best_condition:
+            best_condition_number = (
+                self._get_auto_design_best_condition_number(
+                    display_plot_df
+                )
+            )
 
         legend_handles, legend_labels = (
             self._plot_auto_design_grouped_points_2d(
                 ax=ax,
-                plot_df=pca_df,
-                x_column='PC1',
-                y_column='PC2',
+                plot_df=display_plot_df,
+                x_column=pc1_column,
+                y_column=pc2_column,
                 best_condition_number=best_condition_number,
-                annotate_points=(len(pca_df) <= 20)
+                annotate_points=(
+                    len(display_plot_df) <= 20
+                )
             )
         )
 
-        pc1_label = 'PC1'
-        pc2_label = 'PC2'
-
-        if len(explained_variance) >= 2:
-            pc1_label = f"PC1 ({explained_variance[0] * 100:.1f}%)"
-            pc2_label = f"PC2 ({explained_variance[1] * 100:.1f}%)"
-
-        ax.set_xlabel(pc1_label)
-        ax.set_ylabel(pc2_label)
-
-        ax.set_title(
-            'PCA Projection of Auto Design Space',
-            fontsize=11,
-            fontweight='normal'
+        ax.set_xlabel(
+            (
+                f'Principal component 1 '
+                f'({pc1_variance_percent:.1f}% variance)'
+            ),
+            fontsize=font_sizes['axis_label']
         )
 
-        ax.grid(
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
+        ax.set_ylabel(
+            (
+                f'Principal component 2 '
+                f'({pc2_variance_percent:.1f}% variance)'
+            ),
+            fontsize=font_sizes['axis_label']
         )
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+
+        self._apply_auto_design_plot_lab_frame_style(
+            ax=ax,
+            grid_axis='both',
+            compact=False
+        )
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
+        )
 
         if len(legend_handles) > 0:
-            ax.legend(
+            fig.legend(
                 legend_handles,
                 legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 1.22),
+                bbox_to_anchor=(0.5, 0.905),
                 ncol=min(len(legend_handles), 4),
                 frameon=False,
-                fontsize=8.0
+                fontsize=font_sizes['legend'],
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=1.0
             )
+
+            top_margin = 0.78
+        else:
+            top_margin = 0.85
 
         fig.subplots_adjust(
             left=0.15,
             right=0.96,
-            bottom=0.14,
-            top=0.78
+            bottom=0.15,
+            top=top_margin
         )
 
-        return self._save_auto_design_plot(fig, plot_filename)
+        return self._save_auto_design_plot(
+            fig,
+            plot_filename
+        )
 
     def _plot_initial_training_designs_after_run(self):
         '''
-        Generates dimension-aware Auto design-space plots after an Auto run.
+        Generates dimension-aware Auto reagent-design plots after an Auto run.
 
-        This method is strictly report/plot-only. It reads a deep copy of
-        self.auto_model_performance_rows and never modifies the Auto loop data,
-        recipe data, QC data, model-training data, or experiment_data.
+        Two complementary plot groups are generated:
 
-        Automatic plot behavior:
+            Initial maximin seed design:
+                Includes only rows whose condition_type is seed.
+                Optimizer-selected conditions and the best-observed-condition
+                star are intentionally omitted.
+
+            Auto design-space exploration:
+                Includes every available condition-level row, distinguishing
+                seed and optimizer-selected conditions and highlighting the
+                best observed condition when that information is available.
+
+        The same dimensional renderer is used for both plot groups so their
+        formatting, axis definitions, normalization, and projections remain
+        consistent.
+
+        This method is strictly report/plot-only. It reads deep copies of
+        self.auto_model_performance_rows and does not modify Auto-loop data,
+        recipes, QC decisions, model-training observations, experiment data,
+        optimizer behavior, or robot execution.
+
+        Automatic output behavior:
+
             0 variables:
-                no plot; warning only
+                No design plots; warning only.
 
             1 variable:
-                initial_training_design_1d.png
+                initial_maximin_seed_design_1d.png
+                auto_design_space_exploration_1d.png
 
             2 variables:
-                initial_training_design_2d.png
+                initial_maximin_seed_design_2d.png
+                auto_design_space_exploration_2d.png
 
             3 variables:
-                initial_training_design_pairwise.png
-                initial_training_design_3d.png
+                initial_maximin_seed_design_pairwise.png
+                auto_design_space_exploration_pairwise.png
+                initial_maximin_seed_design_3d.png
+                auto_design_space_exploration_3d.png
 
             4-6 variables:
-                initial_training_design_pairwise.png
-                initial_training_design_parallel_coordinates.png
+                initial_maximin_seed_design_pairwise.png
+                auto_design_space_exploration_pairwise.png
+                initial_maximin_seed_design_parallel_coordinates.png
+                auto_design_space_exploration_parallel_coordinates.png
 
             7+ variables:
-                initial_training_design_pairwise_compact.png
-                initial_training_design_parallel_coordinates.png
-                initial_training_design_pca.png
+                initial_maximin_seed_design_pairwise_compact.png
+                auto_design_space_exploration_pairwise_compact.png
+                initial_maximin_seed_design_parallel_coordinates.png
+                auto_design_space_exploration_parallel_coordinates.png
+                initial_maximin_seed_design_pca.png
+                auto_design_space_exploration_pca.png
 
         returns:
             list:
@@ -5665,7 +6656,9 @@ class AutoContr(Controller):
         '''
         generated_plot_paths = []
 
-        plot_df, design_columns = self._get_auto_design_plot_dataframe()
+        plot_df, design_columns = (
+            self._get_auto_design_plot_dataframe()
+        )
 
         if plot_df.empty:
             print(
@@ -5684,7 +6677,31 @@ class AutoContr(Controller):
             )
             return generated_plot_paths
 
-        def _try_design_plot(plot_function, plot_description):
+        condition_type_series = plot_df.get(
+            'condition_type',
+            pd.Series('', index=plot_df.index)
+        ).fillna('').astype(str).str.strip().str.lower()
+
+        seed_plot_df = plot_df.loc[
+            condition_type_series == 'seed'
+        ].copy(deep=True)
+
+        if seed_plot_df.empty:
+            print(
+                "<<controller warning>> no condition_type=seed rows were "
+                "available; seed-only maximin plots will be skipped, but "
+                "full Auto design-space exploration plots will still be "
+                "generated"
+            )
+
+        def _try_design_plot(
+            plot_function,
+            plot_description
+        ):
+            '''
+            Executes one report-only design plot without allowing a plotting
+            error to interrupt Auto run completion or other plot exports.
+            '''
             try:
                 plot_path = plot_function()
 
@@ -5698,97 +6715,264 @@ class AutoContr(Controller):
                     f"Error: {exc}"
                 )
 
-        if n_design_dimensions == 1:
+        def _generate_seed_and_exploration_plots(
+            plot_method,
+            seed_filename,
+            exploration_filename,
+            seed_title,
+            exploration_title,
+            plot_description,
+            shared_kwargs=None
+        ):
+            '''
+            Calls one generalized dimensional renderer for both the seed-only
+            dataframe and the complete condition-level dataframe.
+            '''
+            if shared_kwargs is None:
+                shared_kwargs = {}
+
+            if not seed_plot_df.empty:
+                seed_call_kwargs = dict(shared_kwargs)
+
+                seed_call_kwargs.update(
+                    {
+                        'plot_df': seed_plot_df,
+                        'design_columns': design_columns,
+                        'plot_filename': seed_filename,
+                        'plot_title': seed_title,
+                        'include_best_condition': False
+                    }
+                )
+
+                _try_design_plot(
+                    lambda call_kwargs=seed_call_kwargs: (
+                        plot_method(**call_kwargs)
+                    ),
+                    (
+                        f"initial maximin seed-design "
+                        f"{plot_description}"
+                    )
+                )
+
+            exploration_call_kwargs = dict(shared_kwargs)
+
+            exploration_call_kwargs.update(
+                {
+                    'plot_df': plot_df,
+                    'design_columns': design_columns,
+                    'plot_filename': exploration_filename,
+                    'plot_title': exploration_title,
+                    'include_best_condition': True
+                }
+            )
+
             _try_design_plot(
-                lambda: self._plot_initial_training_design_1d(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_1d.png'
+                lambda call_kwargs=exploration_call_kwargs: (
+                    plot_method(**call_kwargs)
                 ),
-                '1D initial training design plot'
+                (
+                    f"Auto design-space exploration "
+                    f"{plot_description}"
+                )
+            )
+
+        if n_design_dimensions == 1:
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_1d
+                ),
+                seed_filename=(
+                    'initial_maximin_seed_design_1d.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_1d.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: 1D Reagent Space'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: 1D Reagent Space'
+                ),
+                plot_description='1D reagent-space plot'
             )
 
         elif n_design_dimensions == 2:
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_2d(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_2d.png'
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_2d
                 ),
-                '2D initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_2d.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_2d.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: 2D Reagent Space'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: 2D Reagent Space'
+                ),
+                plot_description='2D reagent-space plot'
             )
 
         elif n_design_dimensions == 3:
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_pairwise(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_pairwise.png',
-                    compact=False
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_pairwise
                 ),
-                'pairwise initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_pairwise.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_pairwise.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: Pairwise Projections'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: Pairwise Projections'
+                ),
+                plot_description='pairwise projection plot',
+                shared_kwargs={
+                    'compact': False
+                }
             )
 
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_3d(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_3d.png'
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_3d
                 ),
-                '3D initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_3d.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_3d.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: 3D Reagent Space'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: 3D Reagent Space'
+                ),
+                plot_description='3D reagent-space plot'
             )
 
         elif n_design_dimensions <= 6:
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_pairwise(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_pairwise.png',
-                    compact=False
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_pairwise
                 ),
-                'pairwise initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_pairwise.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_pairwise.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: Pairwise Projections'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: Pairwise Projections'
+                ),
+                plot_description='pairwise projection plot',
+                shared_kwargs={
+                    'compact': False
+                }
             )
 
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_parallel_coordinates(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename=(
-                        'initial_training_design_parallel_coordinates.png'
-                    )
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_parallel_coordinates
                 ),
-                'parallel-coordinate initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_'
+                    'parallel_coordinates.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_'
+                    'parallel_coordinates.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: Parallel Coordinates'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: Parallel Coordinates'
+                ),
+                plot_description='parallel-coordinate plot'
             )
 
         else:
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_pairwise(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_pairwise_compact.png',
-                    compact=True
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_pairwise
                 ),
-                'compact pairwise initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_'
+                    'pairwise_compact.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_'
+                    'pairwise_compact.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: '
+                    'Compact Pairwise Projections'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: '
+                    'Compact Pairwise Projections'
+                ),
+                plot_description='compact pairwise projection plot',
+                shared_kwargs={
+                    'compact': True
+                }
             )
 
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_parallel_coordinates(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename=(
-                        'initial_training_design_parallel_coordinates.png'
-                    )
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_parallel_coordinates
                 ),
-                'parallel-coordinate initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_'
+                    'parallel_coordinates.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_'
+                    'parallel_coordinates.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: Parallel Coordinates'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: Parallel Coordinates'
+                ),
+                plot_description='parallel-coordinate plot'
             )
 
-            _try_design_plot(
-                lambda: self._plot_initial_training_design_pca(
-                    plot_df=plot_df,
-                    design_columns=design_columns,
-                    plot_filename='initial_training_design_pca.png'
+            _generate_seed_and_exploration_plots(
+                plot_method=(
+                    self._plot_initial_training_design_pca
                 ),
-                'PCA initial training design plot'
+                seed_filename=(
+                    'initial_maximin_seed_design_pca.png'
+                ),
+                exploration_filename=(
+                    'auto_design_space_exploration_pca.png'
+                ),
+                seed_title=(
+                    'Initial Maximin Seed Design: PCA Projection'
+                ),
+                exploration_title=(
+                    'Auto Design-Space Exploration: PCA Projection'
+                ),
+                plot_description='PCA projection plot',
+                shared_kwargs={
+                    # Using the complete run as the reference for both PCA
+                    # figures keeps identical seed conditions at identical
+                    # PC1/PC2 coordinates in both exported plots.
+                    'projection_reference_df': plot_df
+                }
             )
 
         if len(generated_plot_paths) == 0:
@@ -5796,6 +6980,7 @@ class AutoContr(Controller):
                 "<<controller warning>> Auto design-space plotting completed "
                 "without generating any plot files"
             )
+
         else:
             print(
                 "<<controller>> generated Auto design-space plots: "
@@ -6680,190 +7865,319 @@ class AutoContr(Controller):
         )
         lines.append('')
 
-        design_plot_lines = []
+        seed_design_plot_lines = []
+        exploration_design_plot_lines = []
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_1d.png',
-                title='Initial Training Design: 1D Reagent Space',
+                plot_filename='initial_maximin_seed_design_1d.png',
+                title='Initial Maximin Seed Design: 1D Reagent Space',
                 caption=(
-                    'The initial seed design and optimizer-selected conditions '
-                    'are shown in one-dimensional executable reagent space. '
-                    'This plot is generated from copied condition-level Auto '
-                    'performance rows and does not modify run data.'
+                    'This figure shows only the initial maximin seed conditions '
+                    'in one-dimensional executable reagent space. Optimizer-'
+                    'selected conditions and the best-observed-condition marker '
+                    'are intentionally omitted so the initial design coverage '
+                    'can be evaluated independently.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_2d.png',
-                title='Initial Training Design: 2D Reagent Space',
+                plot_filename='initial_maximin_seed_design_2d.png',
+                title='Initial Maximin Seed Design: 2D Reagent Space',
                 caption=(
-                    'The initial seed design and optimizer-selected conditions '
-                    'are shown in two-dimensional executable reagent space. '
-                    'Axis labels follow the same reagent-name and mM convention '
-                    'used by the existing 2D GPR prediction and uncertainty '
-                    'plots.'
+                    'This figure shows only the initial maximin seed conditions '
+                    'across the two executable reagent-concentration axes. It '
+                    'documents the coverage of the design used to initialize '
+                    'the Auto model before Bayesian optimization began.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_pairwise.png',
-                title='Pairwise Design-Space Projections',
+                plot_filename='initial_maximin_seed_design_pairwise.png',
+                title='Initial Maximin Seed Design: Pairwise Projections',
                 caption=(
-                    'Pairwise projections show the Auto conditions across all '
-                    'two-reagent combinations. These projections are the primary '
-                    'static visualization for three-dimensional and moderate '
-                    'higher-dimensional reagent spaces.'
+                    'These pairwise projections show only the initial maximin '
+                    'seed conditions across every displayed two-reagent '
+                    'combination. They provide the primary static assessment '
+                    'of initial coverage for three- through six-dimensional '
+                    'reagent spaces.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_3d.png',
-                title='3D Initial Training Design',
+                plot_filename='initial_maximin_seed_design_3d.png',
+                title='Initial Maximin Seed Design: 3D Reagent Space',
                 caption=(
-                    'For three-variable Auto runs, this 3D scatter plot shows '
-                    'the full reagent-space position of the initial seed and '
-                    'optimizer-selected conditions.'
+                    'For a three-variable Auto run, this figure shows the full '
+                    'three-dimensional position of only the initial maximin '
+                    'seed conditions before optimizer-selected experiments '
+                    'were added.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_parallel_coordinates.png',
-                title='Parallel-Coordinate Design-Space Summary',
+                plot_filename=(
+                    'initial_maximin_seed_design_'
+                    'parallel_coordinates.png'
+                ),
+                title=(
+                    'Initial Maximin Seed Design: Parallel Coordinates'
+                ),
                 caption=(
-                    'The parallel-coordinate plot summarizes higher-dimensional '
-                    'recipe structure by min-max normalizing each reagent axis '
-                    'for display only. Raw concentration values are not modified.'
+                    'This parallel-coordinate figure shows only the initial '
+                    'maximin seed conditions across the higher-dimensional '
+                    'reagent space. Concentrations are normalized for display '
+                    'against executable reagent ranges; raw concentrations are '
+                    'not modified.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_pairwise_compact.png',
-                title='Compact Pairwise Design-Space Projections',
+                plot_filename=(
+                    'initial_maximin_seed_design_'
+                    'pairwise_compact.png'
+                ),
+                title=(
+                    'Initial Maximin Seed Design: '
+                    'Compact Pairwise Projections'
+                ),
                 caption=(
-                    'For high-dimensional Auto runs, the compact pairwise plot '
-                    'shows a limited set of reagent-pair projections to keep the '
-                    'report readable.'
+                    'For a high-dimensional Auto run, this compact figure '
+                    'shows only the initial maximin seed conditions across a '
+                    'limited set of reagent-pair projections so the report '
+                    'remains readable.'
                 )
             )
         )
 
-        design_plot_lines.extend(
+        seed_design_plot_lines.extend(
             self._auto_report_plot_markdown_if_exists(
-                plot_filename='initial_training_design_pca.png',
-                title='PCA Projection of Auto Design Space',
+                plot_filename='initial_maximin_seed_design_pca.png',
+                title='Initial Maximin Seed Design: PCA Projection',
                 caption=(
-                    'The PCA plot provides a two-dimensional summary of global '
-                    'design-space dispersion. PCA axes are reduced-dimensional '
-                    'coordinates and should not be interpreted as physical '
-                    'reagent axes.'
+                    'This PCA figure shows only the initial maximin seed '
+                    'conditions in a two-component summary of the higher-'
+                    'dimensional design space. PCA axes are reduced-dimensional '
+                    'coordinates and are not physical reagent axes.'
                 )
             )
         )
 
-        if len(design_plot_lines) > 0:
-            lines.append('## Initial Training Design Visualization')
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='auto_design_space_exploration_1d.png',
+                title='Auto Design-Space Exploration: 1D Reagent Space',
+                caption=(
+                    'This figure shows where Auto began with the initial seed '
+                    'conditions and where it subsequently sampled optimizer-'
+                    'selected conditions in one-dimensional reagent space. The '
+                    'best observed condition is highlighted when available.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='auto_design_space_exploration_2d.png',
+                title='Auto Design-Space Exploration: 2D Reagent Space',
+                caption=(
+                    'This figure distinguishes the initial seed conditions '
+                    'from optimizer-selected conditions across the two '
+                    'executable reagent-concentration axes. The best observed '
+                    'condition is highlighted when available.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename=(
+                    'auto_design_space_exploration_pairwise.png'
+                ),
+                title=(
+                    'Auto Design-Space Exploration: Pairwise Projections'
+                ),
+                caption=(
+                    'These pairwise projections show how the optimizer extended '
+                    'the initial seed design across every displayed two-reagent '
+                    'combination. Seed and optimizer-selected conditions are '
+                    'shown separately, with the best observed condition '
+                    'highlighted when available.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='auto_design_space_exploration_3d.png',
+                title='Auto Design-Space Exploration: 3D Reagent Space',
+                caption=(
+                    'For a three-variable Auto run, this figure shows the full '
+                    'three-dimensional relationship between the initial seed '
+                    'conditions and the optimizer-selected conditions.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename=(
+                    'auto_design_space_exploration_'
+                    'parallel_coordinates.png'
+                ),
+                title=(
+                    'Auto Design-Space Exploration: Parallel Coordinates'
+                ),
+                caption=(
+                    'This parallel-coordinate figure summarizes the complete '
+                    'higher-dimensional Auto trajectory, distinguishing the '
+                    'initial seed design from optimizer-selected conditions. '
+                    'Normalization is display-only and does not alter raw '
+                    'concentrations.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename=(
+                    'auto_design_space_exploration_'
+                    'pairwise_compact.png'
+                ),
+                title=(
+                    'Auto Design-Space Exploration: '
+                    'Compact Pairwise Projections'
+                ),
+                caption=(
+                    'For a high-dimensional Auto run, this compact figure '
+                    'shows seed and optimizer-selected conditions across a '
+                    'limited set of reagent-pair projections so the report '
+                    'remains readable.'
+                )
+            )
+        )
+
+        exploration_design_plot_lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='auto_design_space_exploration_pca.png',
+                title='Auto Design-Space Exploration: PCA Projection',
+                caption=(
+                    'This PCA figure summarizes the complete higher-dimensional '
+                    'Auto trajectory in two components. The seed-only and full-'
+                    'exploration PCA figures use the same reference projection '
+                    'so identical seed conditions retain identical coordinates. '
+                    'PCA axes are not physical reagent axes.'
+                )
+            )
+        )
+
+        if len(seed_design_plot_lines) > 0:
+            lines.append('## Initial Maximin Seed Design')
             lines.append('')
             lines.append(
-                'The following plots visualize the initial seed design and any '
-                'optimizer-selected conditions in executable reagent-design '
-                'space. These plots are generated after the Auto run from copied '
-                'condition-level performance rows and are report-only '
-                'diagnostics.'
+                'These figures isolate the initial maximin seed conditions used '
+                'to initialize the Auto model. They show the starting coverage '
+                'of executable reagent-design space before the optimizer '
+                'selected any additional experiments.'
             )
             lines.append('')
-            lines.extend(design_plot_lines)
+            lines.extend(seed_design_plot_lines)
+
+        if len(exploration_design_plot_lines) > 0:
+            lines.append('## Auto Design-Space Exploration')
+            lines.append('')
+            lines.append(
+                'These figures show how Auto explored reagent-design space '
+                'after initialization. Initial seed conditions and optimizer-'
+                'selected conditions are displayed as separate categories, and '
+                'the best observed condition is highlighted when available.'
+            )
+            lines.append('')
+            lines.extend(exploration_design_plot_lines)
 
         lines.append('## Generated Files')
+        lines.append('## Generated Files')
         lines.append('')
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('pr_data', 'experiment_data.csv'),
-                'Raw well-level experiment data'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('pr_data', 'auto_model_performance_log.csv'),
-                'Condition-level Auto performance log'
-            )
-        )
-        lines.append(
-            '- Human-readable Auto run report: '
-            '`pr_data/auto_run_report.md` (present)'
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'lambda_progress_final.png'),
-                'Final condition-level lambda progress plot'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'lambda_replicates_final.png'),
-                'Final replicate-level lambda diagnostic plot'
-            )
-        )
         
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'initial_training_design_1d.png'),
-                'Initial training design 1D plot'
+        design_plot_file_entries = [
+            (
+                'initial_maximin_seed_design_1d.png',
+                'Initial maximin seed design 1D reagent-space plot'
+            ),
+            (
+                'auto_design_space_exploration_1d.png',
+                'Auto design-space exploration 1D reagent-space plot'
+            ),
+            (
+                'initial_maximin_seed_design_2d.png',
+                'Initial maximin seed design 2D reagent-space plot'
+            ),
+            (
+                'auto_design_space_exploration_2d.png',
+                'Auto design-space exploration 2D reagent-space plot'
+            ),
+            (
+                'initial_maximin_seed_design_pairwise.png',
+                'Initial maximin seed design pairwise projection plot'
+            ),
+            (
+                'auto_design_space_exploration_pairwise.png',
+                'Auto design-space exploration pairwise projection plot'
+            ),
+            (
+                'initial_maximin_seed_design_3d.png',
+                'Initial maximin seed design 3D reagent-space plot'
+            ),
+            (
+                'auto_design_space_exploration_3d.png',
+                'Auto design-space exploration 3D reagent-space plot'
+            ),
+            (
+                'initial_maximin_seed_design_parallel_coordinates.png',
+                'Initial maximin seed design parallel-coordinate plot'
+            ),
+            (
+                'auto_design_space_exploration_parallel_coordinates.png',
+                'Auto design-space exploration parallel-coordinate plot'
+            ),
+            (
+                'initial_maximin_seed_design_pairwise_compact.png',
+                'Initial maximin seed design compact pairwise plot'
+            ),
+            (
+                'auto_design_space_exploration_pairwise_compact.png',
+                'Auto design-space exploration compact pairwise plot'
+            ),
+            (
+                'initial_maximin_seed_design_pca.png',
+                'Initial maximin seed design PCA projection plot'
+            ),
+            (
+                'auto_design_space_exploration_pca.png',
+                'Auto design-space exploration PCA projection plot'
             )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'initial_training_design_2d.png'),
-                'Initial training design 2D plot'
+        ]
+
+        for plot_filename, plot_description in design_plot_file_entries:
+            lines.append(
+                self._auto_report_file_line(
+                    os.path.join(
+                        'Plots',
+                        plot_filename
+                    ),
+                    plot_description
+                )
             )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'initial_training_design_pairwise.png'),
-                'Initial training design pairwise projection plot'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'initial_training_design_3d.png'),
-                'Initial training design 3D plot'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join(
-                    'Plots',
-                    'initial_training_design_parallel_coordinates.png'
-                ),
-                'Initial training design parallel-coordinate plot'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join(
-                    'Plots',
-                    'initial_training_design_pairwise_compact.png'
-                ),
-                'Initial training design compact pairwise plot'
-            )
-        )
-        lines.append(
-            self._auto_report_file_line(
-                os.path.join('Plots', 'initial_training_design_pca.png'),
-                'Initial training design PCA plot'
-            )
-        )
-        
         lines.append(
             self._auto_report_file_line(
                 os.path.join('Debug', 'terminal_output.txt'),
