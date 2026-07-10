@@ -4825,8 +4825,8 @@ class AutoContr(Controller):
         condition_type_series = plot_df.get(
             'condition_type',
             pd.Series('', index=plot_df.index)
-        ).fillna('').astype(str)
-
+        ).fillna('').astype(str).str.strip().str.lower()
+        
         seed_mask = condition_type_series == 'seed'
         optimizer_mask = condition_type_series == 'optimizer_selected'
         other_mask = ~(seed_mask | optimizer_mask)
@@ -4978,7 +4978,7 @@ class AutoContr(Controller):
         condition_type_series = plot_df.get(
             'condition_type',
             pd.Series('', index=plot_df.index)
-        ).fillna('').astype(str)
+        ).fillna('').astype(str).str.strip().str.lower()
 
         seed_mask = condition_type_series == 'seed'
         optimizer_mask = condition_type_series == 'optimizer_selected'
@@ -5359,7 +5359,7 @@ class AutoContr(Controller):
         condition_type_series = plot_df.get(
             'condition_type',
             pd.Series('', index=plot_df.index)
-        ).fillna('').astype(str)
+        ).fillna('').astype(str).str.strip().str.lower()
 
         seed_mask = condition_type_series == 'seed'
         optimizer_mask = condition_type_series == 'optimizer_selected'
@@ -5960,7 +5960,7 @@ class AutoContr(Controller):
         condition_type_series = display_df.get(
             'condition_type',
             pd.Series('', index=display_df.index)
-        ).fillna('').astype(str)
+        ).fillna('').astype(str).str.strip().str.lower()
 
         best_condition_number = None
 
@@ -8106,9 +8106,53 @@ class AutoContr(Controller):
             lines.extend(exploration_design_plot_lines)
 
         lines.append('## Generated Files')
-        lines.append('## Generated Files')
         lines.append('')
-        
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'pr_data',
+                    'experiment_data.csv'
+                ),
+                'Raw well-level experiment data'
+            )
+        )
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'pr_data',
+                    'auto_model_performance_log.csv'
+                ),
+                'Condition-level Auto performance log'
+            )
+        )
+
+        lines.append(
+            '- Human-readable Auto run report: '
+            '`pr_data/auto_run_report.md` (present)'
+        )
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    'lambda_progress_final.png'
+                ),
+                'Final condition-level lambda progress plot'
+            )
+        )
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    'lambda_replicates_final.png'
+                ),
+                'Final replicate-level lambda diagnostic plot'
+            )
+        )
+
         design_plot_file_entries = [
             (
                 'initial_maximin_seed_design_1d.png',
