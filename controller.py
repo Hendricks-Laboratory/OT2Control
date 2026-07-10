@@ -909,16 +909,21 @@ class Controller(ABC):
        
     def plot_2D_GPR(self, model):
         '''
-        Saves 2D GP heatmaps for predicted lambda max and model uncertainty.
+        Saves square 2D GP prediction and uncertainty heatmaps.
 
-        These plots are only meaningful when Auto mode has exactly two variable
-        reagents. The prediction heatmap shows the GP-predicted lambda max in
-        nm. The uncertainty heatmap shows the GP predictive standard deviation
-        in nm.
+        The scientific plotting panel is physically square. The colorbar
+        remains outside that panel, so the complete saved image may be slightly
+        wider than it is tall without stretching the underlying heatmap.
+
+        Both axes use the configured executable concentration bounds for the
+        two variable reagents. The physical x and y ranges are not forced to
+        use identical data-unit scaling when the reagents have different
+        concentration ranges.
 
         params:
             OptimizationModel model:
-                Auto optimizer model containing 2D prediction grids.
+                Auto optimizer model containing two-dimensional prediction and
+                uncertainty grids.
         '''
         if len(self.variable_reagents) != 2:
             print(
@@ -938,61 +943,290 @@ class Controller(ABC):
             )
             return
 
-        x_values = np.linspace(0, self.max_conc[0], model.predictions.shape[1])
-        y_values = np.linspace(0, self.max_conc[1], model.predictions.shape[0])
+        prediction_array = np.asarray(
+            model.predictions,
+            dtype=float
+        )
+
+        if (
+            prediction_array.ndim != 2
+            or prediction_array.size == 0
+        ):
+            print(
+                "<<controller warning>> skipping 2D_GPR plots because the "
+                "prediction grid is not a nonempty two-dimensional array"
+            )
+            return
+
+        def _read_configured_bound(
+            raw_bounds,
+            dimension_index,
+            reagent_name
+        ):
+            '''
+            Reads one finite configured Auto concentration bound.
+            '''
+            bound_helper = getattr(
+                self,
+                '_get_auto_design_bound_value',
+                None
+            )
+
+            if callable(bound_helper):
+                return bound_helper(
+                    raw_bounds=raw_bounds,
+                    dimension_index=dimension_index,
+                    reagent_name=reagent_name
+                )
+
+            try:
+                if isinstance(raw_bounds, dict):
+                    return float(
+                        raw_bounds[reagent_name]
+                    )
+
+                return float(
+                    raw_bounds[dimension_index]
+                )
+
+            except Exception:
+                return np.nan
+
+        x_minimum = _read_configured_bound(
+            raw_bounds=getattr(
+                self,
+                'min_conc',
+                None
+            ),
+            dimension_index=0,
+            reagent_name=self.variable_reagents[0]
+        )
+
+        x_maximum = _read_configured_bound(
+            raw_bounds=getattr(
+                self,
+                'max_conc',
+                None
+            ),
+            dimension_index=0,
+            reagent_name=self.variable_reagents[0]
+        )
+
+        y_minimum = _read_configured_bound(
+            raw_bounds=getattr(
+                self,
+                'min_conc',
+                None
+            ),
+            dimension_index=1,
+            reagent_name=self.variable_reagents[1]
+        )
+
+        y_maximum = _read_configured_bound(
+            raw_bounds=getattr(
+                self,
+                'max_conc',
+                None
+            ),
+            dimension_index=1,
+            reagent_name=self.variable_reagents[1]
+        )
+
+        bounds_are_valid = (
+            np.isfinite(x_minimum)
+            and np.isfinite(x_maximum)
+            and x_maximum > x_minimum
+            and np.isfinite(y_minimum)
+            and np.isfinite(y_maximum)
+            and y_maximum > y_minimum
+        )
+
+        if not bounds_are_valid:
+            print(
+                "<<controller warning>> skipping 2D_GPR plots because valid "
+                "executable concentration bounds were not available"
+            )
+            return
+
+        x_values = np.linspace(
+            x_minimum,
+            x_maximum,
+            prediction_array.shape[1]
+        )
+
+        y_values = np.linspace(
+            y_minimum,
+            y_maximum,
+            prediction_array.shape[0]
+        )
+
+        font_helper = getattr(
+            self,
+            '_get_auto_design_plot_font_sizes',
+            None
+        )
+
+        if callable(font_helper):
+            font_sizes = font_helper()
+
+        else:
+            font_sizes = {
+                'title': 13.75,
+                'axis_label': 12.5,
+                'tick_label': 12.5
+            }
 
         def _format_2d_gpr_axis(ax):
-            ax.set_xlabel(f"{self.variable_reagents[0]} (mM)", fontsize=12)
-            ax.set_ylabel(f"{self.variable_reagents[1]} (mM)", fontsize=12)
-            ax.tick_params(axis="both", width=1.5)
-            ax.set_xlim(0, self.max_conc[0])
-            ax.set_ylim(0, self.max_conc[1])
+            '''
+            Applies shared laboratory formatting to one GP heatmap axis.
+            '''
+            ax.set_xlabel(
+                f"{self.variable_reagents[0]} (mM)",
+                fontsize=font_sizes['axis_label']
+            )
+
+            ax.set_ylabel(
+                f"{self.variable_reagents[1]} (mM)",
+                fontsize=font_sizes['axis_label']
+            )
+
+            ax.set_xlim(
+                x_minimum,
+                x_maximum
+            )
+
+            ax.set_ylim(
+                y_minimum,
+                y_maximum
+            )
+
+            ax.tick_params(
+                axis='both',
+                which='both',
+                direction='out',
+                top=False,
+                right=False,
+                width=0.9,
+                labelsize=font_sizes['tick_label']
+            )
 
             for spine in ax.spines.values():
-                spine.set_linewidth(1.5)
+                spine.set_visible(True)
+                spine.set_linewidth(0.9)
+                spine.set_color('0.2')
 
-        fig, ax = plt.subplots(figsize=(4.8, 4.0), dpi=200)
+            square_helper = getattr(
+                self,
+                '_apply_auto_design_square_box_aspect',
+                None
+            )
 
-        prediction_mesh = ax.pcolormesh(
-            x_values,
-            y_values,
-            model.predictions,
-            cmap='inferno',
-            shading='auto'
-        )
+            if callable(square_helper):
+                square_helper(ax)
 
-        _format_2d_gpr_axis(ax)
+            else:
+                set_box_aspect = getattr(
+                    ax,
+                    'set_box_aspect',
+                    None
+                )
 
-        ax.set_title(
-            rf'2D GP Predicted $\lambda_{{\max}}$ After Batch '
-            f'{self.batch_num}',
-            fontsize=10
-        )
+                if callable(set_box_aspect):
+                    set_box_aspect(1.0)
 
-        fig.colorbar(
-            prediction_mesh,
-            ax=ax,
-            label=r'Predicted $\lambda_{\max}$ (nm)'
-        )
+        def _save_2d_gpr_heatmap(
+            heatmap_array,
+            cmap_name,
+            plot_title,
+            colorbar_label,
+            plot_filename,
+            plot_description
+        ):
+            '''
+            Renders and saves one square GP heatmap.
+            '''
+            fig, ax = plt.subplots(
+                figsize=(6.4, 5.8),
+                dpi=300
+            )
 
-        fig.subplots_adjust(
-            left=0.2,
-            bottom=0.2,
-            right=0.9,
-            top=0.88
-        )
+            heatmap_mesh = ax.pcolormesh(
+                x_values,
+                y_values,
+                heatmap_array,
+                cmap=cmap_name,
+                shading='auto'
+            )
 
-        prediction_plot_filename = os.path.join(
+            _format_2d_gpr_axis(ax)
+
+            ax.set_title(
+                plot_title,
+                fontsize=font_sizes['title'],
+                fontweight='normal',
+                pad=14
+            )
+
+            colorbar = fig.colorbar(
+                heatmap_mesh,
+                ax=ax,
+                fraction=0.046,
+                pad=0.05
+            )
+
+            colorbar.set_label(
+                colorbar_label,
+                fontsize=font_sizes['axis_label']
+            )
+
+            colorbar.ax.tick_params(
+                labelsize=font_sizes['tick_label'],
+                width=0.9
+            )
+
+            fig.subplots_adjust(
+                left=0.15,
+                right=0.86,
+                bottom=0.14,
+                top=0.88
+            )
+
+            full_plot_path = os.path.join(
+                self.plot_path,
+                plot_filename
+            )
+
+            fig.savefig(
+                full_plot_path,
+                bbox_inches='tight'
+            )
+
+            plt.close(fig)
+
+            print(
+                f"<<controller>> saved {plot_description} to "
+                f"{full_plot_path}"
+            )
+
+        os.makedirs(
             self.plot_path,
-            f'gpr_predictions_batch_{self.batch_num}.png'
+            exist_ok=True
         )
 
-        fig.savefig(prediction_plot_filename)
-        plt.close(fig)
-
-        print(
-            f"<<controller>> saved 2D GP prediction plot to "
-            f"{prediction_plot_filename}"
+        _save_2d_gpr_heatmap(
+            heatmap_array=prediction_array,
+            cmap_name='inferno',
+            plot_title=(
+                rf'2D GP Predicted $\lambda_{{\max}}$ '
+                f'After Batch {self.batch_num}'
+            ),
+            colorbar_label=(
+                r'Predicted $\lambda_{\max}$ (nm)'
+            ),
+            plot_filename=(
+                f'gpr_predictions_batch_{self.batch_num}.png'
+            ),
+            plot_description='2D GP prediction plot'
         )
 
         if (
@@ -1005,47 +1239,30 @@ class Controller(ABC):
             )
             return
 
-        fig, ax = plt.subplots(figsize=(4.8, 4.0), dpi=200)
-
-        uncertainty_mesh = ax.pcolormesh(
-            x_values,
-            y_values,
+        uncertainty_array = np.asarray(
             model.prediction_uncertainty,
-            cmap='viridis',
-            shading='auto'
+            dtype=float
         )
 
-        _format_2d_gpr_axis(ax)
+        if uncertainty_array.shape != prediction_array.shape:
+            print(
+                "<<controller warning>> skipping 2D GP uncertainty plot "
+                "because its grid shape does not match the prediction grid"
+            )
+            return
 
-        ax.set_title(
-            rf'2D GP Predictive Uncertainty After Batch {self.batch_num}',
-            fontsize=10
-        )
-
-        fig.colorbar(
-            uncertainty_mesh,
-            ax=ax,
-            label='GP predictive SD (nm)'
-        )
-
-        fig.subplots_adjust(
-            left=0.2,
-            bottom=0.2,
-            right=0.9,
-            top=0.88
-        )
-
-        uncertainty_plot_filename = os.path.join(
-            self.plot_path,
-            f'gpr_uncertainty_batch_{self.batch_num}.png'
-        )
-
-        fig.savefig(uncertainty_plot_filename)
-        plt.close(fig)
-
-        print(
-            f"<<controller>> saved 2D GP uncertainty plot to "
-            f"{uncertainty_plot_filename}"
+        _save_2d_gpr_heatmap(
+            heatmap_array=uncertainty_array,
+            cmap_name='viridis',
+            plot_title=(
+                '2D GP Predictive Uncertainty '
+                f'After Batch {self.batch_num}'
+            ),
+            colorbar_label='GP predictive SD (nm)',
+            plot_filename=(
+                f'gpr_uncertainty_batch_{self.batch_num}.png'
+            ),
+            plot_description='2D GP uncertainty plot'
         )
     
     # below until ~end is all not used yet needs to be worked up
