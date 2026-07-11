@@ -1496,91 +1496,32 @@ class OptimizationModel():
     
     def _update_prediction_grid_for_plotting(self, grid_size=100):
         '''
-        Updates 2D GP prediction grids for the controller heatmap plots.
+        Updates the two-dimensional GP prediction grids used by the controller
+        heatmap plots.
 
-        The controller's plot_2D_GPR() function expects self.predictions to be
-        a grid_size x grid_size array of predicted lambda max values in nm.
+        The first variable reagent is the horizontal x-axis and the second
+        variable reagent is the vertical y-axis. The saved arrays therefore use
+        the standard Matplotlib heatmap convention:
 
-        When available, self.prediction_uncertainty is also populated as a
-        grid_size x grid_size array of GP predictive standard deviations in nm.
+            columns:
+                first variable reagent / x-axis
 
-        These visualizations only make sense for exactly two variable reagents.
+            rows:
+                second variable reagent / y-axis
 
-        For experiments with more than two variable reagents, this method sets
-        both plotting grids to None so the controller can skip the 2D heatmaps
-        cleanly.
+        NumPy meshgrid with indexing='xy' already produces points in this
+        orientation when its flattened predictions are reshaped in C order.
+        The arrays must not be transposed after reshaping.
 
-        params:
-            int grid_size:
-                Number of grid points per axis for the 2D prediction and
-                uncertainty heatmaps.
-        '''
-        if self._get_dimension() != 2:
-            self.predictions = None
-            self.prediction_uncertainty = None
-            return
-
-        grid_x, grid_y = np.meshgrid(
-            np.linspace(0.0, 1.0, grid_size),
-            np.linspace(0.0, 1.0, grid_size)
-        )
-
-        grid_points = np.stack(
-            [grid_x.ravel(), grid_y.ravel()],
-            axis=-1
-        )
-
-        normalized_predictions, normalized_prediction_stds = (
-            self.gp_model.predict(grid_points)
-        )
-
-        self.predictions = (
-            normalized_predictions
-            .flatten()
-            .reshape(grid_size, grid_size)
-            .T * 600.0 + 300.0
-        )
-
-        self.prediction_uncertainty = (
-            normalized_prediction_stds
-            .flatten()
-            .reshape(grid_size, grid_size)
-            .T * 600.0
-        )
-
-    def refresh_prediction_grid_for_plotting(self, grid_size=100):
-        '''
-        Rebuilds the controller-facing 2D GP prediction and uncertainty grids
-        from the optimizer's current fitted model state.
-
-        This public lifecycle hook is intended to be called after
-        update_experiment_data() has incorporated a completed experimental
-        batch and immediately before the controller generates GP heatmaps.
-
-        For exactly two variable reagents, this refreshes:
-
-            self.predictions:
-                Predicted lambda-max values in nm.
-
-            self.prediction_uncertainty:
-                GP predictive standard deviations in nm.
-
-        For any dimensionality other than two, the existing internal helper
-        clears both plotting arrays to None.
-
-        This method does not refit the model, select a recipe, change the
-        acquisition function, or alter experimental data.
+        For experiments with any dimensionality other than two, both plotting
+        grids are cleared so the controller can skip 2D heatmaps cleanly.
 
         params:
             int grid_size:
-                Number of prediction points along each reagent axis.
+                Number of model-evaluation points along each reagent axis.
 
         returns:
-            tuple:
-                (
-                    self.predictions,
-                    self.prediction_uncertainty
-                )
+            None
         '''
         try:
             grid_size = int(
@@ -1599,34 +1540,114 @@ class OptimizationModel():
                 f"Received: {grid_size}."
             )
 
+        if self._get_dimension() != 2:
+            self.predictions = None
+            self.prediction_uncertainty = None
+            return
+
         if self.gp_model is None:
             self.predictions = None
             self.prediction_uncertainty = None
 
-            print(
-                "<<optimizer>> skipping prediction-grid refresh because "
-                "the GP model has not been initialized"
+            raise RuntimeError(
+                "Cannot generate GP prediction grids before the GP model has "
+                "been initialized."
             )
 
-            return (
-                self.predictions,
-                self.prediction_uncertainty
-            )
-
-        self._update_prediction_grid_for_plotting(
-            grid_size=grid_size
+        reagent_0_axis = np.linspace(
+            0.0,
+            1.0,
+            grid_size
         )
 
-        if self._get_dimension() == 2:
-            print(
-                "<<optimizer>> refreshed 2D GP prediction and uncertainty "
-                "grids from the current fitted model using a "
-                f"{grid_size} x {grid_size} grid"
+        reagent_1_axis = np.linspace(
+            0.0,
+            1.0,
+            grid_size
+        )
+
+        reagent_0_grid, reagent_1_grid = np.meshgrid(
+            reagent_0_axis,
+            reagent_1_axis,
+            indexing='xy'
+        )
+
+        grid_points = np.column_stack(
+            (
+                reagent_0_grid.ravel(order='C'),
+                reagent_1_grid.ravel(order='C')
+            )
+        )
+
+        (
+            normalized_predictions,
+            normalized_prediction_stds
+        ) = self.gp_model.predict(
+            grid_points
+        )
+
+        normalized_predictions = np.asarray(
+            normalized_predictions,
+            dtype=float
+        ).reshape(-1)
+
+        normalized_prediction_stds = np.asarray(
+            normalized_prediction_stds,
+            dtype=float
+        ).reshape(-1)
+
+        expected_point_count = grid_size * grid_size
+
+        if normalized_predictions.size != expected_point_count:
+            raise ValueError(
+                "GP prediction output size does not match the requested "
+                f"{grid_size} x {grid_size} plotting grid. Expected "
+                f"{expected_point_count} values, received "
+                f"{normalized_predictions.size}."
             )
 
-        return (
-            self.predictions,
-            self.prediction_uncertainty
+        if normalized_prediction_stds.size != expected_point_count:
+            raise ValueError(
+                "GP uncertainty output size does not match the requested "
+                f"{grid_size} x {grid_size} plotting grid. Expected "
+                f"{expected_point_count} values, received "
+                f"{normalized_prediction_stds.size}."
+            )
+
+        if not np.all(np.isfinite(normalized_predictions)):
+            raise ValueError(
+                "GP prediction grid contains non-finite values."
+            )
+
+        if not np.all(np.isfinite(normalized_prediction_stds)):
+            raise ValueError(
+                "GP uncertainty grid contains non-finite values."
+            )
+
+        heatmap_shape = (
+            reagent_1_axis.size,
+            reagent_0_axis.size
+        )
+
+        # Rows correspond to reagent 1 (the plotted y-axis), and columns
+        # correspond to reagent 0 (the plotted x-axis). Do not transpose.
+        self.predictions = (
+            normalized_predictions
+            .reshape(
+                heatmap_shape,
+                order='C'
+            )
+            * 600.0
+            + 300.0
+        )
+
+        self.prediction_uncertainty = (
+            normalized_prediction_stds
+            .reshape(
+                heatmap_shape,
+                order='C'
+            )
+            * 600.0
         )
     
     def initialize_optimizer(self, X_init, Y_init):
@@ -1706,45 +1727,61 @@ class OptimizationModel():
             bounds, so the optimizer does not search the non-executable 0-5 uL
             transfer region for active reagents.
 
-        For 2D experiments, this also updates self.predictions and
-        self.prediction_uncertainty so the controller can generate 2D GP
-        prediction and uncertainty heatmaps. For higher-dimensional
-        experiments, both plotting grids are set to None because the heatmaps
-        are only valid for exactly two variable reagents.
+        The selected recipe's predicted lambda-max mean and GP predictive
+        standard deviation are recorded before the recipe is experimentally
+        run. These values allow the controller to compare the pre-experiment
+        model prediction with the subsequently measured result.
 
-        The final selected recipe prediction is saved on the optimizer object
-        so the controller can record pre-experiment model performance before
-        the recipe is physically run.
+        Prediction and uncertainty heatmap grids are intentionally not generated
+        here. The controller refreshes those grids only after a completed batch
+        has been incorporated into the fitted GP model, ensuring that a plot
+        labeled "After Batch N" actually includes Batch N.
 
         returns:
             list[np.ndarray]:
                 A single suggested normalized recipe point wrapped in a list.
                 This preserves the controller-facing return format:
+
                     [array([...])]
         '''
         best_x = self._optimize_target_distance_with_masks()
-        predicted_lambda_max, predicted_lambda_std = (
-            self.predict_lambda_distribution_nm(best_x)
+
+        (
+            predicted_lambda_max,
+            predicted_lambda_std
+        ) = self.predict_lambda_distribution_nm(
+            best_x
         )
 
-        self.last_optimizer_predicted_lambda_mean_nm = predicted_lambda_max
-        self.last_optimizer_predicted_lambda_std_nm = predicted_lambda_std
+        self.last_optimizer_predicted_lambda_mean_nm = (
+            predicted_lambda_max
+        )
 
-        self._update_prediction_grid_for_plotting()
+        self.last_optimizer_predicted_lambda_std_nm = (
+            predicted_lambda_std
+        )
 
-        selected_mask = getattr(self, 'last_selected_mask', None)
+        selected_mask = getattr(
+            self,
+            'last_selected_mask',
+            None
+        )
 
         if selected_mask is not None:
             print(
-                f"<<optimizer>> selected reagent mask {selected_mask.tolist()} "
-                f"for suggested recipe"
+                f"<<optimizer>> selected reagent mask "
+                f"{selected_mask.tolist()} for suggested recipe"
             )
 
-        volume_balance = getattr(self, 'last_optimizer_volume_balance', None)
+        volume_balance = getattr(
+            self,
+            'last_optimizer_volume_balance',
+            None
+        )
 
         if volume_balance is not None:
             print(
-                f"<<optimizer>> suggested recipe volume balance: "
+                "<<optimizer>> suggested recipe volume balance: "
                 f"fixed={volume_balance['fixed_volume_total']:.4f} uL, "
                 f"variable={volume_balance['variable_volume_total']:.4f} uL, "
                 f"water={volume_balance['water_volume']:.4f} uL, "
@@ -1753,24 +1790,228 @@ class OptimizationModel():
 
         print(
             f"<<optimizer>> suggested normalized recipe {best_x} "
-            f"with predicted lambda max {predicted_lambda_max:.4f} nm "
-            f"and GP predictive std {predicted_lambda_std:.4f} nm"
+            f"with predicted lambda max "
+            f"{predicted_lambda_max:.4f} nm "
+            f"and GP predictive std "
+            f"{predicted_lambda_std:.4f} nm"
         )
 
-        return [best_x]
+        return [
+            best_x
+        ]
 
-    def update_experiment_data(self, X_all, Y_all, X_new, Y_new):
-        '''
-        Updates the optimizer with new experimental data, extending the historical dataset.
+    def update_experiment_data(
+        self,
+        X_all,
+        Y_all,
+        X_new,
+        Y_new
+    ):
+        """
+        Refits the GP with the complete cumulative training dataset and keeps
+        the GPyOpt optimizer object's stored X/Y history synchronized.
+
+        The controller constructs X_all and Y_all by appending the newly
+        completed, QC-approved batch to model.optimizer.X and
+        model.optimizer.Y. Therefore, after every successful model update,
+        those optimizer-side arrays must be replaced with the same cumulative
+        arrays. Otherwise, the next controller update would append to stale
+        seed-only data and silently discard earlier optimizer batches.
+
         params:
-        np.ndarray X_new: The new parameter values from the experiments.
-        np.ndarray Y_new: The new objective function values corresponding to X_new.
-        '''
-        
-        self.gp_model.updateModel(X_all=X_all, Y_all=Y_all, X_new=X_new, Y_new=Y_new)
-        
+            np.ndarray X_all:
+                Complete cumulative normalized recipe matrix, including the
+                newly completed batch.
+
+            np.ndarray Y_all:
+                Complete cumulative normalized response column, including the
+                newly completed batch.
+
+            np.ndarray X_new:
+                Normalized recipe matrix for only the newly completed batch.
+
+            np.ndarray Y_new:
+                Normalized response column for only the newly completed batch.
+
+        returns:
+            None
+        """
+        if self.gp_model is None:
+            raise RuntimeError(
+                "Cannot update Auto experiment data before the GP model has "
+                "been initialized."
+            )
+
+        if self.optimizer is None:
+            raise RuntimeError(
+                "Cannot synchronize Auto experiment history before the "
+                "GPyOpt optimizer has been initialized."
+            )
+
+        X_all_array = np.asarray(
+            X_all,
+            dtype=float
+        )
+
+        Y_all_array = np.asarray(
+            Y_all,
+            dtype=float
+        )
+
+        X_new_array = np.asarray(
+            X_new,
+            dtype=float
+        )
+
+        Y_new_array = np.asarray(
+            Y_new,
+            dtype=float
+        )
+
+        if X_all_array.ndim == 1:
+            X_all_array = X_all_array.reshape(
+                1,
+                -1
+            )
+
+        if X_new_array.ndim == 1:
+            X_new_array = X_new_array.reshape(
+                1,
+                -1
+            )
+
+        if Y_all_array.ndim == 1:
+            Y_all_array = Y_all_array.reshape(
+                -1,
+                1
+            )
+
+        if Y_new_array.ndim == 1:
+            Y_new_array = Y_new_array.reshape(
+                -1,
+                1
+            )
+
+        expected_dimension = self._get_dimension()
+
+        if (
+            X_all_array.ndim != 2
+            or X_all_array.shape[1] != expected_dimension
+        ):
+            raise ValueError(
+                "X_all must be a two-dimensional array with one column per "
+                f"variable reagent. Expected {expected_dimension} columns, "
+                f"received shape {X_all_array.shape}."
+            )
+
+        if (
+            X_new_array.ndim != 2
+            or X_new_array.shape[1] != expected_dimension
+        ):
+            raise ValueError(
+                "X_new must be a two-dimensional array with one column per "
+                f"variable reagent. Expected {expected_dimension} columns, "
+                f"received shape {X_new_array.shape}."
+            )
+
+        if (
+            Y_all_array.ndim != 2
+            or Y_all_array.shape[1] != 1
+        ):
+            raise ValueError(
+                "Y_all must be a two-dimensional single-column array. "
+                f"Received shape {Y_all_array.shape}."
+            )
+
+        if (
+            Y_new_array.ndim != 2
+            or Y_new_array.shape[1] != 1
+        ):
+            raise ValueError(
+                "Y_new must be a two-dimensional single-column array. "
+                f"Received shape {Y_new_array.shape}."
+            )
+
+        if X_all_array.shape[0] != Y_all_array.shape[0]:
+            raise ValueError(
+                "X_all and Y_all must contain the same number of cumulative "
+                f"observations. Received {X_all_array.shape[0]} and "
+                f"{Y_all_array.shape[0]} rows."
+            )
+
+        if X_new_array.shape[0] != Y_new_array.shape[0]:
+            raise ValueError(
+                "X_new and Y_new must contain the same number of new "
+                f"observations. Received {X_new_array.shape[0]} and "
+                f"{Y_new_array.shape[0]} rows."
+            )
+
+        if X_new_array.shape[0] == 0:
+            raise ValueError(
+                "X_new and Y_new must contain at least one new observation."
+            )
+
+        if X_all_array.shape[0] < X_new_array.shape[0]:
+            raise ValueError(
+                "The cumulative dataset cannot contain fewer rows than the "
+                "new batch."
+            )
+
+        if not np.all(np.isfinite(X_all_array)):
+            raise ValueError(
+                "X_all contains non-finite values."
+            )
+
+        if not np.all(np.isfinite(Y_all_array)):
+            raise ValueError(
+                "Y_all contains non-finite values."
+            )
+
+        if not np.all(np.isfinite(X_new_array)):
+            raise ValueError(
+                "X_new contains non-finite values."
+            )
+
+        if not np.all(np.isfinite(Y_new_array)):
+            raise ValueError(
+                "Y_new contains non-finite values."
+            )
+
+        self.gp_model.updateModel(
+            X_all=X_all_array,
+            Y_all=Y_all_array,
+            X_new=X_new_array,
+            Y_new=Y_new_array
+        )
+
+        # GPyOpt's model wrapper and ModularBayesianOptimization object store
+        # their training arrays separately. Synchronize the optimizer object
+        # only after the GP update succeeds so the next controller iteration
+        # starts from the complete cumulative history.
+        self.optimizer.X = np.array(
+            X_all_array,
+            dtype=float,
+            copy=True
+        )
+
+        self.optimizer.Y = np.array(
+            Y_all_array,
+            dtype=float,
+            copy=True
+        )
+
         self.curr_iter += 1
-        self.update_quit(X_new, Y_new)
+
+        self.update_quit(
+            X_new_array,
+            Y_new_array
+        )
+
+        print(
+            "<<optimizer>> updated GP with "
+            f"{X_all_array.shape[0]} cumulative observations "
+            f"({X_new_array.shape[0]} new)"
+        )
     
 
     def update_quit(self, X_new, Y_new):
