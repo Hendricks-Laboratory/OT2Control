@@ -808,29 +808,75 @@ class Controller(ABC):
 
     def _init_robo_header_params(self, header_data):
         '''
-        loads the header data into self.robo_params  
-        params:  
-            list<list<str> header_data: as in gsheets  
-        Postconditions:  
-            simulate, using_temp_ctrl, and temp have been initialized according to values in 
-            excel  
-        '''
-        header_dict = {row[0]:row[1] for row in header_data[1:]}
-        self.robo_params['using_temp_ctrl'] = header_dict['using_temp_ctrl'] == 'yes'
-        self.robo_params['temp'] = float(header_dict['temp']) if self.robo_params['using_temp_ctrl'] else None
-        if self.robo_params['temp'] != None:
-            assert( self.robo_params['temp'] >= 4 and self.robo_params['temp'] <= 95), "invalid temperature"
-        self.dilution_params = self.DilutionParams(header_dict['dilution_cont'], 
-                float(header_dict['dilution_vol']))
-        
-        self.robo_params['target'] = float(header_dict['target'])
-        self.robo_params['max_iterations'] = int(header_dict['max_iterations'])
-        self.robo_params['initial_data'] = int(header_dict['initial_data'])
+        Loads controller and Auto settings from the Header worksheet.
 
-        # Optional Auto setting. Defaults to 3 replicates for backwards
-        # compatibility with older Header sheets that do not include this row.
-        if 'num_duplicates' in header_dict and str(header_dict['num_duplicates']).strip() != '':
-            self.robo_params['num_duplicates'] = int(header_dict['num_duplicates'])
+        Auto plotting is controlled by the optional auto_plot_profile setting:
+
+            standard:
+                Generates applicable per-batch and final Auto plots.
+
+            final_only:
+                Generates final-run Auto plots but suppresses per-batch Auto
+                diagnostic plots.
+
+            off:
+                Suppresses automatic Auto diagnostic and summary plots.
+
+        Older spreadsheets that do not contain auto_plot_profile default to
+        standard for backward compatibility.
+        '''
+        header_dict = {
+            row[0]: row[1]
+            for row in header_data[1:]
+        }
+
+        self.robo_params['using_temp_ctrl'] = (
+            header_dict['using_temp_ctrl'] == 'yes'
+        )
+
+        self.robo_params['temp'] = (
+            float(header_dict['temp'])
+            if self.robo_params['using_temp_ctrl']
+            else None
+        )
+
+        if self.robo_params['temp'] is not None:
+            assert (
+                self.robo_params['temp'] >= 4
+                and self.robo_params['temp'] <= 95
+            ), "invalid temperature"
+
+        self.dilution_params = self.DilutionParams(
+            header_dict['dilution_cont'],
+            float(header_dict['dilution_vol'])
+        )
+
+        self.robo_params['target'] = float(
+            header_dict['target']
+        )
+
+        self.robo_params['max_iterations'] = int(
+            header_dict['max_iterations']
+        )
+
+        self.robo_params['initial_data'] = int(
+            header_dict['initial_data']
+        )
+
+        # Optional Auto setting. Defaults to 3 replicates for backward
+        # compatibility with older Header sheets.
+        num_duplicates_value = str(
+            header_dict.get(
+                'num_duplicates',
+                ''
+            )
+        ).strip()
+
+        if num_duplicates_value:
+            self.robo_params['num_duplicates'] = int(
+                num_duplicates_value
+            )
+
         else:
             self.robo_params['num_duplicates'] = 3
 
@@ -839,17 +885,80 @@ class Controller(ABC):
                 "Header value num_duplicates must be at least 1."
             )
 
-        # Optional Auto setting. Defaults to False for backwards compatibility.
-        # Values are normalized so inputs like true, TRUE, TruE, yes, y, and 1
-        # all enable true-zero search.
-        allow_true_zero_value = str(header_dict.get('allow_true_zero', '')).strip().lower()
+        # Optional Auto setting. Defaults to False for backward compatibility.
+        # Inputs such as true, TRUE, yes, y, and 1 enable true-zero search.
+        allow_true_zero_value = str(
+            header_dict.get(
+                'allow_true_zero',
+                ''
+            )
+        ).strip().lower()
 
-        self.robo_params['allow_true_zero'] = allow_true_zero_value in [
-            '1',
-            'true',
-            'yes',
-            'y'
-        ]
+        self.robo_params['allow_true_zero'] = (
+            allow_true_zero_value
+            in [
+                '1',
+                'true',
+                'yes',
+                'y'
+            ]
+        )
+
+        # Optional general Auto plotting setting. The value is normalized so
+        # users may enter spaces or hyphens without causing an avoidable error.
+        auto_plot_profile_value = str(
+            header_dict.get(
+                'auto_plot_profile',
+                'standard'
+            )
+        ).strip().lower()
+
+        auto_plot_profile_value = (
+            auto_plot_profile_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        auto_plot_profile_aliases = {
+            '': 'standard',
+            'all': 'standard',
+            'default': 'standard',
+            'on': 'standard',
+            'true': 'standard',
+            'yes': 'standard',
+            '1': 'standard',
+            'standard': 'standard',
+            'final': 'final_only',
+            'final_only': 'final_only',
+            'none': 'off',
+            'disabled': 'off',
+            'disable': 'off',
+            'off': 'off',
+            'false': 'off',
+            'no': 'off',
+            '0': 'off'
+        }
+
+        if (
+            auto_plot_profile_value
+            not in auto_plot_profile_aliases
+        ):
+            raise ValueError(
+                "Header value auto_plot_profile must be one of: "
+                "standard, final_only, or off. "
+                f"Received: {auto_plot_profile_value!r}."
+            )
+
+        self.robo_params['auto_plot_profile'] = (
+            auto_plot_profile_aliases[
+                auto_plot_profile_value
+            ]
+        )
+
+        print(
+            "<<controller>> Auto plot profile: "
+            f"{self.robo_params['auto_plot_profile']}"
+        )
     
     def getModelInfo(self): 
         return self.robo_params
@@ -907,7 +1016,11 @@ class Controller(ABC):
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
-    def plot_2D_GPR(self, model):
+    def plot_2D_GPR(
+        self,
+        model,
+        batch_number=None
+    ):
         '''
         Saves square 2D GP prediction and uncertainty heatmaps.
 
@@ -920,17 +1033,30 @@ class Controller(ABC):
         use identical data-unit scaling when the reagents have different
         concentration ranges.
 
+        An explicit batch number may be supplied by the general Auto plotting
+        coordinator. When omitted, the current self.batch_num value is used for
+        backward compatibility.
+
         params:
             OptimizationModel model:
                 Auto optimizer model containing two-dimensional prediction and
                 uncertainty grids.
+
+            int or None batch_number:
+                Batch number used in titles and output filenames.
+
+        returns:
+            list:
+                Paths of successfully generated GP heatmap files.
         '''
+        generated_plot_paths = []
+
         if len(self.variable_reagents) != 2:
             print(
-                "<<controller>> skipping 2D_GPR plots because there are not "
+                "<<controller>> skipping 2D GP plots because there are not "
                 "exactly two variable reagents"
             )
-            return
+            return generated_plot_paths
 
         if (
             model is None
@@ -938,10 +1064,36 @@ class Controller(ABC):
             or model.predictions is None
         ):
             print(
-                "<<controller>> skipping 2D_GPR plots because 2D model "
+                "<<controller>> skipping 2D GP plots because model "
                 "predictions are not available"
             )
-            return
+            return generated_plot_paths
+
+        if batch_number is None:
+            batch_number = getattr(
+                self,
+                'batch_num',
+                0
+            )
+
+        try:
+            plot_batch_number = int(
+                batch_number
+            )
+
+        except (TypeError, ValueError, OverflowError):
+            print(
+                "<<controller warning>> skipping 2D GP plots because the "
+                f"batch number is invalid: {batch_number!r}"
+            )
+            return generated_plot_paths
+
+        if plot_batch_number < 0:
+            print(
+                "<<controller warning>> skipping 2D GP plots because the "
+                f"batch number is negative: {plot_batch_number}"
+            )
+            return generated_plot_paths
 
         prediction_array = np.asarray(
             model.predictions,
@@ -953,10 +1105,10 @@ class Controller(ABC):
             or prediction_array.size == 0
         ):
             print(
-                "<<controller warning>> skipping 2D_GPR plots because the "
+                "<<controller warning>> skipping 2D GP plots because the "
                 "prediction grid is not a nonempty two-dimensional array"
             )
-            return
+            return generated_plot_paths
 
         def _read_configured_bound(
             raw_bounds,
@@ -1043,10 +1195,10 @@ class Controller(ABC):
 
         if not bounds_are_valid:
             print(
-                "<<controller warning>> skipping 2D_GPR plots because valid "
+                "<<controller warning>> skipping 2D GP plots because valid "
                 "executable concentration bounds were not available"
             )
-            return
+            return generated_plot_paths
 
         x_values = np.linspace(
             x_minimum,
@@ -1144,6 +1296,10 @@ class Controller(ABC):
         ):
             '''
             Renders and saves one square GP heatmap.
+
+            returns:
+                str:
+                    Saved plot path.
             '''
             fig, ax = plt.subplots(
                 figsize=(6.4, 5.8),
@@ -1158,7 +1314,9 @@ class Controller(ABC):
                 shading='auto'
             )
 
-            _format_2d_gpr_axis(ax)
+            _format_2d_gpr_axis(
+                ax
+            )
 
             ax.set_title(
                 plot_title,
@@ -1201,32 +1359,41 @@ class Controller(ABC):
                 bbox_inches='tight'
             )
 
-            plt.close(fig)
+            plt.close(
+                fig
+            )
 
             print(
                 f"<<controller>> saved {plot_description} to "
                 f"{full_plot_path}"
             )
 
+            return full_plot_path
+
         os.makedirs(
             self.plot_path,
             exist_ok=True
         )
 
-        _save_2d_gpr_heatmap(
+        prediction_plot_path = _save_2d_gpr_heatmap(
             heatmap_array=prediction_array,
             cmap_name='inferno',
             plot_title=(
                 rf'2D GP Predicted $\lambda_{{\max}}$ '
-                f'After Batch {self.batch_num}'
+                f'After Batch {plot_batch_number}'
             ),
             colorbar_label=(
                 r'Predicted $\lambda_{\max}$ (nm)'
             ),
             plot_filename=(
-                f'gpr_predictions_batch_{self.batch_num}.png'
+                f'gpr_predictions_batch_'
+                f'{plot_batch_number}.png'
             ),
             plot_description='2D GP prediction plot'
+        )
+
+        generated_plot_paths.append(
+            prediction_plot_path
         )
 
         if (
@@ -1237,7 +1404,7 @@ class Controller(ABC):
                 "<<controller>> skipping 2D GP uncertainty plot because "
                 "prediction_uncertainty is not available"
             )
-            return
+            return generated_plot_paths
 
         uncertainty_array = np.asarray(
             model.prediction_uncertainty,
@@ -1249,21 +1416,28 @@ class Controller(ABC):
                 "<<controller warning>> skipping 2D GP uncertainty plot "
                 "because its grid shape does not match the prediction grid"
             )
-            return
+            return generated_plot_paths
 
-        _save_2d_gpr_heatmap(
+        uncertainty_plot_path = _save_2d_gpr_heatmap(
             heatmap_array=uncertainty_array,
             cmap_name='viridis',
             plot_title=(
                 '2D GP Predictive Uncertainty '
-                f'After Batch {self.batch_num}'
+                f'After Batch {plot_batch_number}'
             ),
             colorbar_label='GP predictive SD (nm)',
             plot_filename=(
-                f'gpr_uncertainty_batch_{self.batch_num}.png'
+                f'gpr_uncertainty_batch_'
+                f'{plot_batch_number}.png'
             ),
             plot_description='2D GP uncertainty plot'
         )
+
+        generated_plot_paths.append(
+            uncertainty_plot_path
+        )
+
+        return generated_plot_paths
     
     # below until ~end is all not used yet needs to be worked up
     def plot_kin_subplots(self,df,n_cycles,wells,filename=None):
@@ -1790,50 +1964,160 @@ class Controller(ABC):
     def _execute_print(self, row, i):
         print(row['message'])
 
-    def _create_plot(self, row, i, model=None):
+    def _create_plot(
+        self,
+        row,
+        i,
+        model=None
+    ):
         '''
-        exectues a plot command  
-        params:  
-            pd.Series row: a row of self.rxn_df  
-            int i: index of this row  
-        '''
-        wellnames = row[self._products][row[self._products].astype(bool)].index
-        plot_type = str(row['plot_protocol']).strip().upper()
-        print(f"<<controller>> creating plot using protocol: {plot_type}")
-        filename = row['plot_filename']
-        #make sure you have mapping for all files
+        Executes one spreadsheet-controlled, scan-derived plot command.
 
-        self._update_cached_locs(wellnames)
-        pr_dict = {self._cached_reader_locs[wellname].loc: wellname for wellname in wellnames}
-        #it's not safe to plot in simulation because the scan file may not exist yet
-        df, metadata = self.pr.load_reader_data(row['scan_filename'], pr_dict)
-        #execute the plot depending on what was specified
+        Spreadsheet plot rows are reserved for visualizations that are derived
+        directly from a named plate-reader scan:
+
+            SINGLE_KIN:
+                Generates one kinetics plot for each selected well.
+
+            OVERLAY:
+                Generates one spectral overlay for the selected wells.
+
+            MULTI_KIN:
+                Generates a multi-well kinetics figure.
+
+        Automatic Auto diagnostics are not generated here. GP prediction and
+        uncertainty heatmaps, lambda progress plots, replicate plots,
+        dimension-aware design-space plots, and the final Auto report are
+        controlled by the Header auto_plot_profile setting and generated by
+        _generate_auto_plot_suite() at the scientifically appropriate lifecycle
+        stage.
+
+        The legacy 2D_GPR spreadsheet protocol is recognized only for backward
+        compatibility. It is ignored before any plate-reader data are loaded,
+        preventing stale or duplicate GP heatmaps.
+
+        params:
+            pandas.Series row:
+                Plot-operation row from self.rxn_df.
+
+            int i:
+                Index of the plot-operation row.
+
+            OptimizationModel or None model:
+                Retained for backward compatibility with execute_protocol_df().
+                Automatic model plots are no longer generated in this method.
+
+        returns:
+            None
+        '''
+        plot_type = str(
+            row['plot_protocol']
+        ).strip().upper()
+
+        print(
+            f"<<controller>> creating plot using protocol: "
+            f"{plot_type}"
+        )
+
+        # Legacy compatibility only. GP plots must be generated after the GP
+        # has incorporated a completed batch, not from a plot row inside the
+        # physical scan/transfer protocol.
+        if plot_type == '2D_GPR':
+            warning_already_printed = getattr(
+                self,
+                '_legacy_2d_gpr_warning_printed',
+                False
+            )
+
+            if not warning_already_printed:
+                print(
+                    "<<controller warning>> spreadsheet plot protocol "
+                    "2D_GPR is deprecated and will be ignored. Automatic GP "
+                    "prediction and uncertainty plots are now controlled by "
+                    "Header auto_plot_profile and generated after the fitted "
+                    "model is updated."
+                )
+
+                self._legacy_2d_gpr_warning_printed = True
+
+            return
+
+        supported_scan_plot_types = {
+            'SINGLE_KIN',
+            'OVERLAY',
+            'MULTI_KIN'
+        }
+
+        if plot_type not in supported_scan_plot_types:
+            raise ValueError(
+                "Unsupported spreadsheet plot protocol "
+                f"{plot_type!r}. Supported scan-derived protocols are: "
+                "SINGLE_KIN, OVERLAY, and MULTI_KIN. Automatic Auto plots "
+                "are controlled by Header auto_plot_profile."
+            )
+
+        wellnames = row[
+            self._products
+        ][
+            row[self._products].astype(bool)
+        ].index
+
+        if len(wellnames) == 0:
+            raise ValueError(
+                f"Plot protocol {plot_type} did not select any product wells "
+                f"in protocol row {i}."
+            )
+
+        filename = row[
+            'plot_filename'
+        ]
+
+        scan_filename = row[
+            'scan_filename'
+        ]
+
+        self._update_cached_locs(
+            wellnames
+        )
+
+        pr_dict = {
+            self._cached_reader_locs[wellname].loc: wellname
+            for wellname in wellnames
+        }
+
+        # These supported spreadsheet plots genuinely depend on a completed
+        # plate-reader scan, so the scan file is loaded only after the plot
+        # protocol has been validated.
+        df, metadata = self.pr.load_reader_data(
+            scan_filename,
+            pr_dict
+        )
+
         if plot_type == 'SINGLE_KIN':
             for wellname in wellnames:
-                self.plot_single_kin(df, metadata['n_cycles'], wellname, "{}_{}".format(wellname, filename))
-        elif plot_type == 'OVERLAY':
-            self.plot_LAM_overlay(df, wellnames, filename)
-        elif plot_type == 'MULTI_KIN':
-            self.plot_kin_subplots(df, metadata['n_cycles'], wellnames, filename)
-        elif plot_type == '2D_GPR':
-            # The initial seed batch can execute a plot row before the optimizer
-            # has generated a prediction grid. Higher-dimensional experiments
-            # also cannot use 2D heatmaps, so skip cleanly instead of failing
-            # the run.
-            if (
-                model is None
-                or not hasattr(model, 'predictions')
-                or model.predictions is None
-                or len(self.variable_reagents) != 2
-            ):
-                print(
-                    "<<controller>> skipping 2D_GPR plots because 2D model "
-                    "predictions are not available"
+                self.plot_single_kin(
+                    df,
+                    metadata['n_cycles'],
+                    wellname,
+                    f"{wellname}_{filename}"
                 )
-                return
 
-            self.plot_2D_GPR(model)
-        # TODO: A new plotting protocol for 3+ dimensions
+        elif plot_type == 'OVERLAY':
+            self.plot_LAM_overlay(
+                df,
+                wellnames,
+                filename
+            )
+
+        elif plot_type == 'MULTI_KIN':
+            self.plot_kin_subplots(
+                df,
+                metadata['n_cycles'],
+                wellnames,
+                filename
+            )
+
+        return
 
     def _download_reagent_data(self, spreadsheet_key, credentials):
         '''
@@ -9451,6 +9735,376 @@ class AutoContr(Controller):
 
         return display_yerr, clipped_condition_numbers
     
+    def _generate_auto_plot_suite(
+        self,
+        stage,
+        model=None,
+        batch_number=None
+    ):
+        '''
+        Generates the Auto plots appropriate to one lifecycle stage.
+
+        This is the central coordinator for automatic Auto plotting. The
+        spreadsheet selects a general auto_plot_profile; this method determines
+        which outputs are scientifically appropriate for the current run stage
+        and number of variable reagents.
+
+        Supported stages:
+
+            after_measurement:
+                Runs after measured lambda-max results and replicate QC have
+                been recorded for a completed batch.
+
+                standard:
+                    Generates cumulative lambda progress and replicate plots.
+
+                final_only or off:
+                    Generates nothing.
+
+            after_model_update:
+                Runs after the GP model has incorporated the completed batch.
+
+                standard:
+                    Refreshes the fitted two-dimensional GP prediction grid and
+                    generates prediction and uncertainty heatmaps when there
+                    are exactly two variable reagents.
+
+                final_only or off:
+                    Generates nothing.
+
+            final:
+                Runs after CSV exports are complete and all batches have
+                finished.
+
+                standard:
+                    Generates final lambda plots, dimension-aware seed and
+                    exploration plots, and the final Auto report.
+
+                final_only:
+                    Generates the same final outputs. For a two-variable run,
+                    it first refreshes the fitted GP grid and generates one
+                    final prediction/uncertainty pair because per-batch GP
+                    plotting was suppressed.
+
+                off:
+                    Generates no automatic plots or report.
+
+        Plotting and report failures are isolated by output type. A failure in
+        one diagnostic does not prevent the remaining outputs from being
+        attempted and does not alter recipes, optimizer data, QC decisions,
+        robot execution, or CSV exports.
+
+        params:
+            str stage:
+                One of after_measurement, after_model_update, or final.
+
+            OptimizationModel or None model:
+                Current Auto optimization model. Required for two-dimensional
+                GP prediction and uncertainty heatmaps.
+
+            int or None batch_number:
+                Completed batch represented by the generated outputs.
+
+        returns:
+            list:
+                Paths of successfully generated plots and reports.
+        '''
+        generated_output_paths = []
+
+        normalized_stage = str(
+            stage
+        ).strip().lower().replace(
+            '-',
+            '_'
+        ).replace(
+            ' ',
+            '_'
+        )
+
+        valid_stages = {
+            'after_measurement',
+            'after_model_update',
+            'final'
+        }
+
+        if normalized_stage not in valid_stages:
+            raise ValueError(
+                "Auto plot-suite stage must be one of: "
+                "after_measurement, after_model_update, or final. "
+                f"Received: {stage!r}."
+            )
+
+        plot_profile = str(
+            getattr(
+                self,
+                'robo_params',
+                {}
+            ).get(
+                'auto_plot_profile',
+                'standard'
+            )
+        ).strip().lower()
+
+        if plot_profile not in {
+            'standard',
+            'final_only',
+            'off'
+        }:
+            raise ValueError(
+                "Auto plot profile must be standard, final_only, or off. "
+                f"Received: {plot_profile!r}."
+            )
+
+        if plot_profile == 'off':
+            return generated_output_paths
+
+        if (
+            plot_profile == 'final_only'
+            and normalized_stage != 'final'
+        ):
+            return generated_output_paths
+
+        if batch_number is None:
+            if normalized_stage == 'final':
+                batch_number = (
+                    int(
+                        getattr(
+                            self,
+                            'batch_num',
+                            0
+                        )
+                    )
+                    - 1
+                )
+
+            else:
+                batch_number = getattr(
+                    self,
+                    'batch_num',
+                    None
+                )
+
+        try:
+            completed_batch_number = int(
+                batch_number
+            )
+
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Auto plot-suite batch_number must identify a completed "
+                f"integer batch. Received: {batch_number!r}."
+            )
+
+        if completed_batch_number < 0:
+            raise ValueError(
+                "Auto plot-suite batch_number cannot be negative. "
+                f"Received: {completed_batch_number}."
+            )
+
+        def _record_generated_paths(result):
+            '''
+            Adds path-like output values to generated_output_paths.
+            '''
+            if result is None:
+                return
+
+            if isinstance(
+                result,
+                (str, os.PathLike)
+            ):
+                result_path = os.fspath(
+                    result
+                )
+
+                if result_path not in generated_output_paths:
+                    generated_output_paths.append(
+                        result_path
+                    )
+
+                return
+
+            if isinstance(
+                result,
+                (list, tuple, set)
+            ):
+                for item in result:
+                    _record_generated_paths(
+                        item
+                    )
+
+        def _run_output_step(
+            output_description,
+            output_function
+        ):
+            '''
+            Runs one nonfatal plot/report step and records returned paths.
+            '''
+            try:
+                output_result = output_function()
+
+                _record_generated_paths(
+                    output_result
+                )
+
+            except Exception as exc:
+                print(
+                    f"<<controller warning>> failed to generate "
+                    f"{output_description} during Auto plot stage "
+                    f"{normalized_stage}; continuing Auto mode. "
+                    f"Error: {exc}"
+                )
+
+        def _refresh_and_plot_2d_gp(
+            optimization_model,
+            plot_batch_number
+        ):
+            '''
+            Refreshes the controller-facing GP grids from the current fitted
+            model, then generates the paired prediction and uncertainty plots.
+
+            The refresh must happen after update_experiment_data() so a plot
+            titled "After Batch N" actually includes Batch N in the fitted GP.
+            '''
+            if optimization_model is None:
+                print(
+                    "<<controller warning>> skipping automatic 2D GP plots "
+                    "because no optimization model was supplied"
+                )
+                return []
+
+            refresh_method = getattr(
+                optimization_model,
+                'refresh_prediction_grid_for_plotting',
+                None
+            )
+
+            if not callable(refresh_method):
+                raise AttributeError(
+                    "OptimizationModel does not provide "
+                    "refresh_prediction_grid_for_plotting(). Update "
+                    "optimizers.py before using automatic GP plotting."
+                )
+
+            refresh_method()
+
+            return self.plot_2D_GPR(
+                model=optimization_model,
+                batch_number=plot_batch_number
+            )
+
+        if normalized_stage == 'after_measurement':
+            _run_output_step(
+                (
+                    f"lambda progress plot through batch "
+                    f"{completed_batch_number}"
+                ),
+                lambda: self._plot_lambda_progress_after_batch(
+                    completed_batch_number
+                )
+            )
+
+            _run_output_step(
+                (
+                    f"lambda replicate plot through batch "
+                    f"{completed_batch_number}"
+                ),
+                lambda: (
+                    self._plot_lambda_replicate_progress_after_batch(
+                        completed_batch_number
+                    )
+                )
+            )
+
+        elif normalized_stage == 'after_model_update':
+            n_variable_reagents = len(
+                getattr(
+                    self,
+                    'variable_reagents',
+                    []
+                )
+            )
+
+            if n_variable_reagents == 2:
+                _run_output_step(
+                    (
+                        f"2D GP prediction and uncertainty plots after "
+                        f"batch {completed_batch_number}"
+                    ),
+                    lambda: _refresh_and_plot_2d_gp(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number
+                    )
+                )
+
+        elif normalized_stage == 'final':
+            # final_only suppresses all per-batch GP plots, so create one final
+            # fitted-model snapshot here when exactly two variables are used.
+            if (
+                plot_profile == 'final_only'
+                and len(
+                    getattr(
+                        self,
+                        'variable_reagents',
+                        []
+                    )
+                ) == 2
+            ):
+                _run_output_step(
+                    'final 2D GP prediction and uncertainty plots',
+                    lambda: _refresh_and_plot_2d_gp(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number
+                    )
+                )
+
+            _run_output_step(
+                'final lambda progress plot',
+                lambda: self._plot_lambda_progress_after_batch(
+                    completed_batch_number,
+                    plot_filename='lambda_progress_final.png',
+                    plot_title=(
+                        rf'Final Auto $\lambda_{{\max}}$ Progress'
+                    )
+                )
+            )
+
+            _run_output_step(
+                'final lambda replicate plot',
+                lambda: (
+                    self._plot_lambda_replicate_progress_after_batch(
+                        completed_batch_number,
+                        plot_filename='lambda_replicates_final.png',
+                        plot_title=(
+                            rf'Final Auto Replicate '
+                            rf'$\lambda_{{\max}}$ Values'
+                        )
+                    )
+                )
+            )
+
+            _run_output_step(
+                'final dimension-aware Auto design-space plots',
+                self._plot_initial_training_designs_after_run
+            )
+
+            # Generate the report last so it can detect and embed every final
+            # plot that was successfully written.
+            _run_output_step(
+                'final Auto run report',
+                self._write_auto_run_report
+            )
+
+        if len(generated_output_paths) > 0:
+            print(
+                f"<<controller>> Auto plot stage {normalized_stage} "
+                "generated: "
+                + ", ".join(
+                    generated_output_paths
+                )
+            )
+
+        return generated_output_paths
+    
     def _apply_auto_lambda_plot_lab_frame_style(self, ax):
         '''
         Applies lab-standard axis styling to Auto lambda plots.
@@ -10557,8 +11211,11 @@ class AutoContr(Controller):
             }
         )
         
-        self._plot_lambda_progress_after_batch(self.batch_num)
-        self._plot_lambda_replicate_progress_after_batch(self.batch_num)
+        self._generate_auto_plot_suite(
+            stage='after_measurement',
+            model=model,
+            batch_number=self.batch_num
+        )
 
         # Build QC-filtered seed data for GP model training. Raw replicate
         # results remain preserved in experiment_data.csv and in the Auto
@@ -10590,6 +11247,15 @@ class AutoContr(Controller):
         model.initialize_optimizer(
             qc_X_initial_normalized,
             qc_Y_initial_normalized
+        )
+
+        # The initial seed observations are now incorporated into the fitted
+        # GP. Generate scientifically current model plots for batch 0 when the
+        # selected Auto plot profile requests per-batch outputs.
+        self._generate_auto_plot_suite(
+            stage='after_model_update',
+            model=model,
+            batch_number=self.batch_num
         )
 
         # Evaluate whether the initial seed batch already contains a validated
@@ -10711,8 +11377,12 @@ class AutoContr(Controller):
                 prediction_metadata=optimizer_prediction_metadata
             )
 
-            self._plot_lambda_progress_after_batch(self.batch_num)
-            self._plot_lambda_replicate_progress_after_batch(self.batch_num)
+            self._generate_auto_plot_suite(
+                stage='after_measurement',
+                model=model,
+                batch_number=self.batch_num
+            )
+
             # Build QC-filtered optimizer-batch data for GP model training.
             # Raw replicate results remain preserved in experiment_data.csv and
             # in the Auto performance log, but excluded replicate outliers are
@@ -10746,6 +11416,15 @@ class AutoContr(Controller):
                 qc_Y_new_normalized
             )
 
+            # The completed batch is now part of the fitted GP. The plot-suite
+            # coordinator refreshes the 2D prediction and uncertainty grids
+            # before saving heatmaps, so "After Batch N" truly includes Batch N.
+            self._generate_auto_plot_suite(
+                stage='after_model_update',
+                model=model,
+                batch_number=self.batch_num
+            )
+
             # Override optimizer-side quit behavior with the scientifically
             # correct condition-level duplicate rule. This prevents Auto from
             # stopping just because one physical replicate randomly hits the
@@ -10771,44 +11450,28 @@ class AutoContr(Controller):
         # plotting, and future notebook-ready summaries.
         self._export_auto_model_performance_log()
 
-        # Save one final cumulative lambda-progress summary plot for the
-        # completed Auto run.
-        self._plot_lambda_progress_after_batch(
-            self.batch_num - 1,
-            plot_filename='lambda_progress_final.png',
-            plot_title=rf'Final Auto $\lambda_{{\max}}$ Progress'
+        # Generate the final output suite only after both core CSV exports are
+        # complete. The coordinator applies the selected Auto plot profile,
+        # generates dimension-appropriate plots, and writes the report last.
+        self._generate_auto_plot_suite(
+            stage='final',
+            model=model,
+            batch_number=self.batch_num - 1
         )
-
-        self._plot_lambda_replicate_progress_after_batch(
-            self.batch_num - 1,
-            plot_filename='lambda_replicates_final.png',
-            plot_title=rf'Final Auto Replicate $\lambda_{{\max}}$ Values'
-        )
-
-        # Save final design-space plots after the condition-level performance
-        # log and final lambda plots have been exported. These plots are
-        # report-only diagnostics and must never block Auto mode completion.
-        try:
-            self._plot_initial_training_designs_after_run()
-
-        except Exception as exc:
-            print(
-                "<<controller warning>> Auto design-space plotting failed; "
-                "continuing Auto mode without seed-design or exploration "
-                f"plots. Error: {exc}"
-            )
-
-        # Save the human-readable Auto run report after the core CSVs and final
-        # plots have been exported, so the generated-files section can detect
-        # them correctly.
-        self._write_auto_run_report()
 
         print("Success!!!")
 
         self.close_connection()
         self.pr.shutdown()
 
-        self._refresh_auto_run_status_section_in_report()
+        if (
+            self.robo_params.get(
+                'auto_plot_profile',
+                'standard'
+            )
+            != 'off'
+        ):
+            self._refresh_auto_run_status_section_in_report()
 
         return
     

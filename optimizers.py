@@ -1548,6 +1548,87 @@ class OptimizationModel():
             .T * 600.0
         )
 
+    def refresh_prediction_grid_for_plotting(self, grid_size=100):
+        '''
+        Rebuilds the controller-facing 2D GP prediction and uncertainty grids
+        from the optimizer's current fitted model state.
+
+        This public lifecycle hook is intended to be called after
+        update_experiment_data() has incorporated a completed experimental
+        batch and immediately before the controller generates GP heatmaps.
+
+        For exactly two variable reagents, this refreshes:
+
+            self.predictions:
+                Predicted lambda-max values in nm.
+
+            self.prediction_uncertainty:
+                GP predictive standard deviations in nm.
+
+        For any dimensionality other than two, the existing internal helper
+        clears both plotting arrays to None.
+
+        This method does not refit the model, select a recipe, change the
+        acquisition function, or alter experimental data.
+
+        params:
+            int grid_size:
+                Number of prediction points along each reagent axis.
+
+        returns:
+            tuple:
+                (
+                    self.predictions,
+                    self.prediction_uncertainty
+                )
+        '''
+        try:
+            grid_size = int(
+                grid_size
+            )
+
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Prediction-grid size must be an integer of at least 2. "
+                f"Received: {grid_size!r}."
+            )
+
+        if grid_size < 2:
+            raise ValueError(
+                "Prediction-grid size must be at least 2. "
+                f"Received: {grid_size}."
+            )
+
+        if self.gp_model is None:
+            self.predictions = None
+            self.prediction_uncertainty = None
+
+            print(
+                "<<optimizer>> skipping prediction-grid refresh because "
+                "the GP model has not been initialized"
+            )
+
+            return (
+                self.predictions,
+                self.prediction_uncertainty
+            )
+
+        self._update_prediction_grid_for_plotting(
+            grid_size=grid_size
+        )
+
+        if self._get_dimension() == 2:
+            print(
+                "<<optimizer>> refreshed 2D GP prediction and uncertainty "
+                "grids from the current fitted model using a "
+                f"{grid_size} x {grid_size} grid"
+            )
+
+        return (
+            self.predictions,
+            self.prediction_uncertainty
+        )
+    
     def initialize_optimizer(self, X_init, Y_init):
         '''
         Initializes the Gaussian Process model and other components for
