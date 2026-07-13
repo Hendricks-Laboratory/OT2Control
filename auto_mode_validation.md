@@ -1,16 +1,18 @@
 # Auto Mode Validation Notes
 
 **Repository:** Hendricks-Laboratory / OT2Control  
-**Branch context:** Auto mode development branch  
+**Branch context:** Stable Auto mode baseline  
+**Stable branch:** `stable/auto-rtg-v1`  
+**Next development branch:** `feature/acquisition-modes`  
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-06-16  
+**Updated through:** 2026-07-13  
 
 ---
 
 ## Purpose
 
-This note documents the current **Auto mode optimizer implementation and validation status** based on the recent branch history, dry/debug output, water-only testing, RTG_008 real-reagent validation, later RTG_009/DEBUGRTG-style output validation, and the latest replicate-QC/plot-layout validation work, notebook-ready report formatting work, and read-only design-space plotting/report embedding work.
+This note documents the **stable v1 Auto mode implementation and validation status** based on the branch history, dry/debug output, water-only testing, RTG_008 real-reagent validation, later RTG_009/DEBUGRTG output validation, replicate-QC and report work, lifecycle-coordinated plotting, cumulative GP-history repair, corrected 2D heatmap orientation, and the July 13, 2026 stable-checkpoint debug run and post-fix design-space plot validation.
 
 It is intended as a branch-specific record of:
 
@@ -22,13 +24,84 @@ It is intended as a branch-specific record of:
 
 > [!NOTE]  
 > This note is **not** intended to describe the whole shared `OT2Control` repository.  
-> It specifically documents Auto mode branch work around autonomous reaction selection, true-zero reagent handling, volume feasibility, mixed mask optimization, model-performance logging, plotting, debug exports, terminal-output capture, and protocol validation.
+> It specifically documents Auto mode branch work around autonomous reaction selection, true-zero reagent handling, volume feasibility, mixed mask optimization, cumulative GP model history, model-performance logging, lifecycle-aware plotting, debug exports, terminal-output capture, reporting, and protocol validation.
+
+---
+
+
+# Stable V1 Branch Checkpoint
+
+## Branch designation
+
+The validated software baseline documented by this file is intended to live on:
+
+```text
+stable/auto-rtg-v1
+```
+
+New acquisition-function development should branch from this checkpoint into:
+
+```text
+feature/acquisition-modes
+```
+
+The stable branch should not receive experimental acquisition-function changes directly. It should move
+only after a later feature branch passes static validation, synthetic optimizer tests, a controlled debug
+run, and review of the generated scientific outputs.
+
+## Validated code identity
+
+The stable checkpoint was validated with the following file identities:
+
+| File used for stable checkpoint | Equivalent uploaded copy | SHA-256 |
+|---|---|---|
+| `controller(199).py` | `controller(200).py` | `41b52de144646fc6b79731e4d6114aa733224cee9a40493fb828a95caa398081` |
+| `optimizers(77).py` | `optimizers(78).py` | `85d08e67cb4788f5e337ed00478f031077d09a284638adb20274e8536e5fac23` |
+
+The paired copies are byte-for-byte identical. The version numbers in parentheses are local upload labels,
+not repository filenames; the repository files remain `controller.py` and `optimizers.py`.
+
+## Stable-checkpoint validation evidence
+
+The July 13 checkpoint includes:
+
+- successful Python 3.9 parsing and compilation of the controller and optimizer,
+- validation of the controller-to-optimizer public interface,
+- corrected cumulative GP training history across successive batches,
+- corrected 2D GP heatmap orientation,
+- post-model-update prediction and uncertainty grid refresh,
+- removal of stale pre-experiment grid refresh,
+- condition-level replicate QC and model-training selection,
+- target-hit and max-iteration stop-state preservation,
+- standard lifecycle plot generation after measurement, after model update, and at finalization,
+- successful generation of seed-only and full Auto design-space plots after the NumPy-array bounds fix,
+- CSV, report, terminal-log, recipe-debug, and plot output generation,
+- and clean finalization without a pre-success traceback or post-success cleanup warning.
+
+## What “stable v1” means
+
+`stable/auto-rtg-v1` is a reproducible software and protocol baseline for the currently implemented
+GP-guided target-distance optimizer. It is suitable as a rollback point and as the parent branch for new
+features.
+
+It does **not** mean that every scientific or operational enhancement is complete. The following remain
+known, nonblocking limitations:
+
+- the current optimizer uses target-distance exploitation rather than selectable acquisition modes,
+- UV overlay plots still use a fixed `0–1` absorbance axis and can look blank for near-zero signals,
+- low-amplitude spectra can produce mathematically valid but scientifically weak λmax calls,
+- source/deck-volume hard-stop validation is still deferred,
+- water-used tip contamination policy is still deferred,
+- and larger real-chemistry reproducibility testing is still required.
+
+Where an older historical section below describes a feature as compile-only, pending, or using an earlier
+filename, the July 13 stable-checkpoint sections are authoritative for the stable branch.
 
 ---
 
 # High-Level Status
 
-The current Auto mode branch has reached a substantially more mature validation milestone than the original June 8 notes. The branch now supports:
+The stable v1 Auto mode branch has reached a substantially more mature validation milestone than the original June 8 notes. The branch now supports:
 
 - volume-safe Auto recipe generation,
 - true-zero variable reagent handling,
@@ -40,6 +113,10 @@ The current Auto mode branch has reached a substantially more mature validation 
 - fixed 300–1000 nm lambda-display-window plotting with error bars clipped only at the display boundary,
 - 2D GP prediction heatmaps,
 - 2D GP uncertainty heatmaps,
+- scientifically correct 2D GP reagent-axis orientation,
+- cumulative GP training history across all completed optimizer batches,
+- lifecycle-coordinated per-batch and final Auto plotting,
+- separate seed-only and full design-space exploration plots,
 - organized debug output folders,
 - terminal-output capture to the run-specific Debug folder,
 - notebook-ready Auto run report generation,
@@ -48,7 +125,7 @@ The current Auto mode branch has reached a substantially more mature validation 
 - conditional report embedding of generated design-space plots,
 - and a cleaner division between primary results and debug/audit artifacts.
 
-The latest validated debug run confirmed that the terminal-output capture and output-folder reorganization worked as intended.
+The latest validated checkpoint confirmed the complete two-seed/two-iteration Auto lifecycle, cumulative GP updates, post-batch heatmap timing, corrected heatmap orientation, replicate QC, target-based stopping, final reporting, and restored seed/exploration design-space plots.
 
 | Area | Current status |
 |---|---|
@@ -72,16 +149,23 @@ The latest validated debug run confirmed that the terminal-output capture and ou
 | Optional error-bar display cap | Implemented and validated |
 | 2D GP prediction heatmap | Implemented and validated |
 | 2D GP uncertainty heatmap | Implemented and validated |
+| Correct 2D GP axis orientation | Implemented and validated |
+| Post-batch GP grid refresh timing | Implemented and validated |
+| Cumulative optimizer/GP training history | Implemented and validated |
+| Auto plot profiles (`standard`, `final_only`, `off`) | Implemented and validated |
+| Seed-only design-space plots | Implemented and validated |
+| Seed-plus-iterations exploration plots | Implemented and validated |
+| Stable v1 rollback checkpoint | Documented for `stable/auto-rtg-v1` |
 | Terminal output saved to Debug folder | Implemented and validated |
 | Notebook-ready Auto run report | Implemented and validated |
 | Padded Markdown compact condition table | Implemented and validated |
-| Read-only initial-training/design-space plots | Implemented and wired defensively |
-| Conditional design-plot report embedding | Implemented and validated by compile |
+| Dimension-aware seed and full-exploration design-space plots | Implemented and validated |
+| Conditional design-plot report embedding | Implemented and validated |
 | Auto recipe-design exports moved to Debug subfolder | Implemented and validated |
 | Optimizer duplicate max-iteration print | Removed / controller owns user-facing stop print |
 | Water-used tip handling | Deferred |
 | Source/deck volume hard-stop | Deferred |
-| Uncertainty-aware acquisition | Deferred |
+| Spreadsheet-selectable acquisition modes | Deferred to `feature/acquisition-modes` |
 
 Validated behavior includes:
 
@@ -1213,6 +1297,9 @@ This is expected with no jitter.
 
 ## June 16, 2026 — Notebook-Ready Report Tables and Read-Only Design-Space Visualization
 
+> [!NOTE]  
+> Stable v1 supersedes the early `initial_training_design_*` output names described historically in this section. The validated stable filenames use separate `initial_maximin_seed_design_*` and `auto_design_space_exploration_*` families.
+
 ### Purpose
 
 This update improved the Auto mode reporting layer without changing optimizer behavior, recipe generation, QC handling, model training, robot execution, spreadsheet-triggered plot rows, or the existing 2D GPR prediction/uncertainty heatmaps.
@@ -1386,6 +1473,241 @@ The next validation task is to run or simulate against a completed Auto output f
 
 ---
 
+
+## July 9–13, 2026 — Plot Lifecycle, Cumulative GP Repair, Heatmap Orientation, and Stable V1 Validation
+
+### Purpose
+
+This stage converted several Auto plotting and optimizer behaviors from loosely coupled features into a
+validated lifecycle and corrected two scientifically important GP issues.
+
+### General Auto plotting profiles
+
+The optional Header setting:
+
+```text
+auto_plot_profile
+```
+
+supports:
+
+| Value | Behavior |
+|---|---|
+| `standard` | generate applicable per-batch plots and final outputs |
+| `final_only` | suppress per-batch Auto diagnostics and generate final plots/report |
+| `off` | suppress automatic Auto diagnostics and summary plots |
+
+Older spreadsheets default to `standard`.
+
+The controller now coordinates automatic plotting by lifecycle stage:
+
+```text
+after_measurement
+after_model_update
+final
+```
+
+Scan-derived UV overlays remain spreadsheet-triggered, while GP and Auto diagnostic plots are generated
+at the scientifically appropriate model lifecycle stage.
+
+### Cumulative GP-history defect and correction
+
+A major optimizer defect was identified in the model-update path. The GP model received cumulative arrays,
+but the GPyOpt optimizer object's `X` and `Y` arrays were not synchronized after a successful update.
+
+Before correction, a longer run could evolve as:
+
+```text
+seed
+seed + batch 1
+seed + batch 2
+seed + batch 3
+```
+
+instead of preserving:
+
+```text
+seed
+seed + batch 1
+seed + batch 1 + batch 2
+seed + batch 1 + batch 2 + batch 3
+```
+
+The corrected `update_experiment_data()` now updates the GP first and then synchronizes:
+
+```python
+self.optimizer.X
+self.optimizer.Y
+```
+
+with complete cumulative copies. The update remains atomic: if GP updating fails, optimizer history,
+iteration count, and stop state are left unchanged.
+
+This was not merely a visualization fix. In runs with three or more optimizer iterations, the old behavior
+could have caused later reaction selection to forget older optimizer-generated experiments.
+
+### 2D GP heatmap-axis correction
+
+The previous prediction-grid code used ordinary `meshgrid`/C-order flattening and then transposed the
+reshaped prediction array. Under that coordinate ordering, the transpose swapped the relationship between
+the reagent coordinates and the displayed matrix cells.
+
+Stable v1 now explicitly uses:
+
+```text
+columns = first variable reagent = x-axis
+rows    = second variable reagent = y-axis
+```
+
+with no final transpose.
+
+The correction was validated with an intentionally asymmetric synthetic surface and confirmed against the
+real debug plots. The GP prediction and uncertainty maps now share the same correct orientation.
+
+### Post-update heatmap timing
+
+The stale prediction-grid refresh inside `getNextReaction()` was removed. The controller now refreshes the
+full GP prediction and uncertainty grids only after the completed batch has been incorporated into the
+fitted model.
+
+Therefore:
+
+```text
+gpr_predictions_batch_0.png
+```
+
+represents the seed-fitted model, and:
+
+```text
+gpr_predictions_batch_N.png
+```
+
+represents the cumulative model that actually includes Batch N.
+
+### July 13 DEBUGRTG_009 validation configuration
+
+| Setting | Value |
+|---|---:|
+| Initial seed conditions | `2` |
+| Maximum optimizer iterations | `2` |
+| Replicates per condition | `3` |
+| True-zero mixed masks | enabled |
+| Auto plot profile | `standard` |
+| Target λmax | `625 nm` |
+
+Observed lifecycle:
+
+```text
+2 seed conditions
++ 2 optimizer-selected conditions
+= 4 unique conditions
+= 12 physical replicate wells
+```
+
+The run stopped after Batch 2 because the controller accepted a validated condition-level target hit:
+
+```text
+QC-cleaned mean λmax = 630 nm
+target error         = 5 nm
+replicate SD         = 0 nm
+```
+
+One `683 nm` replicate was excluded from that condition under the configured `50 nm` outlier threshold;
+the two included values were `630, 630 nm`.
+
+### Cumulative model-update evidence
+
+The optimizer terminal output recorded:
+
+```text
+after Batch 1: 7 cumulative observations, 3 new
+after Batch 2: 9 cumulative observations, 2 new
+```
+
+The second update retained the earlier optimizer batch and added only the two QC-included observations from
+the final condition.
+
+### Restored seed and exploration plots
+
+The first DEBUGRTG_009 archive exposed a final plotting defect:
+
+```text
+The truth value of an array with more than one element is ambiguous.
+```
+
+`self.variable_reagents` was a NumPy array, and the executable-bounds helper attempted to use it in a Python
+truth-value expression.
+
+The stable controller normalizes that collection explicitly. The post-fix validation generated:
+
+```text
+initial_maximin_seed_design_2d.png
+auto_design_space_exploration_2d.png
+```
+
+Both use identical executable concentration bounds, identical 3% display padding, a physically square
+plotting panel, and the centralized Auto font sizes. The seed-only figure therefore does not autoscale
+tightly around the seed points and remains directly comparable with the full exploration figure.
+
+### Stable v1 output set
+
+For a two-variable run using `auto_plot_profile = standard`, the validated output family includes:
+
+```text
+Plots/
+  auto_uv_overlay-0.png
+  auto_uv_overlay-1.png
+  auto_uv_overlay-2.png
+  gpr_predictions_batch_0.png
+  gpr_predictions_batch_1.png
+  gpr_predictions_batch_2.png
+  gpr_uncertainty_batch_0.png
+  gpr_uncertainty_batch_1.png
+  gpr_uncertainty_batch_2.png
+  lambda_progress_after_batch_0.png
+  lambda_progress_after_batch_1.png
+  lambda_progress_after_batch_2.png
+  lambda_progress_final.png
+  lambda_replicates_after_batch_0.png
+  lambda_replicates_after_batch_1.png
+  lambda_replicates_after_batch_2.png
+  lambda_replicates_final.png
+  initial_maximin_seed_design_2d.png
+  auto_design_space_exploration_2d.png
+```
+
+Primary and audit outputs also include:
+
+```text
+pr_data/experiment_data.csv
+pr_data/auto_model_performance_log.csv
+pr_data/auto_run_report.md
+Debug/terminal_output.txt
+Debug/auto_recipe_design/auto_recipe_design_batch_*.csv
+Eve_Files/protocol_record.txt
+Eve_Files/wellmap.tsv
+Eve_Files/well_history.tsv
+Eve_Files/translated_wellmap.tsv
+```
+
+### Scientific caveat from the debug spectra
+
+The UV overlay traces in this debug run were close to baseline relative to the fixed `0–1` absorbance axis.
+The run is therefore strong evidence for software, robot, plate-reader, data-flow, QC, GP-update, plotting,
+and reporting behavior, but not strong evidence that the apparent λmax values represented robust chemical
+absorbance peaks.
+
+A later scientific-hardening feature should reject or flag λmax values when peak height, prominence, or
+signal-to-noise is inadequate.
+
+### Stable checkpoint outcome
+
+The paired stable controller and optimizer are accepted as the rollback baseline for the current
+target-distance Auto workflow. Acquisition-mode work should start from this checkpoint on
+`feature/acquisition-modes`.
+
+---
+
 # Current Technical Architecture
 
 ## 1. Optimizer model and masks
@@ -1400,21 +1722,35 @@ The optimizer uses one GP model over full normalized recipe vectors. True-zero b
 
 ## 2. Acquisition behavior
 
-The current acquisition remains target-distance exploitation:
+Stable v1 intentionally preserves the validated target-distance exploitation objective:
 
 ```text
-choose the candidate whose GP mean lambda max is closest to the target
+choose the feasible candidate whose GP mean λmax is closest to the target
 ```
 
 The optimizer stores:
 
 - selected mask,
-- predicted lambda mean in nm,
-- predicted lambda SD in nm,
-- suggested recipe,
-- and volume balance information.
+- predicted λmax mean in nm,
+- predicted GP standard deviation in nm,
+- suggested normalized recipe,
+- and volume-balance information.
 
-Uncertainty-aware acquisition has not yet been implemented.
+Although `optimizers.py` contains legacy names such as `EI`, `MPI`, and `LCB`, those names are not the
+active mixed-mask recipe-selection policy in stable v1. The custom mask-constrained target-distance
+objective is the operative selection behavior.
+
+Spreadsheet-selectable acquisition modes are intentionally deferred to `feature/acquisition-modes`.
+The planned canonical modes are:
+
+| Planned mode | Intended behavior |
+|---|---|
+| `exploit` | preserve stable-v1 closest-to-target mean selection |
+| `explore` | prioritize maximum GP predictive uncertainty |
+| `balanced` | target-aware hybrid of target proximity and uncertainty |
+| `target_ei` | expected improvement in best QC-approved target error |
+
+Older spreadsheets must continue to default to `exploit` so the stable-v1 behavior remains reproducible.
 
 ## 3. Prediction and uncertainty units
 
@@ -1452,6 +1788,8 @@ The plot outputs are:
 | `lambda_progress_final.png` | final full-run lambda progress summary |
 | `gpr_predictions_batch_X.png` | 2D GP predicted lambda max surface |
 | `gpr_uncertainty_batch_X.png` | 2D GP predictive SD surface |
+| `initial_maximin_seed_design_2d.png` | seed-only 2D executable design-space view |
+| `auto_design_space_exploration_2d.png` | seed plus optimizer-selected 2D design-space view |
 
 ## 6. Debug output organization
 
@@ -1460,21 +1798,27 @@ Current intended structure:
 ```text
 DEBUGRTG_###/
   Plots/
+    auto_uv_overlay-*.png
     lambda_progress_after_batch_*.png
     lambda_progress_final.png
+    lambda_replicates_after_batch_*.png
+    lambda_replicates_final.png
     gpr_predictions_batch_*.png
     gpr_uncertainty_batch_*.png
+    initial_maximin_seed_design_*.png
+    auto_design_space_exploration_*.png
 
   pr_data/
     experiment_data.csv
     auto_model_performance_log.csv
+    auto_run_report.md
     *_auto_scan-*.csv
     *full_df.csv
 
   Debug/
     terminal_output.txt
     auto_recipe_design/
-      auto_recipe_design_*.csv
+      auto_recipe_design_batch_*.csv
 
   Eve_Files/
     protocol_record.txt
@@ -1657,6 +2001,49 @@ The uncertainty values in early batches were large, which is expected because th
 ### Interpretation
 
 This run validated the latest output organization and terminal-saving behavior.
+
+---
+
+
+## 4. July 13, 2026 Stable V1 Checkpoint Run
+
+This controlled debug run is the main validation checkpoint for `stable/auto-rtg-v1`.
+
+### Configuration
+
+| Setting | Value |
+|---|---:|
+| `initial_data` | `2` |
+| `max_iterations` | `2` |
+| `num_duplicates` | `3` |
+| `allow_true_zero` | `TRUE` |
+| `auto_plot_profile` | `standard` |
+| target λmax | `625 nm` |
+
+### Validated outcomes
+
+- The seed batch and two optimizer-selected batches executed.
+- All recipes remained volume-feasible.
+- True-zero mixed masks were exercised.
+- Batch 1 selected mask `[0, 1]`.
+- Batch 2 selected mask `[1, 0]`.
+- Batch 2 used the model containing seeds plus Batch 1.
+- The final model retained seeds plus both optimizer batches.
+- The final update used only the two QC-included `630 nm` replicates from condition 3.
+- GP prediction and uncertainty grids refreshed after each model update.
+- Heatmap x-axis data corresponded to silver nitrate.
+- Heatmap y-axis data corresponded to potassium bromide.
+- Condition-level target stopping accepted `630 ± 0 nm` against the `625 nm` target.
+- The run exported well-level data, condition-level performance data, report, terminal log, and recipe audit CSVs.
+- The post-fix plot rerun generated both the seed-only and full-exploration 2D design-space plots.
+- No pre-success traceback or post-success cleanup warning was identified.
+
+### Interpretation
+
+This run validates the software and protocol behavior that defines stable v1. It does not establish robust
+chemical optimization because the measured UV signals were close to baseline. The stable branch should
+therefore be described as a validated automation and Bayesian-optimization software baseline, not as a
+fully validated chemistry model.
 
 ---
 
@@ -1847,27 +2234,82 @@ This should be added before scaling to larger autonomous runs.
 
 ---
 
-## 3. Uncertainty-aware acquisition is not yet implemented
+## 3. Spreadsheet-selectable acquisition modes are deferred to the acquisition feature branch
 
-The current optimizer uses target-distance exploitation based on GP mean lambda max.
+Stable v1 uses target-distance exploitation based on GP mean λmax. GP uncertainty is logged and plotted,
+but it does not yet alter recipe selection.
 
-The new GP uncertainty logging and heatmaps are diagnostic outputs. They do not yet drive the acquisition policy.
-
-A later acquisition function could use model uncertainty directly.
-
-A likely first uncertainty-aware acquisition would be:
+The next feature branch is:
 
 ```text
-maximize P(|lambda_max - target| <= tolerance)
+feature/acquisition-modes
 ```
 
-or a related target-probability criterion using GP mean and SD.
+The planned first release should support:
+
+```text
+exploit
+explore
+balanced
+target_ei
+```
+
+All four modes must preserve the stable mixed-mask search, exact-zero behavior, executable transfer bounds,
+water top-off rules, volume-feasibility penalties, cumulative GP history, replicate-QC model training, and
+controller hard-stop.
+
+The stable branch should not be modified during this work.
 
 ---
 
 # Recommended Next Steps
 
-## 1. Continued Small Real-Chemistry Validation / Scale-Up
+## 1. Preserve the Stable V1 Checkpoint
+
+Commit this document with the validated controller and optimizer on:
+
+```text
+stable/auto-rtg-v1
+```
+
+Treat that branch as the rollback baseline. Do not add acquisition-mode experiments directly to it.
+
+Create the next development branch from the exact stable commit:
+
+```text
+feature/acquisition-modes
+```
+
+The first implementation step on that branch is to add and validate the optional Header
+`acquisition_mode` parser without changing recipe selection yet.
+
+## 2. Implement Acquisition Modes in Controlled Stages
+
+Recommended canonical spreadsheet values:
+
+| Mode | Stable-v1 relationship |
+|---|---|
+| `exploit` | exact backward-compatible stable-v1 behavior |
+| `explore` | maximum predictive uncertainty |
+| `balanced` | target-aware hybrid |
+| `target_ei` | expected improvement in target error |
+
+Required validation sequence:
+
+```text
+Header parsing and aliases
+→ controller-to-optimizer propagation
+→ target-aware acquisition score functions
+→ mask and volume-feasibility integration
+→ acquisition metadata logging
+→ synthetic mode-separation tests
+→ regression test of exploit against stable v1
+→ controlled debug run
+→ generated-output audit
+```
+
+
+## 3. Continued Small Real-Chemistry Validation / Scale-Up
 
 The first small real-reagent validation has passed. The next scientific validation should remain conservative and should test repeatability, reporting outputs, replicate QC behavior, and modestly larger Auto loops rather than jumping directly to a large autonomous campaign.
 
@@ -1891,7 +2333,7 @@ This run should be treated as a small validation run, not a full autonomous opti
 
 ---
 
-## 2. Add Optimizer Mask-Result Export
+## 4. Add Optimizer Mask-Result Export
 
 A useful next code improvement is an optimizer-side CSV export summarizing the mask search.
 
@@ -1922,7 +2364,7 @@ This would make optimizer decisions transparent. It would answer questions such 
 
 ---
 
-## 3. Add Deck/Source-Volume Validation Before Scaling
+## 5. Add Deck/Source-Volume Validation Before Scaling
 
 The next major safety feature before larger runs should be a batch-level deck/source-volume validator.
 
@@ -1940,7 +2382,7 @@ Independent reagent bounds make high-volume reagent usage more likely than the o
 
 ---
 
-## 4. Consider Uncertainty-Plot Display Scaling
+## 6. Consider Uncertainty-Plot Display Scaling
 
 The uncertainty heatmap currently shows raw GP predictive SD in nm. In sparse early batches this can be very large, sometimes hundreds of nm.
 
@@ -1950,7 +2392,7 @@ A later visualization-only improvement could add robust color scaling or a displ
 
 ---
 
-## 5. Gradual Scale-Up Plan
+## 7. Gradual Scale-Up Plan
 
 After small real-chemistry validation passes, scale gradually.
 
@@ -1983,7 +2425,7 @@ After small real-chemistry validation passes, scale gradually.
 
 ---
 
-## 6. Later Model/Chemistry Improvements
+## 8. Later Model/Chemistry Improvements
 
 Later improvements may include:
 
@@ -2004,7 +2446,7 @@ Later improvements may include:
 
 ## Current status
 
-The Auto mode branch has passed the main optimizer/protocol validation milestone for mixed mask optimization and volume-safe recipe generation. It has also passed a major output-validation milestone for condition-level logging, lambda progress plotting, GP heatmaps, terminal-output capture, debug-folder organization, notebook-ready report formatting, and read-only design-space plot/report integration.
+The Auto mode branch has reached the `stable/auto-rtg-v1` checkpoint. It has passed the main optimizer/protocol validation milestone for mixed-mask optimization and volume-safe recipe generation, as well as validation of cumulative GP history, corrected heatmap orientation, lifecycle-aware plotting, condition-level QC/logging, final reporting, and seed/full-exploration design-space plot generation.
 
 ## Validated
 
@@ -2022,6 +2464,13 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - fixed-window lambda display with boundary-clipped error-bar annotation behavior,
 - 2D GP prediction heatmap generation,
 - 2D GP uncertainty heatmap generation,
+- correct mapping of the first variable reagent to heatmap columns/x-axis,
+- correct mapping of the second variable reagent to heatmap rows/y-axis,
+- cumulative GP and optimizer history across successive batches,
+- post-model-update heatmap refresh timing,
+- `standard`, `final_only`, and `off` Auto plot-profile parsing and lifecycle behavior,
+- seed-only and seed-plus-iterations design-space plots,
+- stable controller/optimizer interface compatibility,
 - terminal-output capture to `Debug/terminal_output.txt`,
 - recipe-design debug export relocation to `Debug/auto_recipe_design/`,
 - notebook-ready report table formatting,
@@ -2036,12 +2485,17 @@ The Auto mode branch has passed the main optimizer/protocol validation milestone
 - transfer/tip audit CSV,
 - deck/source-volume hard-stop,
 - broader real-chemistry reproducibility / scale-up validation,
-- uncertainty-aware acquisition,
+- spreadsheet-selectable acquisition modes on `feature/acquisition-modes`,
+- spectral signal-quality gating,
 - larger autonomous scale-up.
 
 ## Recommended immediate next step
-Dry Debug run after break
-Continue with small, cautious real-chemistry validation/scale-up using conservative settings, then review:
+
+Commit the validated code and this document to `stable/auto-rtg-v1`, create
+`feature/acquisition-modes` from that exact checkpoint, and resume the acquisition-mode implementation with
+the Header parser as the first isolated change.
+
+Continue small, cautious real-chemistry validation in parallel and review:
 
 - spectra,
 - replicate consistency,
