@@ -810,6 +810,26 @@ class Controller(ABC):
         '''
         Loads controller and Auto settings from the Header worksheet.
 
+        Auto acquisition selection is controlled by the optional
+        acquisition_mode setting:
+
+            exploit:
+                Selects the feasible recipe whose GP-predicted mean lambda max
+                is closest to the requested target. This preserves the current
+                Auto recipe-selection behavior.
+
+            explore:
+                Selects the feasible recipe with the greatest GP predictive
+                uncertainty.
+
+            balanced:
+                Uses a target-aware hybrid score that rewards both proximity
+                to the requested lambda-max target and predictive uncertainty.
+
+            target_ei:
+                Uses target-aware expected improvement to select the recipe
+                expected to reduce the best QC-approved target error.
+
         Auto plotting is controlled by the optional auto_plot_profile setting:
 
             standard:
@@ -821,6 +841,9 @@ class Controller(ABC):
 
             off:
                 Suppresses automatic Auto diagnostic and summary plots.
+
+        Older spreadsheets that do not contain acquisition_mode default to
+        exploit so their recipe-selection behavior remains unchanged.
 
         Older spreadsheets that do not contain auto_plot_profile default to
         standard for backward compatibility.
@@ -902,6 +925,72 @@ class Controller(ABC):
                 'yes',
                 'y'
             ]
+        )
+
+        # Optional Auto acquisition setting. Older spreadsheets default to
+        # exploit because that reproduces the existing target-distance recipe
+        # selection behavior.
+        acquisition_mode_value = str(
+            header_dict.get(
+                'acquisition_mode',
+                'exploit'
+            )
+        ).strip().lower()
+
+        acquisition_mode_value = (
+            acquisition_mode_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        acquisition_mode_aliases = {
+            '': 'exploit',
+            'default': 'exploit',
+            'exploit': 'exploit',
+            'exploitation': 'exploit',
+            'target': 'exploit',
+            'target_distance': 'exploit',
+            'closest_to_target': 'exploit',
+
+            'explore': 'explore',
+            'exploration': 'explore',
+            'uncertainty': 'explore',
+            'maximum_uncertainty': 'explore',
+            'max_uncertainty': 'explore',
+            'maximum_variance': 'explore',
+            'max_variance': 'explore',
+
+            'balanced': 'balanced',
+            'balance': 'balanced',
+            'hybrid': 'balanced',
+            'straddle': 'balanced',
+            'target_straddle': 'balanced',
+
+            'target_ei': 'target_ei',
+            'ei': 'target_ei',
+            'expected_improvement': 'target_ei',
+            'target_expected_improvement': 'target_ei'
+        }
+
+        if (
+            acquisition_mode_value
+            not in acquisition_mode_aliases
+        ):
+            raise ValueError(
+                "Header value acquisition_mode must be one of: "
+                "exploit, explore, balanced, or target_ei. "
+                f"Received: {acquisition_mode_value!r}."
+            )
+
+        self.robo_params['acquisition_mode'] = (
+            acquisition_mode_aliases[
+                acquisition_mode_value
+            ]
+        )
+
+        print(
+            "<<controller>> Auto acquisition mode: "
+            f"{self.robo_params['acquisition_mode']}"
         )
 
         # Optional general Auto plotting setting. The value is normalized so
