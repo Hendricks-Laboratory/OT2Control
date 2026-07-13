@@ -68,7 +68,8 @@ class OptimizationModel():
         max_conc=None,
         total_volume=None,
         fixed_reagent_volumes=None,
-        allow_true_zero=False
+        allow_true_zero=False,
+        acquisition_mode='exploit'
     ):
         '''
         Initializes the Auto optimization model.
@@ -123,6 +124,11 @@ class OptimizationModel():
                 If True, the mixed mask optimizer may turn variable reagents
                 OFF as exact-zero transfers. If False, all variable reagents
                 remain ON and are optimized only in executable transfer ranges.
+
+            str acquisition_mode:
+                Canonical Auto acquisition mode supplied by the controller.
+                Stage 2 stores and validates this interface setting while
+                preserving the existing exploit-only recipe selection logic.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -150,6 +156,27 @@ class OptimizationModel():
         self.total_volume = total_volume
         self.fixed_reagent_volumes = fixed_reagent_volumes
         self.allow_true_zero = bool(allow_true_zero)
+
+        supported_acquisition_modes = (
+            'exploit',
+            'explore',
+            'balanced',
+            'target_ei'
+        )
+
+        if acquisition_mode not in supported_acquisition_modes:
+            raise ValueError(
+                "OptimizationModel acquisition_mode must be one of: "
+                "exploit, explore, balanced, or target_ei. "
+                f"Received: {acquisition_mode!r}."
+            )
+
+        self.acquisition_mode = acquisition_mode
+
+        print(
+            "<<optimizer>> Auto acquisition mode: "
+            f"{self.acquisition_mode}"
+        )
 
         self.gp_model = None
         self.acquisition = None
@@ -1812,6 +1839,15 @@ class OptimizationModel():
 
                     [array([...])]
         '''
+        if self.acquisition_mode != 'exploit':
+            raise NotImplementedError(
+                "Acquisition mode "
+                f"{self.acquisition_mode!r} is configured, but its recipe "
+                "selection behavior is not implemented yet. Only 'exploit' "
+                "may select recipes until the later acquisition-mode stages "
+                "are complete."
+            )
+
         best_x = self._optimize_target_distance_with_masks()
 
         (

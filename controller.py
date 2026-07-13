@@ -223,8 +223,21 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             max_conc=auto.max_conc,
             total_volume=auto.template_meta['tot_vol'],
             fixed_reagent_volumes=auto._get_fixed_reagent_volumes(),
-            allow_true_zero=auto.robo_params.get('allow_true_zero', False)
+            allow_true_zero=auto.robo_params.get('allow_true_zero', False),
+            acquisition_mode=auto.robo_params.get(
+                'acquisition_mode',
+                'exploit'
+            )
         )
+
+        if model.acquisition_mode != 'exploit':
+            raise NotImplementedError(
+                "Auto acquisition mode "
+                f"{model.acquisition_mode!r} is configured, but its recipe "
+                "selection behavior is not implemented yet. The Auto "
+                "protocol will not start until that mode is implemented and "
+                "validated."
+            )
         
         print(f"Target: {target_value}")
 
