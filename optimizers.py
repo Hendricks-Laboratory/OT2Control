@@ -54,6 +54,13 @@ class OptimizationModel():
     calc_obj(self, x) -> np.ndarray: Calculates the objective function.
     update_quit(self, X_new, Y_new) -> None: Updates the quit parameter based on optimization progress.
     '''
+    _SUPPORTED_ACQUISITION_MODES = (
+        'exploit',
+        'explore',
+        'balanced',
+        'target_ei'
+    )
+
     def __init__(
         self,
         bounds,
@@ -157,14 +164,7 @@ class OptimizationModel():
         self.fixed_reagent_volumes = fixed_reagent_volumes
         self.allow_true_zero = bool(allow_true_zero)
 
-        supported_acquisition_modes = (
-            'exploit',
-            'explore',
-            'balanced',
-            'target_ei'
-        )
-
-        if acquisition_mode not in supported_acquisition_modes:
+        if acquisition_mode not in self._SUPPORTED_ACQUISITION_MODES:
             raise ValueError(
                 "OptimizationModel acquisition_mode must be one of: "
                 "exploit, explore, balanced, or target_ei. "
@@ -639,9 +639,64 @@ class OptimizationModel():
 
         return bounds
     
-    def _masked_target_distance_objective(self, x_active, mask):
+    def _calculate_acquisition_score(
+        self,
+        predicted_lambda_mean_nm,
+        predicted_lambda_std_nm=None,
+        incumbent_target_error_nm=None
+    ):
         '''
-        Computes the target-distance objective for one masked candidate.
+        Calculates the statistical acquisition score for one GP prediction.
+
+        The surrounding optimizer minimizes this score. Statistical scoring is
+        intentionally kept separate from reagent masks and physical-feasibility
+        penalties so every acquisition mode must continue through the same
+        executable-recipe pathway.
+
+        Stage 3 enables only the legacy-compatible exploit formula. The mean,
+        standard-deviation, and incumbent interface is established here so the
+        later acquisition-mode stages can add their formulas without moving
+        physical constraints into the statistical calculation.
+
+        params:
+            float predicted_lambda_mean_nm:
+                GP-predicted lambda-max mean in nanometers.
+
+            float predicted_lambda_std_nm:
+                GP predictive standard deviation in nanometers. Exploit does
+                not use this value, but later acquisition modes will.
+
+            float incumbent_target_error_nm:
+                Best QC-approved condition-level target error in nanometers.
+                This is reserved for the later target-EI implementation.
+
+        returns:
+            float:
+                Acquisition score to minimize.
+        '''
+        if self.acquisition_mode not in self._SUPPORTED_ACQUISITION_MODES:
+            raise ValueError(
+                "OptimizationModel acquisition_mode must be one of: "
+                "exploit, explore, balanced, or target_ei. "
+                f"Received: {self.acquisition_mode!r}."
+            )
+
+        if self.acquisition_mode == 'exploit':
+            target_error = (
+                float(predicted_lambda_mean_nm)
+                - float(self.target_value)
+            )
+
+            return float(target_error ** 2)
+
+        raise NotImplementedError(
+            "Acquisition score for mode "
+            f"{self.acquisition_mode!r} is not implemented yet."
+        )
+
+    def _masked_acquisition_objective(self, x_active, mask):
+        '''
+        Computes the acquisition objective for one masked candidate.
 
         The mask controls which reagents are OFF and which reagents are ON:
             OFF reagents are forced to exactly zero.
@@ -660,8 +715,8 @@ class OptimizationModel():
 
         returns:
             float:
-                Squared error between predicted lambda max and target_value, or
-                a large finite penalty for volume-infeasible candidates.
+                Statistical acquisition score for a feasible candidate, or a
+                large finite penalty for a volume-infeasible candidate.
         '''
         full_x = self._expand_masked_candidate_to_full_recipe(
             x_active,
@@ -690,9 +745,21 @@ class OptimizationModel():
             return float(1e12 + overflow_volume ** 2 + bad_water_penalty)
 
         predicted_lambda_max = self._predict_lambda_max_nm(full_x)
-        target_error = predicted_lambda_max - self.target_value
 
-        return float(target_error ** 2)
+        return self._calculate_acquisition_score(
+            predicted_lambda_mean_nm=predicted_lambda_max
+        )
+
+    def _masked_target_distance_objective(self, x_active, mask):
+        '''
+        Backward-compatible wrapper for the masked acquisition objective.
+
+        The active mixed-mask optimizer now uses
+        _masked_acquisition_objective() directly. This wrapper preserves the
+        prior internal method name for isolated callers and stable regression
+        comparisons during the staged acquisition-mode implementation.
+        '''
+        return self._masked_acquisition_objective(x_active, mask)
     
     def _generate_feasible_masked_starting_points(self, mask, n_restarts):
         '''
@@ -765,7 +832,7 @@ class OptimizationModel():
     
     def _optimize_single_mask(self, mask, n_restarts=25):
         '''
-        Optimizes the target-distance objective within one ON/OFF reagent mask.
+        Optimizes the acquisition objective within one ON/OFF reagent mask.
 
         OFF reagents are fixed at exactly zero by the mask. ON reagents are
         optimized continuously within executable transfer bounds.
@@ -817,7 +884,7 @@ class OptimizationModel():
 
         for x0 in starting_points:
             result = minimize(
-                fun=lambda x_active: self._masked_target_distance_objective(
+                fun=lambda x_active: self._masked_acquisition_objective(
                     x_active,
                     mask
                 ),
@@ -870,10 +937,13 @@ class OptimizationModel():
             'predicted_lambda_max': predicted_lambda_max
         }
     
-    def _optimize_target_distance_with_masks(self, n_restarts_per_mask=25):
+    def _optimize_acquisition_with_masks(self, n_restarts_per_mask=25):
         '''
-        Finds the normalized recipe point predicted to be closest to the target
-        lambda max using mixed discrete/continuous mask optimization.
+        Finds the best normalized recipe for the configured acquisition mode
+        using mixed discrete/continuous mask optimization.
+
+        Stage 3 enables only exploit scoring, which remains the squared
+        distance between predicted lambda max and the requested target.
 
         Discrete part:
             Each binary mask decides which variable reagents are OFF or ON.
@@ -949,6 +1019,17 @@ class OptimizationModel():
         self.last_optimizer_volume_balance = best_result['volume_balance']
 
         return best_x
+
+    def _optimize_target_distance_with_masks(self, n_restarts_per_mask=25):
+        '''
+        Backward-compatible wrapper for mixed-mask acquisition optimization.
+
+        Exploit remains target-distance minimization, so existing isolated
+        callers using the prior internal method name retain equivalent behavior.
+        '''
+        return self._optimize_acquisition_with_masks(
+            n_restarts_per_mask=n_restarts_per_mask
+        )
     
     def _get_variable_reagent_stock_conc(self, reagent_name):
         '''
@@ -1425,9 +1506,10 @@ class OptimizationModel():
             return float(1e12 + overflow_volume ** 2)
 
         predicted_lambda_max = self._predict_lambda_max_nm(repaired_x)
-        target_error = predicted_lambda_max - self.target_value
 
-        return float(target_error ** 2)
+        return self._calculate_acquisition_score(
+            predicted_lambda_mean_nm=predicted_lambda_max
+        )
     
     def _optimize_target_distance(self, n_restarts=50):
         '''
@@ -1848,7 +1930,7 @@ class OptimizationModel():
                 "are complete."
             )
 
-        best_x = self._optimize_target_distance_with_masks()
+        best_x = self._optimize_acquisition_with_masks()
 
         (
             predicted_lambda_max,
