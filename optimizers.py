@@ -40,6 +40,8 @@ class OptimizationModel():
         Canonical target-aware acquisition mode.
     float balanced_exploration_weight:
         Dimensionless uncertainty weight used by balanced mode.
+    float incumbent_target_error_nm:
+        Best QC-approved condition-level target error available to target EI.
     int current_acquisition_index: The current index pointing to the acquisition function in use.
     int curr_iter: The current iteration of the optimization process.
     int max_iters: The maximum number of iterations for the optimization process.
@@ -68,7 +70,8 @@ class OptimizationModel():
     IMPLEMENTED_ACQUISITION_MODES = (
         'exploit',
         'explore',
-        'balanced'
+        'balanced',
+        'target_ei'
     )
 
     def __init__(
@@ -214,6 +217,11 @@ class OptimizationModel():
         self.balanced_exploration_weight = (
             balanced_exploration_weight
         )
+
+        # The controller sets this only after QC-approved condition-level data
+        # has been incorporated into the GP. Replicate-level observations must
+        # never be used directly as the target-EI incumbent.
+        self.incumbent_target_error_nm = None
 
         print(
             "<<optimizer>> Auto acquisition mode: "
@@ -734,6 +742,225 @@ class OptimizationModel():
 
         return predicted_lambda_std_nm
 
+    def set_incumbent_target_error_nm(self, incumbent_target_error_nm):
+        '''
+        Stores the QC-approved condition-level incumbent used by target EI.
+
+        The controller owns the scientific decision about which conditions are
+        eligible for model training. This optimizer setter only validates and
+        stores the resulting best absolute target error.
+
+        params:
+            float incumbent_target_error_nm:
+                Best absolute condition-level target error in nanometers.
+                Values must be finite and nonnegative.
+
+        returns:
+            None
+        '''
+        try:
+            incumbent_target_error_nm = float(
+                incumbent_target_error_nm
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "incumbent_target_error_nm must be a finite, nonnegative "
+                "condition-level target error in nanometers. Received: "
+                f"{incumbent_target_error_nm!r}."
+            )
+
+        if (
+            not math.isfinite(incumbent_target_error_nm)
+            or incumbent_target_error_nm < 0.0
+        ):
+            raise ValueError(
+                "incumbent_target_error_nm must be a finite, nonnegative "
+                "condition-level target error in nanometers. Received: "
+                f"{incumbent_target_error_nm!r}."
+            )
+
+        self.incumbent_target_error_nm = incumbent_target_error_nm
+
+    def _standard_normal_pdf(self, value):
+        '''Returns the standard-normal probability density at value.'''
+        value = float(value)
+
+        return float(
+            math.exp(-0.5 * value ** 2)
+            / math.sqrt(2.0 * math.pi)
+        )
+
+    def _standard_normal_cdf(self, value):
+        '''Returns the standard-normal cumulative probability at value.'''
+        value = float(value)
+
+        return float(
+            0.5 * (
+                1.0
+                + math.erf(value / math.sqrt(2.0))
+            )
+        )
+
+    def _calculate_target_error_expected_improvement_nm(
+        self,
+        predicted_lambda_mean_nm,
+        predicted_lambda_std_nm,
+        incumbent_target_error_nm
+    ):
+        '''
+        Calculates expected improvement in absolute target error.
+
+        Let the GP posterior response be:
+
+            Y ~ Normal(mu, sigma)
+
+        with target t and incumbent absolute target error d_best. Target-error
+        improvement is:
+
+            max(0, d_best - abs(Y - t))
+
+        This method evaluates its exact expectation by integrating the normal
+        density over the improvement interval:
+
+            t - d_best <= Y <= t + d_best
+
+        The interval is split at the target because absolute error is linear on
+        each side. The implementation uses the standard-normal CDF and PDF and
+        introduces no numerical quadrature or additional dependency.
+
+        When sigma is effectively zero, the normal posterior is deterministic
+        and the exact limiting value is used directly:
+
+            max(0, d_best - abs(mu - t))
+
+        params:
+            float predicted_lambda_mean_nm:
+                GP-predicted lambda-max mean in nanometers.
+
+            float predicted_lambda_std_nm:
+                GP predictive standard deviation in nanometers.
+
+            float incumbent_target_error_nm:
+                Best QC-approved condition-level absolute target error in nm.
+
+        returns:
+            float:
+                Finite expected target-error improvement in nanometers, bounded
+                between zero and incumbent_target_error_nm.
+        '''
+        try:
+            predicted_lambda_mean_nm = float(
+                predicted_lambda_mean_nm
+            )
+            target_value_nm = float(self.target_value)
+            incumbent_target_error_nm = float(
+                incumbent_target_error_nm
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Target-EI requires finite numeric mean, target, standard "
+                "deviation, and incumbent values in nanometers."
+            )
+
+        if (
+            not math.isfinite(predicted_lambda_mean_nm)
+            or not math.isfinite(target_value_nm)
+        ):
+            raise ValueError(
+                "Target-EI requires finite GP-predicted mean and target "
+                "values in nanometers."
+            )
+
+        predicted_lambda_std_nm = (
+            self._validate_predictive_standard_deviation_nm(
+                predicted_lambda_std_nm,
+                acquisition_mode='Target-EI'
+            )
+        )
+
+        if (
+            not math.isfinite(incumbent_target_error_nm)
+            or incumbent_target_error_nm < 0.0
+        ):
+            raise ValueError(
+                "Target-EI incumbent target error must be finite and "
+                "nonnegative in nanometers. Received: "
+                f"{incumbent_target_error_nm!r}."
+            )
+
+        centered_mean_nm = (
+            predicted_lambda_mean_nm
+            - target_value_nm
+        )
+
+        # Deterministic posterior limit. The tolerance is far below any
+        # physically meaningful wavelength resolution and prevents unstable
+        # division by a numerically zero standard deviation.
+        if predicted_lambda_std_nm <= 1e-12:
+            return float(
+                max(
+                    0.0,
+                    incumbent_target_error_nm
+                    - abs(centered_mean_nm)
+                )
+            )
+
+        if incumbent_target_error_nm == 0.0:
+            return 0.0
+
+        lower_z = (
+            -incumbent_target_error_nm
+            - centered_mean_nm
+        ) / predicted_lambda_std_nm
+        target_z = -centered_mean_nm / predicted_lambda_std_nm
+        upper_z = (
+            incumbent_target_error_nm
+            - centered_mean_nm
+        ) / predicted_lambda_std_nm
+
+        lower_probability = (
+            self._standard_normal_cdf(target_z)
+            - self._standard_normal_cdf(lower_z)
+        )
+        upper_probability = (
+            self._standard_normal_cdf(upper_z)
+            - self._standard_normal_cdf(target_z)
+        )
+
+        lower_improvement = (
+            (incumbent_target_error_nm + centered_mean_nm)
+            * lower_probability
+            + predicted_lambda_std_nm
+            * (
+                self._standard_normal_pdf(lower_z)
+                - self._standard_normal_pdf(target_z)
+            )
+        )
+        upper_improvement = (
+            (incumbent_target_error_nm - centered_mean_nm)
+            * upper_probability
+            + predicted_lambda_std_nm
+            * (
+                self._standard_normal_pdf(upper_z)
+                - self._standard_normal_pdf(target_z)
+            )
+        )
+
+        expected_improvement_nm = (
+            lower_improvement
+            + upper_improvement
+        )
+
+        # Cancellation in extreme normal tails can produce tiny values just
+        # outside the mathematical [0, d_best] interval. Clamp only to those
+        # exact theoretical bounds.
+        expected_improvement_nm = min(
+            incumbent_target_error_nm,
+            max(0.0, expected_improvement_nm)
+        )
+
+        return float(expected_improvement_nm)
+
     def _calculate_acquisition_score(
         self,
         predicted_lambda_mean_nm,
@@ -755,7 +982,8 @@ class OptimizationModel():
             absolute target error
             - balanced_exploration_weight * predictive standard deviation
 
-        The incumbent interface remains reserved for target EI.
+        Target EI minimizes the negative expected reduction in the best
+        QC-approved condition-level absolute target error achieved so far.
 
         params:
             float predicted_lambda_mean_nm:
@@ -767,7 +995,7 @@ class OptimizationModel():
 
             float incumbent_target_error_nm:
                 Best QC-approved condition-level target error in nanometers.
-                This is reserved for the later target-EI implementation.
+                Required by target EI and unused by the other modes.
 
         returns:
             float:
@@ -855,6 +1083,32 @@ class OptimizationModel():
                 * predicted_lambda_std_nm
             )
 
+        if self.acquisition_mode == 'target_ei':
+            if incumbent_target_error_nm is None:
+                incumbent_target_error_nm = getattr(
+                    self,
+                    'incumbent_target_error_nm',
+                    None
+                )
+
+            if incumbent_target_error_nm is None:
+                raise ValueError(
+                    "Target-EI requires a QC-approved condition-level "
+                    "incumbent target error before recipe selection."
+                )
+
+            expected_improvement_nm = (
+                self._calculate_target_error_expected_improvement_nm(
+                    predicted_lambda_mean_nm=predicted_lambda_mean_nm,
+                    predicted_lambda_std_nm=predicted_lambda_std_nm,
+                    incumbent_target_error_nm=incumbent_target_error_nm
+                )
+            )
+
+            # The surrounding optimizer minimizes, so negate expected
+            # improvement to select the candidate with the largest value.
+            return float(-1.0 * expected_improvement_nm)
+
         raise NotImplementedError(
             "Acquisition score for mode "
             f"{self.acquisition_mode!r} is not implemented yet."
@@ -925,7 +1179,12 @@ class OptimizationModel():
 
         return self._calculate_acquisition_score(
             predicted_lambda_mean_nm=predicted_lambda_max,
-            predicted_lambda_std_nm=predicted_lambda_std
+            predicted_lambda_std_nm=predicted_lambda_std,
+            incumbent_target_error_nm=getattr(
+                self,
+                'incumbent_target_error_nm',
+                None
+            )
         )
 
     def _masked_target_distance_objective(self, x_active, mask):
@@ -1123,7 +1382,9 @@ class OptimizationModel():
         Exploit minimizes squared distance from the requested target. Explore
         minimizes negative GP predictive standard deviation. Balanced trades
         absolute target error against weighted predictive uncertainty, with
-        both statistical quantities expressed in nanometers.
+        both statistical quantities expressed in nanometers. Target EI
+        minimizes negative expected improvement in the best QC-approved
+        condition-level absolute target error.
 
         Discrete part:
             Each binary mask decides which variable reagents are OFF or ON.
@@ -2109,11 +2370,17 @@ class OptimizationModel():
                 "Acquisition mode "
                 f"{self.acquisition_mode!r} is configured, but its recipe "
                 "selection behavior is not implemented yet. Only 'exploit', "
-                "'explore', and 'balanced' may select recipes at the current "
-                "implementation stage."
+                "'explore', 'balanced', and 'target_ei' may select recipes at "
+                "the current implementation stage."
             )
 
         best_x = self._optimize_acquisition_with_masks()
+
+        self.last_optimizer_incumbent_target_error_nm = getattr(
+            self,
+            'incumbent_target_error_nm',
+            None
+        )
 
         (
             predicted_lambda_max,

@@ -4249,6 +4249,100 @@ class AutoContr(Controller):
                 row['closest_to_target_so_far'] = True
             else:
                 row['closest_to_target_so_far'] = False
+
+    def _get_best_qc_approved_target_error_nm(self):
+        '''
+        Returns the best condition-level target error eligible for GP training.
+
+        Target expected improvement needs an incumbent representing the best
+        scientifically trusted result achieved so far. The Auto performance
+        log contains one row per unique reaction condition and calculates
+        target_error_nm from the QC-cleaned replicate aggregate. Filtering on
+        use_for_model_training therefore keeps the incumbent aligned with the
+        same QC decision that governs the GP training data.
+
+        Individual replicate values are deliberately not inspected here. This
+        prevents one unusually favorable well from setting an unrealistically
+        strong incumbent when its condition-level replicate result was not
+        approved for model training.
+
+        params:
+            None
+
+        returns:
+            float or None:
+                Smallest finite, nonnegative QC-approved condition-level
+                target error in nanometers, or None when none is available.
+        '''
+        eligible_target_errors_nm = []
+
+        for row in self.auto_model_performance_rows:
+            if not row.get('use_for_model_training', False):
+                continue
+
+            target_error_nm = row.get('target_error_nm')
+
+            try:
+                target_error_nm = float(target_error_nm)
+            except (TypeError, ValueError):
+                continue
+
+            if (
+                not math.isfinite(target_error_nm)
+                or target_error_nm < 0.0
+            ):
+                continue
+
+            eligible_target_errors_nm.append(target_error_nm)
+
+        if len(eligible_target_errors_nm) == 0:
+            return None
+
+        return float(min(eligible_target_errors_nm))
+
+    def _synchronize_target_ei_incumbent_from_performance(self, model):
+        '''
+        Synchronizes target EI with the best GP-approved condition result.
+
+        This method must be called only after a successful GP initialization
+        or update. That ordering guarantees that the incumbent and fitted GP
+        describe the same accepted experimental history; a failed model update
+        cannot leave target EI pointing at data the GP did not incorporate.
+
+        Other acquisition modes do not use an incumbent and return immediately.
+
+        params:
+            OptimizationModel model:
+                Active Auto optimization model.
+
+        returns:
+            float or None:
+                Stored incumbent target error for target EI, otherwise None.
+        '''
+        if model.acquisition_mode != 'target_ei':
+            return None
+
+        incumbent_target_error_nm = (
+            self._get_best_qc_approved_target_error_nm()
+        )
+
+        if incumbent_target_error_nm is None:
+            raise ValueError(
+                "Target-EI cannot select a recipe because no QC-approved "
+                "condition-level target error is available after the GP "
+                "model update."
+            )
+
+        model.set_incumbent_target_error_nm(
+            incumbent_target_error_nm
+        )
+
+        print(
+            "<<controller>> target-EI incumbent condition-level error: "
+            f"{incumbent_target_error_nm:.4f} nm"
+        )
+
+        return incumbent_target_error_nm
     
     def _export_auto_model_performance_log(self):
         '''
@@ -11385,6 +11479,11 @@ class AutoContr(Controller):
             qc_Y_initial_normalized
         )
 
+        # Synchronize target EI only after the seed observations have been
+        # successfully incorporated into the fitted GP. The incumbent comes
+        # from the same QC-approved condition-level performance history.
+        self._synchronize_target_ei_incumbent_from_performance(model)
+
         # The initial seed observations are now incorporated into the fitted
         # GP. Generate scientifically current model plots for batch 0 when the
         # selected Auto plot profile requests per-batch outputs.
@@ -11551,6 +11650,10 @@ class AutoContr(Controller):
                 qc_X_new_normalized,
                 qc_Y_new_normalized
             )
+
+            # Keep target EI aligned with the newly fitted GP only after its
+            # QC-filtered batch update succeeds.
+            self._synchronize_target_ei_incumbent_from_performance(model)
 
             # The completed batch is now part of the fitted GP. The plot-suite
             # coordinator refreshes the 2D prediction and uncertainty grids

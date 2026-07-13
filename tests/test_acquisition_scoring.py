@@ -106,11 +106,52 @@ def _get_production_method_node(method_name):
     )
 
 
+def _load_auto_controller_methods(method_names):
+    '''Loads pure AutoContr methods without importing hardware dependencies.'''
+    tree = ast.parse(
+        CONTROLLER_PATH.read_text(),
+        filename=str(CONTROLLER_PATH)
+    )
+
+    controller_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == 'AutoContr'
+    )
+    methods = {
+        node.name: node
+        for node in controller_class.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    extracted_class = ast.ClassDef(
+        name='AutoContr',
+        bases=[],
+        keywords=[],
+        body=[methods[method_name] for method_name in method_names],
+        decorator_list=[]
+    )
+    module = ast.fix_missing_locations(
+        ast.Module(body=[extracted_class], type_ignores=[])
+    )
+    namespace = {'math': math}
+
+    exec(
+        compile(module, str(CONTROLLER_PATH), 'exec'),
+        namespace
+    )
+
+    return namespace['AutoContr']
+
+
 class AcquisitionScoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.ScoreModel = _load_optimization_model_methods([
             '_validate_predictive_standard_deviation_nm',
+            'set_incumbent_target_error_nm',
+            '_standard_normal_pdf',
+            '_standard_normal_cdf',
+            '_calculate_target_error_expected_improvement_nm',
             '_calculate_acquisition_score'
         ])
 
@@ -119,6 +160,7 @@ class AcquisitionScoreTests(unittest.TestCase):
         model.target_value = 625.0
         model.acquisition_mode = acquisition_mode
         model.balanced_exploration_weight = 1.0
+        model.incumbent_target_error_nm = None
         return model
 
     def test_exploit_matches_legacy_squared_target_distance(self):
@@ -142,16 +184,174 @@ class AcquisitionScoreTests(unittest.TestCase):
 
                 self.assertEqual(score, expected_score)
 
-    def test_unimplemented_modes_fail_clearly(self):
-        for mode in ('target_ei',):
-            with self.subTest(mode=mode):
-                model = self._build_score_model(mode)
+    def test_target_ei_requires_qc_approved_incumbent(self):
+        model = self._build_score_model('target_ei')
 
+        with self.assertRaisesRegex(
+            ValueError,
+            "QC-approved condition-level"
+        ):
+            model._calculate_acquisition_score(625.0, 2.0)
+
+    def test_target_ei_matches_independent_numerical_integration(self):
+        model = self._build_score_model('target_ei')
+        predicted_mean_nm = 630.0
+        predicted_std_nm = 4.0
+        incumbent_error_nm = 10.0
+
+        analytic_ei_nm = (
+            model._calculate_target_error_expected_improvement_nm(
+                predicted_lambda_mean_nm=predicted_mean_nm,
+                predicted_lambda_std_nm=predicted_std_nm,
+                incumbent_target_error_nm=incumbent_error_nm
+            )
+        )
+
+        # Independent midpoint integration of:
+        # (d_best - |y - target|) * Normal(y; mean, std)
+        # over the only interval where improvement is positive.
+        integration_steps = 20000
+        lower_nm = model.target_value - incumbent_error_nm
+        interval_width_nm = 2.0 * incumbent_error_nm
+        step_width_nm = interval_width_nm / integration_steps
+        numerical_ei_nm = 0.0
+
+        for step_index in range(integration_steps):
+            lambda_nm = (
+                lower_nm
+                + (step_index + 0.5) * step_width_nm
+            )
+            improvement_nm = (
+                incumbent_error_nm
+                - abs(lambda_nm - model.target_value)
+            )
+            normal_density = (
+                math.exp(
+                    -0.5 * (
+                        (lambda_nm - predicted_mean_nm)
+                        / predicted_std_nm
+                    ) ** 2
+                )
+                / (
+                    predicted_std_nm
+                    * math.sqrt(2.0 * math.pi)
+                )
+            )
+            numerical_ei_nm += (
+                improvement_nm
+                * normal_density
+                * step_width_nm
+            )
+
+        self.assertAlmostEqual(
+            analytic_ei_nm,
+            numerical_ei_nm,
+            places=7
+        )
+
+    def test_target_ei_is_symmetric_about_requested_target(self):
+        model = self._build_score_model('target_ei')
+
+        below_target_ei = (
+            model._calculate_target_error_expected_improvement_nm(
+                620.0,
+                4.0,
+                10.0
+            )
+        )
+        above_target_ei = (
+            model._calculate_target_error_expected_improvement_nm(
+                630.0,
+                4.0,
+                10.0
+            )
+        )
+
+        self.assertAlmostEqual(
+            below_target_ei,
+            above_target_ei,
+            places=12
+        )
+
+    def test_target_ei_uses_exact_zero_uncertainty_limit(self):
+        model = self._build_score_model('target_ei')
+
+        cases = (
+            (625.0, 10.0),
+            (629.0, 6.0),
+            (640.0, 0.0)
+        )
+
+        for predicted_mean_nm, expected_ei_nm in cases:
+            with self.subTest(predicted_mean_nm=predicted_mean_nm):
+                result = (
+                    model._calculate_target_error_expected_improvement_nm(
+                        predicted_mean_nm,
+                        0.0,
+                        10.0
+                    )
+                )
+                self.assertEqual(result, expected_ei_nm)
+
+    def test_target_ei_score_selects_largest_expected_improvement(self):
+        model = self._build_score_model('target_ei')
+        model.set_incumbent_target_error_nm(10.0)
+        candidates = (
+            (625.0, 2.0),
+            (630.0, 4.0),
+            (640.0, 1.0)
+        )
+
+        scores = [
+            model._calculate_acquisition_score(
+                predicted_lambda_mean_nm=mean_nm,
+                predicted_lambda_std_nm=std_nm
+            )
+            for mean_nm, std_nm in candidates
+        ]
+
+        self.assertEqual(scores.index(min(scores)), 0)
+        self.assertTrue(all(score <= 0.0 for score in scores))
+
+    def test_target_ei_is_finite_and_bounded_by_incumbent(self):
+        model = self._build_score_model('target_ei')
+        incumbent_error_nm = 10.0
+
+        for mean_nm in (500.0, 625.0, 750.0):
+            for std_nm in (0.0, 1e-9, 2.0, 100.0):
+                with self.subTest(mean_nm=mean_nm, std_nm=std_nm):
+                    expected_improvement_nm = (
+                        model._calculate_target_error_expected_improvement_nm(
+                            mean_nm,
+                            std_nm,
+                            incumbent_error_nm
+                        )
+                    )
+                    self.assertTrue(math.isfinite(expected_improvement_nm))
+                    self.assertGreaterEqual(expected_improvement_nm, 0.0)
+                    self.assertLessEqual(
+                        expected_improvement_nm,
+                        incumbent_error_nm
+                    )
+
+    def test_target_ei_incumbent_setter_rejects_invalid_values(self):
+        model = self._build_score_model('target_ei')
+
+        for invalid_incumbent in (
+            None,
+            -0.01,
+            float('nan'),
+            float('inf'),
+            'not-a-number'
+        ):
+            with self.subTest(invalid_incumbent=invalid_incumbent):
                 with self.assertRaisesRegex(
-                    NotImplementedError,
-                    repr(mode)
+                    ValueError,
+                    "finite, nonnegative"
                 ):
-                    model._calculate_acquisition_score(625.0, 2.0)
+                    model.set_incumbent_target_error_nm(
+                        invalid_incumbent
+                    )
 
     def test_balanced_trades_target_proximity_against_uncertainty(self):
         model = self._build_score_model('balanced')
@@ -276,6 +476,9 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
     def setUpClass(cls):
         cls.MaskedModel = _load_optimization_model_methods([
             '_validate_predictive_standard_deviation_nm',
+            '_standard_normal_pdf',
+            '_standard_normal_cdf',
+            '_calculate_target_error_expected_improvement_nm',
             '_calculate_acquisition_score',
             '_masked_acquisition_objective',
             '_masked_target_distance_objective'
@@ -286,6 +489,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
         model.target_value = 625.0
         model.acquisition_mode = acquisition_mode
         model.balanced_exploration_weight = 1.0
+        model.incumbent_target_error_nm = 10.0
         model._expand_masked_candidate_to_full_recipe = (
             lambda x_active, mask: ('full-recipe', x_active, mask)
         )
@@ -378,6 +582,39 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
         self.assertEqual(selected_candidate, 0.2)
         self.assertEqual(scores[0.2], -5.0)
 
+    def test_target_ei_uses_same_feasible_masked_recipe_path(self):
+        volume_balance = {
+            'volume_feasible': True,
+            'water_volume': 20.0,
+            'volume_does_not_overflow': True,
+            'water_transfer_executable': True
+        }
+        model = self._build_model(
+            volume_balance,
+            acquisition_mode='target_ei'
+        )
+        distributions = {
+            0.1: (625.0, 2.0),
+            0.2: (630.0, 4.0),
+            0.3: (640.0, 1.0)
+        }
+        model.predict_lambda_distribution_nm = (
+            lambda full_x: distributions[full_x[1][0]]
+        )
+
+        scores = {
+            candidate: model._masked_acquisition_objective(
+                [candidate],
+                [1]
+            )
+            for candidate in distributions
+        }
+
+        selected_candidate = min(scores, key=scores.get)
+
+        self.assertEqual(selected_candidate, 0.1)
+        self.assertLess(scores[0.1], scores[0.2])
+
     def test_overflow_penalty_is_unchanged_and_skips_gp(self):
         volume_balance = {
             'volume_feasible': False,
@@ -385,7 +622,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
             'volume_does_not_overflow': False,
             'water_transfer_executable': False
         }
-        for mode in ('exploit', 'explore', 'balanced'):
+        for mode in ('exploit', 'explore', 'balanced', 'target_ei'):
             with self.subTest(mode=mode):
                 model = self._build_model(
                     volume_balance,
@@ -416,7 +653,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
             'volume_does_not_overflow': True,
             'water_transfer_executable': False
         }
-        for mode in ('exploit', 'explore', 'balanced'):
+        for mode in ('exploit', 'explore', 'balanced', 'target_ei'):
             with self.subTest(mode=mode):
                 model = self._build_model(
                     volume_balance,
@@ -542,6 +779,159 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertEqual(
             [argument.value for argument in weight_expression.args],
             ['balanced_exploration_weight', 1.0]
+        )
+
+    def test_controller_synchronizes_target_ei_after_successful_gp_changes(
+        self
+    ):
+        tree = ast.parse(
+            CONTROLLER_PATH.read_text(),
+            filename=str(CONTROLLER_PATH)
+        )
+        controller_class = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == 'AutoContr'
+        )
+        run_method = next(
+            node for node in controller_class.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == '_run'
+        )
+        model_lifecycle_calls = sorted(
+            (
+                node.lineno,
+                node.func.attr
+            )
+            for node in ast.walk(run_method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {
+                'initialize_optimizer',
+                'update_experiment_data',
+                '_synchronize_target_ei_incumbent_from_performance'
+            }
+        )
+
+        initialize_lines = [
+            line_number
+            for line_number, method_name in model_lifecycle_calls
+            if method_name == 'initialize_optimizer'
+        ]
+        update_lines = [
+            line_number
+            for line_number, method_name in model_lifecycle_calls
+            if method_name == 'update_experiment_data'
+        ]
+        synchronization_lines = [
+            line_number
+            for line_number, method_name in model_lifecycle_calls
+            if method_name
+            == '_synchronize_target_ei_incumbent_from_performance'
+        ]
+
+        self.assertEqual(len(initialize_lines), 1)
+        self.assertEqual(len(update_lines), 1)
+        self.assertEqual(len(synchronization_lines), 2)
+        self.assertLess(initialize_lines[0], synchronization_lines[0])
+        self.assertLess(update_lines[0], synchronization_lines[1])
+
+
+class TargetEiIncumbentControllerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_get_best_qc_approved_target_error_nm',
+            '_synchronize_target_ei_incumbent_from_performance'
+        ])
+
+    def _build_controller(self, rows):
+        controller = self.Controller()
+        controller.auto_model_performance_rows = rows
+        return controller
+
+    def test_incumbent_uses_best_approved_condition_level_error(self):
+        controller = self._build_controller([
+            {
+                'use_for_model_training': True,
+                'target_error_nm': 8.0,
+                # A lucky well is intentionally irrelevant to the incumbent.
+                'actual_lambda_rep_1_nm': 625.0
+            },
+            {
+                'use_for_model_training': False,
+                'target_error_nm': 0.1
+            },
+            {
+                'use_for_model_training': True,
+                'target_error_nm': 3.0
+            },
+            {
+                'use_for_model_training': True,
+                'target_error_nm': None
+            },
+            {
+                'use_for_model_training': True,
+                'target_error_nm': float('nan')
+            },
+            {
+                'use_for_model_training': True,
+                'target_error_nm': -1.0
+            }
+        ])
+
+        self.assertEqual(
+            controller._get_best_qc_approved_target_error_nm(),
+            3.0
+        )
+
+    def test_target_ei_synchronization_stores_condition_incumbent(self):
+        controller = self._build_controller([
+            {
+                'use_for_model_training': True,
+                'target_error_nm': 4.5
+            }
+        ])
+        stored_values = []
+        model = SimpleNamespace(
+            acquisition_mode='target_ei',
+            set_incumbent_target_error_nm=stored_values.append
+        )
+
+        with redirect_stdout(io.StringIO()):
+            result = (
+                controller
+                ._synchronize_target_ei_incumbent_from_performance(model)
+            )
+
+        self.assertEqual(result, 4.5)
+        self.assertEqual(stored_values, [4.5])
+
+    def test_target_ei_synchronization_requires_approved_condition(self):
+        controller = self._build_controller([
+            {
+                'use_for_model_training': False,
+                'target_error_nm': 0.5
+            }
+        ])
+        model = SimpleNamespace(acquisition_mode='target_ei')
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "no QC-approved condition-level"
+        ):
+            controller._synchronize_target_ei_incumbent_from_performance(
+                model
+            )
+
+    def test_other_modes_do_not_require_or_store_incumbent(self):
+        controller = self.Controller()
+        model = SimpleNamespace(acquisition_mode='balanced')
+
+        self.assertIsNone(
+            controller._synchronize_target_ei_incumbent_from_performance(
+                model
+            )
         )
 
 
@@ -670,23 +1060,21 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
             1.25
         )
 
-    def test_unimplemented_mode_stops_before_optimization(self):
-        for mode in ('target_ei',):
-            with self.subTest(mode=mode):
-                model = self.SelectionModel()
-                model.acquisition_mode = mode
-                optimization_calls = []
-                model._optimize_acquisition_with_masks = (
-                    lambda: optimization_calls.append(True)
-                )
+    def test_unknown_mode_stops_before_optimization(self):
+        model = self.SelectionModel()
+        model.acquisition_mode = 'ordinary_ei'
+        optimization_calls = []
+        model._optimize_acquisition_with_masks = (
+            lambda: optimization_calls.append(True)
+        )
 
-                with self.assertRaisesRegex(
-                    NotImplementedError,
-                    repr(mode)
-                ):
-                    model.getNextReaction()
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "'ordinary_ei'"
+        ):
+            model.getNextReaction()
 
-                self.assertEqual(optimization_calls, [])
+        self.assertEqual(optimization_calls, [])
 
     def test_explore_reaches_optimizer_and_preserves_return_shape(self):
         model = self.SelectionModel()
@@ -722,6 +1110,28 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
         self.assertEqual(optimization_calls, [True])
         self.assertEqual(result, [[0.5]])
 
+    def test_target_ei_reaches_optimizer_and_records_incumbent(self):
+        model = self.SelectionModel()
+        model.acquisition_mode = 'target_ei'
+        model.incumbent_target_error_nm = 7.5
+        optimization_calls = []
+        model._optimize_acquisition_with_masks = (
+            lambda: optimization_calls.append(True) or [0.6]
+        )
+        model.predict_lambda_distribution_nm = (
+            lambda x: (627.0, 3.0)
+        )
+
+        with redirect_stdout(io.StringIO()):
+            result = model.getNextReaction()
+
+        self.assertEqual(optimization_calls, [True])
+        self.assertEqual(result, [[0.6]])
+        self.assertEqual(
+            model.last_optimizer_incumbent_target_error_nm,
+            7.5
+        )
+
 
 class OptimizationModelConfigurationTests(unittest.TestCase):
     @classmethod
@@ -753,6 +1163,7 @@ class OptimizationModelConfigurationTests(unittest.TestCase):
             )
 
         self.assertEqual(model.balanced_exploration_weight, 1.0)
+        self.assertIsNone(model.incumbent_target_error_nm)
 
     def test_balanced_weight_is_stored_and_printed(self):
         output = io.StringIO()
