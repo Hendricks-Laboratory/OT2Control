@@ -4022,8 +4022,8 @@ class AutoContr(Controller):
 
             dict prediction_metadata:
                 Optional metadata captured before experiment execution, such
-                as selected mask, predicted lambda mean, and predicted lambda
-                standard deviation.
+                as acquisition mode and score, selected mask, predicted lambda
+                distribution, predicted target error, and target-EI incumbent.
 
         returns:
             None
@@ -4093,6 +4093,29 @@ class AutoContr(Controller):
             predicted_std = self._safe_float_or_none(
                 prediction_metadata.get('predicted_lambda_std_nm')
             )
+            predicted_target_error = self._safe_float_or_none(
+                prediction_metadata.get('predicted_target_error_nm')
+            )
+            acquisition_score = self._safe_float_or_none(
+                prediction_metadata.get('acquisition_score')
+            )
+            incumbent_target_error = self._safe_float_or_none(
+                prediction_metadata.get('incumbent_target_error_nm')
+            )
+            acquisition_mode = prediction_metadata.get('acquisition_mode')
+
+            if acquisition_mode is not None:
+                acquisition_mode = str(acquisition_mode)
+
+            # Derive the predicted target error when older callers provide a
+            # mean prediction but not the newer explicit audit field.
+            if (
+                predicted_target_error is None
+                and predicted_mean is not None
+            ):
+                predicted_target_error = float(
+                    abs(predicted_mean - target_lambda)
+                )
 
             if qc_mean is None:
                 target_error = None
@@ -4113,6 +4136,8 @@ class AutoContr(Controller):
                 'batch_number': int(batch_number),
                 'reaction_number': int(self.auto_condition_counter),
                 'condition_type': condition_type,
+                'acquisition_mode': acquisition_mode,
+                'acquisition_score': acquisition_score,
                 'selected_mask': self._format_mask_for_report(selected_mask),
                 'active_variable_reagents': (
                     self._get_active_variable_reagents_from_mask(
@@ -4120,8 +4145,10 @@ class AutoContr(Controller):
                     )
                 ),
                 'target_lambda_max_nm': float(target_lambda),
+                'predicted_target_error_nm': predicted_target_error,
                 'predicted_lambda_mean_nm': predicted_mean,
                 'predicted_lambda_std_nm': predicted_std,
+                'incumbent_target_error_nm': incumbent_target_error,
 
                 # Backward-compatible actual_lambda_* columns now represent
                 # the QC-cleaned condition-level values used by Auto summaries.
@@ -8515,9 +8542,39 @@ class AutoContr(Controller):
         max_iterations = robo_params.get('max_iterations', None)
         num_duplicates = robo_params.get('num_duplicates', None)
         allow_true_zero = robo_params.get('allow_true_zero', None)
+        acquisition_mode = robo_params.get('acquisition_mode', 'exploit')
+        balanced_exploration_weight = robo_params.get(
+            'balanced_exploration_weight',
+            1.0
+        )
         replicate_outlier_threshold_nm = robo_params.get(
             'replicate_outlier_threshold_nm',
             50.0
+        )
+
+        acquisition_objective_descriptions = {
+            'exploit': (
+                'Select the feasible recipe whose GP-predicted mean λmax is '
+                'closest to the requested target.'
+            ),
+            'explore': (
+                'Select the feasible recipe with the greatest GP predictive '
+                'standard deviation.'
+            ),
+            'balanced': (
+                'Trade absolute predicted target error against weighted GP '
+                'predictive uncertainty using a target-aware straddle score.'
+            ),
+            'target_ei': (
+                'Maximize the expected reduction in the best QC-approved '
+                'condition-level absolute target error achieved so far.'
+            )
+        }
+        acquisition_objective_description = (
+            acquisition_objective_descriptions.get(
+                acquisition_mode,
+                'Use the configured GP-guided acquisition score.'
+            )
         )
 
         seed_conditions = self._count_auto_report_status(
@@ -8875,6 +8932,131 @@ class AutoContr(Controller):
                 f'data and excluding only clearer isolated outliers.'
             )
 
+        acquisition_audit_table_lines = []
+
+        if (
+            performance_df.empty
+            or 'condition_type' not in performance_df.columns
+        ):
+            acquisition_audit_df = pd.DataFrame()
+        else:
+            acquisition_audit_df = performance_df[
+                performance_df['condition_type'] == 'optimizer_selected'
+            ]
+
+        if acquisition_audit_df.empty:
+            acquisition_audit_table_lines.append(
+                'No optimizer-selected conditions were available for the '
+                'acquisition audit trail.'
+            )
+        else:
+            acquisition_audit_headers = [
+                'Condition',
+                'Batch',
+                'Mode',
+                'Score',
+                'Predicted target error',
+                'Predicted λmax',
+                'GP SD',
+                'Incumbent target error',
+                'Selected mask'
+            ]
+            acquisition_audit_alignments = [
+                'right',
+                'right',
+                'left',
+                'right',
+                'right',
+                'right',
+                'right',
+                'right',
+                'left'
+            ]
+            acquisition_audit_rows = []
+
+            for _, row in acquisition_audit_df.sort_values(
+                'reaction_number'
+            ).iterrows():
+                acquisition_audit_rows.append(
+                    [
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'reaction_number',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'batch_number',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'acquisition_mode',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'acquisition_score',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'predicted_target_error_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'predicted_lambda_mean_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'predicted_lambda_std_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'incumbent_target_error_nm',
+                                None
+                            ),
+                            suffix='nm'
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'selected_mask',
+                                None
+                            )
+                        )
+                    ]
+                )
+
+            acquisition_audit_table_lines.extend(
+                self._build_padded_auto_report_markdown_table(
+                    headers=acquisition_audit_headers,
+                    rows=acquisition_audit_rows,
+                    alignments=acquisition_audit_alignments
+                )
+            )
+
         condition_table_lines = []
 
         if performance_df.empty:
@@ -9046,6 +9228,17 @@ class AutoContr(Controller):
             f'{self._format_auto_report_value(allow_true_zero)}'
         )
         lines.append(
+            f'- Acquisition mode: '
+            f'`{self._format_auto_report_value(acquisition_mode)}`'
+        )
+
+        if acquisition_mode == 'balanced':
+            lines.append(
+                f'- Balanced exploration weight: '
+                f'{self._format_auto_report_value(balanced_exploration_weight)}'
+            )
+
+        lines.append(
             f'- Replicate outlier threshold: '
             f'{self._format_auto_report_value(replicate_outlier_threshold_nm, "nm")}'
         )
@@ -9053,18 +9246,28 @@ class AutoContr(Controller):
         lines.append('## Optimization Objective')
         lines.append('')
         lines.append(
-            'Auto mode selected recipes using the current GP-guided target '
-            'optimizer. The current objective is to propose reaction conditions '
-            'whose predicted λmax is close to the requested target wavelength, '
-            'while preserving volume feasibility and true-zero reagent behavior '
-            'where enabled.'
+            f'Auto mode used the `{acquisition_mode}` target-aware acquisition '
+            f'mode. {acquisition_objective_description}'
         )
         lines.append('')
         lines.append(
-            'Current model uncertainty is logged and plotted where available, '
-            'but the optimizer should still be described as GP-guided target '
-            'optimization rather than fully uncertainty-aware acquisition.'
+            'All acquisition modes are converted to minimization scores and '
+            'use the same reagent-mask, exact-zero, executable-transfer, water '
+            'top-off, and overflow feasibility rules. Lower recorded scores '
+            'are preferred within a mode. Score units depend on the mode: '
+            '`exploit` uses nm²; `explore`, `balanced`, and `target_ei` use nm.'
         )
+        lines.append('')
+        lines.append('## Acquisition Audit Trail')
+        lines.append('')
+        lines.append(
+            'Each optimizer-selected row records the acquisition decision '
+            'before the experiment ran: canonical mode, minimized score, '
+            'predicted target error, GP mean and standard deviation, target-EI '
+            'incumbent when applicable, and selected reagent mask.'
+        )
+        lines.append('')
+        lines.extend(acquisition_audit_table_lines)
         lines.append('')
         lines.append('## Best Condition Found')
         lines.append('')
@@ -11519,7 +11722,22 @@ class AutoContr(Controller):
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
 
             optimizer_prediction_metadata = {
+                'acquisition_mode': getattr(
+                    model,
+                    'last_optimizer_acquisition_mode',
+                    model.acquisition_mode
+                ),
+                'acquisition_score': getattr(
+                    model,
+                    'last_optimizer_acquisition_score',
+                    None
+                ),
                 'selected_mask': getattr(model, 'last_selected_mask', None),
+                'predicted_target_error_nm': getattr(
+                    model,
+                    'last_optimizer_predicted_target_error_nm',
+                    None
+                ),
                 'predicted_lambda_mean_nm': getattr(
                     model,
                     'last_optimizer_predicted_lambda_mean_nm',
@@ -11528,6 +11746,11 @@ class AutoContr(Controller):
                 'predicted_lambda_std_nm': getattr(
                     model,
                     'last_optimizer_predicted_lambda_std_nm',
+                    None
+                ),
+                'incumbent_target_error_nm': getattr(
+                    model,
+                    'last_optimizer_incumbent_target_error_nm',
                     None
                 ),
                 'notes': (

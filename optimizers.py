@@ -2346,9 +2346,11 @@ class OptimizationModel():
             transfer region for active reagents.
 
         The selected recipe's predicted lambda-max mean and GP predictive
-        standard deviation are recorded before the recipe is experimentally
-        run. These values allow the controller to compare the pre-experiment
-        model prediction with the subsequently measured result.
+        standard deviation, target error, acquisition score, acquisition mode,
+        incumbent, and reagent mask are recorded before the recipe is
+        experimentally run. These values form an immutable selection-time
+        audit record that the controller can compare with the subsequently
+        measured result.
 
         Prediction and uncertainty heatmap grids are intentionally not generated
         here. The controller refreshes those grids only after a completed batch
@@ -2382,6 +2384,8 @@ class OptimizationModel():
             None
         )
 
+        self.last_optimizer_acquisition_mode = self.acquisition_mode
+
         (
             predicted_lambda_max,
             predicted_lambda_std
@@ -2397,6 +2401,28 @@ class OptimizationModel():
             predicted_lambda_std
         )
 
+        self.last_optimizer_predicted_target_error_nm = float(
+            abs(
+                predicted_lambda_max
+                - float(self.target_value)
+            )
+        )
+
+        # Re-evaluate the statistical score for the final returned candidate.
+        # This avoids treating an optimizer-internal objective value as audit
+        # metadata if a bounded candidate was clipped by a negligible amount.
+        # Every acquisition function is expressed as a minimization score, so
+        # a lower recorded value always means the candidate was preferred.
+        self.last_optimizer_acquisition_score = (
+            self._calculate_acquisition_score(
+                predicted_lambda_mean_nm=predicted_lambda_max,
+                predicted_lambda_std_nm=predicted_lambda_std,
+                incumbent_target_error_nm=(
+                    self.last_optimizer_incumbent_target_error_nm
+                )
+            )
+        )
+
         selected_mask = getattr(
             self,
             'last_selected_mask',
@@ -2408,6 +2434,29 @@ class OptimizationModel():
                 f"<<optimizer>> selected reagent mask "
                 f"{selected_mask.tolist()} for suggested recipe"
             )
+
+        selected_mask_for_audit = (
+            selected_mask.tolist()
+            if selected_mask is not None
+            else None
+        )
+        incumbent_for_audit = (
+            f"{self.last_optimizer_incumbent_target_error_nm:.4f} nm"
+            if self.last_optimizer_incumbent_target_error_nm is not None
+            else 'not used'
+        )
+
+        print(
+            "<<optimizer>> acquisition audit: "
+            f"mode={self.last_optimizer_acquisition_mode}, "
+            f"score={self.last_optimizer_acquisition_score:.6f}, "
+            f"predicted_target_error="
+            f"{self.last_optimizer_predicted_target_error_nm:.4f} nm, "
+            f"predicted_lambda_mean={predicted_lambda_max:.4f} nm, "
+            f"predicted_lambda_std={predicted_lambda_std:.4f} nm, "
+            f"incumbent_target_error={incumbent_for_audit}, "
+            f"selected_mask={selected_mask_for_audit}"
+        )
 
         volume_balance = getattr(
             self,

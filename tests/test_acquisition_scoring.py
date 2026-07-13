@@ -143,6 +143,25 @@ def _load_auto_controller_methods(method_names):
     return namespace['AutoContr']
 
 
+def _get_auto_controller_method_node(method_name):
+    '''Returns one production AutoContr method as an AST node.'''
+    tree = ast.parse(
+        CONTROLLER_PATH.read_text(),
+        filename=str(CONTROLLER_PATH)
+    )
+    controller_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == 'AutoContr'
+    )
+
+    return next(
+        node for node in controller_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == method_name
+    )
+
+
 class AcquisitionScoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -836,6 +855,88 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertLess(initialize_lines[0], synchronization_lines[0])
         self.assertLess(update_lines[0], synchronization_lines[1])
 
+    def test_controller_captures_complete_selection_metadata_before_run(self):
+        run_method = _get_auto_controller_method_node('_run')
+        metadata_dict = next(
+            node.value
+            for node in ast.walk(run_method)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == 'optimizer_prediction_metadata'
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.Dict)
+        )
+        metadata_keys = {
+            key.value
+            for key in metadata_dict.keys
+            if isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+        }
+
+        self.assertTrue({
+            'acquisition_mode',
+            'acquisition_score',
+            'predicted_target_error_nm',
+            'predicted_lambda_mean_nm',
+            'predicted_lambda_std_nm',
+            'incumbent_target_error_nm',
+            'selected_mask'
+        }.issubset(metadata_keys))
+
+    def test_performance_log_row_contains_complete_acquisition_audit(self):
+        append_method = _get_auto_controller_method_node(
+            '_append_auto_model_performance_rows'
+        )
+        row_dict = next(
+            node.value
+            for node in ast.walk(append_method)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == 'row'
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.Dict)
+        )
+        row_keys = {
+            key.value
+            for key in row_dict.keys
+            if isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+        }
+
+        self.assertTrue({
+            'acquisition_mode',
+            'acquisition_score',
+            'predicted_target_error_nm',
+            'predicted_lambda_mean_nm',
+            'predicted_lambda_std_nm',
+            'incumbent_target_error_nm',
+            'selected_mask'
+        }.issubset(row_keys))
+
+    def test_run_report_includes_acquisition_settings_and_audit_fields(self):
+        report_method = _get_auto_controller_method_node(
+            '_write_auto_run_report'
+        )
+        report_strings = {
+            node.value
+            for node in ast.walk(report_method)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+        }
+
+        self.assertIn('## Acquisition Audit Trail', report_strings)
+        self.assertIn('acquisition_mode', report_strings)
+        self.assertIn('acquisition_score', report_strings)
+        self.assertIn('predicted_target_error_nm', report_strings)
+        self.assertIn('predicted_lambda_mean_nm', report_strings)
+        self.assertIn('predicted_lambda_std_nm', report_strings)
+        self.assertIn('incumbent_target_error_nm', report_strings)
+        self.assertIn('selected_mask', report_strings)
+
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):
     @classmethod
@@ -1038,6 +1139,12 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
     def test_exploit_preserves_controller_return_shape_and_predictions(self):
         model = self.SelectionModel()
         model.acquisition_mode = 'exploit'
+        model.target_value = 625.0
+        model._calculate_acquisition_score = (
+            lambda predicted_lambda_mean_nm,
+            predicted_lambda_std_nm,
+            incumbent_target_error_nm: 0.25
+        )
         optimization_calls = []
         model._optimize_acquisition_with_masks = (
             lambda: optimization_calls.append(True) or [0.25]
@@ -1046,7 +1153,9 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
             lambda x: (624.5, 1.25)
         )
 
-        with redirect_stdout(io.StringIO()):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
             result = model.getNextReaction()
 
         self.assertEqual(optimization_calls, [True])
@@ -1059,6 +1168,16 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
             model.last_optimizer_predicted_lambda_std_nm,
             1.25
         )
+        self.assertEqual(
+            model.last_optimizer_predicted_target_error_nm,
+            0.5
+        )
+        self.assertEqual(model.last_optimizer_acquisition_mode, 'exploit')
+        self.assertEqual(model.last_optimizer_acquisition_score, 0.25)
+        self.assertIsNone(model.last_optimizer_incumbent_target_error_nm)
+        self.assertIn('acquisition audit:', output.getvalue())
+        self.assertIn('mode=exploit', output.getvalue())
+        self.assertIn('predicted_target_error=0.5000 nm', output.getvalue())
 
     def test_unknown_mode_stops_before_optimization(self):
         model = self.SelectionModel()
@@ -1079,6 +1198,12 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
     def test_explore_reaches_optimizer_and_preserves_return_shape(self):
         model = self.SelectionModel()
         model.acquisition_mode = 'explore'
+        model.target_value = 625.0
+        model._calculate_acquisition_score = (
+            lambda predicted_lambda_mean_nm,
+            predicted_lambda_std_nm,
+            incumbent_target_error_nm: -15.0
+        )
         optimization_calls = []
         model._optimize_acquisition_with_masks = (
             lambda: optimization_calls.append(True) or [0.75]
@@ -1096,6 +1221,12 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
     def test_balanced_reaches_optimizer_and_preserves_return_shape(self):
         model = self.SelectionModel()
         model.acquisition_mode = 'balanced'
+        model.target_value = 625.0
+        model._calculate_acquisition_score = (
+            lambda predicted_lambda_mean_nm,
+            predicted_lambda_std_nm,
+            incumbent_target_error_nm: -3.0
+        )
         optimization_calls = []
         model._optimize_acquisition_with_masks = (
             lambda: optimization_calls.append(True) or [0.5]
@@ -1113,7 +1244,13 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
     def test_target_ei_reaches_optimizer_and_records_incumbent(self):
         model = self.SelectionModel()
         model.acquisition_mode = 'target_ei'
+        model.target_value = 625.0
         model.incumbent_target_error_nm = 7.5
+        model._calculate_acquisition_score = (
+            lambda predicted_lambda_mean_nm,
+            predicted_lambda_std_nm,
+            incumbent_target_error_nm: -4.25
+        )
         optimization_calls = []
         model._optimize_acquisition_with_masks = (
             lambda: optimization_calls.append(True) or [0.6]
@@ -1130,6 +1267,11 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
         self.assertEqual(
             model.last_optimizer_incumbent_target_error_nm,
             7.5
+        )
+        self.assertEqual(model.last_optimizer_acquisition_score, -4.25)
+        self.assertEqual(
+            model.last_optimizer_predicted_target_error_nm,
+            2.0
         )
 
 
