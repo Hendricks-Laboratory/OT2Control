@@ -1330,14 +1330,34 @@ class OptimizationModel():
                 method='SLSQP'
             )
 
-            if np.isfinite(result.fun) and result.fun < best_objective:
-                best_objective = float(result.fun)
-                best_x_active = np.asarray(result.x, dtype=float)
+            # SLSQP can return values infinitesimally outside a declared bound.
+            # Clip first, then evaluate and rank the exact candidate that will
+            # be returned and reported. Trusting result.fun from the unclipped
+            # point would let cross-mask ordering disagree with selection-time
+            # metadata and, in an edge case, with physical feasibility.
+            candidate_x_active = np.asarray(
+                result.x,
+                dtype=float
+            ).copy()
 
-                # Keep the active result inside the executable active bounds.
-                for i, (low, high) in enumerate(bounds):
-                    best_x_active[i] = np.clip(best_x_active[i], low, high)
+            for i, (low, high) in enumerate(bounds):
+                candidate_x_active[i] = np.clip(
+                    candidate_x_active[i],
+                    low,
+                    high
+                )
 
+            candidate_objective = self._masked_acquisition_objective(
+                candidate_x_active,
+                mask
+            )
+
+            if (
+                np.isfinite(candidate_objective)
+                and candidate_objective < best_objective
+            ):
+                best_objective = float(candidate_objective)
+                best_x_active = candidate_x_active
                 best_full_x = self._expand_masked_candidate_to_full_recipe(
                     best_x_active,
                     mask
@@ -1348,30 +1368,101 @@ class OptimizationModel():
         if best_full_x is None:
             return {
                 'mask': mask,
+                'is_selected': False,
                 'success': False,
                 'message': 'No finite optimizer result found for mask.',
                 'objective': np.inf,
+                'acquisition_mode': self.acquisition_mode,
+                'acquisition_score': None,
+                'balanced_exploration_weight': (
+                    self.balanced_exploration_weight
+                    if self.acquisition_mode == 'balanced'
+                    else None
+                ),
+                'incumbent_target_error_nm': getattr(
+                    self,
+                    'incumbent_target_error_nm',
+                    None
+                ),
                 'x_active': None,
                 'x_full': None,
+                'normalized_recipe': None,
+                'physical_concentrations': None,
                 'volume_balance': None,
-                'predicted_lambda_max': None
+                'predicted_lambda_max': None,
+                'predicted_lambda_mean_nm': None,
+                'predicted_lambda_std_nm': None,
+                'predicted_target_error_nm': None
             }
 
         volume_balance = self._get_candidate_volume_balance(best_full_x)
 
         predicted_lambda_max = None
+        predicted_lambda_std_nm = None
+        predicted_target_error_nm = None
+        acquisition_score = None
+
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(-1)
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(-1)
+        physical_values = (
+            np.asarray(best_full_x, dtype=float)
+            * (max_conc - min_conc)
+            + min_conc
+        )
+        physical_concentrations = {
+            str(reagent_name): float(physical_values[reagent_i])
+            for reagent_i, reagent_name
+            in enumerate(self.variable_reagents)
+        }
+
         if volume_balance['volume_feasible']:
-            predicted_lambda_max = self._predict_lambda_max_nm(best_full_x)
+            (
+                predicted_lambda_max,
+                predicted_lambda_std_nm
+            ) = self.predict_lambda_distribution_nm(best_full_x)
+            predicted_target_error_nm = float(
+                abs(predicted_lambda_max - float(self.target_value))
+            )
+            acquisition_score = self._calculate_acquisition_score(
+                predicted_lambda_mean_nm=predicted_lambda_max,
+                predicted_lambda_std_nm=predicted_lambda_std_nm,
+                incumbent_target_error_nm=getattr(
+                    self,
+                    'incumbent_target_error_nm',
+                    None
+                )
+            )
 
         return {
             'mask': mask,
+            'is_selected': False,
             'success': best_result_success,
             'message': best_result_message,
             'objective': best_objective,
+            'acquisition_mode': self.acquisition_mode,
+            'acquisition_score': acquisition_score,
+            'balanced_exploration_weight': (
+                self.balanced_exploration_weight
+                if self.acquisition_mode == 'balanced'
+                else None
+            ),
+            'incumbent_target_error_nm': getattr(
+                self,
+                'incumbent_target_error_nm',
+                None
+            ),
             'x_active': best_x_active,
             'x_full': best_full_x,
+            'normalized_recipe': np.asarray(
+                best_full_x,
+                dtype=float
+            ).copy(),
+            'physical_concentrations': physical_concentrations,
             'volume_balance': volume_balance,
-            'predicted_lambda_max': predicted_lambda_max
+            'predicted_lambda_max': predicted_lambda_max,
+            'predicted_lambda_mean_nm': predicted_lambda_max,
+            'predicted_lambda_std_nm': predicted_lambda_std_nm,
+            'predicted_target_error_nm': predicted_target_error_nm
         }
     
     def _optimize_acquisition_with_masks(self, n_restarts_per_mask=25):
@@ -1415,21 +1506,33 @@ class OptimizationModel():
             )
             mask_results.append(result)
 
-        finite_results = [
+        feasible_results = [
             result for result in mask_results
-            if result['x_full'] is not None and np.isfinite(result['objective'])
+            if (
+                result['x_full'] is not None
+                and np.isfinite(result['objective'])
+                and result.get('volume_balance') is not None
+                and result['volume_balance'].get(
+                    'volume_feasible',
+                    False
+                )
+            )
         ]
 
-        if not finite_results:
+        if not feasible_results:
             raise RuntimeError(
-                "Mixed mask optimization failed: no finite optimizer result "
-                "was found for any allowed reagent mask."
+                "Mixed mask optimization failed: no finite, physically "
+                "feasible optimizer result was found for any allowed reagent "
+                "mask."
             )
 
         best_result = min(
-            finite_results,
+            feasible_results,
             key=lambda result: result['objective']
         )
+
+        for result in mask_results:
+            result['is_selected'] = result is best_result
 
         if (
             best_result['volume_balance'] is None
@@ -1458,6 +1561,29 @@ class OptimizationModel():
         self.last_optimizer_objective = float(best_result['objective'])
         self.last_optimizer_predicted_lambda_max = best_result['predicted_lambda_max']
         self.last_optimizer_volume_balance = best_result['volume_balance']
+
+        for result in mask_results:
+            result_mask = result.get('mask')
+            result_mask_for_audit = (
+                result_mask.tolist()
+                if hasattr(result_mask, 'tolist')
+                else result_mask
+            )
+            result_volume_balance = result.get('volume_balance')
+            print(
+                "<<optimizer>> mask acquisition audit: "
+                f"mask={result_mask_for_audit}, "
+                f"selected={result.get('is_selected', False)}, "
+                f"mode={result.get('acquisition_mode', getattr(self, 'acquisition_mode', None))}, "
+                f"objective={result.get('objective')}, "
+                f"score={result.get('acquisition_score')}, "
+                f"predicted_mean_nm="
+                f"{result.get('predicted_lambda_mean_nm')}, "
+                f"predicted_std_nm="
+                f"{result.get('predicted_lambda_std_nm')}, "
+                f"volume_feasible="
+                f"{bool(result_volume_balance and result_volume_balance.get('volume_feasible', False))}"
+            )
 
         return best_x
 
@@ -1711,8 +1837,9 @@ class OptimizationModel():
         remaining space.
 
         A candidate is volume-feasible only if:
-            1. fixed + variable volumes do not exceed the final reaction volume
-            2. water top-off is either exactly 0 uL or at least 5 uL
+            1. each variable transfer is exactly 0 uL or at least 5 uL
+            2. fixed + variable volumes do not exceed the final reaction volume
+            3. water top-off is either exactly 0 uL or at least 5 uL
 
         This prevents the optimizer from selecting candidates that would require
         non-executable 0-5 uL water transfers or would run underfilled.
@@ -1744,6 +1871,22 @@ class OptimizationModel():
             x
         )
         variable_volume_total = float(sum(variable_transfer_volumes.values()))
+        variable_transfer_executable_by_reagent = {
+            reagent_name: bool(
+                math.isclose(
+                    transfer_volume,
+                    0.0,
+                    rel_tol=0,
+                    abs_tol=1e-9
+                )
+                or transfer_volume >= 5.0 - 1e-9
+            )
+            for reagent_name, transfer_volume
+            in variable_transfer_volumes.items()
+        }
+        variable_transfers_executable = all(
+            variable_transfer_executable_by_reagent.values()
+        )
 
         volume_before_water = fixed_volume_total + variable_volume_total
         water_volume = total_volume - volume_before_water
@@ -1765,14 +1908,26 @@ class OptimizationModel():
         )
 
         volume_feasible = (
-            volume_does_not_overflow
+            variable_transfers_executable
+            and volume_does_not_overflow
             and water_transfer_executable
         )
 
         return {
             'total_volume': total_volume,
+            'fixed_transfer_volumes': {
+                str(reagent_name): float(volume)
+                for reagent_name, volume
+                in self.fixed_reagent_volumes.items()
+            },
             'fixed_volume_total': fixed_volume_total,
             'variable_transfer_volumes': variable_transfer_volumes,
+            'variable_transfer_executable_by_reagent': (
+                variable_transfer_executable_by_reagent
+            ),
+            'variable_transfers_executable': bool(
+                variable_transfers_executable
+            ),
             'variable_volume_total': variable_volume_total,
             'volume_before_water': volume_before_water,
             'water_volume': float(water_volume),
@@ -1897,9 +2052,30 @@ class OptimizationModel():
         normalized_mean = float(normalized_mean.flatten()[0])
         normalized_std = float(normalized_std.flatten()[0])
 
-        # Numerical safety: predictive standard deviation should not be
-        # negative, but tiny negative values can appear from floating-point
-        # artifacts or model-wrapper behavior.
+        if not math.isfinite(normalized_mean):
+            raise ValueError(
+                "GP prediction returned a non-finite normalized mean: "
+                f"{normalized_mean!r}."
+            )
+
+        if not math.isfinite(normalized_std):
+            raise ValueError(
+                "GP prediction returned a non-finite normalized predictive "
+                f"standard deviation: {normalized_std!r}."
+            )
+
+        # Predictive standard deviation is mathematically nonnegative. Permit
+        # only negligible floating-point roundoff; a material negative value
+        # indicates a broken model/wrapper contract and must fail closed rather
+        # than silently turning an invalid uncertainty into zero.
+        negative_std_roundoff_tolerance = 1e-12
+        if normalized_std < -negative_std_roundoff_tolerance:
+            raise ValueError(
+                "GP prediction returned a materially negative normalized "
+                "predictive standard deviation: "
+                f"{normalized_std!r}."
+            )
+
         normalized_std = max(normalized_std, 0.0)
 
         predicted_lambda_mean_nm = normalized_mean * 600.0 + 300.0
@@ -2378,6 +2554,17 @@ class OptimizationModel():
 
         best_x = self._optimize_acquisition_with_masks()
 
+        self.last_optimizer_selected_normalized_recipe = np.array(
+            best_x,
+            dtype=float,
+            copy=True
+        )
+        self.last_optimizer_balanced_exploration_weight = (
+            getattr(self, 'balanced_exploration_weight', 1.0)
+            if self.acquisition_mode == 'balanced'
+            else None
+        )
+
         self.last_optimizer_incumbent_target_error_nm = getattr(
             self,
             'incumbent_target_error_nm',
@@ -2445,6 +2632,11 @@ class OptimizationModel():
             if self.last_optimizer_incumbent_target_error_nm is not None
             else 'not used'
         )
+        balanced_weight_for_audit = (
+            f"{self.last_optimizer_balanced_exploration_weight:.4f}"
+            if self.last_optimizer_balanced_exploration_weight is not None
+            else 'not used'
+        )
 
         print(
             "<<optimizer>> acquisition audit: "
@@ -2455,6 +2647,8 @@ class OptimizationModel():
             f"predicted_lambda_mean={predicted_lambda_max:.4f} nm, "
             f"predicted_lambda_std={predicted_lambda_std:.4f} nm, "
             f"incumbent_target_error={incumbent_for_audit}, "
+            f"balanced_exploration_weight="
+            f"{balanced_weight_for_audit}, "
             f"selected_mask={selected_mask_for_audit}"
         )
 

@@ -1,9 +1,14 @@
 import ast
+import copy
 from contextlib import redirect_stdout
 import io
+import json
 import math
 import numpy as np
+import os
+import pandas as pd
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
@@ -75,7 +80,8 @@ def _load_optimization_model_methods(
     )
 
     namespace = {
-        'math': math
+        'math': math,
+        'np': np
     }
 
     if extra_namespace is not None:
@@ -108,7 +114,7 @@ def _get_production_method_node(method_name):
     )
 
 
-def _load_auto_controller_methods(method_names):
+def _load_auto_controller_methods(method_names, extra_namespace=None):
     '''Loads pure AutoContr methods without importing hardware dependencies.'''
     tree = ast.parse(
         CONTROLLER_PATH.read_text(),
@@ -135,7 +141,17 @@ def _load_auto_controller_methods(method_names):
     module = ast.fix_missing_locations(
         ast.Module(body=[extracted_class], type_ignores=[])
     )
-    namespace = {'math': math}
+    namespace = {
+        'copy': copy,
+        'json': json,
+        'math': math,
+        'np': np,
+        'os': os,
+        'pd': pd
+    }
+
+    if extra_namespace is not None:
+        namespace.update(extra_namespace)
 
     exec(
         compile(module, str(CONTROLLER_PATH), 'exec'),
@@ -197,6 +213,17 @@ def _get_auto_controller_method_node(method_name):
         node for node in controller_class.body
         if isinstance(node, ast.FunctionDef)
         and node.name == method_name
+    )
+
+
+def _deterministic_minimize(fun, x0, bounds, method):
+    '''Small scipy-compatible minimizer stub for deterministic source tests.'''
+    x = np.asarray(x0, dtype=float)
+    return SimpleNamespace(
+        fun=float(fun(x)),
+        x=x.copy(),
+        success=True,
+        message='deterministic hardware-free minimizer'
     )
 
 
@@ -953,16 +980,13 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertLess(update_lines[0], synchronization_lines[1])
 
     def test_controller_captures_complete_selection_metadata_before_run(self):
-        run_method = _get_auto_controller_method_node('_run')
+        metadata_method = _get_auto_controller_method_node(
+            '_build_auto_optimizer_selection_metadata'
+        )
         metadata_dict = next(
             node.value
-            for node in ast.walk(run_method)
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(target, ast.Name)
-                and target.id == 'optimizer_prediction_metadata'
-                for target in node.targets
-            )
+            for node in ast.walk(metadata_method)
+            if isinstance(node, ast.Return)
             and isinstance(node.value, ast.Dict)
         )
         metadata_keys = {
@@ -979,7 +1003,17 @@ class AcquisitionRoutingTests(unittest.TestCase):
             'predicted_lambda_mean_nm',
             'predicted_lambda_std_nm',
             'incumbent_target_error_nm',
-            'selected_mask'
+            'selected_mask',
+            'balanced_exploration_weight',
+            'selected_normalized_recipe',
+            'executed_normalized_recipe',
+            'selected_physical_recipe',
+            'executed_physical_recipe',
+            'optimizer_recipe_repaired',
+            'optimizer_volume_balance',
+            'selected_controller_volume_balances',
+            'executed_controller_volume_balances',
+            'mask_results'
         }.issubset(metadata_keys))
 
     def test_performance_log_row_contains_complete_acquisition_audit(self):
@@ -1011,7 +1045,17 @@ class AcquisitionRoutingTests(unittest.TestCase):
             'predicted_lambda_mean_nm',
             'predicted_lambda_std_nm',
             'incumbent_target_error_nm',
-            'selected_mask'
+            'selected_mask',
+            'balanced_exploration_weight',
+            'selected_normalized_recipe',
+            'executed_normalized_recipe',
+            'selected_physical_recipe',
+            'executed_physical_recipe',
+            'optimizer_recipe_repaired',
+            'optimizer_volume_balance',
+            'selected_controller_volume_balance',
+            'executed_controller_volume_balance',
+            'mask_results'
         }.issubset(row_keys))
 
     def test_run_report_includes_acquisition_settings_and_audit_fields(self):
@@ -1033,6 +1077,11 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('predicted_lambda_std_nm', report_strings)
         self.assertIn('incumbent_target_error_nm', report_strings)
         self.assertIn('selected_mask', report_strings)
+        self.assertIn('### Optimizer Recipe Execution Provenance', report_strings)
+        self.assertIn('balanced_exploration_weight', report_strings)
+        self.assertIn('optimizer_recipe_repaired', report_strings)
+        self.assertIn('selected_normalized_recipe', report_strings)
+        self.assertIn('executed_controller_volume_balance', report_strings)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):
@@ -1052,28 +1101,34 @@ class TargetEiIncumbentControllerTests(unittest.TestCase):
         controller = self._build_controller([
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': 8.0,
                 # A lucky well is intentionally irrelevant to the incumbent.
                 'actual_lambda_rep_1_nm': 625.0
             },
             {
                 'use_for_model_training': False,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': 0.1
             },
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': 3.0
             },
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': None
             },
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': float('nan')
             },
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': -1.0
             }
         ])
@@ -1087,6 +1142,7 @@ class TargetEiIncumbentControllerTests(unittest.TestCase):
         controller = self._build_controller([
             {
                 'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
                 'target_error_nm': 4.5
             }
         ])
@@ -1105,10 +1161,30 @@ class TargetEiIncumbentControllerTests(unittest.TestCase):
         self.assertEqual(result, 4.5)
         self.assertEqual(stored_values, [4.5])
 
+    def test_later_trainable_but_unreliable_target_match_cannot_replace_incumbent(self):
+        controller = self._build_controller([
+            {
+                'use_for_model_training': True,
+                'eligible_for_target_incumbent': True,
+                'target_error_nm': 5.0
+            },
+            {
+                'use_for_model_training': True,
+                'eligible_for_target_incumbent': False,
+                'target_error_nm': 0.0
+            }
+        ])
+
+        self.assertEqual(
+            controller._get_best_qc_approved_target_error_nm(),
+            5.0
+        )
+
     def test_target_ei_synchronization_requires_approved_condition(self):
         controller = self._build_controller([
             {
                 'use_for_model_training': False,
+                'eligible_for_target_incumbent': False,
                 'target_error_nm': 0.5
             }
         ])
@@ -1116,7 +1192,7 @@ class TargetEiIncumbentControllerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "no QC-approved condition-level"
+            "no replicate-validated condition-level"
         ):
             controller._synchronize_target_ei_incumbent_from_performance(
                 model
@@ -1131,6 +1207,161 @@ class TargetEiIncumbentControllerTests(unittest.TestCase):
                 model
             )
         )
+
+
+class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_safe_float_or_none',
+            '_serialize_auto_audit_value',
+            '_format_mask_for_report',
+            '_get_active_variable_reagents_from_mask',
+            '_summarize_duplicate_lambda_values',
+            '_get_auto_replicate_outlier_threshold_nm',
+            '_get_auto_replicate_sd_tolerance_nm',
+            '_run_lambda_replicate_qc',
+            '_get_auto_model_training_decision_from_replicate_qc',
+            '_get_auto_target_eligibility_decision',
+            '_append_auto_model_performance_rows',
+            '_update_auto_model_performance_closest_so_far',
+            '_get_best_qc_approved_target_error_nm',
+            '_update_auto_quit_from_condition_level_performance'
+        ])
+
+    def _build_controller(self, num_duplicates):
+        controller = self.Controller()
+        controller.num_duplicates = num_duplicates
+        controller.variable_reagents = ['reagent_a']
+        controller.robo_params = {
+            'target': 625.0,
+            'target_tolerance_nm': 10.0,
+            'replicate_sd_tolerance_nm': 25.0,
+            'replicate_outlier_threshold_nm': 50.0
+        }
+        controller.rxn_sheet_name = 'hardware_free_test'
+        controller.auto_model_performance_rows = []
+        controller.auto_condition_counter = 0
+        controller.getModelInfo = lambda: controller.robo_params
+        controller._get_auto_recipe_volume_balance = lambda recipe: {
+            'total_volume': 100.0,
+            'fixed_transfer_volumes': {'fixed': 10.0},
+            'fixed_volume_total': 10.0,
+            'variable_transfer_volumes': {'reagent_a': 10.0},
+            'variable_transfer_executable_by_reagent': {
+                'reagent_a': True
+            },
+            'variable_transfers_executable': True,
+            'variable_volume_total': 10.0,
+            'volume_before_water': 20.0,
+            'water_volume': 80.0,
+            'volume_does_not_overflow': True,
+            'water_transfer_executable': True,
+            'volume_feasible': True
+        }
+        return controller
+
+    def _append_condition(self, lambda_values):
+        controller = self._build_controller(len(lambda_values))
+        controller._append_auto_model_performance_rows(
+            unique_recipes=np.array([[0.1]], dtype=float),
+            lambda_max_values=lambda_values,
+            condition_type='seed',
+            batch_number=0
+        )
+        return controller, controller.auto_model_performance_rows[0]
+
+    def test_one_favorable_replicate_can_train_but_cannot_set_target_decision(self):
+        controller, row = self._append_condition([625.0, None, None])
+
+        self.assertTrue(row['use_for_model_training'])
+        self.assertFalse(row['eligible_for_target_incumbent'])
+        self.assertFalse(row['eligible_for_target_stop'])
+        self.assertEqual(
+            row['target_eligibility_status'],
+            'ineligible_fewer_than_2_qc_replicates'
+        )
+        self.assertIsNone(
+            controller._get_best_qc_approved_target_error_nm()
+        )
+
+        model = SimpleNamespace(curr_iter=0, max_iters=4, quit=False)
+        with redirect_stdout(io.StringIO()):
+            controller._update_auto_quit_from_condition_level_performance(
+                model,
+                0
+            )
+        self.assertFalse(model.quit)
+
+    def test_noisy_target_mean_can_train_but_cannot_be_incumbent_or_stop(self):
+        controller, row = self._append_condition([600.0, 650.0])
+
+        self.assertAlmostEqual(
+            row['actual_lambda_sd_nm'],
+            35.35533905932738
+        )
+        self.assertTrue(row['use_for_model_training'])
+        self.assertFalse(row['eligible_for_target_incumbent'])
+        self.assertFalse(row['eligible_for_target_stop'])
+        self.assertIsNone(
+            controller._get_best_qc_approved_target_error_nm()
+        )
+
+        model = SimpleNamespace(curr_iter=0, max_iters=4, quit=False)
+        with redirect_stdout(io.StringIO()):
+            controller._update_auto_quit_from_condition_level_performance(
+                model,
+                0
+            )
+        self.assertFalse(model.quit)
+
+    def test_consistent_replicates_can_set_incumbent_and_stop(self):
+        controller, row = self._append_condition([624.0, 626.0])
+
+        self.assertTrue(row['eligible_for_target_incumbent'])
+        self.assertTrue(row['eligible_for_target_stop'])
+        self.assertEqual(
+            controller._get_best_qc_approved_target_error_nm(),
+            0.0
+        )
+
+        model = SimpleNamespace(curr_iter=0, max_iters=4, quit=False)
+        with redirect_stdout(io.StringIO()):
+            controller._update_auto_quit_from_condition_level_performance(
+                model,
+                0
+            )
+        self.assertTrue(model.quit)
+
+    def test_qc_excluded_outlier_leaves_tight_pair_target_eligible(self):
+        _, row = self._append_condition([624.0, 626.0, 800.0])
+
+        self.assertEqual(row['n_replicates_excluded'], 1)
+        self.assertEqual(row['actual_lambda_values_qc_nm'], [624.0, 626.0])
+        self.assertTrue(row['eligible_for_target_incumbent'])
+
+    def test_nonfinite_replicate_is_preserved_raw_but_not_treated_as_valid(self):
+        _, row = self._append_condition([625.0, float('inf')])
+
+        self.assertEqual(row['actual_lambda_values_raw_nm'][0], 625.0)
+        self.assertTrue(math.isinf(row['actual_lambda_values_raw_nm'][1]))
+        self.assertEqual(row['n_replicates_valid'], 1)
+        self.assertEqual(row['n_replicates_used'], 1)
+        self.assertFalse(row['eligible_for_target_incumbent'])
+
+    def test_invalid_replicate_sd_tolerance_fails_closed(self):
+        for invalid_tolerance in (-1.0, float('nan'), float('inf')):
+            controller = self._build_controller(2)
+            controller.robo_params['replicate_sd_tolerance_nm'] = (
+                invalid_tolerance
+            )
+
+            with self.subTest(invalid_tolerance=invalid_tolerance):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    'finite, nonnegative'
+                ):
+                    controller._get_auto_replicate_sd_tolerance_nm()
 
 
 class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
@@ -1152,7 +1383,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             ['initial_data', '2']
         ]
 
-    def _parse_header(self, acquisition_mode=None):
+    def _parse_header(self, acquisition_mode=None, num_duplicates=None):
         controller = self.Controller()
         controller.robo_params = {}
         controller.DilutionParams = lambda container, volume: (
@@ -1163,6 +1394,9 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
 
         if acquisition_mode is not None:
             header.append(['acquisition_mode', acquisition_mode])
+
+        if num_duplicates is not None:
+            header.append(['num_duplicates', str(num_duplicates)])
 
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
@@ -1199,6 +1433,21 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             "exploit, explore, balanced, or target_ei"
         ):
             self._parse_header('ordinary_ei')
+
+    def test_target_ei_requires_at_least_two_replicates(self):
+        for workbook_value in ('target_ei', 'ei'):
+            with self.subTest(workbook_value=workbook_value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "target_ei requires num_duplicates to be at least 2"
+                ):
+                    self._parse_header(
+                        workbook_value,
+                        num_duplicates=1
+                    )
+
+        parsed = self._parse_header('exploit', num_duplicates=1)
+        self.assertEqual(parsed['num_duplicates'], 1)
 
 
 class PredictiveUncertaintyUnitTests(unittest.TestCase):
@@ -1243,6 +1492,39 @@ class PredictiveUncertaintyUnitTests(unittest.TestCase):
 
         self.assertEqual(predicted_mean_nm, 600.0)
         self.assertEqual(predicted_std_nm, 12.0)
+
+    def test_tiny_negative_predictive_sd_roundoff_clamps_to_zero(self):
+        model = self.PredictionModel()
+        model._get_dimension = lambda: 1
+        model.gp_model = SimpleNamespace(
+            predict=lambda x: (
+                self.FakeArray(0.5),
+                self.FakeArray(-1e-13)
+            )
+        )
+
+        predicted_mean_nm, predicted_std_nm = (
+            model.predict_lambda_distribution_nm([0.25])
+        )
+
+        self.assertEqual(predicted_mean_nm, 600.0)
+        self.assertEqual(predicted_std_nm, 0.0)
+
+    def test_materially_negative_predictive_sd_fails_closed(self):
+        model = self.PredictionModel()
+        model._get_dimension = lambda: 1
+        model.gp_model = SimpleNamespace(
+            predict=lambda x: (
+                self.FakeArray(0.5),
+                self.FakeArray(-0.01)
+            )
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'materially negative normalized predictive standard deviation'
+        ):
+            model.predict_lambda_distribution_nm([0.25])
 
 
 class MaskComparisonTests(unittest.TestCase):
@@ -1440,6 +1722,317 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
         )
 
 
+class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_serialize_auto_audit_value',
+            'Normalize_Denormalize_Recipes',
+            '_build_auto_optimizer_selection_metadata',
+            '_prepare_auto_optimizer_recipe_for_execution',
+            '_apply_true_zero_transfer_rule_to_volume',
+            '_apply_true_zero_transfer_rule_to_recipes',
+            '_get_variable_transfer_volumes_for_recipe',
+            '_get_auto_recipe_volume_balance',
+            '_validate_auto_recipe_volume_feasibility',
+            '_export_auto_batch_recipe_design'
+        ])
+
+    def _build_controller_and_model(self):
+        controller = self.Controller()
+        controller.variable_reagents = ['reagent_a']
+        controller.min_conc = [0.0]
+        controller.max_conc = [1.0]
+        controller.template_meta = {'tot_vol': 100.0}
+        controller._get_variable_reagent_stock_conc = lambda name: 1.0
+        controller._get_fixed_reagent_volumes = lambda: {'fixed': 10.0}
+        exports = []
+        controller._export_auto_batch_recipe_design = (
+            lambda **kwargs: exports.append(kwargs)
+        )
+
+        model = SimpleNamespace(
+            acquisition_mode='exploit',
+            balanced_exploration_weight=1.0,
+            last_optimizer_acquisition_mode='exploit',
+            last_optimizer_acquisition_score=1.0,
+            last_selected_mask=np.array([1], dtype=int),
+            last_optimizer_predicted_target_error_nm=1.0,
+            last_optimizer_predicted_lambda_mean_nm=626.0,
+            last_optimizer_predicted_lambda_std_nm=2.0,
+            last_optimizer_incumbent_target_error_nm=None,
+            last_optimizer_volume_balance={
+                'volume_feasible': True,
+                'water_volume': 80.0
+            },
+            last_mask_results=[]
+        )
+        return controller, model, exports
+
+    def test_unchanged_executable_proposal_preserves_selection_provenance(self):
+        controller, model, exports = self._build_controller_and_model()
+        proposal = np.array([[0.1]], dtype=float)
+        terminal_output = io.StringIO()
+
+        with redirect_stdout(terminal_output):
+            executed, metadata = (
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model,
+                    proposal,
+                    'batch_1'
+                )
+            )
+
+        np.testing.assert_array_equal(proposal, np.array([[0.1]]))
+        np.testing.assert_allclose(executed, [[0.1]])
+        self.assertEqual(metadata['selected_normalized_recipe'], [[0.1]])
+        self.assertEqual(metadata['executed_normalized_recipe'], [[0.1]])
+        self.assertFalse(metadata['optimizer_recipe_repaired'])
+        self.assertEqual(
+            metadata['optimizer_recipe_repair_max_transfer_delta_uL'],
+            0.0
+        )
+        self.assertEqual(len(exports), 1)
+        self.assertIs(
+            exports[0]['selection_metadata'],
+            metadata
+        )
+
+        provenance_line = next(
+            line for line in terminal_output.getvalue().splitlines()
+            if line.startswith(
+                '<<controller>> optimizer selection/execution provenance: '
+            )
+        )
+        terminal_metadata = json.loads(
+            provenance_line.split(': ', 1)[1]
+        )
+        self.assertEqual(
+            terminal_metadata['selected_physical_recipe'],
+            [[0.1]]
+        )
+        self.assertEqual(
+            terminal_metadata['executed_physical_recipe'],
+            [[0.1]]
+        )
+        self.assertEqual(
+            terminal_metadata[
+                'selected_controller_volume_balances'
+            ][0]['water_volume'],
+            80.0
+        )
+        self.assertFalse(
+            terminal_metadata['optimizer_recipe_repaired']
+        )
+
+    def test_selection_metadata_is_deeply_immutable_after_capture(self):
+        controller, model, exports = self._build_controller_and_model()
+        model.last_optimizer_volume_balance['nested'] = {'value': 1}
+        model.last_mask_results = [
+            {
+                'mask': np.array([1], dtype=int),
+                'x_full': np.array([0.1], dtype=float),
+                'objective': 1.0,
+                'volume_balance': {
+                    'volume_feasible': True,
+                    'water_volume': 80.0,
+                    'nested': {'value': 1}
+                }
+            }
+        ]
+
+        with redirect_stdout(io.StringIO()):
+            _, metadata = (
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model,
+                    np.array([[0.1]], dtype=float),
+                    'immutable_batch'
+                )
+            )
+
+        model.last_optimizer_volume_balance['nested']['value'] = 99
+        model.last_mask_results[0]['mask'][0] = 0
+        model.last_mask_results[0]['volume_balance']['nested']['value'] = 99
+
+        self.assertEqual(
+            metadata['optimizer_volume_balance']['nested']['value'],
+            1
+        )
+        self.assertEqual(metadata['mask_results'][0]['mask'].tolist(), [1])
+        self.assertEqual(
+            metadata['mask_results'][0]['volume_balance']['nested']['value'],
+            1
+        )
+
+        # The model retains its own independent snapshot for post-failure
+        # inspection; callers cannot mutate it through the returned metadata.
+        metadata['selected_normalized_recipe'][0][0] = 0.9
+        self.assertEqual(
+            model.last_controller_selection_metadata[
+                'selected_normalized_recipe'
+            ],
+            [[0.1]]
+        )
+
+    def test_controller_repair_blocks_optimizer_proposal_after_audit_export(self):
+        controller, model, exports = self._build_controller_and_model()
+
+        # 0.03 concentration at 1.0 stock in a 100 uL reaction is a 3 uL
+        # transfer, which the controller rounds to 5 uL. Optimizer proposals
+        # must never rely on that repair.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            'stopped before wells or robot commands were created'
+        ):
+            with redirect_stdout(io.StringIO()):
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model,
+                    np.array([[0.03]], dtype=float),
+                    'batch_2'
+                )
+
+        self.assertEqual(len(exports), 1)
+        failure_metadata = exports[0]['selection_metadata']
+        self.assertTrue(failure_metadata['optimizer_recipe_repaired'])
+        self.assertAlmostEqual(
+            failure_metadata[
+                'optimizer_recipe_repair_max_transfer_delta_uL'
+            ],
+            2.0
+        )
+
+    def test_failed_repair_persists_exact_recipe_design_audit_values(self):
+        controller, model, _ = self._build_controller_and_model()
+
+        # Remove the instance test stub so this regression executes the exact
+        # production CSV exporter loaded from controller.py.
+        del controller.__dict__['_export_auto_batch_recipe_design']
+        controller.batch_num = 2
+
+        with TemporaryDirectory() as temp_directory:
+            controller.debug_path = temp_directory
+
+            with self.assertRaises(RuntimeError):
+                with redirect_stdout(io.StringIO()):
+                    controller._prepare_auto_optimizer_recipe_for_execution(
+                        model,
+                        np.array([[0.03]], dtype=float),
+                        'failed_batch'
+                    )
+
+            export_path = Path(temp_directory) / (
+                'auto_recipe_design/auto_recipe_design_failed_batch.csv'
+            )
+            persisted = pd.read_csv(export_path)
+
+        row = persisted.iloc[0]
+        self.assertEqual(row['acquisition_mode'], 'exploit')
+        self.assertEqual(row['acquisition_score'], 1.0)
+        self.assertEqual(json.loads(row['selected_mask']), [1])
+        self.assertTrue(bool(row['optimizer_recipe_repaired']))
+        self.assertEqual(
+            row['optimizer_recipe_repair_max_transfer_delta_uL'],
+            2.0
+        )
+        self.assertEqual(row['reagent_a_original_concentration'], 0.03)
+        self.assertEqual(row['reagent_a_repaired_concentration'], 0.05)
+        self.assertEqual(row['reagent_a_original_normalized'], 0.03)
+        self.assertEqual(row['reagent_a_repaired_normalized'], 0.05)
+        self.assertEqual(row['reagent_a_original_transfer_uL'], 3.0)
+        self.assertEqual(row['reagent_a_repaired_transfer_uL'], 5.0)
+        self.assertTrue(bool(row['reagent_a_true_zero_adjusted']))
+        self.assertTrue(bool(row['reagent_a_true_zero_valid']))
+        self.assertEqual(row['water_volume_uL'], 85.0)
+        self.assertTrue(bool(row['variable_transfers_executable']))
+        self.assertTrue(bool(row['volume_feasible']))
+        self.assertEqual(
+            json.loads(row['optimizer_volume_balance'])['water_volume'],
+            80.0
+        )
+        self.assertEqual(
+            json.loads(
+                row['selected_controller_volume_balances']
+            )[0]['water_volume'],
+            87.0
+        )
+        self.assertEqual(
+            json.loads(
+                row['executed_controller_volume_balances']
+            )[0]['water_volume'],
+            85.0
+        )
+        self.assertEqual(json.loads(row['mask_results']), [])
+
+    def test_invalid_optimizer_proposal_shape_and_bounds_fail_before_export(self):
+        invalid_proposals = (
+            np.empty((0, 1), dtype=float),
+            np.array([[0.1], [0.2]], dtype=float),
+            np.array([[1.1]], dtype=float),
+            np.array([[float('nan')]], dtype=float)
+        )
+
+        for proposal in invalid_proposals:
+            controller, model, exports = self._build_controller_and_model()
+
+            with self.subTest(proposal=proposal.tolist()):
+                with self.assertRaises(ValueError):
+                    controller._prepare_auto_optimizer_recipe_for_execution(
+                        model,
+                        proposal,
+                        'invalid_batch'
+                    )
+
+                self.assertEqual(exports, [])
+
+    def test_run_prepares_and_validates_proposal_before_any_robot_sample_work(self):
+        run_method = _get_auto_controller_method_node('_run')
+        call_lines = {}
+
+        for node in ast.walk(run_method):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {
+                    '_prepare_auto_optimizer_recipe_for_execution',
+                    'duplicate_list_elements',
+                    '_generate_wellname',
+                    '_create_samples'
+                }
+            ):
+                call_lines.setdefault(node.func.attr, []).append(node.lineno)
+
+        iterative_prepare_line = call_lines[
+            '_prepare_auto_optimizer_recipe_for_execution'
+        ][0]
+        iterative_duplicate_line = call_lines['duplicate_list_elements'][1]
+        iterative_well_line = call_lines['_generate_wellname'][1]
+        iterative_create_line = call_lines['_create_samples'][1]
+
+        self.assertLess(iterative_prepare_line, iterative_duplicate_line)
+        self.assertLess(iterative_prepare_line, iterative_well_line)
+        self.assertLess(iterative_prepare_line, iterative_create_line)
+
+        helper_method = _get_auto_controller_method_node(
+            '_prepare_auto_optimizer_recipe_for_execution'
+        )
+        export_line = next(
+            node.lineno
+            for node in ast.walk(helper_method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == '_export_auto_batch_recipe_design'
+        )
+        raise_line = next(
+            node.lineno
+            for node in ast.walk(helper_method)
+            if isinstance(node, ast.Raise)
+            and isinstance(node.exc, ast.Call)
+            and isinstance(node.exc.func, ast.Name)
+            and node.exc.func.id == 'RuntimeError'
+        )
+        self.assertLess(export_line, raise_line)
+
+
 class CombinedAcquisitionWorkflowTests(unittest.TestCase):
     '''Exercises every mode through feasibility, selection, and audit output.'''
 
@@ -1598,6 +2191,641 @@ class CombinedAcquisitionWorkflowTests(unittest.TestCase):
                     )
 
 
+class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
+    '''Runs current optimizer and controller source together without hardware.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Model = _load_optimization_model_methods(
+            [
+                '_validate_predictive_standard_deviation_nm',
+                '_standard_normal_pdf',
+                '_standard_normal_cdf',
+                '_calculate_target_error_expected_improvement_nm',
+                '_calculate_acquisition_score',
+                '_masked_acquisition_objective',
+                '_optimize_single_mask',
+                '_optimize_acquisition_with_masks',
+                'getNextReaction'
+            ],
+            extra_namespace={'minimize': _deterministic_minimize}
+        )
+        cls.Controller = _load_auto_controller_methods([
+            '_safe_float_or_none',
+            '_serialize_auto_audit_value',
+            '_format_mask_for_report',
+            '_get_active_variable_reagents_from_mask',
+            '_summarize_duplicate_lambda_values',
+            '_get_auto_replicate_outlier_threshold_nm',
+            '_get_auto_replicate_sd_tolerance_nm',
+            '_run_lambda_replicate_qc',
+            '_get_auto_model_training_decision_from_replicate_qc',
+            '_get_auto_target_eligibility_decision',
+            '_append_auto_model_performance_rows',
+            '_update_auto_model_performance_closest_so_far',
+            '_export_auto_model_performance_log',
+            'Normalize_Denormalize_Recipes',
+            '_build_auto_optimizer_selection_metadata',
+            '_prepare_auto_optimizer_recipe_for_execution',
+            '_apply_true_zero_transfer_rule_to_volume',
+            '_apply_true_zero_transfer_rule_to_recipes',
+            '_get_variable_transfer_volumes_for_recipe',
+            '_get_auto_recipe_volume_balance',
+            '_validate_auto_recipe_volume_feasibility',
+            '_export_auto_batch_recipe_design',
+            '_safe_auto_report_get',
+            '_safe_auto_report_numeric',
+            '_format_auto_report_value',
+            '_count_auto_report_status',
+            '_auto_report_file_line',
+            '_summarize_auto_run_status_for_report',
+            '_build_auto_run_status_report_lines',
+            '_escape_auto_report_markdown_table_value',
+            '_format_auto_report_table_value',
+            '_format_auto_report_replicate_list_value',
+            '_build_padded_auto_report_markdown_table',
+            '_auto_report_plot_markdown_if_exists',
+            '_write_auto_run_report'
+        ])
+
+    def _build_exact_model(self):
+        model = self.Model()
+        model.acquisition_mode = 'exploit'
+        model.target_value = 625.0
+        model.balanced_exploration_weight = 1.0
+        model.incumbent_target_error_nm = None
+        model.min_conc = [0.0, 0.0]
+        model.max_conc = [1.0, 1.0]
+        model.variable_reagents = ['reagent_a', 'reagent_b']
+        model._get_dimension = lambda: 2
+
+        masks = [
+            np.array([1, 0], dtype=int),
+            np.array([0, 1], dtype=int),
+            np.array([1, 1], dtype=int)
+        ]
+        model._get_reagent_masks_for_current_settings = lambda: masks
+        model._get_active_mask_indices = lambda mask: np.where(mask == 1)[0]
+        model._get_masked_bounds = lambda mask: [
+            (0.0, 1.0)
+            for _ in np.where(mask == 1)[0]
+        ]
+
+        starting_points = {
+            (1, 0): [np.array([0.1])],
+            (0, 1): [np.array([0.2])],
+            (1, 1): [np.array([0.3, 0.4])]
+        }
+        model._generate_feasible_masked_starting_points = (
+            lambda mask, n_restarts: starting_points[tuple(mask.tolist())]
+        )
+
+        def expand_candidate(x_active, mask):
+            full = np.zeros(2, dtype=float)
+            full[np.where(mask == 1)[0]] = np.asarray(
+                x_active,
+                dtype=float
+            )
+            return full
+
+        model._expand_masked_candidate_to_full_recipe = expand_candidate
+
+        def volume_balance(candidate):
+            candidate = np.asarray(candidate, dtype=float).reshape(2)
+            variable_transfers = {
+                'reagent_a': float(candidate[0] * 100.0),
+                'reagent_b': float(candidate[1] * 100.0)
+            }
+            variable_total = float(sum(variable_transfers.values()))
+            water_volume = 100.0 - 10.0 - variable_total
+            return {
+                'total_volume': 100.0,
+                'fixed_transfer_volumes': {'fixed': 10.0},
+                'fixed_volume_total': 10.0,
+                'variable_transfer_volumes': variable_transfers,
+                'variable_transfer_executable_by_reagent': {
+                    name: (volume == 0.0 or volume >= 5.0)
+                    for name, volume in variable_transfers.items()
+                },
+                'variable_transfers_executable': True,
+                'variable_volume_total': variable_total,
+                'volume_before_water': 10.0 + variable_total,
+                'water_volume': water_volume,
+                'volume_does_not_overflow': water_volume >= 0.0,
+                'water_transfer_executable': (
+                    water_volume == 0.0 or water_volume >= 5.0
+                ),
+                'volume_feasible': (
+                    water_volume == 0.0 or water_volume >= 5.0
+                )
+            }
+
+        distributions = {
+            (0.1, 0.0): (630.0, 3.0),
+            (0.0, 0.2): (626.0, 2.0),
+            (0.3, 0.4): (640.0, 10.0)
+        }
+        model._get_candidate_volume_balance = volume_balance
+        model.predict_lambda_distribution_nm = lambda candidate: (
+            distributions[
+                tuple(
+                    np.round(
+                        np.asarray(candidate, dtype=float).reshape(2),
+                        12
+                    ).tolist()
+                )
+            ]
+        )
+        model._predict_lambda_max_nm = lambda candidate: (
+            model.predict_lambda_distribution_nm(candidate)[0]
+        )
+        return model
+
+    def _build_exact_controller(self):
+        controller = self.Controller()
+        controller.variable_reagents = ['reagent_a', 'reagent_b']
+        controller.min_conc = [0.0, 0.0]
+        controller.max_conc = [1.0, 1.0]
+        controller.template_meta = {'tot_vol': 100.0}
+        controller._get_variable_reagent_stock_conc = lambda name: 1.0
+        controller._get_fixed_reagent_volumes = lambda: {'fixed': 10.0}
+        controller._export_auto_batch_recipe_design = lambda **kwargs: None
+        controller.num_duplicates = 2
+        controller.robo_params = {
+            'target': 625.0,
+            'replicate_outlier_threshold_nm': 50.0,
+            'replicate_sd_tolerance_nm': 25.0,
+            'initial_data': 2,
+            'max_iterations': 4,
+            'num_duplicates': 2,
+            'allow_true_zero': True,
+            'acquisition_mode': 'exploit',
+            'balanced_exploration_weight': 1.0
+        }
+        controller.getModelInfo = lambda: controller.robo_params
+        controller.rxn_sheet_name = 'combined_hardware_free_test'
+        controller.auto_model_performance_rows = []
+        controller.auto_condition_counter = 0
+        return controller
+
+    def test_exploit_matches_frozen_stable_oracle_across_complete_masks(self):
+        model = self._build_exact_model()
+
+        with redirect_stdout(io.StringIO()):
+            selected = model.getNextReaction()
+
+        # Frozen independent oracle from the pre-acquisition exploit behavior:
+        # every feasible candidate minimizes (predicted_mean_nm - target_nm)^2.
+        expected_scores = {
+            (1, 0): (630.0 - 625.0) ** 2,
+            (0, 1): (626.0 - 625.0) ** 2,
+            (1, 1): (640.0 - 625.0) ** 2
+        }
+
+        self.assertEqual(len(model.last_mask_results), 3)
+        for result in model.last_mask_results:
+            mask_key = tuple(result['mask'].tolist())
+            self.assertEqual(result['objective'], expected_scores[mask_key])
+            self.assertEqual(
+                result['acquisition_score'],
+                expected_scores[mask_key]
+            )
+            self.assertTrue({
+                'acquisition_mode',
+                'balanced_exploration_weight',
+                'incumbent_target_error_nm',
+                'normalized_recipe',
+                'physical_concentrations',
+                'predicted_lambda_mean_nm',
+                'predicted_lambda_std_nm',
+                'predicted_target_error_nm',
+                'volume_balance',
+                'is_selected'
+            }.issubset(result))
+            self.assertIn(
+                'fixed_transfer_volumes',
+                result['volume_balance']
+            )
+
+        self.assertEqual(selected[0].tolist(), [0.0, 0.2])
+        self.assertEqual(model.last_selected_mask.tolist(), [0, 1])
+        self.assertEqual(
+            [result['is_selected'] for result in model.last_mask_results],
+            [False, True, False]
+        )
+
+    def test_every_mode_uses_exact_single_mask_and_cross_mask_audit_path(self):
+        expected_recipes = {
+            'exploit': [0.0, 0.2],
+            'explore': [0.3, 0.4],
+            'balanced': [0.0, 0.2],
+            'target_ei': [0.0, 0.2]
+        }
+
+        for acquisition_mode, expected_recipe in expected_recipes.items():
+            with self.subTest(acquisition_mode=acquisition_mode):
+                model = self._build_exact_model()
+                model.acquisition_mode = acquisition_mode
+
+                if acquisition_mode == 'target_ei':
+                    model.incumbent_target_error_nm = 10.0
+
+                with redirect_stdout(io.StringIO()):
+                    selected = model.getNextReaction()
+
+                self.assertEqual(selected[0].tolist(), expected_recipe)
+                selected_results = [
+                    result
+                    for result in model.last_mask_results
+                    if result['is_selected']
+                ]
+                self.assertEqual(len(selected_results), 1)
+                self.assertEqual(
+                    selected_results[0]['objective'],
+                    min(
+                        result['objective']
+                        for result in model.last_mask_results
+                    )
+                )
+
+                for result in model.last_mask_results:
+                    self.assertEqual(
+                        result['acquisition_mode'],
+                        acquisition_mode
+                    )
+                    self.assertEqual(
+                        result['objective'],
+                        result['acquisition_score']
+                    )
+                    self.assertEqual(
+                        result['balanced_exploration_weight'],
+                        1.0 if acquisition_mode == 'balanced' else None
+                    )
+                    self.assertEqual(
+                        result['incumbent_target_error_nm'],
+                        10.0 if acquisition_mode == 'target_ei' else None
+                    )
+                    self.assertTrue(
+                        result['volume_balance']['volume_feasible']
+                    )
+
+    def test_infeasible_high_uncertainty_mask_is_not_scored_or_selected(self):
+        model = self._build_exact_model()
+        model.acquisition_mode = 'explore'
+        starting_points = {
+            (1, 0): [np.array([0.1])],
+            (0, 1): [np.array([0.2])],
+            # This candidate overflows by 90 uL. If GP-scored, its synthetic
+            # SD would dominate explore mode; feasibility must stop that call.
+            (1, 1): [np.array([0.9, 0.9])]
+        }
+        model._generate_feasible_masked_starting_points = (
+            lambda mask, n_restarts: starting_points[tuple(mask.tolist())]
+        )
+
+        prediction_calls = []
+        distributions = {
+            (0.1, 0.0): (630.0, 3.0),
+            (0.0, 0.2): (626.0, 2.0),
+            (0.9, 0.9): (625.0, 1000.0)
+        }
+
+        def predict(candidate):
+            candidate_key = tuple(
+                np.round(
+                    np.asarray(candidate, dtype=float).reshape(2),
+                    12
+                ).tolist()
+            )
+            prediction_calls.append(candidate_key)
+            return distributions[candidate_key]
+
+        model.predict_lambda_distribution_nm = predict
+        model._predict_lambda_max_nm = lambda candidate: predict(candidate)[0]
+
+        with redirect_stdout(io.StringIO()):
+            selected = model.getNextReaction()
+
+        self.assertEqual(selected[0].tolist(), [0.1, 0.0])
+        self.assertNotIn((0.9, 0.9), prediction_calls)
+
+        infeasible_result = next(
+            result for result in model.last_mask_results
+            if result['mask'].tolist() == [1, 1]
+        )
+        self.assertFalse(infeasible_result['is_selected'])
+        self.assertFalse(
+            infeasible_result['volume_balance']['volume_feasible']
+        )
+        self.assertGreater(infeasible_result['objective'], 1e12)
+        self.assertIsNone(infeasible_result['acquisition_score'])
+        self.assertIsNone(infeasible_result['predicted_lambda_mean_nm'])
+        self.assertEqual(
+            infeasible_result['physical_concentrations'],
+            {'reagent_a': 0.9, 'reagent_b': 0.9}
+        )
+
+    def test_single_mask_ranks_the_exact_candidate_after_bound_clipping(self):
+        model = self._build_exact_model()
+        model._get_masked_bounds = lambda mask: [(0.0, 0.8)]
+        model._generate_feasible_masked_starting_points = (
+            lambda mask, n_restarts: [np.array([0.1])]
+        )
+        model.predict_lambda_distribution_nm = lambda candidate: (
+            625.0
+            + 10.0
+            * float(np.asarray(candidate, dtype=float).reshape(2)[0]),
+            1.0
+        )
+        model._predict_lambda_max_nm = lambda candidate: (
+            model.predict_lambda_distribution_nm(candidate)[0]
+        )
+
+        def out_of_bounds_minimize(fun, x0, bounds, method):
+            return SimpleNamespace(
+                # This stale value belongs to x0 and must not control ranking.
+                fun=float(fun(np.asarray(x0, dtype=float))),
+                x=np.array([0.9], dtype=float),
+                success=True,
+                message='synthetic slightly out-of-bounds result'
+            )
+
+        method_globals = self.Model._optimize_single_mask.__globals__
+        original_minimize = method_globals['minimize']
+        method_globals['minimize'] = out_of_bounds_minimize
+
+        try:
+            result = model._optimize_single_mask(
+                np.array([1, 0], dtype=int),
+                n_restarts=1
+            )
+        finally:
+            method_globals['minimize'] = original_minimize
+
+        self.assertEqual(result['normalized_recipe'].tolist(), [0.8, 0.0])
+        self.assertEqual(result['predicted_lambda_mean_nm'], 633.0)
+        self.assertEqual(result['acquisition_score'], 64.0)
+        self.assertEqual(result['objective'], 64.0)
+        self.assertTrue(result['volume_balance']['volume_feasible'])
+
+    def test_optimizer_selection_survives_controller_handoff_and_csv_export(self):
+        model = self._build_exact_model()
+        controller = self._build_exact_controller()
+
+        with redirect_stdout(io.StringIO()):
+            selected = model.getNextReaction()
+            executed, metadata = (
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model=model,
+                    normalized_recipes=selected,
+                    batch_label='batch_1'
+                )
+            )
+            controller._append_auto_model_performance_rows(
+                unique_recipes=executed,
+                lambda_max_values=[624.0, 626.0],
+                condition_type='optimizer_selected',
+                batch_number=1,
+                prediction_metadata=metadata
+            )
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertEqual(row['acquisition_mode'], 'exploit')
+        self.assertEqual(row['acquisition_score'], 1.0)
+        self.assertEqual(
+            json.loads(row['selected_normalized_recipe']),
+            [[0.0, 0.2]]
+        )
+        self.assertEqual(
+            json.loads(row['executed_normalized_recipe']),
+            [[0.0, 0.2]]
+        )
+        self.assertFalse(row['optimizer_recipe_repaired'])
+        self.assertEqual(row['mask_result_count'], 3)
+        persisted_mask_results = json.loads(row['mask_results'])
+        self.assertEqual(len(persisted_mask_results), 3)
+        expected_mask_audit = {
+            (1, 0): {
+                'score': 25.0,
+                'mean': 630.0,
+                'std': 3.0,
+                'target_error': 5.0,
+                'selected': False
+            },
+            (0, 1): {
+                'score': 1.0,
+                'mean': 626.0,
+                'std': 2.0,
+                'target_error': 1.0,
+                'selected': True
+            },
+            (1, 1): {
+                'score': 225.0,
+                'mean': 640.0,
+                'std': 10.0,
+                'target_error': 15.0,
+                'selected': False
+            }
+        }
+        for mask_result in persisted_mask_results:
+            expected = expected_mask_audit[tuple(mask_result['mask'])]
+            self.assertEqual(mask_result['acquisition_score'], expected['score'])
+            self.assertEqual(
+                mask_result['predicted_lambda_mean_nm'],
+                expected['mean']
+            )
+            self.assertEqual(
+                mask_result['predicted_lambda_std_nm'],
+                expected['std']
+            )
+            self.assertEqual(
+                mask_result['predicted_target_error_nm'],
+                expected['target_error']
+            )
+            self.assertEqual(mask_result['is_selected'], expected['selected'])
+            self.assertIsNone(
+                mask_result['balanced_exploration_weight']
+            )
+        self.assertTrue(row['eligible_for_target_incumbent'])
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            os.makedirs(os.path.join(temp_directory, 'pr_data'))
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            os.makedirs(controller.plot_path)
+
+            with redirect_stdout(io.StringIO()):
+                csv_path = controller._export_auto_model_performance_log()
+                report_path = controller._write_auto_run_report()
+
+            persisted = pd.read_csv(csv_path)
+            report_text = Path(report_path).read_text()
+
+        self.assertEqual(persisted.loc[0, 'acquisition_mode'], 'exploit')
+        self.assertEqual(persisted.loc[0, 'acquisition_score'], 1.0)
+        self.assertEqual(
+            json.loads(persisted.loc[0, 'selected_normalized_recipe']),
+            [[0.0, 0.2]]
+        )
+        self.assertEqual(
+            json.loads(
+                persisted.loc[0, 'executed_controller_volume_balance']
+            )['water_volume'],
+            70.0
+        )
+        self.assertIn('## Acquisition Audit Trail', report_text)
+        self.assertIn(
+            '### Optimizer Recipe Execution Provenance',
+            report_text
+        )
+        self.assertIn('[[0.0,0.2]]', report_text)
+        self.assertIn('"water_volume":70.0', report_text)
+        self.assertIn('False', report_text)
+        self.assertIn(
+            'validated target hit for incumbent and stopping decisions',
+            report_text
+        )
+
+    def test_success_recipe_design_csv_persists_exact_selection_provenance(self):
+        model = self._build_exact_model()
+        controller = self._build_exact_controller()
+        del controller.__dict__['_export_auto_batch_recipe_design']
+        controller.batch_num = 1
+
+        with TemporaryDirectory() as temp_directory:
+            controller.debug_path = temp_directory
+
+            with redirect_stdout(io.StringIO()):
+                selected = model.getNextReaction()
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model=model,
+                    normalized_recipes=selected,
+                    batch_label='batch_1'
+                )
+
+            export_path = Path(temp_directory) / (
+                'auto_recipe_design/auto_recipe_design_batch_1.csv'
+            )
+            persisted = pd.read_csv(export_path)
+
+        row = persisted.iloc[0]
+        self.assertEqual(row['acquisition_mode'], 'exploit')
+        self.assertEqual(row['acquisition_score'], 1.0)
+        self.assertEqual(row['predicted_lambda_mean_nm'], 626.0)
+        self.assertEqual(row['predicted_lambda_std_nm'], 2.0)
+        self.assertEqual(row['predicted_target_error_nm'], 1.0)
+        self.assertEqual(json.loads(row['selected_mask']), [0, 1])
+        self.assertFalse(bool(row['optimizer_recipe_repaired']))
+        self.assertEqual(row['mask_result_count'], 3)
+        self.assertEqual(row['feasible_mask_result_count'], 3)
+        self.assertEqual(row['reagent_a_original_concentration'], 0.0)
+        self.assertEqual(row['reagent_a_repaired_concentration'], 0.0)
+        self.assertEqual(row['reagent_b_original_concentration'], 0.2)
+        self.assertEqual(row['reagent_b_repaired_concentration'], 0.2)
+        self.assertEqual(row['reagent_a_repaired_transfer_uL'], 0.0)
+        self.assertEqual(row['reagent_b_repaired_transfer_uL'], 20.0)
+        self.assertEqual(row['water_volume_uL'], 70.0)
+        self.assertTrue(bool(row['variable_transfers_executable']))
+        self.assertTrue(bool(row['volume_feasible']))
+        self.assertEqual(
+            json.loads(row['optimizer_volume_balance'])['water_volume'],
+            70.0
+        )
+        self.assertEqual(
+            json.loads(
+                row['selected_controller_volume_balances']
+            )[0]['water_volume'],
+            70.0
+        )
+        self.assertEqual(
+            json.loads(
+                row['executed_controller_volume_balances']
+            )[0]['water_volume'],
+            70.0
+        )
+
+        mask_results = json.loads(row['mask_results'])
+        self.assertEqual(
+            [result['mask'] for result in mask_results],
+            [[1, 0], [0, 1], [1, 1]]
+        )
+        self.assertEqual(
+            [result['is_selected'] for result in mask_results],
+            [False, True, False]
+        )
+        self.assertEqual(
+            [result['predicted_lambda_mean_nm'] for result in mask_results],
+            [630.0, 626.0, 640.0]
+        )
+        self.assertEqual(
+            [result['predicted_lambda_std_nm'] for result in mask_results],
+            [3.0, 2.0, 10.0]
+        )
+
+    def test_balanced_mode_weight_and_score_survive_controller_persistence(self):
+        model = self._build_exact_model()
+        model.acquisition_mode = 'balanced'
+        controller = self._build_exact_controller()
+        controller.robo_params['acquisition_mode'] = 'balanced'
+
+        with redirect_stdout(io.StringIO()):
+            selected = model.getNextReaction()
+            executed, metadata = (
+                controller._prepare_auto_optimizer_recipe_for_execution(
+                    model=model,
+                    normalized_recipes=selected,
+                    batch_label='balanced_batch'
+                )
+            )
+            controller._append_auto_model_performance_rows(
+                unique_recipes=executed,
+                lambda_max_values=[624.0, 626.0],
+                condition_type='optimizer_selected',
+                batch_number=1,
+                prediction_metadata=metadata
+            )
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertEqual(row['acquisition_mode'], 'balanced')
+        self.assertEqual(row['acquisition_score'], -1.0)
+        self.assertEqual(row['balanced_exploration_weight'], 1.0)
+        self.assertEqual(row['predicted_lambda_mean_nm'], 626.0)
+        self.assertEqual(row['predicted_lambda_std_nm'], 2.0)
+        self.assertEqual(row['predicted_target_error_nm'], 1.0)
+        self.assertEqual(row['selected_mask'], '[0, 1]')
+
+    def test_report_does_not_call_single_replicate_target_match_validated(self):
+        controller = self._build_exact_controller()
+        controller.num_duplicates = 1
+        controller.robo_params['num_duplicates'] = 1
+
+        controller._append_auto_model_performance_rows(
+            unique_recipes=np.array([[0.1, 0.1]], dtype=float),
+            lambda_max_values=[625.0],
+            condition_type='seed',
+            batch_number=0
+        )
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            os.makedirs(controller.plot_path)
+
+            with redirect_stdout(io.StringIO()):
+                report_path = controller._write_auto_run_report()
+
+            report_text = Path(report_path).read_text()
+
+        self.assertIn(
+            'did not pass replicate validation and therefore cannot establish',
+            report_text
+        )
+        self.assertNotIn(
+            'validated target hit for incumbent and stopping decisions',
+            report_text
+        )
+
+
 class CumulativeGpHistoryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1665,6 +2893,47 @@ class CumulativeGpHistoryTests(unittest.TestCase):
             gp_update_calls[1]['X_all'][2].tolist(),
             [0.3]
         )
+
+    def test_failed_gp_update_leaves_optimizer_history_and_iteration_atomic(self):
+        model = self.HistoryModel()
+        original_X = np.array([[0.1], [0.2]], dtype=float)
+        original_Y = np.array([[0.4], [0.5]], dtype=float)
+        update_quit_calls = []
+
+        def fail_update(**kwargs):
+            raise RuntimeError('synthetic GP refit failure')
+
+        model.gp_model = SimpleNamespace(updateModel=fail_update)
+        model.optimizer = SimpleNamespace(
+            X=original_X.copy(),
+            Y=original_Y.copy()
+        )
+        model.curr_iter = 3
+        model.quit = True
+        model._get_dimension = lambda: 1
+        model.update_quit = lambda X_new, Y_new: update_quit_calls.append(
+            (X_new, Y_new)
+        )
+
+        X_all = np.array([[0.1], [0.2], [0.3]], dtype=float)
+        Y_all = np.array([[0.4], [0.5], [0.6]], dtype=float)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            'synthetic GP refit failure'
+        ):
+            model.update_experiment_data(
+                X_all,
+                Y_all,
+                X_all[-1:],
+                Y_all[-1:]
+            )
+
+        np.testing.assert_array_equal(model.optimizer.X, original_X)
+        np.testing.assert_array_equal(model.optimizer.Y, original_Y)
+        self.assertEqual(model.curr_iter, 3)
+        self.assertTrue(model.quit)
+        self.assertEqual(update_quit_calls, [])
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):

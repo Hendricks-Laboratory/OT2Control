@@ -20,6 +20,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 from collections import namedtuple
+import copy
 import socket
 import json
 import dill
@@ -1010,6 +1011,29 @@ class Controller(ABC):
                 acquisition_mode_value
             ]
         )
+
+        # Target-aware expected improvement needs a statistically defensible
+        # condition-level incumbent. A single well can train the GP, but it
+        # cannot establish replicate agreement or a replicate standard
+        # deviation. Reject this configuration while parsing the Header so the
+        # protocol cannot reach simulation or robot execution with an
+        # ill-defined target-EI incumbent policy.
+        if (
+            self.robo_params['acquisition_mode'] == 'target_ei'
+            and self.robo_params['num_duplicates'] < 2
+        ):
+            raise ValueError(
+                "Header acquisition_mode target_ei requires "
+                "num_duplicates to be at least 2 so its incumbent is based "
+                "on a replicate-validated condition."
+            )
+        elif self.robo_params['num_duplicates'] < 2:
+            print(
+                "<<controller warning>> num_duplicates is 1: valid single "
+                "measurements may train the GP, but no condition can qualify "
+                "for replicate-validated target stopping. Auto will continue "
+                "until max_iterations unless stopped manually."
+            )
 
         print(
             "<<controller>> Auto acquisition mode: "
@@ -3438,6 +3462,45 @@ class AutoContr(Controller):
             pass
 
         return float(value)
+
+    def _serialize_auto_audit_value(self, value):
+        '''Serializes nested Auto audit metadata as deterministic JSON.'''
+        def make_json_safe(item):
+            if isinstance(item, np.ndarray):
+                return make_json_safe(item.tolist())
+
+            if isinstance(item, np.generic):
+                return make_json_safe(item.item())
+
+            if isinstance(item, dict):
+                return {
+                    str(key): make_json_safe(nested_value)
+                    for key, nested_value in item.items()
+                }
+
+            if isinstance(item, (list, tuple)):
+                return [make_json_safe(nested_value) for nested_value in item]
+
+            if isinstance(item, float) and not math.isfinite(item):
+                return None
+
+            if item is None or isinstance(
+                item,
+                (bool, int, float, str)
+            ):
+                return item
+
+            # Scipy result messages and other diagnostic-only scalar objects
+            # are represented textually instead of making audit export fail.
+            return str(item)
+
+        return json.dumps(
+            make_json_safe(value),
+            sort_keys=True,
+            separators=(',', ':'),
+            ensure_ascii=False,
+            allow_nan=False
+        )
     
     def _format_mask_for_report(self, mask):
         '''
@@ -3520,11 +3583,21 @@ class AutoContr(Controller):
                 of the mean. Returns (None, None, None) if no valid lambda max
                 values are present.
         '''
-        lambda_values = [
-            float(value)
-            for value in lambda_values
-            if value is not None and not pd.isna(value)
-        ]
+        finite_lambda_values = []
+
+        for value in lambda_values:
+            if value is None or pd.isna(value):
+                continue
+
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+
+            if math.isfinite(value):
+                finite_lambda_values.append(value)
+
+        lambda_values = finite_lambda_values
 
         if len(lambda_values) == 0:
             return None, None, None
@@ -3554,6 +3627,117 @@ class AutoContr(Controller):
                 50.0
             )
         )
+
+    def _get_auto_replicate_sd_tolerance_nm(self):
+        '''
+        Returns the maximum replicate SD allowed for target decisions.
+
+        GP model-training eligibility is intentionally broader than target
+        incumbent and stopping eligibility. Ambiguous or single-replicate
+        observations may still be scientifically useful model data, while a
+        target decision must demonstrate agreement between at least two
+        QC-included finite replicates.
+        '''
+        tolerance_nm = float(
+            self.robo_params.get(
+                'replicate_sd_tolerance_nm',
+                25.0
+            )
+        )
+
+        if not math.isfinite(tolerance_nm) or tolerance_nm < 0.0:
+            raise ValueError(
+                "replicate_sd_tolerance_nm must be a finite, nonnegative "
+                f"number. Received: {tolerance_nm!r}."
+            )
+
+        return tolerance_nm
+
+    def _get_auto_target_eligibility_decision(
+        self,
+        replicate_qc,
+        model_training_decision,
+        qc_replicate_sd_nm
+    ):
+        '''
+        Decides whether a condition may set an incumbent or stop Auto.
+
+        This policy is deliberately separate from GP model-training
+        eligibility. The GP may retain a valid single observation or a noisy
+        condition as information, but target EI and controller stopping need a
+        condition-level result supported by replicate agreement.
+
+        A condition is eligible for either target decision only when:
+            1. the condition is accepted for GP model training;
+            2. at least two finite, QC-included replicates remain; and
+            3. their sample SD is finite and no greater than the configured
+               replicate_sd_tolerance_nm (25 nm by default).
+
+        returns:
+            dict:
+                Explicit incumbent/stopping eligibility, status, reason, and
+                the SD tolerance used for the decision.
+        '''
+        tolerance_nm = self._get_auto_replicate_sd_tolerance_nm()
+        n_replicates_used = int(
+            replicate_qc.get('n_replicates_used', 0)
+        )
+
+        if not model_training_decision.get('use_for_model_training', False):
+            status = 'ineligible_not_model_approved'
+            reason = (
+                'Condition was not approved for GP model training.'
+            )
+            eligible = False
+        elif n_replicates_used < 2:
+            status = 'ineligible_fewer_than_2_qc_replicates'
+            reason = (
+                'At least two finite QC-included replicates are required for '
+                'a target incumbent or validated stop.'
+            )
+            eligible = False
+        else:
+            try:
+                replicate_sd_nm = float(qc_replicate_sd_nm)
+            except (TypeError, ValueError):
+                replicate_sd_nm = None
+
+            if (
+                replicate_sd_nm is None
+                or not math.isfinite(replicate_sd_nm)
+            ):
+                status = 'ineligible_nonfinite_replicate_sd'
+                reason = (
+                    'Replicate SD must be finite for a target incumbent or '
+                    'validated stop.'
+                )
+                eligible = False
+            elif replicate_sd_nm > tolerance_nm:
+                status = 'ineligible_replicate_sd_above_tolerance'
+                reason = (
+                    f'Replicate SD {replicate_sd_nm:.4f} nm exceeds the '
+                    f'{tolerance_nm:.4f} nm target-decision tolerance.'
+                )
+                eligible = False
+            else:
+                status = 'eligible_replicate_validated_condition'
+                reason = (
+                    f'{n_replicates_used} finite QC-included replicates have '
+                    f'SD {replicate_sd_nm:.4f} nm, within the '
+                    f'{tolerance_nm:.4f} nm target-decision tolerance.'
+                )
+                eligible = True
+
+        return {
+            'eligible_for_target_incumbent': bool(eligible),
+            'eligible_for_target_stop': bool(eligible),
+            'target_eligibility_status': status,
+            'target_eligibility_reason': reason,
+            'n_finite_qc_replicates_for_target_validation': (
+                n_replicates_used
+            ),
+            'replicate_sd_tolerance_nm': tolerance_nm
+        }
 
     def _run_lambda_replicate_qc(self, lambda_values):
         '''
@@ -3605,7 +3789,7 @@ class AutoContr(Controller):
         valid_pairs = [
             (index, value)
             for index, value in enumerate(raw_values)
-            if value is not None
+            if value is not None and math.isfinite(value)
         ]
 
         included_indices = [index for index, value in valid_pairs]
@@ -4049,6 +4233,39 @@ class AutoContr(Controller):
         if prediction_metadata is None:
             prediction_metadata = {}
 
+        def get_recipe_component(recipe_values, reagent_index):
+            if recipe_values is None:
+                return None
+
+            try:
+                recipe_array = np.asarray(recipe_values, dtype=float)
+
+                if recipe_array.ndim == 1:
+                    recipe_array = recipe_array.reshape(1, -1)
+
+                if (
+                    recipe_array.ndim != 2
+                    or recipe_array.shape[0] == 0
+                    or reagent_index >= recipe_array.shape[1]
+                ):
+                    return None
+
+                value = float(recipe_array[0, reagent_index])
+            except (TypeError, ValueError):
+                return None
+
+            return value if math.isfinite(value) else None
+
+        def get_first_volume_balance(metadata_key):
+            balances = prediction_metadata.get(metadata_key)
+
+            if not balances or not isinstance(balances, (list, tuple)):
+                return None
+
+            first_balance = balances[0]
+
+            return first_balance if isinstance(first_balance, dict) else None
+
         target_lambda = self.getModelInfo()["target"]
 
         for recipe_i, recipe in enumerate(unique_recipes):
@@ -4078,6 +4295,14 @@ class AutoContr(Controller):
                 )
             )
 
+            target_eligibility_decision = (
+                self._get_auto_target_eligibility_decision(
+                    replicate_qc=replicate_qc,
+                    model_training_decision=model_training_decision,
+                    qc_replicate_sd_nm=qc_sd
+                )
+            )
+
             if replicate_qc['n_replicates_excluded'] > 0:
                 print(
                     "<<controller>> Auto replicate QC excluded "
@@ -4103,6 +4328,27 @@ class AutoContr(Controller):
                 prediction_metadata.get('incumbent_target_error_nm')
             )
             acquisition_mode = prediction_metadata.get('acquisition_mode')
+            balanced_exploration_weight = self._safe_float_or_none(
+                prediction_metadata.get('balanced_exploration_weight')
+            )
+            selected_normalized_recipe = prediction_metadata.get(
+                'selected_normalized_recipe'
+            )
+            executed_normalized_recipe = prediction_metadata.get(
+                'executed_normalized_recipe'
+            )
+            selected_physical_recipe = prediction_metadata.get(
+                'selected_physical_recipe'
+            )
+            executed_physical_recipe = prediction_metadata.get(
+                'executed_physical_recipe'
+            )
+            selected_controller_volume_balance = get_first_volume_balance(
+                'selected_controller_volume_balances'
+            )
+            executed_controller_volume_balance = get_first_volume_balance(
+                'executed_controller_volume_balances'
+            )
 
             if acquisition_mode is not None:
                 acquisition_mode = str(acquisition_mode)
@@ -4138,6 +4384,9 @@ class AutoContr(Controller):
                 'condition_type': condition_type,
                 'acquisition_mode': acquisition_mode,
                 'acquisition_score': acquisition_score,
+                'balanced_exploration_weight': (
+                    balanced_exploration_weight
+                ),
                 'selected_mask': self._format_mask_for_report(selected_mask),
                 'active_variable_reagents': (
                     self._get_active_variable_reagents_from_mask(
@@ -4149,6 +4398,82 @@ class AutoContr(Controller):
                 'predicted_lambda_mean_nm': predicted_mean,
                 'predicted_lambda_std_nm': predicted_std,
                 'incumbent_target_error_nm': incumbent_target_error,
+                'selected_normalized_recipe': (
+                    None
+                    if selected_normalized_recipe is None
+                    else self._serialize_auto_audit_value(
+                        selected_normalized_recipe
+                    )
+                ),
+                'executed_normalized_recipe': (
+                    None
+                    if executed_normalized_recipe is None
+                    else self._serialize_auto_audit_value(
+                        executed_normalized_recipe
+                    )
+                ),
+                'selected_physical_recipe': (
+                    None
+                    if selected_physical_recipe is None
+                    else self._serialize_auto_audit_value(
+                        selected_physical_recipe
+                    )
+                ),
+                'executed_physical_recipe': (
+                    None
+                    if executed_physical_recipe is None
+                    else self._serialize_auto_audit_value(
+                        executed_physical_recipe
+                    )
+                ),
+                'optimizer_recipe_repaired': prediction_metadata.get(
+                    'optimizer_recipe_repaired'
+                ),
+                'optimizer_recipe_repair_max_transfer_delta_uL': (
+                    self._safe_float_or_none(
+                        prediction_metadata.get(
+                            'optimizer_recipe_repair_max_transfer_delta_uL'
+                        )
+                    )
+                ),
+                'optimizer_volume_balance': (
+                    self._serialize_auto_audit_value(
+                        prediction_metadata.get('optimizer_volume_balance')
+                    )
+                    if prediction_metadata.get('optimizer_volume_balance')
+                    is not None
+                    else None
+                ),
+                'selected_controller_volume_balance': (
+                    self._serialize_auto_audit_value(
+                        selected_controller_volume_balance
+                    )
+                    if selected_controller_volume_balance is not None
+                    else None
+                ),
+                'executed_controller_volume_balance': (
+                    self._serialize_auto_audit_value(
+                        executed_controller_volume_balance
+                    )
+                    if executed_controller_volume_balance is not None
+                    else None
+                ),
+                'mask_results': (
+                    self._serialize_auto_audit_value(
+                        prediction_metadata.get('mask_results')
+                    )
+                    if prediction_metadata.get('mask_results') is not None
+                    else None
+                ),
+                'mask_result_count': int(
+                    prediction_metadata.get('mask_result_count', 0)
+                ),
+                'feasible_mask_result_count': int(
+                    prediction_metadata.get(
+                        'feasible_mask_result_count',
+                        0
+                    )
+                ),
 
                 # Backward-compatible actual_lambda_* columns now represent
                 # the QC-cleaned condition-level values used by Auto summaries.
@@ -4204,6 +4529,40 @@ class AutoContr(Controller):
                     model_training_decision['model_training_reason']
                 ),
 
+                # Target decisions are stricter than GP training. These fields
+                # make it explicit whether this aggregate may become the
+                # target-EI incumbent or authorize a target-based stop.
+                'eligible_for_target_incumbent': (
+                    target_eligibility_decision[
+                        'eligible_for_target_incumbent'
+                    ]
+                ),
+                'eligible_for_target_stop': (
+                    target_eligibility_decision[
+                        'eligible_for_target_stop'
+                    ]
+                ),
+                'target_eligibility_status': (
+                    target_eligibility_decision[
+                        'target_eligibility_status'
+                    ]
+                ),
+                'target_eligibility_reason': (
+                    target_eligibility_decision[
+                        'target_eligibility_reason'
+                    ]
+                ),
+                'replicate_sd_tolerance_nm': (
+                    target_eligibility_decision[
+                        'replicate_sd_tolerance_nm'
+                    ]
+                ),
+                'n_finite_qc_replicates_for_target_validation': (
+                    target_eligibility_decision[
+                        'n_finite_qc_replicates_for_target_validation'
+                    ]
+                ),
+
                 'target_error_nm': target_error,
                 'prediction_error_nm': prediction_error,
                 'fixed_volume_total_uL': volume_balance['fixed_volume_total'],
@@ -4216,6 +4575,61 @@ class AutoContr(Controller):
                 'water_transfer_executable': (
                     volume_balance['water_transfer_executable']
                 ),
+                'variable_transfers_executable': (
+                    volume_balance['variable_transfers_executable']
+                ),
+                'selected_fixed_volume_total_uL': (
+                    None
+                    if selected_controller_volume_balance is None
+                    else selected_controller_volume_balance.get(
+                        'fixed_volume_total'
+                    )
+                ),
+                'selected_variable_volume_total_uL': (
+                    None
+                    if selected_controller_volume_balance is None
+                    else selected_controller_volume_balance.get(
+                        'variable_volume_total'
+                    )
+                ),
+                'selected_water_volume_uL': (
+                    None
+                    if selected_controller_volume_balance is None
+                    else selected_controller_volume_balance.get('water_volume')
+                ),
+                'selected_volume_feasible': (
+                    None
+                    if selected_controller_volume_balance is None
+                    else selected_controller_volume_balance.get(
+                        'volume_feasible'
+                    )
+                ),
+                'executed_fixed_volume_total_uL': (
+                    None
+                    if executed_controller_volume_balance is None
+                    else executed_controller_volume_balance.get(
+                        'fixed_volume_total'
+                    )
+                ),
+                'executed_variable_volume_total_uL': (
+                    None
+                    if executed_controller_volume_balance is None
+                    else executed_controller_volume_balance.get(
+                        'variable_volume_total'
+                    )
+                ),
+                'executed_water_volume_uL': (
+                    None
+                    if executed_controller_volume_balance is None
+                    else executed_controller_volume_balance.get('water_volume')
+                ),
+                'executed_volume_feasible': (
+                    None
+                    if executed_controller_volume_balance is None
+                    else executed_controller_volume_balance.get(
+                        'volume_feasible'
+                    )
+                ),
                 'notes': prediction_metadata.get('notes', ''),
                 'warnings': prediction_metadata.get('warnings', '')
             }
@@ -4224,9 +4638,62 @@ class AutoContr(Controller):
                 reagent_name = str(reagent_name)
                 row[f'{reagent_name}_concentration'] = float(recipe[reagent_i])
 
+                row[f'{reagent_name}_selected_normalized'] = (
+                    get_recipe_component(
+                        selected_normalized_recipe,
+                        reagent_i
+                    )
+                )
+                row[f'{reagent_name}_executed_normalized'] = (
+                    get_recipe_component(
+                        executed_normalized_recipe,
+                        reagent_i
+                    )
+                )
+                row[f'{reagent_name}_selected_concentration'] = (
+                    get_recipe_component(
+                        selected_physical_recipe,
+                        reagent_i
+                    )
+                )
+                row[f'{reagent_name}_executed_concentration'] = (
+                    get_recipe_component(
+                        executed_physical_recipe,
+                        reagent_i
+                    )
+                )
+
                 variable_volumes = volume_balance['variable_transfer_volumes']
                 row[f'{reagent_name}_transfer_uL'] = float(
                     variable_volumes[reagent_name]
+                )
+
+                selected_variable_volumes = (
+                    selected_controller_volume_balance.get(
+                        'variable_transfer_volumes',
+                        {}
+                    )
+                    if selected_controller_volume_balance is not None
+                    else {}
+                )
+                executed_variable_volumes = (
+                    executed_controller_volume_balance.get(
+                        'variable_transfer_volumes',
+                        {}
+                    )
+                    if executed_controller_volume_balance is not None
+                    else {}
+                )
+
+                row[f'{reagent_name}_selected_transfer_uL'] = (
+                    self._safe_float_or_none(
+                        selected_variable_volumes.get(reagent_name)
+                    )
+                )
+                row[f'{reagent_name}_executed_transfer_uL'] = (
+                    self._safe_float_or_none(
+                        executed_variable_volumes.get(reagent_name)
+                    )
                 )
 
             for rep_i in range(self.num_duplicates):
@@ -4279,14 +4746,15 @@ class AutoContr(Controller):
 
     def _get_best_qc_approved_target_error_nm(self):
         '''
-        Returns the best condition-level target error eligible for GP training.
+        Returns the best replicate-validated condition-level target error.
 
         Target expected improvement needs an incumbent representing the best
         scientifically trusted result achieved so far. The Auto performance
         log contains one row per unique reaction condition and calculates
-        target_error_nm from the QC-cleaned replicate aggregate. Filtering on
-        use_for_model_training therefore keeps the incumbent aligned with the
-        same QC decision that governs the GP training data.
+        target_error_nm from the QC-cleaned replicate aggregate. Incumbent
+        eligibility is deliberately stricter than GP model-training
+        eligibility: at least two QC-included finite replicates must agree
+        within the configured replicate-SD tolerance.
 
         Individual replicate values are deliberately not inspected here. This
         prevents one unusually favorable well from setting an unrealistically
@@ -4304,7 +4772,10 @@ class AutoContr(Controller):
         eligible_target_errors_nm = []
 
         for row in self.auto_model_performance_rows:
-            if not row.get('use_for_model_training', False):
+            if (
+                not row.get('use_for_model_training', False)
+                or not row.get('eligible_for_target_incumbent', False)
+            ):
                 continue
 
             target_error_nm = row.get('target_error_nm')
@@ -4355,9 +4826,10 @@ class AutoContr(Controller):
 
         if incumbent_target_error_nm is None:
             raise ValueError(
-                "Target-EI cannot select a recipe because no QC-approved "
-                "condition-level target error is available after the GP "
-                "model update."
+                "Target-EI cannot select a recipe because no replicate-"
+                "validated condition-level target error is available after "
+                "the GP model update. At least two finite QC-included "
+                "replicates must agree within replicate_sd_tolerance_nm."
             )
 
         model.set_incumbent_target_error_nm(
@@ -8551,6 +9023,10 @@ class AutoContr(Controller):
             'replicate_outlier_threshold_nm',
             50.0
         )
+        replicate_sd_tolerance_nm = robo_params.get(
+            'replicate_sd_tolerance_nm',
+            25.0
+        )
 
         acquisition_objective_descriptions = {
             'exploit': (
@@ -8567,7 +9043,8 @@ class AutoContr(Controller):
             ),
             'target_ei': (
                 'Maximize the expected reduction in the best QC-approved '
-                'condition-level absolute target error achieved so far.'
+                'and replicate-validated condition-level absolute target error '
+                'achieved so far.'
             )
         }
         acquisition_objective_description = (
@@ -8802,6 +9279,8 @@ class AutoContr(Controller):
         best_lambda_mean = None
         best_target_error = None
         best_qc_status = 'not recorded'
+        best_target_eligible = False
+        best_target_eligibility_status = 'not recorded'
 
         if best_condition_row is not None:
             best_reaction_number = self._safe_auto_report_get(
@@ -8830,6 +9309,17 @@ class AutoContr(Controller):
                 best_condition_row,
                 'replicate_qc_status'
             )
+            best_target_eligible = (
+                self._safe_auto_report_get(
+                    best_condition_row,
+                    'eligible_for_target_incumbent',
+                    False
+                ) == True
+            )
+            best_target_eligibility_status = self._safe_auto_report_get(
+                best_condition_row,
+                'target_eligibility_status'
+            )
 
         if best_condition_row is None:
             executive_summary = (
@@ -8849,6 +9339,7 @@ class AutoContr(Controller):
                 f'{self._format_auto_report_value(best_lambda_mean, "nm")} '
                 f'and target error '
                 f'{self._format_auto_report_value(best_target_error, "nm")}. '
+                f'Target-decision eligible: {best_target_eligible}. '
                 f'Replicate QC excluded clear outlier replicate(s) in '
                 f'{qc_excluded} condition(s) and flagged {qc_flagged} '
                 f'ambiguous condition(s) without automatic exclusion. '
@@ -8885,10 +9376,21 @@ class AutoContr(Controller):
         if best_target_error is not None:
             try:
                 if float(best_target_error) <= 10.0:
-                    best_interpretation += (
-                        ' The best condition was within 10 nm of the target, '
-                        'which is a strong target hit for this reporting layer.'
-                    )
+                    if best_target_eligible:
+                        best_interpretation += (
+                            ' The best condition was within 10 nm of the target '
+                            'and passed replicate validation, so it is a '
+                            'validated target hit for incumbent and stopping '
+                            'decisions.'
+                        )
+                    else:
+                        best_interpretation += (
+                            ' The best condition was numerically within 10 nm '
+                            'of the target, but it did not pass replicate '
+                            'validation and therefore cannot establish a '
+                            'target-EI incumbent or authorize a target-based '
+                            'stop.'
+                        )
                 elif float(best_target_error) <= 25.0:
                     best_interpretation += (
                         ' The best condition was within 25 nm of the target, '
@@ -8954,12 +9456,15 @@ class AutoContr(Controller):
                 'Condition',
                 'Batch',
                 'Mode',
+                'Balanced weight',
                 'Score',
                 'Predicted target error',
                 'Predicted λmax',
                 'GP SD',
                 'Incumbent target error',
-                'Selected mask'
+                'Selected mask',
+                'Recipe repaired',
+                'Masks evaluated'
             ]
             acquisition_audit_alignments = [
                 'right',
@@ -8970,7 +9475,10 @@ class AutoContr(Controller):
                 'right',
                 'right',
                 'right',
-                'left'
+                'right',
+                'left',
+                'left',
+                'right'
             ]
             acquisition_audit_rows = []
 
@@ -8997,6 +9505,13 @@ class AutoContr(Controller):
                             self._safe_auto_report_get(
                                 row,
                                 'acquisition_mode',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'balanced_exploration_weight',
                                 None
                             )
                         ),
@@ -9045,6 +9560,20 @@ class AutoContr(Controller):
                                 'selected_mask',
                                 None
                             )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'optimizer_recipe_repaired',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'mask_result_count',
+                                None
+                            )
                         )
                     ]
                 )
@@ -9054,6 +9583,96 @@ class AutoContr(Controller):
                     headers=acquisition_audit_headers,
                     rows=acquisition_audit_rows,
                     alignments=acquisition_audit_alignments
+                )
+            )
+
+        acquisition_provenance_table_lines = []
+
+        if acquisition_audit_df.empty:
+            acquisition_provenance_table_lines.append(
+                'No optimizer-selected recipe provenance was available.'
+            )
+        else:
+            provenance_headers = [
+                'Condition',
+                'Selected normalized recipe',
+                'Executed normalized recipe',
+                'Selected physical recipe',
+                'Executed physical recipe',
+                'Selected volume balance',
+                'Executed volume balance'
+            ]
+            provenance_alignments = [
+                'right',
+                'left',
+                'left',
+                'left',
+                'left',
+                'left',
+                'left'
+            ]
+            provenance_rows = []
+
+            for _, row in acquisition_audit_df.sort_values(
+                'reaction_number'
+            ).iterrows():
+                provenance_rows.append([
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'reaction_number',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_normalized_recipe',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_normalized_recipe',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_physical_recipe',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_physical_recipe',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_controller_volume_balance',
+                            None
+                        )
+                    ),
+                    self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_controller_volume_balance',
+                            None
+                        )
+                    )
+                ])
+
+            acquisition_provenance_table_lines.extend(
+                self._build_padded_auto_report_markdown_table(
+                    headers=provenance_headers,
+                    rows=provenance_rows,
+                    alignments=provenance_alignments
                 )
             )
 
@@ -9074,7 +9693,9 @@ class AutoContr(Controller):
                 'QC-used λmax values',
                 'Mean λmax',
                 'Target error',
-                'QC status'
+                'QC status',
+                'Target eligible',
+                'Target eligibility status'
             ]
 
             condition_table_alignments = [
@@ -9087,6 +9708,8 @@ class AutoContr(Controller):
                 'left',
                 'right',
                 'right',
+                'left',
+                'left',
                 'left'
             ]
 
@@ -9170,6 +9793,20 @@ class AutoContr(Controller):
                                 'replicate_qc_status',
                                 None
                             )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'eligible_for_target_incumbent',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_table_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'target_eligibility_status',
+                                None
+                            )
                         )
                     ]
                 )
@@ -9242,6 +9879,10 @@ class AutoContr(Controller):
             f'- Replicate outlier threshold: '
             f'{self._format_auto_report_value(replicate_outlier_threshold_nm, "nm")}'
         )
+        lines.append(
+            f'- Replicate SD tolerance for incumbents/stopping: '
+            f'{self._format_auto_report_value(replicate_sd_tolerance_nm, "nm")}'
+        )
         lines.append('')
         lines.append('## Optimization Objective')
         lines.append('')
@@ -9264,10 +9905,22 @@ class AutoContr(Controller):
             'Each optimizer-selected row records the acquisition decision '
             'before the experiment ran: canonical mode, minimized score, '
             'predicted target error, GP mean and standard deviation, target-EI '
-            'incumbent when applicable, and selected reagent mask.'
+            'incumbent when applicable, balanced weight when used, selected '
+            'reagent mask, mask count, and repair status.'
         )
         lines.append('')
         lines.extend(acquisition_audit_table_lines)
+        lines.append('')
+        lines.append('### Optimizer Recipe Execution Provenance')
+        lines.append('')
+        lines.append(
+            'The selected and executed representations below are captured '
+            'before measurement. A controlled run may proceed only when the '
+            'controller reports `optimizer_recipe_repaired = False`; otherwise '
+            'the batch stops before robot commands are created.'
+        )
+        lines.append('')
+        lines.extend(acquisition_provenance_table_lines)
         lines.append('')
         lines.append('## Best Condition Found')
         lines.append('')
@@ -9304,6 +9957,14 @@ class AutoContr(Controller):
                 f'{self._format_auto_report_value(best_target_error, "nm")}'
             )
             lines.append(f'- Replicate QC status: {best_qc_status}')
+            lines.append(
+                f'- Eligible for target incumbent/stopping: '
+                f'{best_target_eligible}'
+            )
+            lines.append(
+                f'- Target eligibility status: '
+                f'{best_target_eligibility_status}'
+            )
             lines.append('')
 
         lines.append('### Best Condition Interpretation')
@@ -9978,8 +10639,8 @@ class AutoContr(Controller):
         target_tolerance_nm = float(
             self.robo_params.get('target_tolerance_nm', 10.0)
         )
-        replicate_sd_tolerance_nm = float(
-            self.robo_params.get('replicate_sd_tolerance_nm', 25.0)
+        replicate_sd_tolerance_nm = (
+            self._get_auto_replicate_sd_tolerance_nm()
         )
 
         target_error_values = pd.to_numeric(
@@ -9994,12 +10655,51 @@ class AutoContr(Controller):
 
         target_hit = target_error_values <= target_tolerance_nm
 
+        # A target hit must be explicitly authorized by the same
+        # replicate-validation policy used for target-EI incumbents. Missing
+        # eligibility fields fail closed. The additional count/SD checks make
+        # the stop rule robust when reading partially populated or externally
+        # edited performance rows.
+        if 'eligible_for_target_stop' in batch_df.columns:
+            target_stop_eligible = (
+                batch_df['eligible_for_target_stop'] == True
+            )
+        else:
+            target_stop_eligible = pd.Series(
+                False,
+                index=batch_df.index,
+                dtype=bool
+            )
+
+        if (
+            'n_finite_qc_replicates_for_target_validation'
+            in batch_df.columns
+        ):
+            finite_replicate_counts = pd.to_numeric(
+                batch_df[
+                    'n_finite_qc_replicates_for_target_validation'
+                ],
+                errors='coerce'
+            )
+        else:
+            finite_replicate_counts = pd.Series(
+                float('nan'),
+                index=batch_df.index,
+                dtype=float
+            )
+
         replicate_consistent = (
-            replicate_sd_values.isna()
-            | (replicate_sd_values <= replicate_sd_tolerance_nm)
+            replicate_sd_values.notna()
+            & np.isfinite(replicate_sd_values)
+            & (replicate_sd_values <= replicate_sd_tolerance_nm)
+            & (finite_replicate_counts >= 2)
         )
 
-        validated_hit = target_hit & replicate_consistent
+        validated_hit = (
+            target_hit
+            & target_stop_eligible
+            & replicate_consistent
+        )
 
         if validated_hit.any():
             best_hit_row = batch_df.loc[
@@ -10030,13 +10730,26 @@ class AutoContr(Controller):
 
         model.quit = False
 
-        best_row_index = target_error_values.idxmin()
-        best_row = batch_df.loc[best_row_index]
-
         print(
             "<<controller>> continuing Auto: no validated condition-level "
             "target hit"
         )
+
+        finite_target_errors = target_error_values[
+            target_error_values.notna()
+            & np.isfinite(target_error_values)
+        ]
+
+        if finite_target_errors.empty:
+            print(
+                "<<controller warning>> latest batch has no finite "
+                "condition-level target error to summarize"
+            )
+            return
+
+        best_row_index = finite_target_errors.idxmin()
+        best_row = batch_df.loc[best_row_index]
+
         print(
             "<<controller>> best condition in latest batch: "
             f"mean lambda max = {best_row['actual_lambda_mean_nm']:.4f} nm, "
@@ -11524,6 +12237,381 @@ class AutoContr(Controller):
         
         return X
 
+    def _build_auto_optimizer_selection_metadata(
+        self,
+        model,
+        selected_normalized_recipes,
+        selected_physical_recipes,
+        executed_normalized_recipes,
+        executed_physical_recipes,
+        optimizer_recipe_repaired,
+        repair_max_transfer_delta_uL,
+        selected_volume_balances,
+        executed_volume_balances
+    ):
+        '''
+        Builds immutable selection/execution provenance for one Auto batch.
+
+        The GP prediction and acquisition values are captured on the optimizer
+        before any experiment is run. Recipe arrays and volume balances are
+        copied into plain Python structures so later model updates or in-place
+        normalization cannot alter the selection-time record.
+        '''
+        acquisition_mode = getattr(
+            model,
+            'last_optimizer_acquisition_mode',
+            model.acquisition_mode
+        )
+
+        balanced_exploration_weight = None
+        if acquisition_mode == 'balanced':
+            balanced_exploration_weight = getattr(
+                model,
+                'last_optimizer_balanced_exploration_weight',
+                getattr(model, 'balanced_exploration_weight', None)
+            )
+
+        mask_results = getattr(model, 'last_mask_results', None)
+
+        if mask_results is None:
+            mask_result_count = 0
+            feasible_mask_result_count = 0
+        else:
+            mask_result_count = len(mask_results)
+            feasible_mask_result_count = sum(
+                1
+                for result in mask_results
+                if (
+                    result.get('x_full') is not None
+                    and result.get('volume_balance') is not None
+                    and result['volume_balance'].get(
+                        'volume_feasible',
+                        False
+                    )
+                )
+            )
+
+        selected_mask = getattr(model, 'last_selected_mask', None)
+        selected_mask_for_audit = (
+            None
+            if selected_mask is None
+            else np.asarray(
+                selected_mask
+            ).astype(int).reshape(-1).tolist()
+        )
+
+        return {
+            'acquisition_mode': acquisition_mode,
+            'acquisition_score': getattr(
+                model,
+                'last_optimizer_acquisition_score',
+                None
+            ),
+            'balanced_exploration_weight': (
+                balanced_exploration_weight
+            ),
+            'selected_mask': selected_mask_for_audit,
+            'predicted_target_error_nm': getattr(
+                model,
+                'last_optimizer_predicted_target_error_nm',
+                None
+            ),
+            'predicted_lambda_mean_nm': getattr(
+                model,
+                'last_optimizer_predicted_lambda_mean_nm',
+                getattr(model, 'last_optimizer_predicted_lambda_max', None)
+            ),
+            'predicted_lambda_std_nm': getattr(
+                model,
+                'last_optimizer_predicted_lambda_std_nm',
+                None
+            ),
+            'incumbent_target_error_nm': getattr(
+                model,
+                'last_optimizer_incumbent_target_error_nm',
+                None
+            ),
+            'selected_normalized_recipe': np.asarray(
+                selected_normalized_recipes,
+                dtype=float
+            ).tolist(),
+            'executed_normalized_recipe': np.asarray(
+                executed_normalized_recipes,
+                dtype=float
+            ).tolist(),
+            'selected_physical_recipe': np.asarray(
+                selected_physical_recipes,
+                dtype=float
+            ).tolist(),
+            'executed_physical_recipe': np.asarray(
+                executed_physical_recipes,
+                dtype=float
+            ).tolist(),
+            'optimizer_recipe_repaired': bool(
+                optimizer_recipe_repaired
+            ),
+            'optimizer_recipe_repair_max_transfer_delta_uL': float(
+                repair_max_transfer_delta_uL
+            ),
+            'optimizer_volume_balance': dict(
+                copy.deepcopy(
+                    getattr(
+                        model,
+                        'last_optimizer_volume_balance',
+                        {}
+                    ) or {}
+                )
+            ),
+            'selected_controller_volume_balances': [
+                copy.deepcopy(volume_balance)
+                for volume_balance in selected_volume_balances
+            ],
+            'executed_controller_volume_balances': [
+                copy.deepcopy(volume_balance)
+                for volume_balance in executed_volume_balances
+            ],
+            'mask_results': copy.deepcopy(list(mask_results or [])),
+            'mask_result_count': int(mask_result_count),
+            'feasible_mask_result_count': int(
+                feasible_mask_result_count
+            ),
+            'notes': (
+                'Optimizer-selected recipe; acquisition prediction and '
+                'recipe provenance captured before experiment execution.'
+            )
+        }
+
+    def _prepare_auto_optimizer_recipe_for_execution(
+        self,
+        model,
+        normalized_recipes,
+        batch_label
+    ):
+        '''
+        Converts and validates an optimizer proposal before robot preparation.
+
+        Optimizer-selected recipes must already satisfy every executable
+        transfer invariant enforced by the controller. The controller still
+        applies its true-zero rule as an independent verification, but any
+        resulting transfer change is treated as an optimizer/controller
+        contract violation and stops the run before wells or robot commands are
+        created. Initial maximin seed repair remains intentionally unchanged.
+
+        A recipe-design CSV is exported before a repair mismatch raises so the
+        failed proposal and controller-prepared counterpart remain available
+        for diagnosis.
+
+        returns:
+            tuple(np.ndarray, dict):
+                Executable physical-space recipes and immutable selection
+                metadata when the optimizer proposal passes unchanged.
+        '''
+        selected_normalized_recipes = np.array(
+            normalized_recipes,
+            dtype=float,
+            copy=True
+        )
+
+        if selected_normalized_recipes.ndim == 1:
+            selected_normalized_recipes = (
+                selected_normalized_recipes.reshape(1, -1)
+            )
+
+        if (
+            selected_normalized_recipes.ndim != 2
+            or selected_normalized_recipes.shape[1]
+            != len(self.variable_reagents)
+        ):
+            raise ValueError(
+                "Optimizer-selected normalized recipes must be a "
+                "two-dimensional array with one column per variable reagent. "
+                f"Received shape {selected_normalized_recipes.shape}."
+            )
+
+        if selected_normalized_recipes.shape[0] != 1:
+            raise ValueError(
+                "Auto optimizer selection must contain exactly one recipe per "
+                "iteration because the active OptimizationModel/controller "
+                "contract uses batch_size=1. Received "
+                f"{selected_normalized_recipes.shape[0]} recipes."
+            )
+
+        if not np.all(np.isfinite(selected_normalized_recipes)):
+            raise ValueError(
+                "Optimizer-selected normalized recipes contain non-finite "
+                "values and will not be executed."
+            )
+
+        normalized_bound_tolerance = 1e-9
+        if (
+            np.any(
+                selected_normalized_recipes
+                < -normalized_bound_tolerance
+            )
+            or np.any(
+                selected_normalized_recipes
+                > 1.0 + normalized_bound_tolerance
+            )
+        ):
+            raise ValueError(
+                "Optimizer-selected normalized recipes contain values outside "
+                "the allowed [0, 1] model space and will not be executed. "
+                f"Received: {selected_normalized_recipes}."
+            )
+
+        # Normalize_Denormalize_Recipes mutates its argument. Always pass a
+        # copy so the selection-time normalized proposal remains immutable.
+        selected_physical_recipes = self.Normalize_Denormalize_Recipes(
+            selected_normalized_recipes.copy(),
+            normalize_flag=False
+        )
+
+        executed_physical_recipes = (
+            self._apply_true_zero_transfer_rule_to_recipes(
+                selected_physical_recipes.copy()
+            )
+        )
+
+        executed_normalized_recipes = self.Normalize_Denormalize_Recipes(
+            executed_physical_recipes.copy(),
+            normalize_flag=True
+        )
+
+        selected_volume_balances = [
+            self._get_auto_recipe_volume_balance(recipe)
+            for recipe in selected_physical_recipes
+        ]
+        executed_volume_balances = [
+            self._get_auto_recipe_volume_balance(recipe)
+            for recipe in executed_physical_recipes
+        ]
+
+        transfer_deltas_uL = []
+
+        for selected_balance, executed_balance in zip(
+            selected_volume_balances,
+            executed_volume_balances
+        ):
+            for reagent_name in self.variable_reagents:
+                transfer_deltas_uL.append(
+                    abs(
+                        float(
+                            selected_balance['variable_transfer_volumes'][
+                                reagent_name
+                            ]
+                        )
+                        - float(
+                            executed_balance['variable_transfer_volumes'][
+                                reagent_name
+                            ]
+                        )
+                    )
+                )
+
+        repair_max_transfer_delta_uL = max(
+            transfer_deltas_uL,
+            default=0.0
+        )
+        optimizer_recipe_repaired = (
+            repair_max_transfer_delta_uL > 1e-9
+        )
+
+        metadata = self._build_auto_optimizer_selection_metadata(
+            model=model,
+            selected_normalized_recipes=selected_normalized_recipes,
+            selected_physical_recipes=selected_physical_recipes,
+            executed_normalized_recipes=executed_normalized_recipes,
+            executed_physical_recipes=executed_physical_recipes,
+            optimizer_recipe_repaired=optimizer_recipe_repaired,
+            repair_max_transfer_delta_uL=(
+                repair_max_transfer_delta_uL
+            ),
+            selected_volume_balances=selected_volume_balances,
+            executed_volume_balances=executed_volume_balances
+        )
+
+        # Retain the controller-side audit on the model even when execution is
+        # blocked, which makes the failure inspectable in terminal/debug tests.
+        model.last_controller_selection_metadata = copy.deepcopy(metadata)
+
+        # terminal_output.txt is the first artifact reviewed during a
+        # human-supervised dry debug. Emit the complete selected-versus-
+        # prepared recipe and controller volume balances here, before either
+        # export or a fail-closed repair error. The full per-mask search audit
+        # remains in mask_results and the CSV/report artifacts so this line
+        # stays concise enough for live inspection.
+        terminal_provenance = {
+            'acquisition_mode': metadata['acquisition_mode'],
+            'selected_mask': metadata['selected_mask'],
+            'selected_normalized_recipe': (
+                metadata['selected_normalized_recipe']
+            ),
+            'executed_normalized_recipe': (
+                metadata['executed_normalized_recipe']
+            ),
+            'selected_physical_recipe': (
+                metadata['selected_physical_recipe']
+            ),
+            'executed_physical_recipe': (
+                metadata['executed_physical_recipe']
+            ),
+            'optimizer_recipe_repaired': (
+                metadata['optimizer_recipe_repaired']
+            ),
+            'optimizer_recipe_repair_max_transfer_delta_uL': (
+                metadata[
+                    'optimizer_recipe_repair_max_transfer_delta_uL'
+                ]
+            ),
+            'selected_controller_volume_balances': (
+                metadata['selected_controller_volume_balances']
+            ),
+            'executed_controller_volume_balances': (
+                metadata['executed_controller_volume_balances']
+            )
+        }
+        print(
+            "<<controller>> optimizer selection/execution provenance: "
+            + self._serialize_auto_audit_value(terminal_provenance)
+        )
+
+        self._export_auto_batch_recipe_design(
+            repaired_recipes=executed_physical_recipes,
+            original_recipes=selected_physical_recipes,
+            batch_label=batch_label,
+            selection_metadata=metadata
+        )
+
+        if optimizer_recipe_repaired:
+            print(
+                "<<controller error>> optimizer-selected physical recipe: "
+                f"{selected_physical_recipes}"
+            )
+            print(
+                "<<controller error>> controller-prepared physical recipe: "
+                f"{executed_physical_recipes}"
+            )
+            raise RuntimeError(
+                "Optimizer/controller executable-recipe invariant failed: "
+                "the controller true-zero rule changed an optimizer-selected "
+                "transfer by as much as "
+                f"{repair_max_transfer_delta_uL:.12g} uL. The batch was "
+                "stopped before wells or robot commands were created. Review "
+                f"the recipe-design audit for {batch_label}."
+            )
+
+        self._validate_auto_recipe_volume_feasibility(
+            executed_physical_recipes,
+            context_label=f"model-suggested {batch_label}"
+        )
+
+        print(
+            "<<controller>> optimizer/controller recipe invariant passed; "
+            "no transfer repair was required"
+        )
+
+        return executed_physical_recipes, metadata
+
     @terminal_output_capture_guard
     @error_exit
     def _run(self, port, simulate, model, no_pr):
@@ -11721,88 +12809,12 @@ class AutoContr(Controller):
             X_new = model.getNextReaction()
             print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
 
-            optimizer_prediction_metadata = {
-                'acquisition_mode': getattr(
-                    model,
-                    'last_optimizer_acquisition_mode',
-                    model.acquisition_mode
-                ),
-                'acquisition_score': getattr(
-                    model,
-                    'last_optimizer_acquisition_score',
-                    None
-                ),
-                'selected_mask': getattr(model, 'last_selected_mask', None),
-                'predicted_target_error_nm': getattr(
-                    model,
-                    'last_optimizer_predicted_target_error_nm',
-                    None
-                ),
-                'predicted_lambda_mean_nm': getattr(
-                    model,
-                    'last_optimizer_predicted_lambda_mean_nm',
-                    getattr(model, 'last_optimizer_predicted_lambda_max', None)
-                ),
-                'predicted_lambda_std_nm': getattr(
-                    model,
-                    'last_optimizer_predicted_lambda_std_nm',
-                    None
-                ),
-                'incumbent_target_error_nm': getattr(
-                    model,
-                    'last_optimizer_incumbent_target_error_nm',
-                    None
-                ),
-                'notes': (
-                    'Optimizer-selected recipe; prediction captured before '
-                    'experiment execution.'
-                )
-            }
-
-            # Denormalize the recipe before sending it to the robot.
-            X_new_Denormalized = self.Normalize_Denormalize_Recipes(X_new, normalize_flag=False)
-
-            # Keep a copy of the original denormalized suggestion so the debug
-            # export can show exactly what true-zero repair changed.
-            X_new_Denormalized_before_repair = X_new_Denormalized.copy()
-
-            # Apply Auto true-zero transfer behavior before duplicating/running
-            # recipes. The optimizer may suggest values that correspond to
-            # impossible 0-5 uL transfers; the model and robot should both use
-            # the repaired executable recipe.
-            X_new_Denormalized = self._apply_true_zero_transfer_rule_to_recipes(
-                X_new_Denormalized
-            )
-
-            self._validate_auto_recipe_volume_feasibility(
+            (
                 X_new_Denormalized,
-                context_label=f"model-suggested batch {self.batch_num}"
-            )
-
-            if not np.allclose(
-                X_new_Denormalized_before_repair,
-                X_new_Denormalized,
-                rtol=0.0,
-                atol=1e-12
-            ):
-                print(
-                    "<<controller warning>> true-zero repair changed the "
-                    f"optimizer-selected recipe for batch {self.batch_num}. "
-                    "This means the optimizer suggestion was not already in "
-                    "final executable true-zero form."
-                )
-                print(
-                    "<<controller warning>> optimizer-selected recipe before "
-                    f"repair: {X_new_Denormalized_before_repair}"
-                )
-                print(
-                    "<<controller warning>> optimizer-selected recipe after "
-                    f"repair: {X_new_Denormalized}"
-                )
-
-            self._export_auto_batch_recipe_design(
-                repaired_recipes=X_new_Denormalized,
-                original_recipes=X_new_Denormalized_before_repair,
+                optimizer_prediction_metadata
+            ) = self._prepare_auto_optimizer_recipe_for_execution(
+                model=model,
+                normalized_recipes=X_new,
                 batch_label=f"batch_{self.batch_num}"
             )
             
@@ -12690,11 +13702,12 @@ class AutoContr(Controller):
         Variable reagent volumes are not rescaled or redistributed.
 
         A recipe is volume-feasible only if:
-            1. fixed + variable volumes do not exceed the final reaction volume
-            2. water top-off is either exactly 0 uL or at least 5 uL
+            1. each variable transfer is exactly 0 uL or at least 5 uL
+            2. fixed + variable volumes do not exceed the final reaction volume
+            3. water top-off is either exactly 0 uL or at least 5 uL
 
-        This prevents recipes that would require non-executable 0-5 uL water
-        transfers from being run underfilled.
+        This prevents recipes with non-executable variable or water transfers
+        from being run at unintended concentrations or underfilled volumes.
 
         params:
             np.ndarray recipe:
@@ -12714,6 +13727,23 @@ class AutoContr(Controller):
             recipe
         )
         variable_volume_total = float(sum(variable_transfer_volumes.values()))
+
+        variable_transfer_executable_by_reagent = {
+            reagent_name: bool(
+                math.isclose(
+                    transfer_volume,
+                    0.0,
+                    rel_tol=0,
+                    abs_tol=1e-9
+                )
+                or transfer_volume >= 5.0 - 1e-9
+            )
+            for reagent_name, transfer_volume
+            in variable_transfer_volumes.items()
+        }
+        variable_transfers_executable = all(
+            variable_transfer_executable_by_reagent.values()
+        )
 
         volume_before_water = fixed_volume_total + variable_volume_total
         water_volume = total_volume - volume_before_water
@@ -12736,7 +13766,8 @@ class AutoContr(Controller):
         )
 
         volume_feasible = (
-            volume_does_not_overflow
+            variable_transfers_executable
+            and volume_does_not_overflow
             and water_transfer_executable
         )
 
@@ -12745,6 +13776,12 @@ class AutoContr(Controller):
             'fixed_transfer_volumes': fixed_transfer_volumes,
             'fixed_volume_total': fixed_volume_total,
             'variable_transfer_volumes': variable_transfer_volumes,
+            'variable_transfer_executable_by_reagent': (
+                variable_transfer_executable_by_reagent
+            ),
+            'variable_transfers_executable': bool(
+                variable_transfers_executable
+            ),
             'variable_volume_total': variable_volume_total,
             'volume_before_water': volume_before_water,
             'water_volume': float(water_volume),
@@ -12763,9 +13800,10 @@ class AutoContr(Controller):
         robot execution.
 
         A recipe is considered volume-feasible only if:
-            1. fixed + variable reagent volumes do not exceed the final
+            1. every variable transfer is exactly 0 uL or at least 5 uL
+            2. fixed + variable reagent volumes do not exceed the final
                reaction volume
-            2. required water top-off is either exactly 0 uL or at least 5 uL
+            3. required water top-off is either exactly 0 uL or at least 5 uL
 
         If any repaired recipe is not physically executable, the run is stopped
         before robot commands are created.
@@ -12802,6 +13840,8 @@ class AutoContr(Controller):
                     f"{context_label}, recipe index {recipe_i}: "
                     f"fixed volume = {volume_balance['fixed_volume_total']:.4f} uL, "
                     f"variable volume = {volume_balance['variable_volume_total']:.4f} uL, "
+                    f"variable transfers executable = "
+                    f"{volume_balance['variable_transfers_executable']}, "
                     f"total before water = {volume_balance['volume_before_water']:.4f} uL, "
                     f"allowed total = {volume_balance['total_volume']:.4f} uL, "
                     f"water top-off = {volume_balance['water_volume']:.4f} uL, "
@@ -12814,12 +13854,19 @@ class AutoContr(Controller):
             raise ValueError(
                 "Auto recipe volume feasibility check failed. These recipes "
                 "are not physically executable and will not be executed. "
-                "A recipe may fail because it overfills the final reaction "
-                "volume or because it requires a non-executable 0-5 uL water "
-                "top-off transfer:\n" + "\n".join(invalid_messages)
+                "A recipe may fail because it contains a non-executable 0-5 uL "
+                "variable transfer, overfills the final reaction volume, or "
+                "requires a non-executable 0-5 uL water top-off transfer:\n"
+                + "\n".join(invalid_messages)
             )
 
-    def _export_auto_batch_recipe_design(self, repaired_recipes, original_recipes=None, batch_label=None):
+    def _export_auto_batch_recipe_design(
+        self,
+        repaired_recipes,
+        original_recipes=None,
+        batch_label=None,
+        selection_metadata=None
+    ):
         '''
         Exports the unique Auto recipe design for a batch before replicate wells
         are created.
@@ -12850,6 +13897,11 @@ class AutoContr(Controller):
             str batch_label:
                 Optional label for the exported file name. If not provided,
                 the current self.batch_num is used.
+
+            dict selection_metadata:
+                Optional optimizer selection provenance. Seed-design callers
+                may omit it. Optimizer-selected batches use it to persist the
+                acquisition decision beside the selected/prepared recipe delta.
         '''
         repaired_recipes = np.array(repaired_recipes, dtype=float, copy=True)
 
@@ -12889,6 +13941,61 @@ class AutoContr(Controller):
             'batch_num': [self.batch_num] * repaired_recipes.shape[0],
             'recipe_index': range(repaired_recipes.shape[0])
         })
+
+        if selection_metadata is not None:
+            repeated_value_count = repaired_recipes.shape[0]
+            selection_scalar_fields = (
+                'acquisition_mode',
+                'acquisition_score',
+                'balanced_exploration_weight',
+                'predicted_target_error_nm',
+                'predicted_lambda_mean_nm',
+                'predicted_lambda_std_nm',
+                'incumbent_target_error_nm',
+                'optimizer_recipe_repaired',
+                'optimizer_recipe_repair_max_transfer_delta_uL',
+                'mask_result_count',
+                'feasible_mask_result_count'
+            )
+
+            for field_name in selection_scalar_fields:
+                export_df[field_name] = [
+                    selection_metadata.get(field_name)
+                ] * repeated_value_count
+
+            export_df['selected_mask'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get('selected_mask')
+                )
+            ] * repeated_value_count
+
+            export_df['optimizer_volume_balance'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get('optimizer_volume_balance')
+                )
+            ] * repeated_value_count
+
+            export_df['selected_controller_volume_balances'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get(
+                        'selected_controller_volume_balances'
+                    )
+                )
+            ] * repeated_value_count
+
+            export_df['executed_controller_volume_balances'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get(
+                        'executed_controller_volume_balances'
+                    )
+                )
+            ] * repeated_value_count
+
+            export_df['mask_results'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get('mask_results')
+                )
+            ] * repeated_value_count
 
         for reagent_i, reagent_name in enumerate(self.variable_reagents):
             stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
@@ -12950,6 +14057,7 @@ class AutoContr(Controller):
         variable_volume_totals = []
         water_volumes = []
         volume_before_water_values = []
+        variable_transfers_executable_values = []
         volume_does_not_overflow_values = []
         water_transfer_executable_values = []
         volume_feasible_values = []
@@ -12961,6 +14069,9 @@ class AutoContr(Controller):
             variable_volume_totals.append(volume_balance['variable_volume_total'])
             water_volumes.append(volume_balance['water_volume'])
             volume_before_water_values.append(volume_balance['volume_before_water'])
+            variable_transfers_executable_values.append(
+                volume_balance['variable_transfers_executable']
+            )
             volume_does_not_overflow_values.append(volume_balance['volume_does_not_overflow'])
             water_transfer_executable_values.append(volume_balance['water_transfer_executable'])
             volume_feasible_values.append(volume_balance['volume_feasible'])
@@ -12969,6 +14080,9 @@ class AutoContr(Controller):
         export_df['variable_volume_total_uL'] = variable_volume_totals
         export_df['water_volume_uL'] = water_volumes
         export_df['volume_before_water_uL'] = volume_before_water_values
+        export_df['variable_transfers_executable'] = (
+            variable_transfers_executable_values
+        )
         export_df['volume_does_not_overflow'] = volume_does_not_overflow_values
         export_df['water_transfer_executable'] = water_transfer_executable_values
         export_df['volume_feasible'] = volume_feasible_values
