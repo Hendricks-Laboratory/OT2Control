@@ -230,7 +230,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             )
         )
 
-        if model.acquisition_mode != 'exploit':
+        if (
+            model.acquisition_mode
+            not in model.IMPLEMENTED_ACQUISITION_MODES
+        ):
             raise NotImplementedError(
                 "Auto acquisition mode "
                 f"{model.acquisition_mode!r} is configured, but its recipe "

@@ -61,6 +61,11 @@ class OptimizationModel():
         'target_ei'
     )
 
+    IMPLEMENTED_ACQUISITION_MODES = (
+        'exploit',
+        'explore'
+    )
+
     def __init__(
         self,
         bounds,
@@ -134,8 +139,8 @@ class OptimizationModel():
 
             str acquisition_mode:
                 Canonical Auto acquisition mode supplied by the controller.
-                Stage 2 stores and validates this interface setting while
-                preserving the existing exploit-only recipe selection logic.
+                Older callers default to exploit. Modes that are recognized
+                but not yet implemented remain blocked before recipe selection.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -653,18 +658,18 @@ class OptimizationModel():
         penalties so every acquisition mode must continue through the same
         executable-recipe pathway.
 
-        Stage 3 enables only the legacy-compatible exploit formula. The mean,
-        standard-deviation, and incumbent interface is established here so the
-        later acquisition-mode stages can add their formulas without moving
-        physical constraints into the statistical calculation.
+        Exploit preserves the legacy squared target-distance formula. Explore
+        minimizes negative GP predictive standard deviation, which is
+        equivalent to selecting the feasible candidate with maximum
+        uncertainty. The incumbent interface remains reserved for target EI.
 
         params:
             float predicted_lambda_mean_nm:
                 GP-predicted lambda-max mean in nanometers.
 
             float predicted_lambda_std_nm:
-                GP predictive standard deviation in nanometers. Exploit does
-                not use this value, but later acquisition modes will.
+                GP predictive standard deviation in nanometers. Required by
+                explore; exploit does not use this value.
 
             float incumbent_target_error_nm:
                 Best QC-approved condition-level target error in nanometers.
@@ -688,6 +693,31 @@ class OptimizationModel():
             )
 
             return float(target_error ** 2)
+
+        if self.acquisition_mode == 'explore':
+            if predicted_lambda_std_nm is None:
+                raise ValueError(
+                    "Explore acquisition requires GP predictive standard "
+                    "deviation in nanometers."
+                )
+
+            predicted_lambda_std_nm = float(
+                predicted_lambda_std_nm
+            )
+
+            if (
+                not math.isfinite(predicted_lambda_std_nm)
+                or predicted_lambda_std_nm < 0.0
+            ):
+                raise ValueError(
+                    "Explore acquisition requires a finite, nonnegative GP "
+                    "predictive standard deviation in nanometers. Received: "
+                    f"{predicted_lambda_std_nm!r}."
+                )
+
+            # The surrounding optimizer minimizes. Negating standard
+            # deviation therefore selects maximum predictive uncertainty.
+            return float(-1.0 * predicted_lambda_std_nm)
 
         raise NotImplementedError(
             "Acquisition score for mode "
@@ -744,10 +774,22 @@ class OptimizationModel():
             # 0-5 uL water top-off cases from otherwise valid candidates.
             return float(1e12 + overflow_volume ** 2 + bad_water_penalty)
 
-        predicted_lambda_max = self._predict_lambda_max_nm(full_x)
+        predicted_lambda_std = None
+
+        if self.acquisition_mode == 'exploit':
+            # Preserve the exact stable exploit prediction pathway. Explore
+            # and later uncertainty-aware modes require the full distribution.
+            predicted_lambda_max = self._predict_lambda_max_nm(full_x)
+
+        else:
+            (
+                predicted_lambda_max,
+                predicted_lambda_std
+            ) = self.predict_lambda_distribution_nm(full_x)
 
         return self._calculate_acquisition_score(
-            predicted_lambda_mean_nm=predicted_lambda_max
+            predicted_lambda_mean_nm=predicted_lambda_max,
+            predicted_lambda_std_nm=predicted_lambda_std
         )
 
     def _masked_target_distance_objective(self, x_active, mask):
@@ -942,8 +984,9 @@ class OptimizationModel():
         Finds the best normalized recipe for the configured acquisition mode
         using mixed discrete/continuous mask optimization.
 
-        Stage 3 enables only exploit scoring, which remains the squared
-        distance between predicted lambda max and the requested target.
+        Exploit minimizes squared distance from the requested target. Explore
+        minimizes negative GP predictive standard deviation so the most
+        uncertain feasible candidate is selected.
 
         Discrete part:
             Each binary mask decides which variable reagents are OFF or ON.
@@ -1921,13 +1964,16 @@ class OptimizationModel():
 
                     [array([...])]
         '''
-        if self.acquisition_mode != 'exploit':
+        if (
+            self.acquisition_mode
+            not in self.IMPLEMENTED_ACQUISITION_MODES
+        ):
             raise NotImplementedError(
                 "Acquisition mode "
                 f"{self.acquisition_mode!r} is configured, but its recipe "
                 "selection behavior is not implemented yet. Only 'exploit' "
-                "may select recipes until the later acquisition-mode stages "
-                "are complete."
+                "and 'explore' may select recipes at the current "
+                "implementation stage."
             )
 
         best_x = self._optimize_acquisition_with_masks()
