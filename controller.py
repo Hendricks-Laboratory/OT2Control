@@ -5132,12 +5132,36 @@ class AutoContr(Controller):
             None
         )
 
-        variable_reagents = [
-            str(reagent_name)
-            for reagent_name in (
-                getattr(self, 'variable_reagents', []) or []
-            )
-        ]
+        raw_variable_reagents = getattr(
+            self,
+            'variable_reagents',
+            None
+        )
+
+        # self.variable_reagents is commonly a NumPy array returned by
+        # pandas.unique(). Never use ``array or []`` here because NumPy arrays
+        # with more than one element do not have a single truth value.
+        if raw_variable_reagents is None:
+            variable_reagents = []
+
+        elif isinstance(raw_variable_reagents, str):
+            variable_reagents = [
+                raw_variable_reagents
+            ]
+
+        else:
+            try:
+                variable_reagents = [
+                    str(reagent_name)
+                    for reagent_name in list(
+                        raw_variable_reagents
+                    )
+                ]
+
+            except TypeError:
+                variable_reagents = [
+                    str(raw_variable_reagents)
+                ]
 
         reagent_dimension_lookup = {
             reagent_name: dimension_index
