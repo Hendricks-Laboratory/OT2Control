@@ -36,6 +36,10 @@ class OptimizationModel():
     float threshold: The threshold for determining when the optimization should stop.
     bool quit: Flag to indicate whether the optimization process should stop.
     list acquisition_functions: List of acquisition functions to be used for suggesting experiments.
+    str acquisition_mode:
+        Canonical target-aware acquisition mode.
+    float balanced_exploration_weight:
+        Dimensionless uncertainty weight used by balanced mode.
     int current_acquisition_index: The current index pointing to the acquisition function in use.
     int curr_iter: The current iteration of the optimization process.
     int max_iters: The maximum number of iterations for the optimization process.
@@ -63,7 +67,8 @@ class OptimizationModel():
 
     IMPLEMENTED_ACQUISITION_MODES = (
         'exploit',
-        'explore'
+        'explore',
+        'balanced'
     )
 
     def __init__(
@@ -81,7 +86,8 @@ class OptimizationModel():
         total_volume=None,
         fixed_reagent_volumes=None,
         allow_true_zero=False,
-        acquisition_mode='exploit'
+        acquisition_mode='exploit',
+        balanced_exploration_weight=1.0
     ):
         '''
         Initializes the Auto optimization model.
@@ -141,6 +147,12 @@ class OptimizationModel():
                 Canonical Auto acquisition mode supplied by the controller.
                 Older callers default to exploit. Modes that are recognized
                 but not yet implemented remain blocked before recipe selection.
+
+            float balanced_exploration_weight:
+                Dimensionless coefficient multiplying GP predictive standard
+                deviation in the balanced acquisition score. The default 1.0
+                trades one nanometer of target error against one nanometer of
+                predictive uncertainty. Values must be finite and nonnegative.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -178,10 +190,41 @@ class OptimizationModel():
 
         self.acquisition_mode = acquisition_mode
 
+        try:
+            balanced_exploration_weight = float(
+                balanced_exploration_weight
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "balanced_exploration_weight must be a finite, nonnegative "
+                "number. Received: "
+                f"{balanced_exploration_weight!r}."
+            )
+
+        if (
+            not math.isfinite(balanced_exploration_weight)
+            or balanced_exploration_weight < 0.0
+        ):
+            raise ValueError(
+                "balanced_exploration_weight must be a finite, nonnegative "
+                "number. Received: "
+                f"{balanced_exploration_weight!r}."
+            )
+
+        self.balanced_exploration_weight = (
+            balanced_exploration_weight
+        )
+
         print(
             "<<optimizer>> Auto acquisition mode: "
             f"{self.acquisition_mode}"
         )
+
+        if self.acquisition_mode == 'balanced':
+            print(
+                "<<optimizer>> balanced exploration weight: "
+                f"{self.balanced_exploration_weight:.4f}"
+            )
 
         self.gp_model = None
         self.acquisition = None
@@ -644,6 +687,53 @@ class OptimizationModel():
 
         return bounds
     
+    def _validate_predictive_standard_deviation_nm(
+        self,
+        predicted_lambda_std_nm,
+        acquisition_mode
+    ):
+        '''
+        Validates GP predictive standard deviation for acquisition scoring.
+
+        GPModel.predict() supplies predictive standard deviation rather than
+        variance. The caller converts that value directly to nanometers before
+        this validation; no additional square root belongs here.
+
+        params:
+            float predicted_lambda_std_nm:
+                GP predictive standard deviation in nanometers.
+
+            str acquisition_mode:
+                Canonical mode requesting uncertainty. Used to produce a clear
+                mode-specific validation error.
+
+        returns:
+            float:
+                Finite, nonnegative predictive standard deviation in nm.
+        '''
+        if predicted_lambda_std_nm is None:
+            raise ValueError(
+                f"{acquisition_mode} acquisition requires GP predictive "
+                "standard deviation in nanometers."
+            )
+
+        predicted_lambda_std_nm = float(
+            predicted_lambda_std_nm
+        )
+
+        if (
+            not math.isfinite(predicted_lambda_std_nm)
+            or predicted_lambda_std_nm < 0.0
+        ):
+            raise ValueError(
+                f"{acquisition_mode} acquisition requires a finite, "
+                "nonnegative GP predictive standard deviation in "
+                "nanometers. Received: "
+                f"{predicted_lambda_std_nm!r}."
+            )
+
+        return predicted_lambda_std_nm
+
     def _calculate_acquisition_score(
         self,
         predicted_lambda_mean_nm,
@@ -659,9 +749,13 @@ class OptimizationModel():
         executable-recipe pathway.
 
         Exploit preserves the legacy squared target-distance formula. Explore
-        minimizes negative GP predictive standard deviation, which is
-        equivalent to selecting the feasible candidate with maximum
-        uncertainty. The incumbent interface remains reserved for target EI.
+        minimizes negative GP predictive standard deviation. Balanced uses a
+        target-aware straddle score in nanometers:
+
+            absolute target error
+            - balanced_exploration_weight * predictive standard deviation
+
+        The incumbent interface remains reserved for target EI.
 
         params:
             float predicted_lambda_mean_nm:
@@ -669,7 +763,7 @@ class OptimizationModel():
 
             float predicted_lambda_std_nm:
                 GP predictive standard deviation in nanometers. Required by
-                explore; exploit does not use this value.
+                explore and balanced; exploit does not use this value.
 
             float incumbent_target_error_nm:
                 Best QC-approved condition-level target error in nanometers.
@@ -695,29 +789,71 @@ class OptimizationModel():
             return float(target_error ** 2)
 
         if self.acquisition_mode == 'explore':
-            if predicted_lambda_std_nm is None:
-                raise ValueError(
-                    "Explore acquisition requires GP predictive standard "
-                    "deviation in nanometers."
+            predicted_lambda_std_nm = (
+                self._validate_predictive_standard_deviation_nm(
+                    predicted_lambda_std_nm,
+                    acquisition_mode='Explore'
                 )
-
-            predicted_lambda_std_nm = float(
-                predicted_lambda_std_nm
             )
-
-            if (
-                not math.isfinite(predicted_lambda_std_nm)
-                or predicted_lambda_std_nm < 0.0
-            ):
-                raise ValueError(
-                    "Explore acquisition requires a finite, nonnegative GP "
-                    "predictive standard deviation in nanometers. Received: "
-                    f"{predicted_lambda_std_nm!r}."
-                )
 
             # The surrounding optimizer minimizes. Negating standard
             # deviation therefore selects maximum predictive uncertainty.
             return float(-1.0 * predicted_lambda_std_nm)
+
+        if self.acquisition_mode == 'balanced':
+            try:
+                predicted_lambda_mean_nm = float(
+                    predicted_lambda_mean_nm
+                )
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Balanced acquisition requires a finite GP-predicted "
+                    "lambda-max mean in nanometers. Received: "
+                    f"{predicted_lambda_mean_nm!r}."
+                )
+
+            if not math.isfinite(predicted_lambda_mean_nm):
+                raise ValueError(
+                    "Balanced acquisition requires a finite GP-predicted "
+                    "lambda-max mean in nanometers. Received: "
+                    f"{predicted_lambda_mean_nm!r}."
+                )
+
+            try:
+                target_value_nm = float(self.target_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Balanced acquisition requires a finite target lambda "
+                    "max in nanometers. Received: "
+                    f"{self.target_value!r}."
+                )
+
+            if not math.isfinite(target_value_nm):
+                raise ValueError(
+                    "Balanced acquisition requires a finite target lambda "
+                    "max in nanometers. Received: "
+                    f"{target_value_nm!r}."
+                )
+
+            predicted_lambda_std_nm = (
+                self._validate_predictive_standard_deviation_nm(
+                    predicted_lambda_std_nm,
+                    acquisition_mode='Balanced'
+                )
+            )
+
+            predicted_target_error_nm = abs(
+                predicted_lambda_mean_nm
+                - target_value_nm
+            )
+
+            # Both terms are expressed in nanometers. The dimensionless weight
+            # therefore has an interpretable one-for-one default scale.
+            return float(
+                predicted_target_error_nm
+                - self.balanced_exploration_weight
+                * predicted_lambda_std_nm
+            )
 
         raise NotImplementedError(
             "Acquisition score for mode "
@@ -985,8 +1121,9 @@ class OptimizationModel():
         using mixed discrete/continuous mask optimization.
 
         Exploit minimizes squared distance from the requested target. Explore
-        minimizes negative GP predictive standard deviation so the most
-        uncertain feasible candidate is selected.
+        minimizes negative GP predictive standard deviation. Balanced trades
+        absolute target error against weighted predictive uncertainty, with
+        both statistical quantities expressed in nanometers.
 
         Discrete part:
             Each binary mask decides which variable reagents are OFF or ON.
@@ -1971,8 +2108,8 @@ class OptimizationModel():
             raise NotImplementedError(
                 "Acquisition mode "
                 f"{self.acquisition_mode!r} is configured, but its recipe "
-                "selection behavior is not implemented yet. Only 'exploit' "
-                "and 'explore' may select recipes at the current "
+                "selection behavior is not implemented yet. Only 'exploit', "
+                "'explore', and 'balanced' may select recipes at the current "
                 "implementation stage."
             )
 

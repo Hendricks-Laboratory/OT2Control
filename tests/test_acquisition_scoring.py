@@ -110,6 +110,7 @@ class AcquisitionScoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.ScoreModel = _load_optimization_model_methods([
+            '_validate_predictive_standard_deviation_nm',
             '_calculate_acquisition_score'
         ])
 
@@ -117,6 +118,7 @@ class AcquisitionScoreTests(unittest.TestCase):
         model = self.ScoreModel()
         model.target_value = 625.0
         model.acquisition_mode = acquisition_mode
+        model.balanced_exploration_weight = 1.0
         return model
 
     def test_exploit_matches_legacy_squared_target_distance(self):
@@ -141,7 +143,7 @@ class AcquisitionScoreTests(unittest.TestCase):
                 self.assertEqual(score, expected_score)
 
     def test_unimplemented_modes_fail_clearly(self):
-        for mode in ('balanced', 'target_ei'):
+        for mode in ('target_ei',):
             with self.subTest(mode=mode):
                 model = self._build_score_model(mode)
 
@@ -150,6 +152,80 @@ class AcquisitionScoreTests(unittest.TestCase):
                     repr(mode)
                 ):
                     model._calculate_acquisition_score(625.0, 2.0)
+
+    def test_balanced_trades_target_proximity_against_uncertainty(self):
+        model = self._build_score_model('balanced')
+        candidates = (
+            # Closest mean, but nearly no uncertainty.
+            (626.0, 0.0),
+            # Farther mean, but sufficiently uncertain to be preferred.
+            (630.0, 10.0),
+            # Far from target without enough uncertainty to compensate.
+            (650.0, 3.0)
+        )
+
+        scores = [
+            model._calculate_acquisition_score(
+                predicted_lambda_mean_nm=mean_nm,
+                predicted_lambda_std_nm=std_nm
+            )
+            for mean_nm, std_nm in candidates
+        ]
+
+        self.assertEqual(scores, [1.0, -5.0, 22.0])
+        self.assertEqual(scores.index(min(scores)), 1)
+
+    def test_balanced_weight_has_documented_one_for_one_scale(self):
+        model = self._build_score_model('balanced')
+        scores_by_weight = {}
+
+        for weight in (0.0, 1.0, 2.0):
+            model.balanced_exploration_weight = weight
+            scores_by_weight[weight] = model._calculate_acquisition_score(
+                predicted_lambda_mean_nm=630.0,
+                predicted_lambda_std_nm=4.0
+            )
+
+        self.assertEqual(
+            scores_by_weight,
+            {
+                0.0: 5.0,
+                1.0: 1.0,
+                2.0: -3.0
+            }
+        )
+
+    def test_balanced_requires_finite_mean_and_valid_uncertainty(self):
+        model = self._build_score_model('balanced')
+
+        for invalid_mean in (None, float('nan'), float('inf')):
+            with self.subTest(invalid_mean=invalid_mean):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    model._calculate_acquisition_score(
+                        predicted_lambda_mean_nm=invalid_mean,
+                        predicted_lambda_std_nm=2.0
+                    )
+
+        for invalid_std in (None, -0.01, float('nan'), float('inf')):
+            with self.subTest(invalid_std=invalid_std):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "standard deviation"
+                ):
+                    model._calculate_acquisition_score(
+                        predicted_lambda_mean_nm=625.0,
+                        predicted_lambda_std_nm=invalid_std
+                    )
+
+        for invalid_target in (None, float('nan'), float('inf')):
+            with self.subTest(invalid_target=invalid_target):
+                model.target_value = invalid_target
+
+                with self.assertRaisesRegex(ValueError, "finite target"):
+                    model._calculate_acquisition_score(
+                        predicted_lambda_mean_nm=625.0,
+                        predicted_lambda_std_nm=2.0
+                    )
 
     def test_explore_score_selects_maximum_uncertainty(self):
         model = self._build_score_model('explore')
@@ -199,6 +275,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.MaskedModel = _load_optimization_model_methods([
+            '_validate_predictive_standard_deviation_nm',
             '_calculate_acquisition_score',
             '_masked_acquisition_objective',
             '_masked_target_distance_objective'
@@ -208,6 +285,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
         model = self.MaskedModel()
         model.target_value = 625.0
         model.acquisition_mode = acquisition_mode
+        model.balanced_exploration_weight = 1.0
         model._expand_masked_candidate_to_full_recipe = (
             lambda x_active, mask: ('full-recipe', x_active, mask)
         )
@@ -267,6 +345,39 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
         self.assertEqual(selected_candidate, 0.2)
         self.assertEqual(scores[0.2], -15.0)
 
+    def test_balanced_uses_mean_and_uncertainty_for_feasible_candidates(self):
+        volume_balance = {
+            'volume_feasible': True,
+            'water_volume': 20.0,
+            'volume_does_not_overflow': True,
+            'water_transfer_executable': True
+        }
+        model = self._build_model(
+            volume_balance,
+            acquisition_mode='balanced'
+        )
+        distributions = {
+            0.1: (626.0, 0.0),
+            0.2: (630.0, 10.0),
+            0.3: (650.0, 3.0)
+        }
+        model.predict_lambda_distribution_nm = (
+            lambda full_x: distributions[full_x[1][0]]
+        )
+
+        scores = {
+            candidate: model._masked_acquisition_objective(
+                [candidate],
+                [1]
+            )
+            for candidate in distributions
+        }
+
+        selected_candidate = min(scores, key=scores.get)
+
+        self.assertEqual(selected_candidate, 0.2)
+        self.assertEqual(scores[0.2], -5.0)
+
     def test_overflow_penalty_is_unchanged_and_skips_gp(self):
         volume_balance = {
             'volume_feasible': False,
@@ -274,7 +385,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
             'volume_does_not_overflow': False,
             'water_transfer_executable': False
         }
-        for mode in ('exploit', 'explore'):
+        for mode in ('exploit', 'explore', 'balanced'):
             with self.subTest(mode=mode):
                 model = self._build_model(
                     volume_balance,
@@ -305,7 +416,7 @@ class MaskedAcquisitionObjectiveTests(unittest.TestCase):
             'volume_does_not_overflow': True,
             'water_transfer_executable': False
         }
-        for mode in ('exploit', 'explore'):
+        for mode in ('exploit', 'explore', 'balanced'):
             with self.subTest(mode=mode):
                 model = self._build_model(
                     volume_balance,
@@ -404,6 +515,34 @@ class AcquisitionRoutingTests(unittest.TestCase):
         ]
 
         self.assertEqual(len(implemented_mode_guards), 1)
+
+    def test_controller_passes_default_balanced_weight(self):
+        tree = ast.parse(
+            CONTROLLER_PATH.read_text(),
+            filename=str(CONTROLLER_PATH)
+        )
+        launch_auto = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'launch_auto'
+        )
+        constructor_call = next(
+            node for node in ast.walk(launch_auto)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == 'OptimizationModel'
+        )
+        keywords = {
+            keyword.arg: keyword.value
+            for keyword in constructor_call.keywords
+        }
+        weight_expression = keywords['balanced_exploration_weight']
+
+        self.assertIsInstance(weight_expression, ast.Call)
+        self.assertEqual(
+            [argument.value for argument in weight_expression.args],
+            ['balanced_exploration_weight', 1.0]
+        )
 
 
 class PredictiveUncertaintyUnitTests(unittest.TestCase):
@@ -532,7 +671,7 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
         )
 
     def test_unimplemented_mode_stops_before_optimization(self):
-        for mode in ('balanced', 'target_ei'):
+        for mode in ('target_ei',):
             with self.subTest(mode=mode):
                 model = self.SelectionModel()
                 model.acquisition_mode = mode
@@ -565,6 +704,89 @@ class GetNextReactionCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(optimization_calls, [True])
         self.assertEqual(result, [[0.75]])
+
+    def test_balanced_reaches_optimizer_and_preserves_return_shape(self):
+        model = self.SelectionModel()
+        model.acquisition_mode = 'balanced'
+        optimization_calls = []
+        model._optimize_acquisition_with_masks = (
+            lambda: optimization_calls.append(True) or [0.5]
+        )
+        model.predict_lambda_distribution_nm = (
+            lambda x: (626.0, 4.0)
+        )
+
+        with redirect_stdout(io.StringIO()):
+            result = model.getNextReaction()
+
+        self.assertEqual(optimization_calls, [True])
+        self.assertEqual(result, [[0.5]])
+
+
+class OptimizationModelConfigurationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fake_gpyopt = SimpleNamespace(
+            Design_space=lambda bounds: bounds
+        )
+        cls.ConfigurationModel = _load_optimization_model_methods(
+            ['__init__'],
+            extra_namespace={'GPyOpt': fake_gpyopt}
+        )
+
+    def _required_constructor_arguments(self):
+        return {
+            'bounds': [],
+            'target_value': 625.0,
+            'reagent_info': None,
+            'fixed_reagents': [],
+            'variable_reagents': [],
+            'initial_design_numdata': 2,
+            'batch_size': 1,
+            'max_iters': 2
+        }
+
+    def test_balanced_weight_defaults_to_one_for_legacy_callers(self):
+        with redirect_stdout(io.StringIO()):
+            model = self.ConfigurationModel(
+                **self._required_constructor_arguments()
+            )
+
+        self.assertEqual(model.balanced_exploration_weight, 1.0)
+
+    def test_balanced_weight_is_stored_and_printed(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            model = self.ConfigurationModel(
+                acquisition_mode='balanced',
+                balanced_exploration_weight=1.5,
+                **self._required_constructor_arguments()
+            )
+
+        self.assertEqual(model.balanced_exploration_weight, 1.5)
+        self.assertIn(
+            'balanced exploration weight: 1.5000',
+            output.getvalue()
+        )
+
+    def test_balanced_weight_rejects_invalid_values(self):
+        for invalid_weight in (
+            None,
+            -0.01,
+            float('nan'),
+            float('inf'),
+            'not-a-number'
+        ):
+            with self.subTest(invalid_weight=invalid_weight):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "balanced_exploration_weight"
+                ):
+                    self.ConfigurationModel(
+                        balanced_exploration_weight=invalid_weight,
+                        **self._required_constructor_arguments()
+                    )
 
 
 if __name__ == '__main__':

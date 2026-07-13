@@ -227,6 +227,13 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             acquisition_mode=auto.robo_params.get(
                 'acquisition_mode',
                 'exploit'
+            ),
+            # The balanced weight is intentionally a named code-level setting
+            # with a backward-compatible default. A separate workbook control
+            # is not required for the initial balanced-mode implementation.
+            balanced_exploration_weight=auto.robo_params.get(
+                'balanced_exploration_weight',
+                1.0
             )
         )
 
