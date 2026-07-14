@@ -2568,6 +2568,56 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(result['objective'], 64.0)
         self.assertTrue(result['volume_balance']['volume_feasible'])
 
+    def test_single_mask_recovers_failed_slsqp_boundary_status(self):
+        model = self._build_exact_model()
+        model._get_masked_bounds = lambda mask: [(0.0, 0.8)]
+        model._generate_feasible_masked_starting_points = (
+            lambda mask, n_restarts: [np.array([0.8])]
+        )
+        model.predict_lambda_distribution_nm = lambda candidate: (
+            625.0
+            + float(np.asarray(candidate, dtype=float).reshape(2)[0]),
+            1.0
+        )
+        model._predict_lambda_max_nm = lambda candidate: (
+            model.predict_lambda_distribution_nm(candidate)[0]
+        )
+
+        methods_called = []
+
+        def failed_then_recovered_minimize(fun, x0, bounds, method):
+            methods_called.append(method)
+            return SimpleNamespace(
+                fun=float(fun(np.asarray(x0, dtype=float))),
+                x=np.asarray(x0, dtype=float).copy(),
+                success=(method == 'L-BFGS-B'),
+                status=(0 if method == 'L-BFGS-B' else 4),
+                message=(
+                    'converged'
+                    if method == 'L-BFGS-B'
+                    else 'Inequality constraints incompatible'
+                )
+            )
+
+        method_globals = self.Model._optimize_single_mask.__globals__
+        original_minimize = method_globals['minimize']
+        method_globals['minimize'] = failed_then_recovered_minimize
+
+        try:
+            result = model._optimize_single_mask(
+                np.array([1, 0], dtype=int),
+                n_restarts=1
+            )
+        finally:
+            method_globals['minimize'] = original_minimize
+
+        self.assertEqual(methods_called, ['SLSQP', 'L-BFGS-B'])
+        self.assertTrue(result['success'])
+        self.assertEqual(result['optimizer_method'], 'L-BFGS-B recovery')
+        self.assertEqual(result['optimizer_status'], 0)
+        self.assertEqual(result['normalized_recipe'].tolist(), [0.8, 0.0])
+        self.assertTrue(result['volume_balance']['volume_feasible'])
+
     def test_optimizer_selection_survives_controller_handoff_and_csv_export(self):
         model = self._build_exact_model()
         controller = self._build_exact_controller()

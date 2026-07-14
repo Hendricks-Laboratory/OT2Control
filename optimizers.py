@@ -1318,6 +1318,8 @@ class OptimizationModel():
         best_objective = np.inf
         best_result_success = False
         best_result_message = None
+        best_result_method = None
+        best_result_status = None
 
         for x0 in starting_points:
             result = minimize(
@@ -1364,6 +1366,79 @@ class OptimizationModel():
                 )
                 best_result_success = bool(result.success)
                 best_result_message = result.message
+                best_result_method = 'SLSQP'
+                best_result_status = getattr(result, 'status', None)
+
+        # A feasible optimum can lie exactly on an executable bound. SLSQP
+        # occasionally reports a failed status at such points even though the
+        # clipped candidate has a finite, deterministically re-evaluated
+        # objective. Retry that candidate once with a bound-native method so a
+        # spurious SLSQP status does not remain the sole optimizer verdict.
+        if best_x_active is not None and not best_result_success:
+            recovery_result = minimize(
+                fun=lambda x_active: self._masked_acquisition_objective(
+                    x_active,
+                    mask
+                ),
+                x0=best_x_active,
+                bounds=bounds,
+                method='L-BFGS-B'
+            )
+
+            recovery_x_active = np.asarray(
+                recovery_result.x,
+                dtype=float
+            ).copy()
+
+            for i, (low, high) in enumerate(bounds):
+                recovery_x_active[i] = np.clip(
+                    recovery_x_active[i],
+                    low,
+                    high
+                )
+
+            recovery_objective = self._masked_acquisition_objective(
+                recovery_x_active,
+                mask
+            )
+            recovery_full_x = self._expand_masked_candidate_to_full_recipe(
+                recovery_x_active,
+                mask
+            )
+            recovery_volume_balance = self._get_candidate_volume_balance(
+                recovery_full_x
+            )
+
+            recovery_is_equivalent_or_better = (
+                recovery_objective < best_objective
+                or np.isclose(
+                    recovery_objective,
+                    best_objective,
+                    rtol=1e-9,
+                    atol=1e-9
+                )
+            )
+
+            if (
+                bool(recovery_result.success)
+                and np.isfinite(recovery_objective)
+                and recovery_volume_balance['volume_feasible']
+                and recovery_is_equivalent_or_better
+            ):
+                best_objective = float(recovery_objective)
+                best_x_active = recovery_x_active
+                best_full_x = recovery_full_x
+                best_result_success = True
+                best_result_message = (
+                    "Recovered after failed SLSQP status: "
+                    f"{recovery_result.message}"
+                )
+                best_result_method = 'L-BFGS-B recovery'
+                best_result_status = getattr(
+                    recovery_result,
+                    'status',
+                    None
+                )
 
         if best_full_x is None:
             return {
@@ -1371,6 +1446,8 @@ class OptimizationModel():
                 'is_selected': False,
                 'success': False,
                 'message': 'No finite optimizer result found for mask.',
+                'optimizer_method': None,
+                'optimizer_status': None,
                 'objective': np.inf,
                 'acquisition_mode': self.acquisition_mode,
                 'acquisition_score': None,
@@ -1438,6 +1515,8 @@ class OptimizationModel():
             'is_selected': False,
             'success': best_result_success,
             'message': best_result_message,
+            'optimizer_method': best_result_method,
+            'optimizer_status': best_result_status,
             'objective': best_objective,
             'acquisition_mode': self.acquisition_mode,
             'acquisition_score': acquisition_score,
@@ -1574,6 +1653,10 @@ class OptimizationModel():
                 "<<optimizer>> mask acquisition audit: "
                 f"mask={result_mask_for_audit}, "
                 f"selected={result.get('is_selected', False)}, "
+                f"optimizer_method={result.get('optimizer_method')}, "
+                f"optimizer_success={result.get('success')}, "
+                f"optimizer_status={result.get('optimizer_status')}, "
+                f"optimizer_message={result.get('message')}, "
                 f"mode={result.get('acquisition_mode', getattr(self, 'acquisition_mode', None))}, "
                 f"objective={result.get('objective')}, "
                 f"score={result.get('acquisition_score')}, "
