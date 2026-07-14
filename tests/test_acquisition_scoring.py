@@ -187,7 +187,10 @@ def _load_base_controller_methods(method_names):
     module = ast.fix_missing_locations(
         ast.Module(body=[extracted_class], type_ignores=[])
     )
-    namespace = {'math': math}
+    namespace = {
+        'math': math,
+        'np': np
+    }
 
     exec(
         compile(module, str(CONTROLLER_PATH), 'exec'),
@@ -834,6 +837,60 @@ class MaskAndExecutableBoundsTests(unittest.TestCase):
         # stock concentration 1.0 * 5 uL / 100 uL total gives a normalized
         # lower concentration bound of 0.05 for each active reagent.
         self.assertEqual(bounds, [(0.05, 1.0), (0.05, 1.0)])
+
+
+class GprFeasibilityOverlayTests(unittest.TestCase):
+    '''Verifies physical-executability masks used by 2D GP overlay plots.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_base_controller_methods([
+            '_get_2d_gpr_feasibility_overlay_data'
+        ])
+
+    def _build_controller_and_model(self, allow_true_zero=True):
+        controller = self.Controller()
+        controller.variable_reagents = ['reagent_a', 'reagent_b']
+
+        model = SimpleNamespace(
+            total_volume=200.0,
+            fixed_reagent_volumes={'fixed': 20.0},
+            allow_true_zero=allow_true_zero
+        )
+        model._get_variable_reagent_stock_conc = (
+            lambda reagent_name: 1.0
+        )
+
+        return controller, model
+
+    def test_overlay_marks_non_executable_transfers_water_band_and_overflow(self):
+        controller, model = self._build_controller_and_model()
+        overlay = controller._get_2d_gpr_feasibility_overlay_data(
+            model=model,
+            x_values=[0.0, 0.02, 0.88, 0.90],
+            y_values=[0.0, 0.02, 0.10]
+        )
+
+        self.assertEqual(overlay['infeasible'].shape, (3, 4))
+        self.assertFalse(overlay['infeasible'][0, 0])
+        self.assertTrue(overlay['variable_transfer_infeasible'][0, 1])
+        self.assertTrue(overlay['variable_transfer_infeasible'][1, 0])
+        self.assertTrue(overlay['water_transfer_infeasible'][0, 2])
+        self.assertTrue(overlay['overflow'][2, 2])
+        self.assertFalse(overlay['water_transfer_infeasible'][0, 3])
+        self.assertTrue(overlay['water_is_exact_zero'][0, 3])
+
+    def test_overlay_marks_zero_reagent_transfer_infeasible_without_true_zero(self):
+        controller, model = self._build_controller_and_model(
+            allow_true_zero=False
+        )
+        overlay = controller._get_2d_gpr_feasibility_overlay_data(
+            model=model,
+            x_values=[0.0, 0.10],
+            y_values=[0.0, 0.10]
+        )
+
+        self.assertTrue(overlay['variable_transfer_infeasible'][0, 0])
 
 
 class AcquisitionRoutingTests(unittest.TestCase):

@@ -1152,6 +1152,193 @@ class Controller(ABC):
         plt.savefig(os.path.join(self.plot_path, '{}.png'.format(filename)))
         plt.close()
        
+    def _get_2d_gpr_feasibility_overlay_data(
+        self,
+        model,
+        x_values,
+        y_values
+    ):
+        '''
+        Calculates physical-executability masks for a 2D GP heatmap grid.
+
+        The ordinary GP heatmaps intentionally show the complete configured
+        concentration rectangle. This helper supplies separate diagnostic
+        overlay plots with the portions that cannot be executed by the robot
+        marked explicitly. It evaluates raw concentration-grid values rather
+        than applying true-zero repair, so the non-executable interval between
+        0 and 5 uL remains visible.
+
+        A grid point is excluded when a variable-reagent transfer is below
+        5 uL (except an exact zero when true-zero search is enabled), water
+        top-off is between 0 and 5 uL, or the recipe overflows the configured
+        final volume. Exact-zero water remains feasible.
+
+        params:
+            OptimizationModel model:
+                Optimizer providing stock concentrations and volume settings.
+
+            np.ndarray x_values:
+                Physical concentrations for the first variable reagent.
+
+            np.ndarray y_values:
+                Physical concentrations for the second variable reagent.
+
+        returns:
+            dict:
+                Boolean feasibility masks, water-volume grid, and
+                reagent-specific transfer-volume grids. All arrays use rows
+                for y_values and columns for x_values.
+        '''
+        reagent_names = list(self.variable_reagents)
+
+        if len(reagent_names) != 2:
+            raise ValueError(
+                "2D GP feasibility overlays require exactly two variable "
+                "reagents."
+            )
+
+        if model is None:
+            raise ValueError(
+                "2D GP feasibility overlays require an optimizer model."
+            )
+
+        x_values = np.asarray(x_values, dtype=float).reshape(-1)
+        y_values = np.asarray(y_values, dtype=float).reshape(-1)
+
+        if x_values.size == 0 or y_values.size == 0:
+            raise ValueError(
+                "2D GP feasibility overlays require nonempty axis values."
+            )
+
+        total_volume = float(getattr(model, 'total_volume', np.nan))
+        fixed_reagent_volumes = getattr(
+            model,
+            'fixed_reagent_volumes',
+            None
+        )
+        stock_concentration_getter = getattr(
+            model,
+            '_get_variable_reagent_stock_conc',
+            None
+        )
+
+        if (
+            not np.isfinite(total_volume)
+            or total_volume <= 0
+            or not isinstance(fixed_reagent_volumes, dict)
+            or not callable(stock_concentration_getter)
+        ):
+            raise ValueError(
+                "2D GP feasibility overlays require total volume, fixed "
+                "reagent volumes, and variable-reagent stock concentrations."
+            )
+
+        fixed_volume_total = float(
+            sum(
+                float(volume)
+                for volume in fixed_reagent_volumes.values()
+            )
+        )
+
+        x_grid, y_grid = np.meshgrid(
+            x_values,
+            y_values,
+            indexing='xy'
+        )
+        concentration_grids = [x_grid, y_grid]
+        transfer_volume_grids = {}
+        variable_transfer_infeasible = np.zeros(
+            x_grid.shape,
+            dtype=bool
+        )
+        volume_tolerance = 1e-9
+        true_zero_allowed = bool(
+            getattr(model, 'allow_true_zero', False)
+        )
+
+        for reagent_name, concentration_grid in zip(
+            reagent_names,
+            concentration_grids
+        ):
+            stock_concentration = float(
+                stock_concentration_getter(reagent_name)
+            )
+
+            if math.isclose(
+                stock_concentration,
+                0.0,
+                rel_tol=0,
+                abs_tol=volume_tolerance
+            ):
+                raise ValueError(
+                    "2D GP feasibility overlay cannot calculate transfer "
+                    f"volume for {reagent_name}: stock concentration is 0."
+                )
+
+            transfer_volume_grid = (
+                concentration_grid
+                * total_volume
+                / stock_concentration
+            )
+            transfer_volume_grids[reagent_name] = transfer_volume_grid
+
+            is_exact_zero = np.isclose(
+                transfer_volume_grid,
+                0.0,
+                rtol=0,
+                atol=volume_tolerance
+            )
+            below_executable_minimum = (
+                transfer_volume_grid < 5.0 - volume_tolerance
+            )
+
+            if true_zero_allowed:
+                variable_transfer_infeasible |= (
+                    below_executable_minimum & ~is_exact_zero
+                )
+            else:
+                variable_transfer_infeasible |= (
+                    below_executable_minimum
+                )
+
+        variable_volume_total = sum(
+            transfer_volume_grids.values()
+        )
+        water_volume_grid = (
+            total_volume
+            - fixed_volume_total
+            - variable_volume_total
+        )
+        water_is_exact_zero = np.isclose(
+            water_volume_grid,
+            0.0,
+            rtol=0,
+            atol=volume_tolerance
+        )
+        overflow = water_volume_grid < -volume_tolerance
+        water_transfer_infeasible = (
+            (water_volume_grid > volume_tolerance)
+            & (water_volume_grid < 5.0 - volume_tolerance)
+        )
+
+        return {
+            'x_values': x_values,
+            'y_values': y_values,
+            'infeasible': (
+                variable_transfer_infeasible
+                | water_transfer_infeasible
+                | overflow
+            ),
+            'variable_transfer_infeasible': (
+                variable_transfer_infeasible
+            ),
+            'water_transfer_infeasible': water_transfer_infeasible,
+            'overflow': overflow,
+            'water_volume_uL': water_volume_grid,
+            'water_is_exact_zero': water_is_exact_zero,
+            'transfer_volume_uL_by_reagent': transfer_volume_grids
+        }
+
     def plot_2D_GPR(
         self,
         model,
@@ -1348,6 +1535,37 @@ class Controller(ABC):
             prediction_array.shape[0]
         )
 
+        feasibility_overlay_data = None
+        try:
+            # The GP itself is evaluated on its established plotting grid.
+            # Feasibility is purely geometric, so a denser independent grid
+            # produces smooth physical-boundary overlays without changing any
+            # GP predictions or the original heatmap pixels.
+            feasibility_x_values = np.linspace(
+                x_minimum,
+                x_maximum,
+                max(401, prediction_array.shape[1])
+            )
+            feasibility_y_values = np.linspace(
+                y_minimum,
+                y_maximum,
+                max(401, prediction_array.shape[0])
+            )
+            feasibility_overlay_data = (
+                self._get_2d_gpr_feasibility_overlay_data(
+                    model=model,
+                    x_values=feasibility_x_values,
+                    y_values=feasibility_y_values
+                )
+            )
+        except Exception as feasibility_error:
+            # The established GP heatmaps remain available if optional
+            # diagnostic overlay inputs are incomplete in an older workflow.
+            print(
+                "<<controller warning>> skipping 2D GP feasibility-overlay "
+                f"plots: {feasibility_error}"
+            )
+
         font_helper = getattr(
             self,
             '_get_auto_design_plot_font_sizes',
@@ -1428,7 +1646,9 @@ class Controller(ABC):
             plot_title,
             colorbar_label,
             plot_filename,
-            plot_description
+            plot_description,
+            feasibility_overlay=None,
+            target_contour_nm=None
         ):
             '''
             Renders and saves one square GP heatmap.
@@ -1450,16 +1670,210 @@ class Controller(ABC):
                 shading='auto'
             )
 
+            feasibility_legend_handles = []
+
+            if feasibility_overlay is not None:
+                feasibility_x_values = np.asarray(
+                    feasibility_overlay['x_values'],
+                    dtype=float
+                )
+                feasibility_y_values = np.asarray(
+                    feasibility_overlay['y_values'],
+                    dtype=float
+                )
+                infeasible_mask = np.asarray(
+                    feasibility_overlay['infeasible'],
+                    dtype=bool
+                )
+
+                expected_feasibility_shape = (
+                    feasibility_y_values.size,
+                    feasibility_x_values.size
+                )
+
+                if infeasible_mask.shape != expected_feasibility_shape:
+                    raise ValueError(
+                        "Feasibility overlay shape does not match its "
+                        "physical concentration axes."
+                    )
+
+                if np.any(infeasible_mask):
+                    # Contour fill on a dense independent feasibility grid
+                    # avoids the stair-step edge and small cell gaps produced
+                    # by a coarse binary pcolormesh beside water boundaries.
+                    ax.contourf(
+                        feasibility_x_values,
+                        feasibility_y_values,
+                        infeasible_mask.astype(float),
+                        levels=[0.5, 1.5],
+                        colors=['0.70'],
+                        alpha=0.55,
+                        antialiased=True,
+                        corner_mask=False,
+                        zorder=2
+                    )
+                    feasibility_legend_handles.append(
+                        mpatches.Patch(
+                            facecolor='0.70',
+                            alpha=0.55,
+                            label=(
+                                'Excluded: overflow or non-executable '
+                                'transfer'
+                            )
+                        )
+                    )
+
+                def _grid_spans_contour_level(grid, level):
+                    finite_values = np.asarray(
+                        grid,
+                        dtype=float
+                    )
+                    finite_values = finite_values[
+                        np.isfinite(finite_values)
+                    ]
+
+                    return (
+                        finite_values.size > 0
+                        and np.min(finite_values) < level
+                        and np.max(finite_values) > level
+                    )
+
+                water_volume_grid = feasibility_overlay[
+                    'water_volume_uL'
+                ]
+
+                if _grid_spans_contour_level(water_volume_grid, 0.0):
+                    ax.contour(
+                        feasibility_x_values,
+                        feasibility_y_values,
+                        water_volume_grid,
+                        levels=[0.0],
+                        colors='#0072B2',
+                        linewidths=1.35,
+                        linestyles='solid',
+                        zorder=4
+                    )
+                    water_zero_handle, = ax.plot(
+                        [],
+                        [],
+                        color='#0072B2',
+                        linewidth=1.35,
+                        label='Water = 0 uL boundary'
+                    )
+                    feasibility_legend_handles.append(
+                        water_zero_handle
+                    )
+
+                if _grid_spans_contour_level(water_volume_grid, 5.0):
+                    ax.contour(
+                        feasibility_x_values,
+                        feasibility_y_values,
+                        water_volume_grid,
+                        levels=[5.0],
+                        colors='#D55E00',
+                        linewidths=1.35,
+                        linestyles='dashed',
+                        zorder=4
+                    )
+                    water_minimum_handle, = ax.plot(
+                        [],
+                        [],
+                        color='#D55E00',
+                        linewidth=1.35,
+                        linestyle='dashed',
+                        label='Water = 5 uL boundary'
+                    )
+                    feasibility_legend_handles.append(
+                        water_minimum_handle
+                    )
+
+                for reagent_i, reagent_name in enumerate(
+                    self.variable_reagents
+                ):
+                    transfer_volume_grid = feasibility_overlay[
+                        'transfer_volume_uL_by_reagent'
+                    ][reagent_name]
+
+                    if _grid_spans_contour_level(
+                        transfer_volume_grid,
+                        5.0
+                    ):
+                        reagent_color = (
+                            '#009E73'
+                            if reagent_i == 0
+                            else '#CC79A7'
+                        )
+                        ax.contour(
+                            feasibility_x_values,
+                            feasibility_y_values,
+                            transfer_volume_grid,
+                            levels=[5.0],
+                            colors=reagent_color,
+                            linewidths=1.15,
+                            linestyles='dotted',
+                            zorder=4
+                        )
+                        reagent_minimum_handle, = ax.plot(
+                            [],
+                            [],
+                            color=reagent_color,
+                            linewidth=1.15,
+                            linestyle='dotted',
+                            label=(
+                                f'{reagent_name} = 5 uL boundary'
+                            )
+                        )
+                        feasibility_legend_handles.append(
+                            reagent_minimum_handle
+                        )
+
+                if (
+                    target_contour_nm is not None
+                    and _grid_spans_contour_level(
+                        heatmap_array,
+                        target_contour_nm
+                    )
+                ):
+                    ax.contour(
+                        x_values,
+                        y_values,
+                        heatmap_array,
+                        levels=[target_contour_nm],
+                        colors='#000000',
+                        linewidths=1.1,
+                        linestyles='dashdot',
+                        zorder=5
+                    )
+                    target_handle, = ax.plot(
+                        [],
+                        [],
+                        color='#000000',
+                        linewidth=1.1,
+                        linestyle='dashdot',
+                        label=(
+                            f'Target = {target_contour_nm:.0f} nm'
+                        )
+                    )
+                    feasibility_legend_handles.append(target_handle)
+
             _format_2d_gpr_axis(
                 ax
             )
 
-            ax.set_title(
-                plot_title,
-                fontsize=font_sizes['title'],
-                fontweight='normal',
-                pad=14
-            )
+            if feasibility_overlay is None:
+                ax.set_title(
+                    plot_title,
+                    fontsize=font_sizes['title'],
+                    fontweight='normal',
+                    pad=14
+                )
+            else:
+                fig.suptitle(
+                    plot_title,
+                    fontsize=font_sizes['title'],
+                    fontweight='normal',
+                    y=0.975
+                )
 
             colorbar = fig.colorbar(
                 heatmap_mesh,
@@ -1478,11 +1892,31 @@ class Controller(ABC):
                 width=0.9
             )
 
+            if len(feasibility_legend_handles) > 0:
+                fig.legend(
+                    feasibility_legend_handles,
+                    [
+                        handle.get_label()
+                        for handle in feasibility_legend_handles
+                    ],
+                    loc='upper center',
+                    bbox_to_anchor=(0.5, 0.925),
+                    ncol=2,
+                    frameon=False,
+                    fontsize=font_sizes['tick_label'] * 0.68,
+                    handlelength=1.7,
+                    columnspacing=0.9
+                )
+
             fig.subplots_adjust(
                 left=0.15,
                 right=0.86,
                 bottom=0.14,
-                top=0.88
+                top=(
+                    0.75
+                    if feasibility_overlay is not None
+                    else 0.88
+                )
             )
 
             full_plot_path = os.path.join(
@@ -1532,6 +1966,43 @@ class Controller(ABC):
             prediction_plot_path
         )
 
+        target_contour_nm = None
+        try:
+            target_contour_candidate = float(
+                self.robo_params['target']
+            )
+
+            if np.isfinite(target_contour_candidate):
+                target_contour_nm = target_contour_candidate
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
+
+        if feasibility_overlay_data is not None:
+            prediction_feasibility_plot_path = _save_2d_gpr_heatmap(
+                heatmap_array=prediction_array,
+                cmap_name='inferno',
+                plot_title=(
+                    rf'2D GP Predicted $\lambda_{{\max}}$ with '
+                    f'Feasibility Overlay After Batch {plot_batch_number}'
+                ),
+                colorbar_label=(
+                    r'Predicted $\lambda_{\max}$ (nm)'
+                ),
+                plot_filename=(
+                    f'gpr_predictions_feasibility_batch_'
+                    f'{plot_batch_number}.png'
+                ),
+                plot_description=(
+                    '2D GP prediction feasibility-overlay plot'
+                ),
+                feasibility_overlay=feasibility_overlay_data,
+                target_contour_nm=target_contour_nm
+            )
+
+            generated_plot_paths.append(
+                prediction_feasibility_plot_path
+            )
+
         if (
             not hasattr(model, 'prediction_uncertainty')
             or model.prediction_uncertainty is None
@@ -1572,6 +2043,29 @@ class Controller(ABC):
         generated_plot_paths.append(
             uncertainty_plot_path
         )
+
+        if feasibility_overlay_data is not None:
+            uncertainty_feasibility_plot_path = _save_2d_gpr_heatmap(
+                heatmap_array=uncertainty_array,
+                cmap_name='viridis',
+                plot_title=(
+                    '2D GP Predictive Uncertainty with Feasibility Overlay '
+                    f'After Batch {plot_batch_number}'
+                ),
+                colorbar_label='GP predictive SD (nm)',
+                plot_filename=(
+                    f'gpr_uncertainty_feasibility_batch_'
+                    f'{plot_batch_number}.png'
+                ),
+                plot_description=(
+                    '2D GP uncertainty feasibility-overlay plot'
+                ),
+                feasibility_overlay=feasibility_overlay_data
+            )
+
+            generated_plot_paths.append(
+                uncertainty_feasibility_plot_path
+            )
 
         return generated_plot_paths
     
