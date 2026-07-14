@@ -11442,6 +11442,7 @@ class AutoContr(Controller):
         font_sizes = self._get_auto_lambda_plot_font_sizes()
 
         fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=300)
+        fig.set_tight_layout(False)
 
         target_handle = ax.axhline(
             target_lambda,
@@ -11624,7 +11625,7 @@ class AutoContr(Controller):
 
             fig.text(
                 0.5,
-                0.018,
+                0.035,
                 display_note,
                 ha='center',
                 va='center',
@@ -11632,7 +11633,7 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.26
+            bottom_margin = 0.17
         else:
             bottom_margin = 0.14
 
@@ -11864,6 +11865,7 @@ class AutoContr(Controller):
         font_sizes = self._get_auto_lambda_plot_font_sizes()
 
         fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=300)
+        fig.set_tight_layout(False)
 
         target_handle = ax.axhline(
             target_lambda,
@@ -12085,7 +12087,7 @@ class AutoContr(Controller):
 
             fig.text(
                 0.5,
-                0.018,
+                0.035,
                 plot_note,
                 ha='center',
                 va='center',
@@ -12093,7 +12095,7 @@ class AutoContr(Controller):
                 color='0.35'
             )
 
-            bottom_margin = 0.195
+            bottom_margin = 0.17
         else:
             bottom_margin = 0.12
 
