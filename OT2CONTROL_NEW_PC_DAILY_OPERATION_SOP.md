@@ -231,7 +231,20 @@ Disconnect from the robot:
 exit
 ```
 
-## 7. Prepare the new PC controller
+Leave this first Ubuntu tab open at the local PC prompt. Its role is robot/Eve administration and troubleshooting.
+
+Do not run `controller.py` from a robot `#` prompt.
+
+## 7. Open a second Ubuntu tab and prepare the PC controller
+
+Open a new Ubuntu terminal tab on the Windows PC. This preserves the original lab workflow and keeps the two roles visually separate:
+
+```text
+Tab 1: robot SSH, tmux, and Eve administration
+Tab 2: local PC controller and simulations
+```
+
+All commands in the remainder of this SOP are run in Tab 2 unless a step explicitly says to reconnect to the robot.
 
 Activate the validated environment:
 
