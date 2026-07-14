@@ -197,6 +197,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         fixed_reagents = auto.get_fixed_reagents()
         variable_reagents = auto.get_variable_reagents()
         target_value = auto.getModelInfo()["target"] 
+        acquisition_modes = list(
+            auto.robo_params.get(
+                'acquisition_modes',
+                [auto.robo_params.get('acquisition_mode', 'exploit')]
+            )
+        )
 
         try:
             min_conc = auto.get_min_conc()
@@ -218,7 +224,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             fixed_reagents,
             variable_reagents,
             initial_design_numdata=auto.getModelInfo()["initial_data"],
-            batch_size=1,
+            # A portfolio produces one unique condition for each requested
+            # mode, while num_duplicates remains the physical replicate count
+            # for every one of those conditions.
+            batch_size=len(acquisition_modes),
             max_iters=auto.getModelInfo()["max_iterations"],
             min_conc=auto.min_conc,
             max_conc=auto.max_conc,
@@ -236,6 +245,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
                 'balanced_exploration_weight',
                 1.0
             )
+        )
+
+        model.acquisition_modes = acquisition_modes
+        model.portfolio_min_distance = auto.robo_params.get(
+            'portfolio_min_distance',
+            0.05
         )
 
         if (
@@ -951,9 +966,10 @@ class Controller(ABC):
             ]
         )
 
-        # Optional Auto acquisition setting. Older spreadsheets default to
-        # exploit because that reproduces the existing target-distance recipe
-        # selection behavior.
+        # The singular acquisition_mode remains the legacy interface. New
+        # portfolio-enabled Header sheets must make the inactive interface
+        # explicit with ``off`` so an experiment cannot start from an
+        # ambiguous mixture of single-mode and portfolio settings.
         acquisition_mode_value = str(
             header_dict.get(
                 'acquisition_mode',
@@ -993,7 +1009,14 @@ class Controller(ABC):
             'target_ei': 'target_ei',
             'ei': 'target_ei',
             'expected_improvement': 'target_ei',
-            'target_expected_improvement': 'target_ei'
+            'target_expected_improvement': 'target_ei',
+
+            # ``off`` is a Header-interface sentinel, not an optimizer
+            # acquisition mode. It makes the active configuration visible in
+            # the spreadsheet when acquisition_modes is being used.
+            'off': 'off',
+            'none': 'off',
+            'disabled': 'off'
         }
 
         if (
@@ -1001,15 +1024,148 @@ class Controller(ABC):
             not in acquisition_mode_aliases
         ):
             raise ValueError(
-                "Header value acquisition_mode must be one of: "
+                "Header value acquisition_mode must be one of: off, "
                 "exploit, explore, balanced, or target_ei. "
                 f"Received: {acquisition_mode_value!r}."
             )
 
-        self.robo_params['acquisition_mode'] = (
-            acquisition_mode_aliases[
-                acquisition_mode_value
+        singular_acquisition_mode = acquisition_mode_aliases[
+            acquisition_mode_value
+        ]
+
+        # acquisition_modes is an optional ordered portfolio interface. It is
+        # deliberately semicolon-separated rather than comma-separated so
+        # spreadsheet locale formatting cannot be confused with a list.
+        # Older sheets lacking this field retain exact singular behavior.
+        acquisition_modes_present = 'acquisition_modes' in header_dict
+        acquisition_modes_value = str(
+            header_dict.get('acquisition_modes', '')
+        ).strip().lower()
+        acquisition_modes_value = (
+            acquisition_modes_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        if acquisition_modes_value == 'core3':
+            portfolio_acquisition_modes = [
+                'exploit',
+                'explore',
+                'balanced'
             ]
+        elif acquisition_modes_value in ['', 'off', 'none', 'disabled']:
+            portfolio_acquisition_modes = []
+        else:
+            portfolio_acquisition_modes = []
+
+            for raw_mode in acquisition_modes_value.split(';'):
+                normalized_mode = raw_mode.strip().lower()
+                normalized_mode = (
+                    normalized_mode
+                    .replace('-', '_')
+                    .replace(' ', '_')
+                )
+
+                if normalized_mode not in acquisition_mode_aliases:
+                    raise ValueError(
+                        "Header value acquisition_modes contains an "
+                        "unsupported mode. Use canonical modes exploit, "
+                        "explore, balanced, target_ei, or the standalone "
+                        "alias core3. Received: "
+                        f"{raw_mode!r}."
+                    )
+
+                canonical_mode = acquisition_mode_aliases[normalized_mode]
+
+                if canonical_mode == 'off':
+                    raise ValueError(
+                        "Header acquisition_modes may be off only as the "
+                        "complete field value, not as one portfolio member."
+                    )
+
+                portfolio_acquisition_modes.append(canonical_mode)
+
+        if len(portfolio_acquisition_modes) != len(
+            set(portfolio_acquisition_modes)
+        ):
+            raise ValueError(
+                "Header acquisition_modes must not repeat a canonical "
+                "acquisition mode. Replicates are controlled only by "
+                "num_duplicates."
+            )
+
+        if not acquisition_modes_present:
+            if singular_acquisition_mode == 'off':
+                raise ValueError(
+                    "Header acquisition_mode is off, but acquisition_modes "
+                    "is not present. Select one singular mode or add an "
+                    "active acquisition_modes portfolio."
+                )
+
+            resolved_acquisition_modes = [singular_acquisition_mode]
+            using_acquisition_portfolio = False
+
+        elif singular_acquisition_mode == 'off' and portfolio_acquisition_modes:
+            resolved_acquisition_modes = portfolio_acquisition_modes
+            using_acquisition_portfolio = True
+
+        elif singular_acquisition_mode != 'off' and not portfolio_acquisition_modes:
+            resolved_acquisition_modes = [singular_acquisition_mode]
+            using_acquisition_portfolio = False
+
+        elif singular_acquisition_mode == 'off':
+            raise ValueError(
+                "Header acquisition_mode and acquisition_modes are both off. "
+                "Activate exactly one acquisition interface."
+            )
+
+        else:
+            raise ValueError(
+                "Header acquisition_mode and acquisition_modes are both "
+                "active. Set the unused interface to off."
+            )
+
+        # OptimizationModel retains a singular active mode for scoring one
+        # candidate at a time. Portfolio orchestration switches that mode only
+        # while evaluating immutable pre-batch selection records.
+        self.robo_params['acquisition_mode'] = (
+            resolved_acquisition_modes[0]
+        )
+        self.robo_params['acquisition_modes'] = list(
+            resolved_acquisition_modes
+        )
+        self.robo_params['using_acquisition_portfolio'] = (
+            using_acquisition_portfolio
+        )
+
+        portfolio_min_distance_value = str(
+            header_dict.get('portfolio_min_distance', '0.05')
+        ).strip()
+
+        try:
+            portfolio_min_distance = float(
+                portfolio_min_distance_value
+            )
+        except ValueError:
+            raise ValueError(
+                "Header portfolio_min_distance must be a finite value "
+                "between 0 and 1 in normalized RMS recipe space. Received: "
+                f"{portfolio_min_distance_value!r}."
+            )
+
+        if (
+            not math.isfinite(portfolio_min_distance)
+            or portfolio_min_distance < 0.0
+            or portfolio_min_distance > 1.0
+        ):
+            raise ValueError(
+                "Header portfolio_min_distance must be a finite value "
+                "between 0 and 1 in normalized RMS recipe space. Received: "
+                f"{portfolio_min_distance!r}."
+            )
+
+        self.robo_params['portfolio_min_distance'] = (
+            portfolio_min_distance
         )
 
         # Target-aware expected improvement needs a statistically defensible
@@ -1019,11 +1175,11 @@ class Controller(ABC):
         # protocol cannot reach simulation or robot execution with an
         # ill-defined target-EI incumbent policy.
         if (
-            self.robo_params['acquisition_mode'] == 'target_ei'
+            'target_ei' in self.robo_params['acquisition_modes']
             and self.robo_params['num_duplicates'] < 2
         ):
             raise ValueError(
-                "Header acquisition_mode target_ei requires "
+                "Header acquisition_mode(s) target_ei requires "
                 "num_duplicates to be at least 2 so its incumbent is based "
                 "on a replicate-validated condition."
             )
@@ -1038,6 +1194,14 @@ class Controller(ABC):
         print(
             "<<controller>> Auto acquisition mode: "
             f"{self.robo_params['acquisition_mode']}"
+        )
+
+        print(
+            "<<controller>> Auto acquisition portfolio: "
+            + ';'.join(self.robo_params['acquisition_modes'])
+            + " (active)"
+            if self.robo_params['using_acquisition_portfolio']
+            else "<<controller>> Auto acquisition portfolio: off"
         )
 
         # Optional general Auto plotting setting. The value is normalized so
@@ -4727,6 +4891,20 @@ class AutoContr(Controller):
         if prediction_metadata is None:
             prediction_metadata = {}
 
+        if isinstance(prediction_metadata, list):
+            if len(prediction_metadata) != unique_recipes.shape[0]:
+                raise ValueError(
+                    "Portfolio prediction metadata must contain exactly one "
+                    "selection record per unique recipe."
+                )
+
+            prediction_metadata_by_recipe = prediction_metadata
+        else:
+            prediction_metadata_by_recipe = [
+                prediction_metadata
+                for _ in range(unique_recipes.shape[0])
+            ]
+
         def get_recipe_component(recipe_values, reagent_index):
             if recipe_values is None:
                 return None
@@ -4763,6 +4941,7 @@ class AutoContr(Controller):
         target_lambda = self.getModelInfo()["target"]
 
         for recipe_i, recipe in enumerate(unique_recipes):
+            prediction_metadata = prediction_metadata_by_recipe[recipe_i]
             start_i = recipe_i * self.num_duplicates
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
@@ -4882,6 +5061,26 @@ class AutoContr(Controller):
                     balanced_exploration_weight
                 ),
                 'selected_mask': self._format_mask_for_report(selected_mask),
+                'portfolio_selection_index': prediction_metadata.get(
+                    'portfolio_selection_index'
+                ),
+                'portfolio_acquisition_modes': (
+                    self._serialize_auto_audit_value(
+                        prediction_metadata.get(
+                            'portfolio_acquisition_modes'
+                        )
+                    )
+                    if prediction_metadata.get(
+                        'portfolio_acquisition_modes'
+                    ) is not None
+                    else None
+                ),
+                'portfolio_min_distance': self._safe_float_or_none(
+                    prediction_metadata.get('portfolio_min_distance')
+                ),
+                'portfolio_nearest_distance': self._safe_float_or_none(
+                    prediction_metadata.get('portfolio_nearest_distance')
+                ),
                 'optimizer_method': prediction_metadata.get(
                     'optimizer_method'
                 ),
@@ -5323,7 +5522,13 @@ class AutoContr(Controller):
             float or None:
                 Stored incumbent target error for target EI, otherwise None.
         '''
-        if model.acquisition_mode != 'target_ei':
+        acquisition_modes = getattr(
+            model,
+            'acquisition_modes',
+            [model.acquisition_mode]
+        )
+
+        if 'target_ei' not in acquisition_modes:
             return None
 
         incumbent_target_error_nm = (
@@ -9633,6 +9838,19 @@ class AutoContr(Controller):
         num_duplicates = robo_params.get('num_duplicates', None)
         allow_true_zero = robo_params.get('allow_true_zero', None)
         acquisition_mode = robo_params.get('acquisition_mode', 'exploit')
+        acquisition_modes = list(
+            robo_params.get('acquisition_modes', [acquisition_mode])
+        )
+        using_acquisition_portfolio = bool(
+            robo_params.get(
+                'using_acquisition_portfolio',
+                len(acquisition_modes) > 1
+            )
+        )
+        portfolio_min_distance = robo_params.get(
+            'portfolio_min_distance',
+            None
+        )
         balanced_exploration_weight = robo_params.get(
             'balanced_exploration_weight',
             1.0
@@ -10537,11 +10755,22 @@ class AutoContr(Controller):
             f'{self._format_auto_report_value(allow_true_zero)}'
         )
         lines.append(
-            f'- Acquisition mode: '
-            f'`{self._format_auto_report_value(acquisition_mode)}`'
+            f'- Acquisition mode(s): '
+            f'`{self._format_auto_report_value(";".join(acquisition_modes))}`'
         )
 
-        if acquisition_mode == 'balanced':
+        if using_acquisition_portfolio:
+            lines.append(
+                '- Portfolio selection order resolves only near-duplicate '
+                'candidates; every member used the same pre-batch GP and '
+                'target-EI incumbent.'
+            )
+            lines.append(
+                f'- Portfolio minimum normalized RMS distance: '
+                f'{self._format_auto_report_value(portfolio_min_distance)}'
+            )
+
+        if 'balanced' in acquisition_modes:
             lines.append(
                 f'- Balanced exploration weight: '
                 f'{self._format_auto_report_value(balanced_exploration_weight)}'
@@ -10558,10 +10787,18 @@ class AutoContr(Controller):
         lines.append('')
         lines.append('## Optimization Objective')
         lines.append('')
-        lines.append(
-            f'Auto mode used the `{acquisition_mode}` target-aware acquisition '
-            f'mode. {acquisition_objective_description}'
-        )
+        if using_acquisition_portfolio:
+            lines.append(
+                'Auto mode used the ordered target-aware acquisition portfolio '
+                f'`{";".join(acquisition_modes)}`. Each mode selected one '
+                'physically feasible, portfolio-distinct condition before the '
+                'batch was measured or the GP was updated.'
+            )
+        else:
+            lines.append(
+                f'Auto mode used the `{acquisition_mode}` target-aware '
+                f'acquisition mode. {acquisition_objective_description}'
+            )
         lines.append('')
         lines.append(
             'All acquisition modes are converted to minimization scores and '
@@ -13111,7 +13348,8 @@ class AutoContr(Controller):
         self,
         model,
         normalized_recipes,
-        batch_label
+        batch_label,
+        additional_selection_metadata=None
     ):
         '''
         Converts and validates an optimizer proposal before robot preparation.
@@ -13256,6 +13494,11 @@ class AutoContr(Controller):
             executed_volume_balances=executed_volume_balances
         )
 
+        if additional_selection_metadata is not None:
+            metadata.update(
+                copy.deepcopy(additional_selection_metadata)
+            )
+
         # Retain the controller-side audit on the model even when execution is
         # blocked, which makes the failure inspectable in terminal/debug tests.
         model.last_controller_selection_metadata = copy.deepcopy(metadata)
@@ -13337,6 +13580,127 @@ class AutoContr(Controller):
         )
 
         return executed_physical_recipes, metadata
+
+    def _prepare_auto_portfolio_recipes_for_execution(
+        self,
+        model,
+        selection_records,
+        batch_label
+    ):
+        '''
+        Validates an ordered portfolio through the established single-recipe
+        controller contract, then combines its executable conditions.
+
+        Each record is restored onto the model only long enough to reuse the
+        pre-execution provenance, exact-zero, and volume validation path. The
+        model is not fitted or otherwise updated here, so every selection
+        remains tied to the same pre-batch GP snapshot.
+        '''
+        selection_records = list(selection_records)
+
+        if len(selection_records) == 0:
+            raise ValueError(
+                "Cannot prepare an empty acquisition portfolio."
+            )
+
+        original_mode = model.acquisition_mode
+        prepared_recipes = []
+        metadata_records = []
+
+        try:
+            for selection_record in selection_records:
+                acquisition_mode = selection_record['acquisition_mode']
+                model.acquisition_mode = acquisition_mode
+
+                # _prepare_auto_optimizer_recipe_for_execution intentionally
+                # consumes the established last_optimizer_* audit interface.
+                # Restore a per-mode immutable snapshot instead of allowing
+                # the final portfolio mode to overwrite earlier provenance.
+                model.last_optimizer_acquisition_mode = acquisition_mode
+                model.last_optimizer_acquisition_score = selection_record.get(
+                    'acquisition_score'
+                )
+                model.last_optimizer_balanced_exploration_weight = (
+                    selection_record.get('balanced_exploration_weight')
+                )
+                model.last_selected_mask = selection_record.get(
+                    'selected_mask'
+                )
+                model.last_optimizer_method = selection_record.get(
+                    'optimizer_method'
+                )
+                model.last_optimizer_success = selection_record.get(
+                    'optimizer_success'
+                )
+                model.last_optimizer_status = selection_record.get(
+                    'optimizer_status'
+                )
+                model.last_optimizer_message = selection_record.get(
+                    'optimizer_message'
+                )
+                model.last_optimizer_predicted_target_error_nm = (
+                    selection_record.get('predicted_target_error_nm')
+                )
+                model.last_optimizer_predicted_lambda_mean_nm = (
+                    selection_record.get('predicted_lambda_mean_nm')
+                )
+                model.last_optimizer_predicted_lambda_std_nm = (
+                    selection_record.get('predicted_lambda_std_nm')
+                )
+                model.last_optimizer_incumbent_target_error_nm = (
+                    selection_record.get('incumbent_target_error_nm')
+                )
+                model.last_optimizer_volume_balance = copy.deepcopy(
+                    selection_record.get('optimizer_volume_balance')
+                )
+                model.last_mask_results = copy.deepcopy(
+                    selection_record.get('mask_results', [])
+                )
+
+                record_label = (
+                    f"{batch_label}_{selection_record['portfolio_selection_index']}"
+                    f"_{acquisition_mode}"
+                )
+                prepared_recipe, metadata = (
+                    self._prepare_auto_optimizer_recipe_for_execution(
+                        model=model,
+                        normalized_recipes=np.asarray(
+                            selection_record['normalized_recipe'],
+                            dtype=float
+                        ).reshape(1, -1),
+                        batch_label=record_label,
+                        additional_selection_metadata={
+                            'portfolio_selection_index': (
+                                selection_record[
+                                    'portfolio_selection_index'
+                                ]
+                            ),
+                            'portfolio_acquisition_modes': list(
+                                selection_record[
+                                    'portfolio_acquisition_modes'
+                                ]
+                            ),
+                            'portfolio_min_distance': selection_record[
+                                'portfolio_min_distance'
+                            ],
+                            'portfolio_nearest_distance': (
+                                selection_record.get(
+                                    'portfolio_nearest_distance'
+                                )
+                            )
+                        }
+                    )
+                )
+                prepared_recipes.append(prepared_recipe[0])
+                metadata_records.append(metadata)
+        finally:
+            model.acquisition_mode = original_mode
+
+        model.last_controller_selection_metadata = copy.deepcopy(
+            metadata_records
+        )
+
+        return np.asarray(prepared_recipes, dtype=float), metadata_records
 
     @terminal_output_capture_guard
     @error_exit
@@ -13530,19 +13894,54 @@ class AutoContr(Controller):
         # Enter iterative while loop now until max_iters is hit or close to the target
         while not model.quit:
 
-            # Get new recipe from gpr (can either be explore or exploit based on how much uncertainty is in the model)
-            print("<<controller>> selecting next reaction from updated model")
-            X_new = model.getNextReaction()
-            print(f'<<controller>> executing batch {self.batch_num}, Suggested Location: {X_new}')
-
-            (
-                X_new_Denormalized,
-                optimizer_prediction_metadata
-            ) = self._prepare_auto_optimizer_recipe_for_execution(
-                model=model,
-                normalized_recipes=X_new,
-                batch_label=f"batch_{self.batch_num}"
+            # Portfolio members are selected from the same fitted GP snapshot.
+            # The controller deliberately updates the GP only after every
+            # member has been measured and QC-filtered below.
+            acquisition_modes = getattr(
+                model,
+                'acquisition_modes',
+                [model.acquisition_mode]
             )
+
+            print("<<controller>> selecting next reaction from updated model")
+
+            if len(acquisition_modes) == 1:
+                X_new = model.getNextReaction()
+                print(
+                    f'<<controller>> executing batch {self.batch_num}, '
+                    f'Suggested Location: {X_new}'
+                )
+
+                (
+                    X_new_Denormalized,
+                    optimizer_prediction_metadata
+                ) = self._prepare_auto_optimizer_recipe_for_execution(
+                    model=model,
+                    normalized_recipes=X_new,
+                    batch_label=f"batch_{self.batch_num}"
+                )
+            else:
+                selection_records = model.getNextPortfolio(
+                    acquisition_modes=acquisition_modes,
+                    portfolio_min_distance=getattr(
+                        model,
+                        'portfolio_min_distance',
+                        0.05
+                    )
+                )
+                print(
+                    f'<<controller>> executing portfolio batch '
+                    f'{self.batch_num}: ' + ';'.join(acquisition_modes)
+                )
+
+                (
+                    X_new_Denormalized,
+                    optimizer_prediction_metadata
+                ) = self._prepare_auto_portfolio_recipes_for_execution(
+                    model=model,
+                    selection_records=selection_records,
+                    batch_label=f"batch_{self.batch_num}"
+                )
             
             # Duplicate the repaired recipe to create replicate wells.
             recipes = self.duplicate_list_elements(X_new_Denormalized, self.num_duplicates)
@@ -14681,7 +15080,10 @@ class AutoContr(Controller):
                 'optimizer_recipe_repaired',
                 'optimizer_recipe_repair_max_transfer_delta_uL',
                 'mask_result_count',
-                'feasible_mask_result_count'
+                'feasible_mask_result_count',
+                'portfolio_selection_index',
+                'portfolio_min_distance',
+                'portfolio_nearest_distance'
             )
 
             for field_name in selection_scalar_fields:
@@ -14692,6 +15094,14 @@ class AutoContr(Controller):
             export_df['selected_mask'] = [
                 self._serialize_auto_audit_value(
                     selection_metadata.get('selected_mask')
+                )
+            ] * repeated_value_count
+
+            export_df['portfolio_acquisition_modes'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get(
+                        'portfolio_acquisition_modes'
+                    )
                 )
             ] * repeated_value_count
 

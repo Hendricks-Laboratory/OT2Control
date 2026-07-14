@@ -1,3 +1,4 @@
+import copy
 import math
 import GPyOpt
 from pyDOE import lhs
@@ -239,6 +240,14 @@ class OptimizationModel():
         self.optimizer = None
         self.prediction = None
         self.predictions = None
+
+        # Portfolio selection is opt-in. During a portfolio batch, this holds
+        # earlier immutable normalized recipes so later modes can be forced to
+        # contribute a meaningfully distinct feasible condition without
+        # changing the fitted GP or its incumbent.
+        self._portfolio_selected_normalized_recipes = []
+        self.portfolio_min_distance = 0.05
+        self.acquisition_modes = [self.acquisition_mode]
         
     def _minimum_pairwise_distance(self, design):
         '''
@@ -1164,6 +1173,32 @@ class OptimizationModel():
             # 0-5 uL water top-off cases from otherwise valid candidates.
             return float(1e12 + overflow_volume ** 2 + bad_water_penalty)
 
+        # Legacy single-mode callers and isolated tests do not need to carry
+        # portfolio state. Avoid invoking the portfolio helper unless a
+        # portfolio has already selected at least one prior recipe.
+        if getattr(self, '_portfolio_selected_normalized_recipes', []):
+            portfolio_distance = self._get_portfolio_nearest_distance(full_x)
+        else:
+            portfolio_distance = None
+
+        if (
+            portfolio_distance is not None
+            and (
+                portfolio_distance <= 1e-12
+                or portfolio_distance < self.portfolio_min_distance
+            )
+        ):
+            # This candidate is physically executable but would duplicate an
+            # earlier member of the same unmeasured portfolio batch. Use a
+            # penalty larger than every normal acquisition score so SLSQP
+            # seeks its best distinct alternative. Physical infeasibility
+            # remains independently represented by the existing penalty.
+            return float(
+                1e13
+                + self.portfolio_min_distance
+                - portfolio_distance
+            )
+
         predicted_lambda_std = None
 
         if self.acquisition_mode == 'exploit':
@@ -1186,6 +1221,53 @@ class OptimizationModel():
                 None
             )
         )
+
+    def _get_portfolio_nearest_distance(self, normalized_recipe):
+        '''
+        Returns the nearest prior portfolio recipe in normalized RMS distance.
+
+        RMS distance makes the 0--1 normalized concentration scale comparable
+        across two- and three-variable runs, while exact-zero mask choices
+        remain represented by literal zero coordinates.
+        '''
+        selected_recipes = getattr(
+            self,
+            '_portfolio_selected_normalized_recipes',
+            []
+        )
+
+        if len(selected_recipes) == 0:
+            return None
+
+        normalized_recipe = np.asarray(
+            normalized_recipe,
+            dtype=float
+        ).reshape(-1)
+
+        distances = []
+        for selected_recipe in selected_recipes:
+            selected_recipe = np.asarray(
+                selected_recipe,
+                dtype=float
+            ).reshape(-1)
+
+            if selected_recipe.shape != normalized_recipe.shape:
+                raise ValueError(
+                    "Portfolio diversity comparison received incompatible "
+                    "normalized recipe shapes."
+                )
+
+            distances.append(
+                float(
+                    np.sqrt(
+                        np.mean(
+                            (normalized_recipe - selected_recipe) ** 2
+                        )
+                    )
+                )
+            )
+
+        return min(distances)
 
     def _masked_target_distance_objective(self, x_active, mask):
         '''
@@ -1255,7 +1337,26 @@ class OptimizationModel():
 
             volume_balance = self._get_candidate_volume_balance(full_x)
 
-            if volume_balance['volume_feasible']:
+            portfolio_distance = (
+                self._get_portfolio_nearest_distance(full_x)
+                if getattr(
+                    self,
+                    '_portfolio_selected_normalized_recipes',
+                    []
+                )
+                else None
+            )
+
+            if (
+                volume_balance['volume_feasible']
+                and (
+                    portfolio_distance is None
+                    or (
+                        portfolio_distance > 1e-12
+                        and portfolio_distance >= self.portfolio_min_distance
+                    )
+                )
+            ):
                 feasible_points.append(x_active)
 
         if len(feasible_points) < n_restarts:
@@ -2770,6 +2871,241 @@ class OptimizationModel():
         return [
             best_x
         ]
+
+    def getNextPortfolio(self, acquisition_modes, portfolio_min_distance):
+        '''
+        Selects one distinct recipe for each ordered acquisition mode.
+
+        Every mode sees the same already-fitted GP and the same target-EI
+        incumbent. No model update occurs within this method. The written
+        portfolio order matters only when independent mode optima collide:
+        earlier modes retain their candidate and later modes re-optimize
+        outside the normalized-RMS diversity radius.
+
+        params:
+            list[str] acquisition_modes:
+                Ordered canonical modes, one unique condition per member.
+
+            float portfolio_min_distance:
+                Minimum normalized RMS distance between distinct portfolio
+                conditions. Zero disables near-duplicate exclusion but exact
+                duplicate detection still remains fail-closed.
+
+        returns:
+            list[dict]:
+                Immutable selection records in requested mode order.
+        '''
+        acquisition_modes = list(acquisition_modes)
+
+        if len(acquisition_modes) == 0:
+            raise ValueError(
+                "Acquisition portfolio must contain at least one mode."
+            )
+
+        if len(acquisition_modes) != len(set(acquisition_modes)):
+            raise ValueError(
+                "Acquisition portfolio must not repeat a canonical mode."
+            )
+
+        unsupported_modes = [
+            mode for mode in acquisition_modes
+            if mode not in self.IMPLEMENTED_ACQUISITION_MODES
+        ]
+
+        if unsupported_modes:
+            raise NotImplementedError(
+                "Acquisition portfolio contains unsupported mode(s): "
+                + ', '.join(unsupported_modes)
+            )
+
+        try:
+            portfolio_min_distance = float(portfolio_min_distance)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "portfolio_min_distance must be a finite value between 0 "
+                "and 1 in normalized RMS recipe space."
+            )
+
+        if (
+            not math.isfinite(portfolio_min_distance)
+            or portfolio_min_distance < 0.0
+            or portfolio_min_distance > 1.0
+        ):
+            raise ValueError(
+                "portfolio_min_distance must be a finite value between 0 "
+                "and 1 in normalized RMS recipe space."
+            )
+
+        if (
+            'target_ei' in acquisition_modes
+            and getattr(self, 'incumbent_target_error_nm', None) is None
+        ):
+            raise ValueError(
+                "Target-EI is explicitly requested in acquisition_modes, "
+                "but no QC-approved condition-level incumbent target error "
+                "is available. The portfolio batch will not be substituted "
+                "or partially executed."
+            )
+
+        original_mode = self.acquisition_mode
+        original_selected_recipes = getattr(
+            self,
+            '_portfolio_selected_normalized_recipes',
+            []
+        )
+        original_min_distance = getattr(
+            self,
+            'portfolio_min_distance',
+            0.05
+        )
+
+        self.portfolio_min_distance = portfolio_min_distance
+        self._portfolio_selected_normalized_recipes = []
+        selection_records = []
+
+        try:
+            for selection_index, acquisition_mode in enumerate(
+                acquisition_modes
+            ):
+                self.acquisition_mode = acquisition_mode
+                selected_recipe = np.asarray(
+                    self.getNextReaction()[0],
+                    dtype=float
+                ).reshape(-1)
+
+                nearest_distance = self._get_portfolio_nearest_distance(
+                    selected_recipe
+                )
+
+                # A penalty can be returned only when every searched point is
+                # excluded. Fail before controller preparation rather than
+                # silently executing an ineffective duplicate condition.
+                if (
+                    nearest_distance is not None
+                    and (
+                        nearest_distance <= 1e-12
+                        or nearest_distance < portfolio_min_distance
+                    )
+                ):
+                    raise RuntimeError(
+                        "Acquisition portfolio could not find a distinct "
+                        f"feasible recipe for {acquisition_mode!r}. Nearest "
+                        "selected normalized RMS distance was "
+                        f"{nearest_distance:.6f}, below required "
+                        f"{portfolio_min_distance:.6f}."
+                    )
+
+                selected_mask = getattr(self, 'last_selected_mask', None)
+                selected_mask = (
+                    None
+                    if selected_mask is None
+                    else np.asarray(selected_mask).astype(int).tolist()
+                )
+                mask_results = copy.deepcopy(
+                    list(getattr(self, 'last_mask_results', []) or [])
+                )
+                feasible_mask_result_count = sum(
+                    1
+                    for result in mask_results
+                    if (
+                        result.get('x_full') is not None
+                        and result.get('volume_balance') is not None
+                        and result['volume_balance'].get(
+                            'volume_feasible',
+                            False
+                        )
+                    )
+                )
+
+                selection_records.append({
+                    'acquisition_mode': acquisition_mode,
+                    'normalized_recipe': selected_recipe.copy(),
+                    'acquisition_score': getattr(
+                        self,
+                        'last_optimizer_acquisition_score',
+                        None
+                    ),
+                    'balanced_exploration_weight': getattr(
+                        self,
+                        'last_optimizer_balanced_exploration_weight',
+                        None
+                    ),
+                    'selected_mask': selected_mask,
+                    'optimizer_method': getattr(
+                        self,
+                        'last_optimizer_method',
+                        None
+                    ),
+                    'optimizer_success': getattr(
+                        self,
+                        'last_optimizer_success',
+                        None
+                    ),
+                    'optimizer_status': getattr(
+                        self,
+                        'last_optimizer_status',
+                        None
+                    ),
+                    'optimizer_message': getattr(
+                        self,
+                        'last_optimizer_message',
+                        None
+                    ),
+                    'predicted_target_error_nm': getattr(
+                        self,
+                        'last_optimizer_predicted_target_error_nm',
+                        None
+                    ),
+                    'predicted_lambda_mean_nm': getattr(
+                        self,
+                        'last_optimizer_predicted_lambda_mean_nm',
+                        None
+                    ),
+                    'predicted_lambda_std_nm': getattr(
+                        self,
+                        'last_optimizer_predicted_lambda_std_nm',
+                        None
+                    ),
+                    'incumbent_target_error_nm': getattr(
+                        self,
+                        'last_optimizer_incumbent_target_error_nm',
+                        None
+                    ),
+                    'optimizer_volume_balance': copy.deepcopy(
+                        getattr(
+                            self,
+                            'last_optimizer_volume_balance',
+                            {}
+                        ) or {}
+                    ),
+                    'mask_results': mask_results,
+                    'mask_result_count': len(mask_results),
+                    'feasible_mask_result_count': (
+                        feasible_mask_result_count
+                    ),
+                    'portfolio_selection_index': selection_index,
+                    'portfolio_acquisition_modes': list(
+                        acquisition_modes
+                    ),
+                    'portfolio_min_distance': portfolio_min_distance,
+                    'portfolio_nearest_distance': nearest_distance
+                })
+                self._portfolio_selected_normalized_recipes.append(
+                    selected_recipe.copy()
+                )
+
+        finally:
+            self.acquisition_mode = original_mode
+            self._portfolio_selected_normalized_recipes = (
+                original_selected_recipes
+            )
+            self.portfolio_min_distance = original_min_distance
+
+        self.last_portfolio_selection_records = copy.deepcopy(
+            selection_records
+        )
+
+        return selection_records
 
     def update_experiment_data(
         self,

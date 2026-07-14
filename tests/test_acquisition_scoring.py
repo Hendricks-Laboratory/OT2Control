@@ -1450,7 +1450,13 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             ['initial_data', '2']
         ]
 
-    def _parse_header(self, acquisition_mode=None, num_duplicates=None):
+    def _parse_header(
+        self,
+        acquisition_mode=None,
+        num_duplicates=None,
+        acquisition_modes=None,
+        portfolio_min_distance=None
+    ):
         controller = self.Controller()
         controller.robo_params = {}
         controller.DilutionParams = lambda container, volume: (
@@ -1465,6 +1471,15 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         if num_duplicates is not None:
             header.append(['num_duplicates', str(num_duplicates)])
 
+        if acquisition_modes is not None:
+            header.append(['acquisition_modes', acquisition_modes])
+
+        if portfolio_min_distance is not None:
+            header.append([
+                'portfolio_min_distance',
+                str(portfolio_min_distance)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1477,6 +1492,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['auto_plot_profile'], 'standard')
         self.assertEqual(parsed['num_duplicates'], 3)
         self.assertFalse(parsed['allow_true_zero'])
+        self.assertEqual(parsed['acquisition_modes'], ['exploit'])
+        self.assertFalse(parsed['using_acquisition_portfolio'])
 
     def test_canonical_modes_and_documented_aliases_normalize(self):
         cases = {
@@ -1515,6 +1532,46 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
 
         parsed = self._parse_header('exploit', num_duplicates=1)
         self.assertEqual(parsed['num_duplicates'], 1)
+
+    def test_core3_portfolio_requires_explicit_singular_off(self):
+        parsed = self._parse_header(
+            acquisition_mode='off',
+            acquisition_modes='core3',
+            portfolio_min_distance=0.10
+        )
+
+        self.assertEqual(
+            parsed['acquisition_modes'],
+            ['exploit', 'explore', 'balanced']
+        )
+        self.assertTrue(parsed['using_acquisition_portfolio'])
+        self.assertEqual(parsed['portfolio_min_distance'], 0.10)
+
+        with self.assertRaisesRegex(ValueError, 'both active'):
+            self._parse_header(
+                acquisition_mode='exploit',
+                acquisition_modes='core3'
+            )
+
+        with self.assertRaisesRegex(ValueError, 'both off'):
+            self._parse_header(
+                acquisition_mode='off',
+                acquisition_modes='off'
+            )
+
+    def test_portfolio_rejects_duplicate_modes_and_target_ei_singletons(self):
+        with self.assertRaisesRegex(ValueError, 'must not repeat'):
+            self._parse_header(
+                acquisition_mode='off',
+                acquisition_modes='exploit;exploit'
+            )
+
+        with self.assertRaisesRegex(ValueError, 'target_ei requires'):
+            self._parse_header(
+                acquisition_mode='off',
+                acquisition_modes='exploit;target_ei',
+                num_duplicates=1
+            )
 
 
 class PredictiveUncertaintyUnitTests(unittest.TestCase):
@@ -2270,12 +2327,17 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
                 '_standard_normal_cdf',
                 '_calculate_target_error_expected_improvement_nm',
                 '_calculate_acquisition_score',
+                '_get_portfolio_nearest_distance',
                 '_masked_acquisition_objective',
                 '_optimize_single_mask',
                 '_optimize_acquisition_with_masks',
-                'getNextReaction'
+                'getNextReaction',
+                'getNextPortfolio'
             ],
-            extra_namespace={'minimize': _deterministic_minimize}
+            extra_namespace={
+                'copy': copy,
+                'minimize': _deterministic_minimize
+            }
         )
         cls.Controller = _load_auto_controller_methods([
             '_safe_float_or_none',
@@ -2294,6 +2356,7 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             'Normalize_Denormalize_Recipes',
             '_build_auto_optimizer_selection_metadata',
             '_prepare_auto_optimizer_recipe_for_execution',
+            '_prepare_auto_portfolio_recipes_for_execution',
             '_apply_true_zero_transfer_rule_to_volume',
             '_apply_true_zero_transfer_rule_to_recipes',
             '_get_variable_transfer_volumes_for_recipe',
@@ -2482,6 +2545,98 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(
             [result['is_selected'] for result in model.last_mask_results],
             [False, True, False]
+        )
+
+    def test_ordered_portfolio_selects_distinct_immutable_candidates(self):
+        model = self._build_exact_model()
+        model.portfolio_min_distance = 0.10
+
+        with redirect_stdout(io.StringIO()):
+            records = model.getNextPortfolio(
+                acquisition_modes=['exploit', 'explore', 'balanced'],
+                portfolio_min_distance=0.10
+            )
+
+        self.assertEqual(
+            [record['acquisition_mode'] for record in records],
+            ['exploit', 'explore', 'balanced']
+        )
+        self.assertEqual(
+            [record['portfolio_selection_index'] for record in records],
+            [0, 1, 2]
+        )
+        self.assertIsNone(records[0]['portfolio_nearest_distance'])
+        self.assertGreaterEqual(
+            records[1]['portfolio_nearest_distance'],
+            0.10
+        )
+        self.assertGreaterEqual(
+            records[2]['portfolio_nearest_distance'],
+            0.10
+        )
+        self.assertEqual(model.acquisition_mode, 'exploit')
+        self.assertEqual(
+            [record['normalized_recipe'].tolist() for record in records],
+            [[0.0, 0.2], [0.3, 0.4], [0.1, 0.0]]
+        )
+
+        # Later mutation of live optimizer state cannot rewrite a captured
+        # portfolio selection record.
+        model.last_mask_results[0]['objective'] = -999.0
+        self.assertNotEqual(
+            records[-1]['mask_results'][0]['objective'],
+            -999.0
+        )
+
+    def test_target_ei_portfolio_fails_without_valid_incumbent(self):
+        model = self._build_exact_model()
+        model.incumbent_target_error_nm = None
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'explicitly requested'
+        ):
+            model.getNextPortfolio(
+                acquisition_modes=['exploit', 'target_ei'],
+                portfolio_min_distance=0.05
+            )
+
+    def test_portfolio_controller_handoff_preserves_condition_groups(self):
+        model = self._build_exact_model()
+        controller = self._build_exact_controller()
+
+        with redirect_stdout(io.StringIO()):
+            records = model.getNextPortfolio(
+                acquisition_modes=['exploit', 'explore', 'balanced'],
+                portfolio_min_distance=0.10
+            )
+            prepared_recipes, metadata_records = (
+                controller._prepare_auto_portfolio_recipes_for_execution(
+                    model=model,
+                    selection_records=records,
+                    batch_label='portfolio_batch'
+                )
+            )
+            controller._append_auto_model_performance_rows(
+                unique_recipes=prepared_recipes,
+                lambda_max_values=[624.0, 626.0, 620.0, 630.0, 623.0, 627.0],
+                condition_type='optimizer_selected',
+                batch_number=1,
+                prediction_metadata=metadata_records
+            )
+
+        self.assertEqual(prepared_recipes.shape, (3, 2))
+        self.assertEqual(
+            [row['acquisition_mode'] for row in controller.auto_model_performance_rows],
+            ['exploit', 'explore', 'balanced']
+        )
+        self.assertEqual(
+            [row['portfolio_selection_index'] for row in controller.auto_model_performance_rows],
+            [0, 1, 2]
+        )
+        self.assertEqual(
+            [row['actual_lambda_values_raw_nm'] for row in controller.auto_model_performance_rows],
+            [[624.0, 626.0], [620.0, 630.0], [623.0, 627.0]]
         )
 
     def test_every_mode_uses_exact_single_mask_and_cross_mask_audit_path(self):
