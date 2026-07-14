@@ -4882,6 +4882,18 @@ class AutoContr(Controller):
                     balanced_exploration_weight
                 ),
                 'selected_mask': self._format_mask_for_report(selected_mask),
+                'optimizer_method': prediction_metadata.get(
+                    'optimizer_method'
+                ),
+                'optimizer_success': prediction_metadata.get(
+                    'optimizer_success'
+                ),
+                'optimizer_status': prediction_metadata.get(
+                    'optimizer_status'
+                ),
+                'optimizer_message': prediction_metadata.get(
+                    'optimizer_message'
+                ),
                 'active_variable_reagents': (
                     self._get_active_variable_reagents_from_mask(
                         selected_mask
@@ -5541,6 +5553,25 @@ class AutoContr(Controller):
         full_path = os.path.join(self.out_path, relative_path)
         exists_text = 'present' if os.path.exists(full_path) else 'not found'
         return f'- {label}: `{relative_path}` ({exists_text})'
+
+    def _auto_report_not_applicable_file_line(
+        self,
+        relative_path,
+        label,
+        reason
+    ):
+        '''
+        Creates a Markdown bullet for an output which does not apply to the
+        current number of variable reagents.
+
+        Reporting a dimension-specific visualization as ``not applicable``
+        distinguishes an intentionally ungenerated plot from a plot that
+        should have been written but is missing.
+        '''
+        return (
+            f'- {label}: `{relative_path}` '
+            f'(not applicable: {reason})'
+        )
     
     def _summarize_auto_run_status_for_report(self):
         '''
@@ -5959,6 +5990,99 @@ class AutoContr(Controller):
             value_text = f'{value_text} {suffix}'
 
         return self._escape_auto_report_markdown_table_value(value_text)
+
+    def _format_auto_report_volume_summary(
+        self,
+        fixed_volume_uL,
+        variable_volume_uL,
+        water_volume_uL,
+        volume_feasible
+    ):
+        '''
+        Formats a compact volume-balance summary for the Markdown report.
+
+        Full per-reagent and feasibility JSON remains in the performance CSV.
+        The report deliberately presents only the totals needed for a quick
+        human review, preventing the provenance table from becoming too wide.
+        '''
+        numeric_values = [
+            self._safe_auto_report_numeric(value)
+            for value in [
+                fixed_volume_uL,
+                variable_volume_uL,
+                water_volume_uL
+            ]
+        ]
+
+        if all(value is None for value in numeric_values):
+            return '—'
+
+        total_volume_uL = (
+            None
+            if any(value is None for value in numeric_values)
+            else sum(numeric_values)
+        )
+
+        return '; '.join([
+            'fixed=' + self._format_auto_report_table_value(
+                numeric_values[0], suffix='uL'
+            ),
+            'variable=' + self._format_auto_report_table_value(
+                numeric_values[1], suffix='uL'
+            ),
+            'water=' + self._format_auto_report_table_value(
+                numeric_values[2], suffix='uL'
+            ),
+            'total=' + self._format_auto_report_table_value(
+                total_volume_uL, suffix='uL'
+            ),
+            'feasible=' + self._format_auto_report_table_value(
+                volume_feasible
+            )
+        ])
+
+    def _format_auto_report_optimizer_status(
+        self,
+        optimizer_method,
+        optimizer_success,
+        optimizer_status,
+        optimizer_message=None
+    ):
+        '''Formats the selected SciPy optimizer outcome for report tables.'''
+        if (
+            optimizer_method is None
+            and optimizer_success is None
+            and optimizer_status is None
+        ):
+            return '—'
+
+        success_text = (
+            'success'
+            if optimizer_success is True
+            else 'not successful'
+            if optimizer_success is False
+            else 'unknown success'
+        )
+
+        status_parts = [
+            self._format_auto_report_table_value(optimizer_method),
+            'status=' + self._format_auto_report_table_value(
+                optimizer_status
+            ),
+            success_text
+        ]
+
+        # A success status is adequately described by its method and code. A
+        # failure needs its SciPy message in the human-readable report so it
+        # cannot be mistaken for a normal successful selection.
+        if optimizer_success is False and optimizer_message:
+            status_parts.append(
+                'message=' + self._format_auto_report_table_value(
+                    optimizer_message
+                )
+            )
+
+        return '; '.join(status_parts)
 
     def _format_auto_report_replicate_list_value(
         self,
@@ -9957,6 +10081,7 @@ class AutoContr(Controller):
                 'GP SD',
                 'Incumbent target error',
                 'Selected mask',
+                'SciPy result',
                 'Recipe repaired',
                 'Masks evaluated'
             ]
@@ -9970,6 +10095,7 @@ class AutoContr(Controller):
                 'right',
                 'right',
                 'right',
+                'left',
                 'left',
                 'left',
                 'right'
@@ -10055,6 +10181,28 @@ class AutoContr(Controller):
                                 None
                             )
                         ),
+                        self._format_auto_report_optimizer_status(
+                            self._safe_auto_report_get(
+                                row,
+                                'optimizer_method',
+                                None
+                            ),
+                            self._safe_auto_report_get(
+                                row,
+                                'optimizer_success',
+                                None
+                            ),
+                            self._safe_auto_report_get(
+                                row,
+                                'optimizer_status',
+                                None
+                            ),
+                            self._safe_auto_report_get(
+                                row,
+                                'optimizer_message',
+                                None
+                            )
+                        ),
                         self._format_auto_report_table_value(
                             self._safe_auto_report_get(
                                 row,
@@ -10093,8 +10241,8 @@ class AutoContr(Controller):
                 'Executed normalized recipe',
                 'Selected physical recipe',
                 'Executed physical recipe',
-                'Selected volume balance',
-                'Executed volume balance'
+                'Selected volume summary',
+                'Executed volume summary'
             ]
             provenance_alignments = [
                 'right',
@@ -10146,17 +10294,47 @@ class AutoContr(Controller):
                             None
                         )
                     ),
-                    self._format_auto_report_table_value(
+                    self._format_auto_report_volume_summary(
                         self._safe_auto_report_get(
                             row,
-                            'selected_controller_volume_balance',
+                            'selected_fixed_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_variable_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_water_volume_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'selected_volume_feasible',
                             None
                         )
                     ),
-                    self._format_auto_report_table_value(
+                    self._format_auto_report_volume_summary(
                         self._safe_auto_report_get(
                             row,
-                            'executed_controller_volume_balance',
+                            'executed_fixed_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_variable_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_water_volume_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_volume_feasible',
                             None
                         )
                     )
@@ -10939,75 +11117,107 @@ class AutoContr(Controller):
             )
         )
 
+        # Design-space renderers are deliberately dimension-specific.  Record
+        # unavailable renderers as not applicable rather than as missing files
+        # so a two-variable report does not resemble a plotting failure.
+        n_design_dimensions = len(self.variable_reagents)
         design_plot_file_entries = [
             (
                 'initial_maximin_seed_design_1d.png',
-                'Initial maximin seed design 1D reagent-space plot'
+                'Initial maximin seed design 1D reagent-space plot',
+                n_design_dimensions == 1
             ),
             (
                 'auto_design_space_exploration_1d.png',
-                'Auto design-space exploration 1D reagent-space plot'
+                'Auto design-space exploration 1D reagent-space plot',
+                n_design_dimensions == 1
             ),
             (
                 'initial_maximin_seed_design_2d.png',
-                'Initial maximin seed design 2D reagent-space plot'
+                'Initial maximin seed design 2D reagent-space plot',
+                n_design_dimensions == 2
             ),
             (
                 'auto_design_space_exploration_2d.png',
-                'Auto design-space exploration 2D reagent-space plot'
+                'Auto design-space exploration 2D reagent-space plot',
+                n_design_dimensions == 2
             ),
             (
                 'initial_maximin_seed_design_pairwise.png',
-                'Initial maximin seed design pairwise projection plot'
+                'Initial maximin seed design pairwise projection plot',
+                3 <= n_design_dimensions <= 6
             ),
             (
                 'auto_design_space_exploration_pairwise.png',
-                'Auto design-space exploration pairwise projection plot'
+                'Auto design-space exploration pairwise projection plot',
+                3 <= n_design_dimensions <= 6
             ),
             (
                 'initial_maximin_seed_design_3d.png',
-                'Initial maximin seed design 3D reagent-space plot'
+                'Initial maximin seed design 3D reagent-space plot',
+                n_design_dimensions == 3
             ),
             (
                 'auto_design_space_exploration_3d.png',
-                'Auto design-space exploration 3D reagent-space plot'
+                'Auto design-space exploration 3D reagent-space plot',
+                n_design_dimensions == 3
             ),
             (
                 'initial_maximin_seed_design_parallel_coordinates.png',
-                'Initial maximin seed design parallel-coordinate plot'
+                'Initial maximin seed design parallel-coordinate plot',
+                n_design_dimensions >= 4
             ),
             (
                 'auto_design_space_exploration_parallel_coordinates.png',
-                'Auto design-space exploration parallel-coordinate plot'
+                'Auto design-space exploration parallel-coordinate plot',
+                n_design_dimensions >= 4
             ),
             (
                 'initial_maximin_seed_design_pairwise_compact.png',
-                'Initial maximin seed design compact pairwise plot'
+                'Initial maximin seed design compact pairwise plot',
+                n_design_dimensions > 6
             ),
             (
                 'auto_design_space_exploration_pairwise_compact.png',
-                'Auto design-space exploration compact pairwise plot'
+                'Auto design-space exploration compact pairwise plot',
+                n_design_dimensions > 6
             ),
             (
                 'initial_maximin_seed_design_pca.png',
-                'Initial maximin seed design PCA projection plot'
+                'Initial maximin seed design PCA projection plot',
+                n_design_dimensions > 6
             ),
             (
                 'auto_design_space_exploration_pca.png',
-                'Auto design-space exploration PCA projection plot'
+                'Auto design-space exploration PCA projection plot',
+                n_design_dimensions > 6
             )
         ]
 
-        for plot_filename, plot_description in design_plot_file_entries:
-            lines.append(
-                self._auto_report_file_line(
-                    os.path.join(
-                        'Plots',
-                        plot_filename
-                    ),
-                    plot_description
+        for (
+            plot_filename,
+            plot_description,
+            plot_is_applicable
+        ) in design_plot_file_entries:
+            relative_plot_path = os.path.join('Plots', plot_filename)
+
+            if plot_is_applicable:
+                lines.append(
+                    self._auto_report_file_line(
+                        relative_plot_path,
+                        plot_description
+                    )
                 )
-            )
+            else:
+                lines.append(
+                    self._auto_report_not_applicable_file_line(
+                        relative_plot_path,
+                        plot_description,
+                        (
+                            f'{n_design_dimensions}-variable Auto run'
+                        )
+                    )
+                )
         lines.append(
             self._auto_report_file_line(
                 os.path.join('Debug', 'terminal_output.txt'),
@@ -12807,6 +13017,26 @@ class AutoContr(Controller):
                 balanced_exploration_weight
             ),
             'selected_mask': selected_mask_for_audit,
+            'optimizer_method': getattr(
+                model,
+                'last_optimizer_method',
+                None
+            ),
+            'optimizer_success': getattr(
+                model,
+                'last_optimizer_success',
+                None
+            ),
+            'optimizer_status': getattr(
+                model,
+                'last_optimizer_status',
+                None
+            ),
+            'optimizer_message': getattr(
+                model,
+                'last_optimizer_message',
+                None
+            ),
             'predicted_target_error_nm': getattr(
                 model,
                 'last_optimizer_predicted_target_error_nm',

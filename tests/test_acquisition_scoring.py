@@ -1061,6 +1061,10 @@ class AcquisitionRoutingTests(unittest.TestCase):
             'predicted_lambda_std_nm',
             'incumbent_target_error_nm',
             'selected_mask',
+            'optimizer_method',
+            'optimizer_success',
+            'optimizer_status',
+            'optimizer_message',
             'balanced_exploration_weight',
             'selected_normalized_recipe',
             'executed_normalized_recipe',
@@ -1103,6 +1107,10 @@ class AcquisitionRoutingTests(unittest.TestCase):
             'predicted_lambda_std_nm',
             'incumbent_target_error_nm',
             'selected_mask',
+            'optimizer_method',
+            'optimizer_success',
+            'optimizer_status',
+            'optimizer_message',
             'balanced_exploration_weight',
             'selected_normalized_recipe',
             'executed_normalized_recipe',
@@ -1134,11 +1142,13 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('predicted_lambda_std_nm', report_strings)
         self.assertIn('incumbent_target_error_nm', report_strings)
         self.assertIn('selected_mask', report_strings)
+        self.assertIn('SciPy result', report_strings)
         self.assertIn('### Optimizer Recipe Execution Provenance', report_strings)
         self.assertIn('balanced_exploration_weight', report_strings)
         self.assertIn('optimizer_recipe_repaired', report_strings)
         self.assertIn('selected_normalized_recipe', report_strings)
-        self.assertIn('executed_controller_volume_balance', report_strings)
+        self.assertIn('selected_fixed_volume_total_uL', report_strings)
+        self.assertIn('executed_fixed_volume_total_uL', report_strings)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):
@@ -2295,10 +2305,13 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_format_auto_report_value',
             '_count_auto_report_status',
             '_auto_report_file_line',
+            '_auto_report_not_applicable_file_line',
             '_summarize_auto_run_status_for_report',
             '_build_auto_run_status_report_lines',
             '_escape_auto_report_markdown_table_value',
             '_format_auto_report_table_value',
+            '_format_auto_report_volume_summary',
+            '_format_auto_report_optimizer_status',
             '_format_auto_report_replicate_list_value',
             '_build_padded_auto_report_markdown_table',
             '_auto_report_plot_markdown_if_exists',
@@ -2786,7 +2799,16 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             report_text
         )
         self.assertIn('[[0.0,0.2]]', report_text)
-        self.assertIn('"water_volume":70.0', report_text)
+        self.assertIn(
+            'fixed=10 uL; variable=20 uL; water=70 uL; total=100 uL; '
+            'feasible=True',
+            report_text
+        )
+        self.assertIn('SciPy result', report_text)
+        self.assertIn(
+            'not applicable: 2-variable Auto run',
+            report_text
+        )
         self.assertIn('False', report_text)
         self.assertIn(
             'validated target hit for incumbent and stopping decisions',

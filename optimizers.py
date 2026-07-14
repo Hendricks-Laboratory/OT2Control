@@ -1640,6 +1640,15 @@ class OptimizationModel():
         self.last_optimizer_objective = float(best_result['objective'])
         self.last_optimizer_predicted_lambda_max = best_result['predicted_lambda_max']
         self.last_optimizer_volume_balance = best_result['volume_balance']
+        # Preserve the SciPy outcome for the selected feasible mask as
+        # selection-time provenance.  This is intentionally separate from the
+        # acquisition score: a finite feasible candidate can be selected after
+        # a non-success SciPy status, while a successful recovery is recorded
+        # as ``L-BFGS-B recovery`` for later audit.
+        self.last_optimizer_method = best_result.get('optimizer_method')
+        self.last_optimizer_success = best_result.get('success')
+        self.last_optimizer_status = best_result.get('optimizer_status')
+        self.last_optimizer_message = best_result.get('message')
 
         for result in mask_results:
             result_mask = result.get('mask')
