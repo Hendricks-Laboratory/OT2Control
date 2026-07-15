@@ -11,7 +11,10 @@ This guide is intended for a nontechnical audience.
 1. Create a reaction sheet in accordance the the preconditions explained in
 excel\_spreadsheet\_precoditions.txt  
 2. copy the key of your worksheet into the reaction key spreadsheet.  
-3. Make sure that the PlateReader software is not running. If it is, close the window.  
+3. A controller simulation uses `DummyReader` and must not initialize or command the physical
+PlateReader. Before continuing from a successful simulation to a live run, make sure the
+PlateReader software is not running. If it is, close the window so the controller can configure
+and initialize it cleanly.
 4. move into the git directory and run the command `python controller.py`. (Note, for advanced
 users, controller.py has a cli to skip later input stages.
 run `python controller.py -h` for more information)  

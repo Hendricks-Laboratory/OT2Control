@@ -70,9 +70,13 @@ def init_parser():
     parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
     parser.add_argument('-n','--name',help='the name of the google sheet')
     parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
-    parser.add_argument('-s','--simulate',help='runs robot and pr in simulation mode',action='store_true')
+    parser.add_argument(
+        '-s', '--simulate',
+        help='runs the robot/controller in simulation mode without invoking the physical plate reader',
+        action='store_true',
+    )
     parser.add_argument('--no-sim',help='won\'t run simulation at the start.',action='store_true')
-    parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
+    parser.add_argument('--no-pr', help='won\'t invoke the physical plate reader during a live run',action='store_true')
     return parser
 
 def main(serveraddr):
@@ -360,21 +364,30 @@ class Controller(ABC):
     def _init_pr(self, simulate, no_pr):
         '''
         params:  
-            bool simulate: True indicates that the platereader should be launched in simulation
-              mode
-            bool no_pr: True indicates that even if platereader can be run in simulation mode,
-              it should not be. This should be run only for the marginal speedup that can be
-              gained by not using the platereader for certain tests
+            bool simulate: True indicates that the controller is running a simulation. The
+              physical plate reader must not be initialized or commanded in this mode.
+            bool no_pr: True indicates that the physical plate reader should not be used.
         Postconditions:  
-            self.pr is initialized with either a connection to the SPECTROstar if possible and
-              no_pr is false, otherwise, a Dummy with no connection, but the same interface
-              is supplied
+            self.pr is a DummyReader whenever simulate or no_pr is true. A connection to the
+              physical SPECTROstar is attempted only for a live run where both values are false.
+
+        The legacy implementation instantiated PlateReader(simulate=True) and relied on changing
+        SPECTROstar Nano.ini before issuing DDE commands. If the SPECTROstar application was
+        already open, or a previous run had been interrupted, the application could retain its
+        live-hardware state and execute PlateOut, PlateIn, Shake, or scan commands during the
+        controller precheck. Selecting DummyReader here makes simulation isolation independent
+        of external application state.
         '''
-        if no_pr:
+        if simulate or no_pr:
             self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))
         else:
             try:
-                self.pr = PlateReader(os.path.join(self.out_path, 'pr_data'), self.header_data, self.eve_files_path, simulate)
+                self.pr = PlateReader(
+                    os.path.join(self.out_path, 'pr_data'),
+                    self.header_data,
+                    self.eve_files_path,
+                    simulate=False,
+                )
             except:
                 print('<<controller>> failed to initialize platereader, initializing dummy reader')
                 self.pr = DummyReader(os.path.join(self.out_path, 'pr_data'))

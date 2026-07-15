@@ -48,6 +48,9 @@ Eve listener port: 50000
 5. Open SPECTROstar Nano V5.50.
 6. Log in as `USER` with the password field blank.
 7. Confirm the software reports `Ready` and recognizes the correct reader.
+8. Close the SPECTROstar application before starting `controller.py`. The controller opens and
+   configures the application when a live run begins. A simulation uses `DummyReader` and does
+   not need the application open.
 
 Do not perform a firmware update. The validated reader firmware is 1.20.
 
@@ -287,7 +290,7 @@ A `pkg_resources` deprecation warning may appear. It is currently nonfatal. Do n
 Run:
 
 ```bash
-python controller.py -n DEBUG_PC --no-pr
+python controller.py -n DEBUG_PC
 ```
 
 This test:
@@ -295,8 +298,9 @@ This test:
 - Runs the workflow in local simulation.
 - Redirects the simulated connection to `127.0.0.1`.
 - Does not connect to or move the physical robot.
-- Uses a dummy plate reader.
+- Automatically uses a dummy plate reader because the controller is simulating.
 - Does not command a SPECTROstar scan.
+- Must not print any `<<Reader>> executing:` DDE commands.
 
 At the end, the controller asks:
 
@@ -321,6 +325,10 @@ python controller.py -n CNH_077
 ```
 
 When asked whether to run the physical protocol, enter `n` unless a live run has been explicitly approved and all physical checks have passed.
+
+All controller simulations use `DummyReader`. The SPECTROstar tray must not move, shake, scan,
+or load a measurement protocol during the precheck. If any physical reader action occurs during
+simulation, stop and verify that the migration branch includes the plate-reader simulation fix.
 
 ## 10. Live protocol execution
 
@@ -348,7 +356,12 @@ Use it only when:
 - The temperature module is connected.
 - SPECTROstar reports `Ready`.
 - Both plate-reader output paths are available.
+- The required named SPECTROstar measurement protocol exists under `User\Definit`.
 - No other person is using the robot.
+
+After confirming that SPECTROstar reports `Ready`, close the SPECTROstar application before
+starting the controller. The live-run path writes the required settings and initializes the
+application through `DDEClient.exe`.
 
 ## 11. Auto mode
 
@@ -423,6 +436,16 @@ The BMG export configuration uses that exact path as `BackupDir`.
 4. Reopen SPECTROstar V5.50.
 5. Confirm it reports `Ready`.
 6. Do not update firmware.
+
+### SPECTROstar reports that `NC_synthesis` does not exist
+
+`NC_synthesis` is a named SPECTROstar measurement protocol, not a setting in
+`SPECTROstar Nano.ini`. The fresh V5.50 installation does not include the lab's custom protocol
+database. Follow `SPECTROSTAR_CUSTOM_PROTOCOL_MIGRATION.md` to restore the complete working
+`User\Definit` directory from the old-PC program backup before attempting a live run.
+
+This error must not occur during simulation because simulations use `DummyReader` and send no
+DDE commands to SPECTROstar.
 
 ### The robot IP changes
 

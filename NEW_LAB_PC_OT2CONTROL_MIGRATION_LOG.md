@@ -33,6 +33,57 @@ Do not work directly on main for migration changes.
 
 ---
 
+## 2026-07-15 — Physical plate reader activated during simulation
+
+Command:
+
+```bash
+python controller.py -n DEBUG_PC
+```
+
+Observed behavior:
+
+```text
+The controller entered simulation, but sent real DDE commands to SPECTROstar.
+The physical tray moved, the reader shook the plate, and the scan path reached ImportLayout.
+SPECTROstar then reported that NC_synthesis did not exist.
+```
+
+Root cause in `controller.py`:
+
+```text
+Controller._init_pr(simulate=True, no_pr=False) instantiated the real PlateReader.
+PlateReader initialization and scan processing issued physical DDE commands.
+The code relied on SPECTROstar reloading SimulationMode=1 from its INI file.
+That assumption fails when the application is already open or a previous run was interrupted.
+```
+
+Migration fix:
+
+```text
+Any controller simulation now selects DummyReader unconditionally.
+The physical PlateReader is initialized only for a live run where simulate=False and no_pr=False.
+```
+
+Separate SPECTROstar migration finding:
+
+```text
+NC_synthesis is a named measurement protocol in the BMG User\Definit protocol database.
+It is not a SPECTROstar Nano.ini setting.
+The fresh V5.50 installation requires restoration of the complete working User\Definit directory
+from the preserved old-PC program-folder archive.
+```
+
+Validation status:
+
+```text
+Automated reader-selection tests passed locally.
+New-PC DEBUG_PC simulation validation is still required after pulling the fix.
+The NC_synthesis database restore and live dry run remain pending.
+```
+
+---
+
 ## 2. Early strategy decisions
 
 ### Main first, Auto-RTG later
