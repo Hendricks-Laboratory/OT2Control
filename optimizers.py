@@ -1957,7 +1957,11 @@ class OptimizationModel():
 
         return np.clip(repaired_x, 0.0, 1.0)
     
-    def _get_variable_transfer_volumes_for_normalized_candidate(self, x):
+    def _get_variable_transfer_volumes_for_normalized_candidate(
+        self,
+        x,
+        apply_true_zero_repair=True
+    ):
         '''
         Converts one normalized optimizer candidate into variable reagent
         transfer volumes.
@@ -1967,9 +1971,11 @@ class OptimizationModel():
         transfer volumes required to make those concentrations in the final
         reaction volume.
 
-        The candidate is repaired with the true-zero rule before transfer
-        volumes are calculated, so the returned volumes reflect executable
-        robot behavior.
+        By default the candidate is repaired with the true-zero rule before
+        transfer volumes are calculated, so optimization receives executable
+        robot behavior. Read-only diagnostic plots may disable that repair to
+        reveal the physically non-executable interval between exact zero and
+        the 5 uL minimum transfer.
 
         params:
             np.ndarray x:
@@ -1992,7 +1998,10 @@ class OptimizationModel():
         n_dimensions = self._get_dimension()
         x = np.asarray(x, dtype=float).reshape(n_dimensions)
 
-        repaired_x = self._repair_normalized_candidate_for_true_zero(x)
+        if apply_true_zero_repair:
+            repaired_x = self._repair_normalized_candidate_for_true_zero(x)
+        else:
+            repaired_x = np.array(x, dtype=float, copy=True)
 
         min_conc = np.asarray(self.min_conc, dtype=float).reshape(n_dimensions)
         max_conc = np.asarray(self.max_conc, dtype=float).reshape(n_dimensions)
@@ -2019,7 +2028,11 @@ class OptimizationModel():
 
         return variable_transfer_volumes
 
-    def _get_candidate_volume_balance(self, x):
+    def _get_candidate_volume_balance(
+        self,
+        x,
+        apply_true_zero_repair=True
+    ):
         '''
         Calculates the well-volume balance for one normalized optimizer
         candidate.
@@ -2060,8 +2073,11 @@ class OptimizationModel():
             sum(float(volume) for volume in self.fixed_reagent_volumes.values())
         )
 
-        variable_transfer_volumes = self._get_variable_transfer_volumes_for_normalized_candidate(
-            x
+        variable_transfer_volumes = (
+            self._get_variable_transfer_volumes_for_normalized_candidate(
+                x,
+                apply_true_zero_repair=apply_true_zero_repair
+            )
         )
         variable_volume_total = float(sum(variable_transfer_volumes.values()))
         variable_transfer_executable_by_reagent = {
@@ -2128,6 +2144,33 @@ class OptimizationModel():
             'water_transfer_executable': bool(water_transfer_executable),
             'volume_feasible': bool(volume_feasible)
         }
+
+    def get_candidate_volume_balance_for_plotting(self, x):
+        '''
+        Returns read-only physical-feasibility data for one plotting point.
+
+        Higher-dimensional GP visualizations need to display the executable
+        recipe region used by acquisition optimization, including the
+        non-executable interval strictly between 0 and 5 uL. This intentionally
+        small public wrapper prevents controller plotting code from
+        reimplementing or drifting from the authoritative volume rules. Unlike
+        optimization evaluation, it deliberately does not repair near-zero
+        values to exact zero before assessing the displayed point. It does not
+        alter the candidate, fitted GP, optimizer history, or controller state.
+
+        params:
+            np.ndarray x:
+                One normalized recipe with one entry per variable reagent.
+
+        returns:
+            dict:
+                The volume-balance dictionary returned by the internal,
+                dimension-general feasibility evaluator.
+        '''
+        return self._get_candidate_volume_balance(
+            x,
+            apply_true_zero_repair=False
+        )
     
     def _generate_feasible_starting_points(self, n_restarts):
         '''
@@ -2275,6 +2318,119 @@ class OptimizationModel():
         predicted_lambda_std_nm = normalized_std * 600.0
 
         return predicted_lambda_mean_nm, predicted_lambda_std_nm
+
+    def predict_lambda_distribution_nm_batch(
+        self,
+        x_values,
+        chunk_size=4096
+    ):
+        '''
+        Predicts GP mean and standard deviation in nm for normalized recipes.
+
+        This read-only batch counterpart to predict_lambda_distribution_nm()
+        is used by visualization only.  It keeps the established 300--900 nm
+        output conversion and validates the GP standard-deviation contract,
+        while avoiding per-pixel GP calls for conditional slice atlases.
+
+        params:
+            np.ndarray x_values:
+                Two-dimensional array of normalized recipes.  Rows are
+                candidates and columns follow variable_reagents order.
+
+            int chunk_size:
+                Maximum candidates submitted to one GP prediction call.  A
+                bounded default keeps three-variable plots responsive without
+                changing model state.
+
+        returns:
+            tuple(np.ndarray, np.ndarray):
+                Mean lambda max and predictive standard deviation in nm, one
+                value per supplied candidate.
+        '''
+        if self.gp_model is None:
+            raise ValueError(
+                "Cannot predict a GP distribution batch before the GP model "
+                "has been initialized."
+            )
+
+        try:
+            chunk_size = int(chunk_size)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "GP prediction batch chunk_size must be a positive integer."
+            )
+
+        if chunk_size < 1:
+            raise ValueError(
+                "GP prediction batch chunk_size must be at least 1."
+            )
+
+        n_dimensions = self._get_dimension()
+        x_values = np.asarray(x_values, dtype=float)
+
+        if x_values.ndim == 1:
+            x_values = x_values.reshape(1, -1)
+
+        if (
+            x_values.ndim != 2
+            or x_values.shape[1] != n_dimensions
+            or x_values.shape[0] == 0
+        ):
+            raise ValueError(
+                "GP prediction batch requires a nonempty N x D normalized "
+                f"recipe array with D={n_dimensions}."
+            )
+
+        if not np.all(np.isfinite(x_values)):
+            raise ValueError(
+                "GP prediction batch received non-finite normalized recipes."
+            )
+
+        normalized_means = []
+        normalized_stds = []
+        negative_std_roundoff_tolerance = 1e-12
+
+        for start_index in range(0, x_values.shape[0], chunk_size):
+            x_chunk = x_values[start_index:start_index + chunk_size]
+            chunk_mean, chunk_std = self.gp_model.predict(x_chunk)
+
+            chunk_mean = np.asarray(chunk_mean, dtype=float).reshape(-1)
+            chunk_std = np.asarray(chunk_std, dtype=float).reshape(-1)
+
+            if (
+                chunk_mean.shape[0] != x_chunk.shape[0]
+                or chunk_std.shape[0] != x_chunk.shape[0]
+            ):
+                raise ValueError(
+                    "GP prediction batch returned an unexpected output "
+                    "shape."
+                )
+
+            if (
+                not np.all(np.isfinite(chunk_mean))
+                or not np.all(np.isfinite(chunk_std))
+            ):
+                raise ValueError(
+                    "GP prediction batch returned non-finite mean or "
+                    "predictive standard-deviation values."
+                )
+
+            if np.any(chunk_std < -negative_std_roundoff_tolerance):
+                raise ValueError(
+                    "GP prediction batch returned a materially negative "
+                    "predictive standard deviation."
+                )
+
+            normalized_means.append(chunk_mean)
+            normalized_stds.append(np.maximum(chunk_std, 0.0))
+
+        normalized_means = np.concatenate(normalized_means)
+        normalized_stds = np.concatenate(normalized_stds)
+
+        return (
+            normalized_means * 600.0 + 300.0,
+            normalized_stds * 600.0
+        )
     
     def _target_distance_objective(self, x):
         '''

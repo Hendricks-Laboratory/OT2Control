@@ -54,6 +54,7 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.colors import TwoSlopeNorm
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
@@ -11066,6 +11067,44 @@ class AutoContr(Controller):
         )
         lines.append('')
 
+        if len(getattr(self, 'variable_reagents', [])) == 3:
+            lines.append('### Final Conditional GP Slice Atlases')
+            lines.append('')
+            lines.append(
+                'These maps are conditional two-reagent slices through the '
+                'three-reagent fitted GP. Each panel holds its third reagent '
+                'at the renderer-reported observed reference condition '
+                '(best QC-approved when available).'
+            )
+            lines.append('')
+            for plot_filename, plot_title, plot_caption in (
+                (
+                    'gpr_3d_mean_orthogonal_slices_final.png',
+                    'Conditional GP Mean Slices',
+                    'Predicted lambda-max slices, with the target contour '
+                    'and physically infeasible regions shown explicitly.'
+                ),
+                (
+                    'gpr_3d_uncertainty_orthogonal_slices_final.png',
+                    'Conditional GP Uncertainty Slices',
+                    'Predictive GP standard-deviation slices on a shared '
+                    'nanometer scale.'
+                ),
+                (
+                    'gpr_3d_target_probability_orthogonal_slices_final.png',
+                    'Conditional Target-Tolerance Probability Slices',
+                    'Probability of falling within the same target tolerance '
+                    'used by controller stopping.'
+                )
+            ):
+                lines.extend(
+                    self._auto_report_plot_markdown_if_exists(
+                        plot_filename=plot_filename,
+                        title=plot_title,
+                        caption=plot_caption
+                    )
+                )
+
         seed_design_plot_lines = []
         exploration_design_plot_lines = []
 
@@ -11537,6 +11576,547 @@ class AutoContr(Controller):
 
         return report_path
     
+    def _get_auto_target_tolerance_nm(self):
+        '''
+        Returns the condition-level target tolerance shared by Auto decisions.
+
+        The same tolerance controls controller-owned target stopping and the
+        three-variable visualization probability maps.  Keeping this lookup
+        central prevents a plot from silently describing a different success
+        region than the one Auto actually uses.
+        '''
+        tolerance_nm = float(
+            self.robo_params.get('target_tolerance_nm', 10.0)
+        )
+
+        if not math.isfinite(tolerance_nm) or tolerance_nm < 0.0:
+            raise ValueError(
+                "target_tolerance_nm must be a finite, nonnegative number. "
+                f"Received: {tolerance_nm!r}."
+            )
+
+        return tolerance_nm
+
+    def _calculate_auto_target_probability(
+        self,
+        predicted_mean_nm,
+        predicted_std_nm,
+        target_nm,
+        tolerance_nm
+    ):
+        '''
+        Calculates P(|lambda max - target| <= tolerance) under the GP normal
+        predictive distribution.
+
+        A zero standard deviation uses its deterministic limit rather than a
+        division by zero.  The method is vectorized with NumPy and uses only
+        math.erf, keeping it compatible with the project's established Python
+        and SciPy environments without introducing a new dependency.
+        '''
+        predicted_mean_nm = np.asarray(predicted_mean_nm, dtype=float)
+        predicted_std_nm = np.asarray(predicted_std_nm, dtype=float)
+
+        if (
+            predicted_mean_nm.shape != predicted_std_nm.shape
+            or not np.all(np.isfinite(predicted_mean_nm))
+            or not np.all(np.isfinite(predicted_std_nm))
+            or np.any(predicted_std_nm < 0.0)
+        ):
+            raise ValueError(
+                "Target-probability plotting requires finite mean and "
+                "nonnegative standard-deviation arrays of equal shape."
+            )
+
+        target_nm = float(target_nm)
+        tolerance_nm = float(tolerance_nm)
+
+        if (
+            not math.isfinite(target_nm)
+            or not math.isfinite(tolerance_nm)
+            or tolerance_nm < 0.0
+        ):
+            raise ValueError(
+                "Target probability requires a finite target and a finite, "
+                "nonnegative tolerance."
+            )
+
+        probability = np.zeros(predicted_mean_nm.shape, dtype=float)
+        deterministic = predicted_std_nm <= 1e-12
+        probability[deterministic] = (
+            np.abs(predicted_mean_nm[deterministic] - target_nm)
+            <= tolerance_nm
+        ).astype(float)
+
+        stochastic = ~deterministic
+        if np.any(stochastic):
+            standard_deviation = predicted_std_nm[stochastic]
+            lower_z = (
+                target_nm - tolerance_nm - predicted_mean_nm[stochastic]
+            ) / standard_deviation
+            upper_z = (
+                target_nm + tolerance_nm - predicted_mean_nm[stochastic]
+            ) / standard_deviation
+            normal_cdf = np.vectorize(
+                lambda value: 0.5 * (
+                    1.0 + math.erf(value / math.sqrt(2.0))
+                ),
+                otypes=[float]
+            )
+            probability[stochastic] = (
+                normal_cdf(upper_z) - normal_cdf(lower_z)
+            )
+
+        return np.clip(probability, 0.0, 1.0)
+
+    def plot_3D_GPR_orthogonal_slices(
+        self,
+        model,
+        batch_number=None,
+        final_snapshot=False,
+        grid_size=121
+    ):
+        '''
+        Saves conditional two-dimensional GP slice atlases for exactly three
+        variable reagents.
+
+        Each panel varies a pair of reagents over their physical concentration
+        ranges while holding the third reagent at one documented reference
+        recipe.  The three companion atlases show predicted lambda max,
+        predictive GP standard deviation, and the probability of landing
+        within Auto's actual condition-level target tolerance.  Feasibility is
+        evaluated by OptimizationModel's authoritative volume-balance logic,
+        so the plotting layer cannot introduce a competing transfer rule.
+
+        This renderer is observational only: it never updates the GP, changes
+        acquisition state, repairs recipes, or touches robot-facing data.
+        '''
+        generated_plot_paths = []
+        reagent_names = [
+            str(reagent_name)
+            for reagent_name in list(
+                getattr(self, 'variable_reagents', [])
+            )
+        ]
+
+        if len(reagent_names) != 3:
+            print(
+                "<<controller>> skipping orthogonal GP slice plots because "
+                "there are not exactly three variable reagents"
+            )
+            return generated_plot_paths
+
+        if model is None:
+            raise ValueError(
+                "3D GP slice plots require an initialized OptimizationModel."
+            )
+
+        try:
+            grid_size = int(grid_size)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("3D GP slice grid_size must be an integer.")
+
+        if grid_size < 21:
+            raise ValueError(
+                "3D GP slice grid_size must be at least 21 for a useful "
+                "conditional map."
+            )
+
+        predict_batch = getattr(
+            model,
+            'predict_lambda_distribution_nm_batch',
+            None
+        )
+        balance_for_plotting = getattr(
+            model,
+            'get_candidate_volume_balance_for_plotting',
+            None
+        )
+
+        if not callable(predict_batch) or not callable(balance_for_plotting):
+            raise AttributeError(
+                "3D GP slice plots require the read-only batch-prediction "
+                "and feasibility helpers supplied by OptimizationModel."
+            )
+
+        bounds = []
+        for reagent_index, reagent_name in enumerate(reagent_names):
+            lower_bound = self._get_auto_design_bound_value(
+                self.min_conc,
+                reagent_index,
+                reagent_name
+            )
+            upper_bound = self._get_auto_design_bound_value(
+                self.max_conc,
+                reagent_index,
+                reagent_name
+            )
+
+            if (
+                not np.isfinite(lower_bound)
+                or not np.isfinite(upper_bound)
+                or upper_bound <= lower_bound
+            ):
+                raise ValueError(
+                    "3D GP slice plots require finite increasing "
+                    f"concentration bounds for {reagent_name}."
+                )
+
+            bounds.append((float(lower_bound), float(upper_bound)))
+
+        target_nm = float(self.getModelInfo()['target'])
+        tolerance_nm = self._get_auto_target_tolerance_nm()
+
+        # Prefer the best QC-approved condition because it is the most useful
+        # scientific operating point.  The first complete finite observation
+        # is a deterministic fallback for early debug runs without an eligible
+        # target incumbent.
+        reference_recipe = None
+        reference_label = None
+        ranked_rows = []
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            values = []
+            for reagent_name in reagent_names:
+                try:
+                    value = float(row.get(f'{reagent_name}_concentration'))
+                except (TypeError, ValueError):
+                    value = np.nan
+                values.append(value)
+
+            if not np.all(np.isfinite(values)):
+                continue
+
+            try:
+                target_error = float(row.get('target_error_nm'))
+            except (TypeError, ValueError):
+                target_error = np.inf
+
+            is_qc_approved = bool(
+                row.get('use_for_model_training', False)
+                and row.get('eligible_for_target_incumbent', False)
+                and math.isfinite(target_error)
+            )
+            ranked_rows.append((not is_qc_approved, target_error, values))
+
+        if len(ranked_rows) > 0:
+            ranked_rows.sort(key=lambda item: (item[0], item[1]))
+            reference_recipe = np.asarray(ranked_rows[0][2], dtype=float)
+            if not ranked_rows[0][0]:
+                reference_label = 'best QC-approved observed condition'
+            else:
+                reference_label = 'first available observed condition'
+
+        if reference_recipe is None:
+            raise ValueError(
+                "3D GP slice plots require at least one complete observed "
+                "condition to define a scientifically interpretable slice."
+            )
+
+        reference_normalized = np.asarray([
+            (reference_recipe[index] - bounds[index][0])
+            / (bounds[index][1] - bounds[index][0])
+            for index in range(3)
+        ], dtype=float)
+
+        if not np.all(
+            np.isfinite(reference_normalized)
+            & (reference_normalized >= -1e-9)
+            & (reference_normalized <= 1.0 + 1e-9)
+        ):
+            raise ValueError(
+                "The selected 3D slice reference recipe lies outside the "
+                "configured Auto concentration bounds."
+            )
+
+        # A measured-condition overlay is deliberately restricted to rows that
+        # were accepted into model training.  That communicates the data the
+        # fitted GP actually represents without treating QC-excluded values as
+        # equivalent observations.
+        observed_conditions = []
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            if not row.get('use_for_model_training', False):
+                continue
+
+            observed_recipe = []
+            for reagent_name in reagent_names:
+                try:
+                    concentration = float(
+                        row.get(f'{reagent_name}_concentration')
+                    )
+                except (TypeError, ValueError):
+                    concentration = np.nan
+                observed_recipe.append(concentration)
+
+            if not np.all(np.isfinite(observed_recipe)):
+                continue
+
+            normalized_recipe = np.asarray([
+                (observed_recipe[index] - bounds[index][0])
+                / (bounds[index][1] - bounds[index][0])
+                for index in range(3)
+            ], dtype=float)
+
+            if not np.all(np.isfinite(normalized_recipe)):
+                continue
+
+            observed_conditions.append({
+                'physical_recipe': np.asarray(observed_recipe, dtype=float),
+                'normalized_recipe': normalized_recipe
+            })
+
+        normalized_axis_values = np.linspace(0.0, 1.0, grid_size)
+        slice_half_width = 0.5 / float(grid_size - 1)
+        orientations = ((0, 1, 2), (0, 2, 1), (1, 2, 0))
+        panel_data = []
+
+        for x_index, y_index, fixed_index in orientations:
+            x_normalized, y_normalized = np.meshgrid(
+                normalized_axis_values,
+                normalized_axis_values,
+                indexing='xy'
+            )
+            recipes = np.tile(
+                reference_normalized,
+                (x_normalized.size, 1)
+            )
+            recipes[:, x_index] = x_normalized.ravel(order='C')
+            recipes[:, y_index] = y_normalized.ravel(order='C')
+
+            predicted_mean, predicted_std = predict_batch(recipes)
+            predicted_mean = np.asarray(predicted_mean, dtype=float).reshape(
+                x_normalized.shape
+            )
+            predicted_std = np.asarray(predicted_std, dtype=float).reshape(
+                x_normalized.shape
+            )
+
+            feasible = np.zeros(recipes.shape[0], dtype=bool)
+            water_volume = np.full(recipes.shape[0], np.nan, dtype=float)
+            for point_index, recipe in enumerate(recipes):
+                balance = balance_for_plotting(recipe)
+                feasible[point_index] = bool(balance['volume_feasible'])
+                water_volume[point_index] = float(balance['water_volume'])
+
+            panel_data.append({
+                'x_index': x_index,
+                'y_index': y_index,
+                'fixed_index': fixed_index,
+                'x_physical': (
+                    bounds[x_index][0]
+                    + x_normalized * (bounds[x_index][1] - bounds[x_index][0])
+                ),
+                'y_physical': (
+                    bounds[y_index][0]
+                    + y_normalized * (bounds[y_index][1] - bounds[y_index][0])
+                ),
+                'mean_nm': predicted_mean,
+                'std_nm': predicted_std,
+                'probability': self._calculate_auto_target_probability(
+                    predicted_mean,
+                    predicted_std,
+                    target_nm,
+                    tolerance_nm
+                ),
+                'feasible': feasible.reshape(x_normalized.shape),
+                'water_volume_uL': water_volume.reshape(x_normalized.shape)
+            })
+
+        feasible_mean_chunks = [
+            panel['mean_nm'][panel['feasible']]
+            for panel in panel_data
+            if np.any(panel['feasible'])
+        ]
+        feasible_std_chunks = [
+            panel['std_nm'][panel['feasible']]
+            for panel in panel_data
+            if np.any(panel['feasible'])
+        ]
+
+        if len(feasible_mean_chunks) == 0 or len(feasible_std_chunks) == 0:
+            raise ValueError(
+                "No physically executable points were available for the 3D "
+                "conditional GP slices."
+            )
+
+        feasible_mean_values = np.concatenate(feasible_mean_chunks)
+        feasible_std_values = np.concatenate(feasible_std_chunks)
+
+        mean_extent = max(
+            abs(float(np.min(feasible_mean_values)) - target_nm),
+            abs(float(np.max(feasible_mean_values)) - target_nm),
+            1.0
+        )
+        mean_norm = TwoSlopeNorm(
+            vmin=target_nm - mean_extent,
+            vcenter=target_nm,
+            vmax=target_nm + mean_extent
+        )
+        max_std_nm = max(float(np.max(feasible_std_values)), 1.0)
+
+        field_definitions = (
+            (
+                'mean',
+                'Predicted $\\lambda_{max}$ (nm)',
+                lambda panel: panel['mean_nm'],
+                'coolwarm',
+                mean_norm,
+                f'Conditional GP mean; target = {target_nm:g} nm'
+            ),
+            (
+                'uncertainty',
+                'Predictive GP SD (nm)',
+                lambda panel: panel['std_nm'],
+                'viridis',
+                plt.Normalize(vmin=0.0, vmax=max_std_nm),
+                'Conditional GP predictive uncertainty'
+            ),
+            (
+                'target_probability',
+                'P(|$\\lambda_{max}$ - target| <= tolerance)',
+                lambda panel: panel['probability'],
+                'cividis',
+                plt.Normalize(vmin=0.0, vmax=1.0),
+                (
+                    'Probability within the controller target tolerance '
+                    f'({tolerance_nm:g} nm)'
+                )
+            )
+        )
+        if final_snapshot:
+            final_suffix = 'final'
+        else:
+            if batch_number is None:
+                batch_number = getattr(self, 'batch_num', 0)
+            final_suffix = f'after_batch_{int(batch_number)}'
+
+        for field_name, colorbar_label, value_getter, colormap, norm, title in (
+            field_definitions
+        ):
+            figure, axes = plt.subplots(1, 3, figsize=(17.5, 5.6))
+            # Reserve a stable title/annotation band and a dedicated right
+            # margin for the shared colorbar.  tight_layout cannot reliably
+            # account for a colorbar spanning several axes.
+            figure.subplots_adjust(
+                left=0.065,
+                right=0.875,
+                bottom=0.14,
+                top=0.76,
+                wspace=0.24
+            )
+            image = None
+
+            for axis, panel in zip(axes, panel_data):
+                field_values = np.ma.masked_where(
+                    ~panel['feasible'],
+                    value_getter(panel)
+                )
+                image = axis.pcolormesh(
+                    panel['x_physical'],
+                    panel['y_physical'],
+                    field_values,
+                    shading='auto',
+                    cmap=colormap,
+                    norm=norm
+                )
+                axis.contourf(
+                    panel['x_physical'],
+                    panel['y_physical'],
+                    (~panel['feasible']).astype(float),
+                    levels=[0.5, 1.5],
+                    colors=['#c7c7c7'],
+                    alpha=0.70
+                )
+
+                if field_name == 'mean':
+                    axis.contour(
+                        panel['x_physical'],
+                        panel['y_physical'],
+                        panel['mean_nm'],
+                        levels=[target_nm],
+                        colors=['#111111'],
+                        linewidths=1.2
+                    )
+
+                if field_name == 'target_probability':
+                    axis.contour(
+                        panel['x_physical'],
+                        panel['y_physical'],
+                        panel['probability'],
+                        levels=[0.5],
+                        colors=['#ffffff'],
+                        linewidths=1.0
+                    )
+
+                x_index = panel['x_index']
+                y_index = panel['y_index']
+                fixed_index = panel['fixed_index']
+                for observation in observed_conditions:
+                    if abs(
+                        observation['normalized_recipe'][fixed_index]
+                        - reference_normalized[fixed_index]
+                    ) > slice_half_width:
+                        continue
+
+                    axis.scatter(
+                        observation['physical_recipe'][x_index],
+                        observation['physical_recipe'][y_index],
+                        marker='o',
+                        s=35,
+                        facecolors='white',
+                        edgecolors='#202020',
+                        linewidths=0.8,
+                        zorder=4
+                    )
+
+                axis.scatter(
+                    reference_recipe[x_index],
+                    reference_recipe[y_index],
+                    marker='*',
+                    s=105,
+                    facecolors='#f2c14e',
+                    edgecolors='#1a1a1a',
+                    linewidths=0.8,
+                    zorder=5
+                )
+                axis.set_xlabel(
+                    self._format_auto_design_axis_label(reagent_names[x_index])
+                )
+                axis.set_ylabel(
+                    self._format_auto_design_axis_label(reagent_names[y_index])
+                )
+                axis.set_title(
+                    f'Hold {reagent_names[fixed_index]} = '
+                    f'{reference_recipe[fixed_index]:.4g} mM',
+                    fontsize=10
+                )
+
+            colorbar = figure.colorbar(
+                image,
+                ax=list(axes),
+                shrink=0.91,
+                pad=0.02
+            )
+            colorbar.set_label(colorbar_label)
+            figure.suptitle(title, fontsize=15, y=0.955)
+            figure.text(
+                0.5,
+                0.865,
+                'Gray regions are physically infeasible; white markers are '
+                'near-slice GP-training conditions; star = '
+                f'{reference_label}.',
+                ha='center',
+                va='center',
+                fontsize=8
+            )
+            output_path = os.path.join(
+                self.plot_path,
+                f'gpr_3d_{field_name}_orthogonal_slices_{final_suffix}.png'
+            )
+            figure.savefig(output_path, dpi=200)
+            plt.close(figure)
+            generated_plot_paths.append(output_path)
+
+        return generated_plot_paths
+
     def _update_auto_quit_from_condition_level_performance(
         self,
         model,
@@ -11577,9 +12157,7 @@ class AutoContr(Controller):
 
         # Defaults are conservative. These can later be moved into the Header
         # sheet if we want them user-configurable from the input spreadsheet.
-        target_tolerance_nm = float(
-            self.robo_params.get('target_tolerance_nm', 10.0)
-        )
+        target_tolerance_nm = self._get_auto_target_tolerance_nm()
         replicate_sd_tolerance_nm = (
             self._get_auto_replicate_sd_tolerance_nm()
         )
@@ -11854,7 +12432,9 @@ class AutoContr(Controller):
                 standard:
                     Refreshes the fitted two-dimensional GP prediction grid and
                     generates prediction and uncertainty heatmaps when there
-                    are exactly two variable reagents.
+                    are exactly two variable reagents. For exactly three
+                    reagents, generates conditional mean, uncertainty, and
+                    target-tolerance probability slice atlases instead.
 
                 final_only or off:
                     Generates nothing.
@@ -11868,10 +12448,10 @@ class AutoContr(Controller):
                     exploration plots, and the final Auto report.
 
                 final_only:
-                    Generates the same final outputs. For a two-variable run,
-                    it first refreshes the fitted GP grid and generates one
-                    final prediction/uncertainty pair because per-batch GP
-                    plotting was suppressed.
+                    Generates the same final outputs. Two-variable runs first
+                    refresh the fitted GP grid for one final heatmap pair;
+                    three-variable runs generate one final conditional-slice
+                    atlas set because per-batch plotting was suppressed.
 
                 off:
                     Generates no automatic plots or report.
@@ -11886,8 +12466,8 @@ class AutoContr(Controller):
                 One of after_measurement, after_model_update, or final.
 
             OptimizationModel or None model:
-                Current Auto optimization model. Required for two-dimensional
-                GP prediction and uncertainty heatmaps.
+                Current Auto optimization model. Required for GP heatmaps or
+                three-variable conditional slice atlases.
 
             int or None batch_number:
                 Completed batch represented by the generated outputs.
@@ -12079,6 +12659,25 @@ class AutoContr(Controller):
                 batch_number=plot_batch_number
             )
 
+        def _plot_3d_gp_slices(
+            optimization_model,
+            plot_batch_number,
+            final_snapshot=False
+        ):
+            '''Generates read-only conditional GP slices from the fitted GP.'''
+            if optimization_model is None:
+                print(
+                    "<<controller warning>> skipping automatic 3D GP slice "
+                    "plots because no optimization model was supplied"
+                )
+                return []
+
+            return self.plot_3D_GPR_orthogonal_slices(
+                model=optimization_model,
+                batch_number=plot_batch_number,
+                final_snapshot=final_snapshot
+            )
+
         if normalized_stage == 'after_measurement':
             _run_output_step(
                 (
@@ -12123,6 +12722,18 @@ class AutoContr(Controller):
                     )
                 )
 
+            elif n_variable_reagents == 3:
+                _run_output_step(
+                    (
+                        f"3D conditional GP slice atlases after batch "
+                        f"{completed_batch_number}"
+                    ),
+                    lambda: _plot_3d_gp_slices(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number
+                    )
+                )
+
         elif normalized_stage == 'final':
             # final_only suppresses all per-batch GP plots, so create one final
             # fitted-model snapshot here when exactly two variables are used.
@@ -12141,6 +12752,22 @@ class AutoContr(Controller):
                     lambda: _refresh_and_plot_2d_gp(
                         optimization_model=model,
                         plot_batch_number=completed_batch_number
+                    )
+                )
+
+            if len(
+                getattr(
+                    self,
+                    'variable_reagents',
+                    []
+                )
+            ) == 3:
+                _run_output_step(
+                    'final 3D conditional GP slice atlases',
+                    lambda: _plot_3d_gp_slices(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number,
+                        final_snapshot=True
                     )
                 )
 

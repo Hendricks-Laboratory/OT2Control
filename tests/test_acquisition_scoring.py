@@ -1287,6 +1287,7 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
             '_summarize_duplicate_lambda_values',
             '_get_auto_replicate_outlier_threshold_nm',
             '_get_auto_replicate_sd_tolerance_nm',
+            '_get_auto_target_tolerance_nm',
             '_run_lambda_replicate_qc',
             '_get_auto_model_training_decision_from_replicate_qc',
             '_get_auto_target_eligibility_decision',
@@ -3218,6 +3219,91 @@ class CumulativeGpHistoryTests(unittest.TestCase):
         self.assertEqual(model.curr_iter, 3)
         self.assertTrue(model.quit)
         self.assertEqual(update_quit_calls, [])
+
+
+class ThreeVariableSliceSupportTests(unittest.TestCase):
+    '''Hardware-free checks for the read-only 3D GP slice primitives.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.BatchPredictionModel = _load_optimization_model_methods([
+            '_get_dimension',
+            '_get_variable_transfer_volumes_for_normalized_candidate',
+            '_get_candidate_volume_balance',
+            'get_candidate_volume_balance_for_plotting',
+            'predict_lambda_distribution_nm_batch'
+        ])
+        cls.SliceController = _load_auto_controller_methods([
+            '_get_auto_target_tolerance_nm',
+            '_calculate_auto_target_probability'
+        ])
+
+    def test_batch_prediction_converts_mean_and_standard_deviation_units(self):
+        class FakeGp:
+            def predict(self, x_values):
+                rows = x_values.shape[0]
+                return (
+                    np.full((rows, 1), 0.55),
+                    np.full((rows, 1), 0.10)
+                )
+
+        model = self.BatchPredictionModel()
+        model.variable_reagents = ['A', 'B', 'C']
+        model.gp_model = FakeGp()
+
+        mean_nm, std_nm = model.predict_lambda_distribution_nm_batch(
+            np.array([[0.0, 0.1, 0.2], [0.3, 0.4, 0.5]]),
+            chunk_size=1
+        )
+
+        np.testing.assert_allclose(mean_nm, [630.0, 630.0])
+        np.testing.assert_allclose(std_nm, [60.0, 60.0])
+
+    def test_target_probability_is_symmetric_and_has_correct_zero_sd_limit(self):
+        controller = self.SliceController()
+        probability = controller._calculate_auto_target_probability(
+            predicted_mean_nm=np.array([620.0, 630.0, 640.0]),
+            predicted_std_nm=np.array([0.0, 0.0, 0.0]),
+            target_nm=625.0,
+            tolerance_nm=5.0
+        )
+
+        np.testing.assert_allclose(probability, [1.0, 1.0, 0.0])
+
+        stochastic_probability = controller._calculate_auto_target_probability(
+            predicted_mean_nm=np.array([620.0, 630.0]),
+            predicted_std_nm=np.array([8.0, 8.0]),
+            target_nm=625.0,
+            tolerance_nm=10.0
+        )
+        self.assertAlmostEqual(
+            stochastic_probability[0],
+            stochastic_probability[1],
+            places=12
+        )
+
+    def test_plotting_feasibility_preserves_nonexecutable_true_zero_band(self):
+        model = self.BatchPredictionModel()
+        model.variable_reagents = ['A']
+        model.min_conc = [0.0]
+        model.max_conc = [1.0]
+        model.total_volume = 100.0
+        model.fixed_reagent_volumes = {}
+        model._get_variable_reagent_stock_conc = lambda reagent_name: 1.0
+
+        # A 0.03 normalized concentration would transfer 3 uL. It must be
+        # displayed as infeasible rather than silently repaired to exact zero.
+        balance = model.get_candidate_volume_balance_for_plotting(
+            np.array([0.03])
+        )
+
+        self.assertFalse(balance['volume_feasible'])
+        self.assertFalse(balance['variable_transfers_executable'])
+
+    def test_slice_tolerance_uses_the_controller_stop_setting(self):
+        controller = self.SliceController()
+        controller.robo_params = {'target_tolerance_nm': 7.5}
+        self.assertEqual(controller._get_auto_target_tolerance_nm(), 7.5)
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):
