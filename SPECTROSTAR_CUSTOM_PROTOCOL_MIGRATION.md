@@ -1,191 +1,181 @@
 # SPECTROstar Nano Custom Protocol Migration
 
-## Purpose
+## What must be transferred
 
-Restore the lab's custom SPECTROstar Nano V5.50 measurement protocols, including
-`NC_synthesis`, from the preserved old-PC program folder to the replacement PC.
+`NC_synthesis` is not a setting in `SPECTROstar Nano.ini`. It is a named BMG measurement
+protocol stored in the related database files inside the complete `User\Definit` folder.
 
-`NC_synthesis` is not an INI setting. OT2Control passes it to BMG's `DDEClient.exe` as a named
-measurement protocol located in:
+Old working lab-PC folder:
 
 ```text
 C:\Program Files\SPECTROstar Nano V5.50\User\Definit
 ```
 
-On the replacement PC, that legacy code-compatible path is a junction to the official install:
+New-PC real installation folder:
 
 ```text
 C:\Program Files (x86)\BMG\SPECTROstar Nano\User\Definit
 ```
 
-The files in `Definit` form a related protocol database. Do not copy an individual `.DB`, `.PX`,
-or similarly named file by itself. Preserve and restore the complete directory as one set.
-
-## Preconditions
-
-- The preserved old-PC `SPECTROstar Nano V5.50` program-folder archive is available.
-- The official SPECTROstar Nano V5.50 software is installed on the replacement PC.
-- The legacy junction path has already been created and verified.
-- SPECTROstar is not running on either PC while its protocol files are copied.
-- PowerShell is opened as Administrator for changes under `Program Files (x86)`.
-
-Do not update reader firmware during this procedure.
-
-## 1. Inspect the old working protocol database
-
-Run on the **old lab PC in normal PowerShell**. This is read-only:
-
-```powershell
-Get-ChildItem "C:\Program Files\SPECTROstar Nano V5.50\User\Definit" -File |
-Sort-Object Name |
-Select-Object Name,Length,LastWriteTime
-```
-
-The protocol name may be stored inside BMG database files rather than in a file literally named
-`NC_synthesis`. Therefore, the absence of a file named `NC_synthesis` does not prove that the
-working database lacks the protocol.
-
-## 2. Extract the preserved old-PC program archive on the replacement PC
-
-Extract it into a neutral staging folder, not into `Program Files`. Example:
+The new PC also has this legacy junction path used by OT2Control:
 
 ```text
-C:\Users\science_356_lab\Desktop\SPECTROstar_old_PC_staging\SPECTROstar Nano V5.50
+C:\Program Files\SPECTROstar Nano V5.50\User\Definit
 ```
 
-Confirm that the staged database exists. Run on the **new PC in PowerShell**:
+That junction points to the real new-PC installation. Perform the manual replacement through
+the real `Program Files (x86)` location.
 
-```powershell
-Test-Path "$env:USERPROFILE\Desktop\SPECTROstar_old_PC_staging\SPECTROstar Nano V5.50\User\Definit"
-```
+Copy the complete `Definit` folder. Do not copy only one `.DB`, `.PX`, or similarly named file;
+the files form one related protocol database.
 
-Expected result:
+## Option A — Use the preserved old-PC program ZIP
+
+If the migration archive already contains the complete old working folder
+`SPECTROstar Nano V5.50`, the old lab PC does not need to be touched again.
+
+1. Download the preserved old-PC SPECTROstar program ZIP onto the new PC.
+2. Extract it to a temporary folder on the new PC Desktop.
+3. Open the extracted folders until this folder is visible:
+
+   ```text
+   SPECTROstar Nano V5.50\User\Definit
+   ```
+
+4. Confirm that `Definit` contains the old database files. The protocol name may be stored inside
+   those database files, so there may not be a file literally named `NC_synthesis`.
+5. Continue to **Install the old protocol database on the new PC** below.
+
+## Option B — Copy the folder manually from the old lab PC
+
+Use this only if the preserved program ZIP does not contain `User\Definit`.
+
+1. On the old lab PC, close SPECTROstar Nano completely.
+2. Open Windows File Explorer.
+3. Paste this into the address bar:
+
+   ```text
+   C:\Program Files\SPECTROstar Nano V5.50\User
+   ```
+
+4. Copy the entire folder named:
+
+   ```text
+   Definit
+   ```
+
+5. Paste it into the private migration folder used to transfer files to the new PC.
+6. Zip that copied folder so Google Drive preserves the complete database as one set.
+7. Name it clearly, for example:
+
+   ```text
+   SPECTROstar_Nano_V5.50_old_lab_PC_Definit.zip
+   ```
+
+8. Upload that ZIP to the private migration Google Drive folder.
+9. On the new PC, download the ZIP locally and extract it to the Desktop.
+
+Do not commit this folder or ZIP to GitHub.
+
+## Install the old protocol database on the new PC
+
+1. Close SPECTROstar Nano completely on the new PC.
+2. Open Task Manager and confirm that neither SPECTROstar Nano nor `DDEClient.exe` is running.
+3. Open Windows File Explorer.
+4. Paste this real installation path into the address bar:
+
+   ```text
+   C:\Program Files (x86)\BMG\SPECTROstar Nano\User
+   ```
+
+5. Find the fresh new-PC folder named `Definit`.
+6. Move that fresh folder to the Desktop. Rename it:
+
+   ```text
+   Definit_NEW_PC_FRESH_INSTALL_BACKUP
+   ```
+
+   Do not delete it. This is the rollback copy.
+
+7. Copy the old working `Definit` folder extracted from the old-PC archive.
+8. Paste the old folder into:
+
+   ```text
+   C:\Program Files (x86)\BMG\SPECTROstar Nano\User
+   ```
+
+9. Windows may ask for administrator permission to copy into Program Files. Click **Continue**
+   using the approved lab administrator account.
+10. Confirm the final path is exactly:
+
+    ```text
+    C:\Program Files (x86)\BMG\SPECTROstar Nano\User\Definit
+    ```
+
+11. Open `Definit` and confirm the database files are directly inside it.
+
+Correct structure:
 
 ```text
-True
+...\User\Definit\1.DB
+...\User\Definit\1.PX
+...\User\Definit\[other database files]
 ```
 
-If the archive was extracted somewhere else, substitute its actual path in all following
-commands.
-
-## 3. Close SPECTROstar
-
-Close the SPECTROstar Nano application normally. Confirm it is not running. Run on the
-**new PC in PowerShell**:
-
-```powershell
-Get-Process | Where-Object { $_.ProcessName -match "SPECTROstar|DDEClient" }
-```
-
-A blank result means no matching process was found. If a process remains, stop and close the
-application normally before continuing.
-
-## 4. Back up the fresh new-PC user database
-
-Open **PowerShell as Administrator** on the new PC:
-
-```powershell
-$newRoot = "C:\Program Files (x86)\BMG\SPECTROstar Nano"
-$stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$freshUserBackup = "$env:USERPROFILE\Desktop\SPECTROstar_User_fresh_install_$stamp"
-Copy-Item "$newRoot\User" $freshUserBackup -Recurse -Force
-```
-
-Confirm that the backup exists and contains files:
-
-```powershell
-Get-ChildItem $freshUserBackup -Recurse -File |
-Measure-Object
-```
-
-Do not continue unless `Count` is greater than zero.
-
-## 5. Stage the old protocol database beside the fresh one
-
-Still in **PowerShell as Administrator**, set the old folder path:
-
-```powershell
-$oldDefinit = "$env:USERPROFILE\Desktop\SPECTROstar_old_PC_staging\SPECTROstar Nano V5.50\User\Definit"
-```
-
-Verify both folders:
-
-```powershell
-Test-Path $oldDefinit
-Test-Path "$newRoot\User\Definit"
-```
-
-Both must return `True`.
-
-Move the fresh directory out of the installed application so it remains immediately recoverable
-without leaving a second database beside the active one:
-
-```powershell
-$freshDefinitBackup = "$env:USERPROFILE\Desktop\Definit_fresh_install_$stamp"
-Move-Item "$newRoot\User\Definit" $freshDefinitBackup
-```
-
-Copy the complete old working directory into place:
-
-```powershell
-Copy-Item $oldDefinit "$newRoot\User\Definit" -Recurse -Force
-```
-
-Confirm the restored directory exists and contains files:
-
-```powershell
-Get-ChildItem "$newRoot\User\Definit" -File |
-Sort-Object Name |
-Select-Object Name,Length,LastWriteTime
-```
-
-## 6. Verify through the legacy junction
-
-Run on the **new PC in PowerShell**:
-
-```powershell
-Test-Path "C:\Program Files\SPECTROstar Nano V5.50\User\Definit"
-```
-
-Expected:
+Incorrect extra nesting:
 
 ```text
-True
+...\User\Definit\Definit\1.DB
 ```
 
-The controller's existing `PROTOCOL_PATH` should now resolve to the restored database through
-the junction.
-
-## 7. Verify `NC_synthesis` in the application
+## Verify the imported protocol
 
 1. Open SPECTROstar Nano V5.50.
 2. Log in as `USER` using the established lab login.
-3. Inspect the available measurement protocols/definitions.
-4. Confirm that `NC_synthesis` appears.
-5. Do not update firmware.
-6. Close the application before testing OT2Control.
+3. Open the measurement-protocol/definition selection in the application.
+4. Confirm that this named protocol appears:
 
-If `NC_synthesis` does not appear, do not run the physical protocol. Preserve screenshots and
-contact BMG support to request the V5.50 procedure for restoring a multi-user `User\Definit`
-database. The public BMG product page directs users to software support or the manual-request
-form for version-specific software instructions.
+   ```text
+   NC_synthesis
+   ```
 
-To restore the fresh database without deleting either copy, close SPECTROstar and run in
-**PowerShell as Administrator**:
+5. Do not update reader firmware.
+6. Close SPECTROstar Nano before running `controller.py`.
 
-```powershell
-$newRoot = "C:\Program Files (x86)\BMG\SPECTROstar Nano"
-$freshDefinitBackup = Get-ChildItem "$env:USERPROFILE\Desktop" -Directory -Filter "Definit_fresh_install_*" |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
-$failedOldDatabase = "$env:USERPROFILE\Desktop\Definit_old_PC_restore_failed_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-Move-Item "$newRoot\User\Definit" $failedOldDatabase
-Move-Item $freshDefinitBackup "$newRoot\User\Definit"
-```
+If `NC_synthesis` still does not appear, do not attempt a physical OT2Control run. Restore the
+fresh database using the rollback procedure and contact BMG support for the V5.50 multi-user
+protocol-database import procedure.
 
-## 8. Validate simulation before live use
+## Manual rollback
 
-After installing the plate-reader simulation fix, run on the **new PC in Ubuntu**:
+1. Close SPECTROstar Nano completely.
+2. Move the imported old-PC folder out of:
+
+   ```text
+   C:\Program Files (x86)\BMG\SPECTROstar Nano\User
+   ```
+
+3. Preserve it on the Desktop with a name such as:
+
+   ```text
+   Definit_OLD_PC_IMPORT_FAILED
+   ```
+
+4. Move `Definit_NEW_PC_FRESH_INSTALL_BACKUP` from the Desktop back into:
+
+   ```text
+   C:\Program Files (x86)\BMG\SPECTROstar Nano\User
+   ```
+
+5. Rename it back to:
+
+   ```text
+   Definit
+   ```
+
+## Validate the simulation fix before a live run
+
+After the new PC pulls the plate-reader simulation fix, run in **New PC — Ubuntu**:
 
 ```bash
 conda activate ot2control_legacy
@@ -197,8 +187,9 @@ During simulation:
 
 - No `<<Reader>> executing:` lines should appear.
 - The SPECTROstar tray must not move.
-- No physical shake or scan should occur.
-- Answer `n` when asked whether to run the physical protocol.
+- The reader must not shake or scan.
+- The simulation still generates dummy scan data for downstream save and plot checks.
+- Enter `n` when asked whether to run the physical protocol.
 
-Only after this simulation passes and `NC_synthesis` is visible should a separately authorized
-live dry run be attempted.
+Only after that simulation passes and `NC_synthesis` appears in SPECTROstar should a separately
+authorized live dry run be attempted.
