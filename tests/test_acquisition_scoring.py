@@ -1,5 +1,6 @@
 import ast
 import copy
+from collections import defaultdict
 from contextlib import redirect_stdout
 import io
 import json
@@ -16,6 +17,7 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 OPTIMIZERS_PATH = REPOSITORY_ROOT / 'optimizers.py'
 CONTROLLER_PATH = REPOSITORY_ROOT / 'controller.py'
+OT2_ROBOT_PATH = REPOSITORY_ROOT / 'ot2_robot.py'
 
 
 def _load_optimization_model_methods(
@@ -143,6 +145,7 @@ def _load_auto_controller_methods(method_names, extra_namespace=None):
     )
     namespace = {
         'copy': copy,
+        'defaultdict': defaultdict,
         'json': json,
         'math': math,
         'np': np,
@@ -198,6 +201,45 @@ def _load_base_controller_methods(method_names):
     )
 
     return namespace['Controller']
+
+
+def _load_robot_methods(method_names, extra_namespace=None):
+    '''Loads pure OT2Robot methods without importing Opentrons dependencies.'''
+    tree = ast.parse(
+        OT2_ROBOT_PATH.read_text(),
+        filename=str(OT2_ROBOT_PATH)
+    )
+    robot_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == 'OT2Robot'
+    )
+    methods = {
+        node.name: node
+        for node in robot_class.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    extracted_class = ast.ClassDef(
+        name='OT2Robot',
+        bases=[],
+        keywords=[],
+        body=[methods[method_name] for method_name in method_names],
+        decorator_list=[]
+    )
+    module = ast.fix_missing_locations(
+        ast.Module(body=[extracted_class], type_ignores=[])
+    )
+    namespace = {'math': math}
+
+    if extra_namespace is not None:
+        namespace.update(extra_namespace)
+
+    exec(
+        compile(module, str(OT2_ROBOT_PATH), 'exec'),
+        namespace
+    )
+
+    return namespace['OT2Robot']
 
 
 def _get_auto_controller_method_node(method_name):
@@ -1458,7 +1500,9 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         acquisition_modes=None,
         portfolio_min_distance=None,
         target_tolerance_nm=None,
-        auto_terminal_verbosity=None
+        auto_terminal_verbosity=None,
+        auto_source_volume_check=None,
+        auto_source_reserve_volume_uL=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1495,6 +1539,18 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(auto_terminal_verbosity)
             ])
 
+        if auto_source_volume_check is not None:
+            header.append([
+                'auto_source_volume_check',
+                str(auto_source_volume_check)
+            ])
+
+        if auto_source_reserve_volume_uL is not None:
+            header.append([
+                'auto_source_reserve_volume_uL',
+                str(auto_source_reserve_volume_uL)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1509,8 +1565,34 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertFalse(parsed['allow_true_zero'])
         self.assertEqual(parsed['target_tolerance_nm'], 10.0)
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
+        self.assertEqual(parsed['auto_source_volume_check'], 'off')
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
+
+    def test_header_source_volume_protection_is_explicit_and_fail_closed(self):
+        parsed = self._parse_header(
+            auto_source_volume_check='ON',
+            auto_source_reserve_volume_uL=50
+        )
+
+        self.assertEqual(parsed['auto_source_volume_check'], 'required')
+        self.assertEqual(parsed['auto_source_reserve_volume_uL'], 50.0)
+
+        self.assertEqual(
+            self._parse_header(
+                auto_source_volume_check='required'
+            )['auto_source_reserve_volume_uL'],
+            0.0
+        )
+
+        with self.assertRaisesRegex(ValueError, 'off or required'):
+            self._parse_header(auto_source_volume_check='maybe')
+
+        with self.assertRaisesRegex(ValueError, 'reserve_volume'):
+            self._parse_header(
+                auto_source_volume_check='required',
+                auto_source_reserve_volume_uL='-1'
+            )
 
     def test_header_target_tolerance_is_optional_and_validated(self):
         parsed = self._parse_header(target_tolerance_nm=5.0)
@@ -1650,6 +1732,164 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 acquisition_modes='exploit;target_ei',
                 num_duplicates=1
             )
+
+
+class AutoSourceVolumePreflightTests(unittest.TestCase):
+    '''Exercises source-volume protection without importing hardware code.'''
+
+    @classmethod
+    def setUpClass(cls):
+        class FakeConversionError(Exception):
+            pass
+
+        cls.FakeConversionError = FakeConversionError
+        cls.Controller = _load_auto_controller_methods([
+            '_get_auto_batch_source_volume_requirements',
+            '_export_auto_source_volume_audit',
+            '_preflight_auto_source_volumes',
+            '_create_samples'
+        ], extra_namespace={'ConversionError': FakeConversionError})
+
+    def _build_controller(self):
+        controller = self.Controller()
+        controller.batch_num = 0
+        controller.robo_params = {
+            'auto_source_volume_check': 'required',
+            'auto_source_reserve_volume_uL': 5.0,
+            'auto_terminal_verbosity': 'essential'
+        }
+        controller._products = ['autowell0C1.0', 'autowell1C1.0']
+        controller._round_transfer_volume = lambda volume: float(volume)
+        controller._cached_reader_locs = {
+            'reagent_aC1.0': SimpleNamespace(
+                loc='A1',
+                deck_pos=1,
+                vol=100.0,
+                aspiratible_vol=80.0
+            ),
+            'WaterC1.0': SimpleNamespace(
+                loc='A2',
+                deck_pos=1,
+                vol=300.0,
+                aspiratible_vol=280.0
+            )
+        }
+        return controller
+
+    def _build_protocol_dataframe(self):
+        return pd.DataFrame([
+            {
+                'op': 'transfer',
+                'chemical_name': 'reagent_aC1.0',
+                'autowell0C1.0': 20.0,
+                'autowell1C1.0': 20.0
+            },
+            {
+                'op': 'transfer',
+                'chemical_name': 'WaterC1.0',
+                'autowell0C1.0': 70.0,
+                'autowell1C1.0': 70.0
+            }
+        ])
+
+    def test_preflight_uses_current_cached_aggregate_inventory(self):
+        controller = self._build_controller()
+        protocol_df = self._build_protocol_dataframe()
+
+        with redirect_stdout(io.StringIO()):
+            audit_rows = controller._preflight_auto_source_volumes(
+                protocol_df,
+                'batch 0'
+            )
+
+        audit_by_source = {row['source_chemical_name']: row for row in audit_rows}
+        self.assertEqual(
+            audit_by_source['reagent_aC1.0']['planned_usage_uL'],
+            40.0
+        )
+        self.assertEqual(audit_by_source['reagent_aC1.0']['source_loc'], 'A1')
+        self.assertEqual(
+            audit_by_source['reagent_aC1.0'][
+                'remaining_aspirable_volume_uL'
+            ],
+            40.0
+        )
+        self.assertEqual(
+            audit_by_source['WaterC1.0']['required_aspirable_volume_uL'],
+            145.0
+        )
+        self.assertEqual(
+            audit_by_source['reagent_aC1.0']['preflight_scope'],
+            'aggregate_source_group'
+        )
+
+    def test_preflight_rejects_insufficient_aggregate_aspirable_volume(self):
+        controller = self._build_controller()
+        controller._cached_reader_locs['reagent_aC1.0'].aspiratible_vol = 44.0
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'planned use 40.0000 uL plus reserve 5.0000 uL'
+        ):
+            with redirect_stdout(io.StringIO()):
+                controller._preflight_auto_source_volumes(
+                    self._build_protocol_dataframe(),
+                    'batch 0'
+                )
+
+    def test_legacy_source_volume_setting_preserves_no_preflight_behavior(self):
+        controller = self._build_controller()
+        controller.robo_params['auto_source_volume_check'] = 'off'
+
+        self.assertIsNone(
+            controller._preflight_auto_source_volumes(
+                self._build_protocol_dataframe(),
+                'legacy batch'
+            )
+        )
+
+    def test_required_preflight_blocks_unaccounted_conversion_recovery(self):
+        controller = self._build_controller()
+        controller._validate_auto_recipe_volume_feasibility = (
+            lambda recipes, context_label: None
+        )
+        controller._preflight_auto_source_volumes = lambda rxn_df, context_label: []
+        controller.template_meta = {
+            'labware': 'test_labware',
+            'cont': 'A1',
+            'tot_vol': 100.0
+        }
+        controller.portal = SimpleNamespace(send_pack=lambda *args: None)
+        controller._clean_meta = lambda wellnames: None
+        controller._build_rxn_df = lambda wellnames, recipes: (
+            (_ for _ in ()).throw(self.FakeConversionError())
+        )
+        controller._insert_tot_vol_transfer = lambda: None
+        controller.tot_vols = {}
+        recovery_calls = []
+        controller._handle_conversion_err = lambda error: recovery_calls.append(error)
+
+        with self.assertRaisesRegex(ValueError, 'unplanned dilution/recovery'):
+            controller._create_samples(
+                ['autowell0C1.0'],
+                np.array([[0.1]], dtype=float)
+            )
+
+        self.assertEqual(recovery_calls, [])
+
+    def test_preflight_rejects_missing_cached_source_inventory(self):
+        controller = self._build_controller()
+        del controller._cached_reader_locs['WaterC1.0']
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'WaterC1.0: no current source-volume record'
+        ):
+            with redirect_stdout(io.StringIO()):
+                controller._preflight_auto_source_volumes(
+                    self._build_protocol_dataframe(),
+                    'batch 0'
+                )
 
 
 class PredictiveUncertaintyUnitTests(unittest.TestCase):

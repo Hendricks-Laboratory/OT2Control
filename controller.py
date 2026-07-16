@@ -932,6 +932,26 @@ class Controller(ABC):
         User-friendly aliases are accepted. In particular, off means
         essential (not silent), limited means standard, and all means
         diagnostic.
+
+        Source-volume protection is controlled by the optional
+        auto_source_volume_check setting:
+
+            off:
+                Preserves legacy behavior. No declared source-inventory
+                preflight is performed.
+
+            required:
+                Before every Auto batch, verifies aggregate planned source
+                use against the robot's current mass-derived aspiratable
+                source inventory. A failed check stops before any liquid
+                transfer is sent. Individual same-stock tube allocation
+                remains the existing robot runtime's responsibility.
+
+        The robot already derives each source's volume, dead volume, and
+        aspiration height from the existing reagent_info mass entry and its
+        physical tube type. No duplicate per-reagent volume entry is needed.
+        An optional auto_source_reserve_volume_uL setting protects additional
+        liquid beyond the robot's established dead-volume calculation.
         '''
         header_dict = {
             row[0]: row[1]
@@ -1055,6 +1075,90 @@ class Controller(ABC):
             "<<controller>> Auto terminal verbosity: "
             f"{self.robo_params['auto_terminal_verbosity']}"
         )
+
+        # Optional source-inventory hard stop. It remains disabled for legacy
+        # worksheets. When enabled, it deliberately reuses the robot's
+        # mass-derived aspiratable-volume cache, so the spreadsheet continues
+        # to have one source of truth for every reagent's starting liquid.
+        source_volume_check_value = str(
+            header_dict.get(
+                'auto_source_volume_check',
+                'off'
+            )
+        ).strip().lower()
+
+        source_volume_check_value = (
+            source_volume_check_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        source_volume_check_aliases = {
+            '': 'off',
+            'off': 'off',
+            'none': 'off',
+            'disabled': 'off',
+            'no': 'off',
+            'false': 'off',
+            '0': 'off',
+            'required': 'required',
+            'on': 'required',
+            'enabled': 'required',
+            'yes': 'required',
+            'true': 'required',
+            '1': 'required'
+        }
+
+        if source_volume_check_value not in source_volume_check_aliases:
+            raise ValueError(
+                "Header value auto_source_volume_check must be off or "
+                "required. Received: "
+                f"{source_volume_check_value!r}."
+            )
+
+        source_volume_check = source_volume_check_aliases[
+            source_volume_check_value
+        ]
+        self.robo_params['auto_source_volume_check'] = source_volume_check
+
+        def parse_source_reserve_volume_setting():
+            raw_value = str(
+                header_dict.get('auto_source_reserve_volume_uL', 0.0)
+            ).strip()
+
+            try:
+                parsed_value = float(raw_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Header value auto_source_reserve_volume_uL must be a "
+                    "finite, nonnegative volume "
+                    f"in uL. Received: {raw_value!r}."
+                )
+
+            if not math.isfinite(parsed_value) or parsed_value < 0.0:
+                raise ValueError(
+                    "Header value auto_source_reserve_volume_uL must be a "
+                    "finite, nonnegative volume "
+                    f"in uL. Received: {raw_value!r}."
+                )
+
+            return float(parsed_value)
+
+        self.robo_params['auto_source_reserve_volume_uL'] = (
+            parse_source_reserve_volume_setting()
+        )
+
+        print(
+            "<<controller>> Auto source-volume preflight: "
+            f"{source_volume_check}"
+        )
+
+        if source_volume_check == 'required':
+            print(
+                "<<controller>> Auto source-volume reserve beyond robot "
+                "dead volume: "
+                f"{self.robo_params['auto_source_reserve_volume_uL']:g} uL"
+            )
 
         self.robo_params['max_iterations'] = int(
             header_dict['max_iterations']
@@ -15097,7 +15201,8 @@ class AutoContr(Controller):
         
         self.batch_num = 0 #used internally for unique filenames
 
-        
+        self.last_auto_source_volume_audit = []
+
         self.well_count = 0 #used internally for unique wellnames
         self.create_connection(simulate, no_pr, port)
         # Begin optimization
@@ -15537,7 +15642,17 @@ class AutoContr(Controller):
               order of recipes
         Postconditions:
         '''
-     
+        # Retain the controller-side physical recipe check before allocating
+        # product wells. The subsequent source-volume preflight uses the fully
+        # resolved protocol dataframe, after the robot has reported its
+        # mass-derived source inventory but before liquid handling begins.
+        self._validate_auto_recipe_volume_feasibility(
+            recipes,
+            context_label=(
+                f"Auto batch {getattr(self, 'batch_num', 'unknown')} "
+                f"({len(wellnames)} physical wells)"
+            )
+        )
 
         self.portal.send_pack('init_containers', pd.DataFrame(
                 {'labware':self.template_meta['labware'],
@@ -15569,7 +15684,35 @@ class AutoContr(Controller):
                 print("<<controller>> protocol dataframe built successfully")
                 successful_build = True
             except ConversionError as e:
+                # A legacy conversion recovery may create and execute a new
+                # dilution protocol. That liquid would not be part of a
+                # successfully constructed, source-preflighted batch, so
+                # source-volume protection must not permit this unaccounted
+                # physical path.
+                # Legacy sheets keep their established recovery behavior.
+                if (
+                    self.robo_params.get(
+                        'auto_source_volume_check',
+                        'off'
+                    )
+                    == 'required'
+                ):
+                    raise ValueError(
+                        "Auto source-volume protection stopped before an "
+                        "unplanned dilution/recovery could consume liquid. "
+                        "Correct the conversion problem or explicitly revise "
+                        "the declared source-volume plan before retrying."
+                    ) from e
+
                 self._handle_conversion_err(e)
+
+        self._preflight_auto_source_volumes(
+            self.rxn_df,
+            context_label=(
+                f"Auto batch {getattr(self, 'batch_num', 'unknown')} "
+                f"({len(wellnames)} physical wells)"
+            )
+        )
 
         self.execute_protocol_df(model)
 
@@ -16402,6 +16545,210 @@ class AutoContr(Controller):
                 "requires a non-executable 0-5 uL water top-off transfer:\n"
                 + "\n".join(invalid_messages)
             )
+
+    def _get_auto_batch_source_volume_requirements(self, rxn_df):
+        '''
+        Builds the ordered source-withdrawal plan for a fully constructed Auto
+        protocol dataframe.
+
+        This intentionally runs after _build_rxn_df() has selected the exact
+        stock container for every transfer and after _insert_tot_vol_transfer()
+        has added Water. The preflight therefore audits the same named sources
+        and volumes that execute_protocol_df() would send to the robot.
+
+        The controller's existing ``loc_req`` response exposes each resolved
+        source group's *aggregate* aspiratable volume. It does not expose the
+        volumes of individual same-stock tubes inside a robot MultiContainer.
+        Consequently, this plan supports an aggregate inventory check only;
+        the robot remains responsible for its established live tube-switching
+        behavior when an individual tube becomes insufficient.
+        '''
+        if not isinstance(rxn_df, pd.DataFrame):
+            raise ValueError(
+                "Auto source-volume preflight requires a constructed "
+                "protocol dataframe."
+            )
+
+        source_plan = []
+        transfer_rows = rxn_df.loc[rxn_df['op'] == 'transfer']
+
+        for _, transfer_row in transfer_rows.iterrows():
+            source_name = transfer_row.get('chemical_name')
+
+            if pd.isna(source_name) or not str(source_name).strip():
+                raise ValueError(
+                    "Auto source-volume preflight found a transfer row "
+                    "without a resolved chemical_name source."
+                )
+
+            transfer_volumes = pd.to_numeric(
+                transfer_row[self._products],
+                errors='coerce'
+            ).fillna(0.0)
+
+            if (transfer_volumes < -1e-9).any():
+                raise ValueError(
+                    "Auto source-volume preflight found a negative transfer "
+                    f"volume for source {source_name}."
+                )
+
+            ordered_transfer_volumes = [
+                self._round_transfer_volume(float(transfer_volume))
+                for transfer_volume in transfer_volumes
+                if transfer_volume > 1e-9
+            ]
+
+            if ordered_transfer_volumes:
+                source_plan.append((
+                    str(source_name),
+                    ordered_transfer_volumes
+                ))
+
+        return source_plan
+
+    def _export_auto_source_volume_audit(self, audit_rows):
+        '''Writes append-only per-batch source-volume preflight results.'''
+        debug_path = getattr(self, 'debug_path', None)
+
+        if debug_path is None:
+            return
+
+        os.makedirs(debug_path, exist_ok=True)
+        export_path = os.path.join(
+            debug_path,
+            'auto_source_volume_audit.csv'
+        )
+        audit_df = pd.DataFrame(audit_rows)
+        write_header = not os.path.exists(export_path)
+
+        audit_df.to_csv(
+            export_path,
+            mode='a',
+            header=write_header,
+            index=False
+        )
+
+    def _preflight_auto_source_volumes(self, rxn_df, context_label):
+        '''
+        Fail-closed aggregate source-inventory check immediately before Auto
+        liquid handling.
+
+        This uses the controller's normal, already-supported ``loc_req``
+        cache populated by _build_rxn_df(). The cache reflects the robot's
+        current mass-derived source volumes and tracked prior withdrawals, but
+        reports a same-stock MultiContainer as one aggregate source group.
+        It therefore blocks batches whose total planned use plus reserve
+        exceeds that group's available aspiratable volume. It deliberately
+        does not claim to simulate individual tube allocation, pipette
+        substeps, or fallback switching; those remain robot-runtime behavior
+        and require no new robot-side code.
+
+        returns:
+            list or None:
+                Passed audit rows when protection is required, otherwise None
+                for backward-compatible legacy worksheets.
+        '''
+        if (
+            self.robo_params.get('auto_source_volume_check', 'off')
+            != 'required'
+        ):
+            return None
+
+        source_plan = self._get_auto_batch_source_volume_requirements(rxn_df)
+        reserve_volume_uL = float(
+            self.robo_params.get('auto_source_reserve_volume_uL', 0.0)
+        )
+        planned_usage_by_source = {}
+
+        for source_name, transfer_volumes in source_plan:
+            planned_usage_by_source[source_name] = (
+                planned_usage_by_source.get(source_name, 0.0)
+                + sum(transfer_volumes)
+            )
+
+        failures = []
+        audit_rows = []
+
+        for source_name in sorted(planned_usage_by_source):
+            planned_usage_uL = planned_usage_by_source[source_name]
+            source_entry = self._cached_reader_locs.get(source_name)
+
+            if source_entry is None:
+                failures.append(
+                    '{}: no current source-volume record was returned by the '
+                    'robot location query.'.format(source_name)
+                )
+                continue
+
+            available_aspirable_uL = float(source_entry.aspiratible_vol)
+            required_aspirable_uL = (
+                planned_usage_uL + reserve_volume_uL
+            )
+            remaining_aspirable_uL = (
+                available_aspirable_uL - planned_usage_uL
+            )
+            passed = (
+                available_aspirable_uL >= required_aspirable_uL - 1e-9
+            )
+
+            audit_rows.append({
+                'source_chemical_name': source_name,
+                'source_loc': source_entry.loc,
+                'source_deck_pos': source_entry.deck_pos,
+                'robot_reported_current_volume_uL': float(source_entry.vol),
+                'robot_reported_aspirable_volume_uL': available_aspirable_uL,
+                'planned_usage_uL': planned_usage_uL,
+                'source_group_reserve_uL': reserve_volume_uL,
+                'required_aspirable_volume_uL': required_aspirable_uL,
+                'remaining_aspirable_volume_uL': remaining_aspirable_uL,
+                'preflight_scope': 'aggregate_source_group',
+                'batch_number': getattr(self, 'batch_num', None),
+                'context_label': context_label,
+                'preflight_passed': passed
+            })
+
+            if not passed:
+                failures.append(
+                    '{}: planned use {:.4f} uL plus reserve {:.4f} uL '
+                    'requires {:.4f} uL, but the robot reports only {:.4f} '
+                    'uL aspiratable for this source group.'.format(
+                        source_name,
+                        planned_usage_uL,
+                        reserve_volume_uL,
+                        required_aspirable_uL,
+                        available_aspirable_uL
+                    )
+                )
+
+        overall_passed = len(failures) == 0
+        self.last_auto_source_volume_audit = copy.deepcopy(audit_rows)
+        self._export_auto_source_volume_audit(audit_rows)
+
+        if not overall_passed:
+            raise ValueError(
+                "Auto aggregate source-volume preflight failed before liquid "
+                "transfers were sent:\n" + '\n'.join(failures)
+            )
+
+        print(
+            "<<controller>> Auto source-volume preflight passed for "
+            f"{context_label}: aggregate source inventory is sufficient."
+        )
+
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            == 'diagnostic'
+        ):
+            for audit_row in audit_rows:
+                print(
+                    "<<controller diagnostic>> source-volume "
+                    f"{audit_row['source_chemical_name']}: "
+                    f"planned {audit_row['planned_usage_uL']:.4f} uL, "
+                    f"remaining "
+                    f"{audit_row['remaining_aspirable_volume_uL']:.4f} uL"
+                )
+
+        return audit_rows
 
     def _export_auto_batch_recipe_design(
         self,
