@@ -1456,7 +1456,9 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         acquisition_mode=None,
         num_duplicates=None,
         acquisition_modes=None,
-        portfolio_min_distance=None
+        portfolio_min_distance=None,
+        target_tolerance_nm=None,
+        auto_terminal_verbosity=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1481,6 +1483,18 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(portfolio_min_distance)
             ])
 
+        if target_tolerance_nm is not None:
+            header.append([
+                'target_tolerance_nm',
+                str(target_tolerance_nm)
+            ])
+
+        if auto_terminal_verbosity is not None:
+            header.append([
+                'auto_terminal_verbosity',
+                str(auto_terminal_verbosity)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1493,8 +1507,50 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['auto_plot_profile'], 'standard')
         self.assertEqual(parsed['num_duplicates'], 3)
         self.assertFalse(parsed['allow_true_zero'])
+        self.assertEqual(parsed['target_tolerance_nm'], 10.0)
+        self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
+
+    def test_header_target_tolerance_is_optional_and_validated(self):
+        parsed = self._parse_header(target_tolerance_nm=5.0)
+        self.assertEqual(parsed['target_tolerance_nm'], 5.0)
+
+        for invalid_tolerance in ('-1', 'nan', 'inf', 'not_a_number'):
+            with self.subTest(invalid_tolerance=invalid_tolerance):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    'finite, nonnegative'
+                ):
+                    self._parse_header(
+                        target_tolerance_nm=invalid_tolerance
+                    )
+
+    def test_header_terminal_verbosity_normalizes_and_fails_clearly(self):
+        cases = {
+            'essential': 'essential',
+            'OFF': 'essential',
+            'limited': 'standard',
+            'on': 'standard',
+            'debug': 'diagnostic',
+            'ALL': 'diagnostic'
+        }
+
+        for workbook_value, expected_value in cases.items():
+            with self.subTest(workbook_value=workbook_value):
+                parsed = self._parse_header(
+                    auto_terminal_verbosity=workbook_value
+                )
+                self.assertEqual(
+                    parsed['auto_terminal_verbosity'],
+                    expected_value
+                )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'auto_terminal_verbosity'
+        ):
+            self._parse_header(auto_terminal_verbosity='chatty')
 
     def test_canonical_modes_and_documented_aliases_normalize(self):
         cases = {
@@ -1917,6 +1973,9 @@ class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
 
     def test_unchanged_executable_proposal_preserves_selection_provenance(self):
         controller, model, exports = self._build_controller_and_model()
+        controller.robo_params = {
+            'auto_terminal_verbosity': 'diagnostic'
+        }
         proposal = np.array([[0.1]], dtype=float)
         terminal_output = io.StringIO()
 
@@ -1947,7 +2006,8 @@ class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
         provenance_line = next(
             line for line in terminal_output.getvalue().splitlines()
             if line.startswith(
-                '<<controller>> optimizer selection/execution provenance: '
+                '<<controller diagnostic>> optimizer selection/execution '
+                'provenance: '
             )
         )
         terminal_metadata = json.loads(
@@ -1969,6 +2029,30 @@ class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
         )
         self.assertFalse(
             terminal_metadata['optimizer_recipe_repaired']
+        )
+
+    def test_standard_recipe_handoff_keeps_terminal_concise(self):
+        controller, model, _ = self._build_controller_and_model()
+        controller.robo_params = {
+            'auto_terminal_verbosity': 'standard'
+        }
+        terminal_output = io.StringIO()
+
+        with redirect_stdout(terminal_output):
+            controller._prepare_auto_optimizer_recipe_for_execution(
+                model,
+                np.array([[0.1]], dtype=float),
+                'standard_batch'
+            )
+
+        output_text = terminal_output.getvalue()
+        self.assertIn(
+            'optimizer/controller recipe invariant passed',
+            output_text
+        )
+        self.assertNotIn(
+            'optimizer selection/execution provenance:',
+            output_text
         )
 
     def test_selection_metadata_is_deeply_immutable_after_capture(self):
@@ -3392,6 +3476,14 @@ class OptimizationModelConfigurationTests(unittest.TestCase):
 
         self.assertEqual(model.balanced_exploration_weight, 1.0)
         self.assertIsNone(model.incumbent_target_error_nm)
+        self.assertEqual(model.terminal_verbosity, 'standard')
+
+    def test_terminal_verbosity_rejects_noncanonical_optimizer_values(self):
+        with self.assertRaisesRegex(ValueError, 'terminal_verbosity'):
+            self.ConfigurationModel(
+                **self._required_constructor_arguments(),
+                terminal_verbosity='all'
+            )
 
     def test_balanced_weight_is_stored_and_printed(self):
         output = io.StringIO()

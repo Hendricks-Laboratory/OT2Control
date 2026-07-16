@@ -91,7 +91,8 @@ class OptimizationModel():
         fixed_reagent_volumes=None,
         allow_true_zero=False,
         acquisition_mode='exploit',
-        balanced_exploration_weight=1.0
+        balanced_exploration_weight=1.0,
+        terminal_verbosity='standard'
     ):
         '''
         Initializes the Auto optimization model.
@@ -157,6 +158,12 @@ class OptimizationModel():
                 deviation in the balanced acquisition score. The default 1.0
                 trades one nanometer of target error against one nanometer of
                 predictive uncertainty. Values must be finite and nonnegative.
+
+            str terminal_verbosity:
+                Controller-normalized Auto terminal-output tier. Essential
+                suppresses routine optimizer detail, standard emits concise
+                acquisition summaries, and diagnostic additionally emits
+                per-mask and raw normalized-recipe diagnostics.
         '''
         self.bounds = bounds
         self.target_value = target_value
@@ -219,17 +226,34 @@ class OptimizationModel():
             balanced_exploration_weight
         )
 
+        if terminal_verbosity not in (
+            'essential',
+            'standard',
+            'diagnostic'
+        ):
+            raise ValueError(
+                "OptimizationModel terminal_verbosity must be one of: "
+                "essential, standard, or diagnostic. "
+                f"Received: {terminal_verbosity!r}."
+            )
+
+        self.terminal_verbosity = terminal_verbosity
+
         # The controller sets this only after QC-approved condition-level data
         # has been incorporated into the GP. Replicate-level observations must
         # never be used directly as the target-EI incumbent.
         self.incumbent_target_error_nm = None
 
-        print(
-            "<<optimizer>> Auto acquisition mode: "
-            f"{self.acquisition_mode}"
-        )
+        if self.terminal_verbosity != 'essential':
+            print(
+                "<<optimizer>> Auto acquisition mode: "
+                f"{self.acquisition_mode}"
+            )
 
-        if self.acquisition_mode == 'balanced':
+        if (
+            self.terminal_verbosity != 'essential'
+            and self.acquisition_mode == 'balanced'
+        ):
             print(
                 "<<optimizer>> balanced exploration weight: "
                 f"{self.balanced_exploration_weight:.4f}"
@@ -467,12 +491,19 @@ class OptimizationModel():
 
         initial_design = feasible_points[selected_indices]
 
-        print("<<optimizer>> generated volume-feasible maximin initial design")
-        print(f"<<optimizer>> initial design points: {n_points}")
-        print(f"<<optimizer>> initial design dimensions: {n_dimensions}")
-        print(f"<<optimizer>> feasible candidate points generated: {len(feasible_points)}")
-        print(f"<<optimizer>> candidate generation attempts: {attempts}")
-        print(f"<<optimizer>> minimum pairwise distance: {self._minimum_pairwise_distance(initial_design)}")
+        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+            print(
+                "<<optimizer>> generated volume-feasible maximin initial "
+                f"design: points={n_points}, dimensions={n_dimensions}, "
+                "minimum_pairwise_distance="
+                f"{self._minimum_pairwise_distance(initial_design):.6f}"
+            )
+
+        if getattr(self, 'terminal_verbosity', 'standard') == 'diagnostic':
+            print(
+                "<<optimizer diagnostic>> feasible seed candidates="
+                f"{len(feasible_points)}, generation_attempts={attempts}"
+            )
 
         return initial_design
 
@@ -1751,32 +1782,33 @@ class OptimizationModel():
         self.last_optimizer_status = best_result.get('optimizer_status')
         self.last_optimizer_message = best_result.get('message')
 
-        for result in mask_results:
-            result_mask = result.get('mask')
-            result_mask_for_audit = (
-                result_mask.tolist()
-                if hasattr(result_mask, 'tolist')
-                else result_mask
-            )
-            result_volume_balance = result.get('volume_balance')
-            print(
-                "<<optimizer>> mask acquisition audit: "
-                f"mask={result_mask_for_audit}, "
-                f"selected={result.get('is_selected', False)}, "
-                f"optimizer_method={result.get('optimizer_method')}, "
-                f"optimizer_success={result.get('success')}, "
-                f"optimizer_status={result.get('optimizer_status')}, "
-                f"optimizer_message={result.get('message')}, "
-                f"mode={result.get('acquisition_mode', getattr(self, 'acquisition_mode', None))}, "
-                f"objective={result.get('objective')}, "
-                f"score={result.get('acquisition_score')}, "
-                f"predicted_mean_nm="
-                f"{result.get('predicted_lambda_mean_nm')}, "
-                f"predicted_std_nm="
-                f"{result.get('predicted_lambda_std_nm')}, "
-                f"volume_feasible="
-                f"{bool(result_volume_balance and result_volume_balance.get('volume_feasible', False))}"
-            )
+        if getattr(self, 'terminal_verbosity', 'standard') == 'diagnostic':
+            for result in mask_results:
+                result_mask = result.get('mask')
+                result_mask_for_audit = (
+                    result_mask.tolist()
+                    if hasattr(result_mask, 'tolist')
+                    else result_mask
+                )
+                result_volume_balance = result.get('volume_balance')
+                print(
+                    "<<optimizer diagnostic>> mask acquisition audit: "
+                    f"mask={result_mask_for_audit}, "
+                    f"selected={result.get('is_selected', False)}, "
+                    f"optimizer_method={result.get('optimizer_method')}, "
+                    f"optimizer_success={result.get('success')}, "
+                    f"optimizer_status={result.get('optimizer_status')}, "
+                    f"optimizer_message={result.get('message')}, "
+                    f"mode={result.get('acquisition_mode', getattr(self, 'acquisition_mode', None))}, "
+                    f"objective={result.get('objective')}, "
+                    f"score={result.get('acquisition_score')}, "
+                    f"predicted_mean_nm="
+                    f"{result.get('predicted_lambda_mean_nm')}, "
+                    f"predicted_std_nm="
+                    f"{result.get('predicted_lambda_std_nm')}, "
+                    f"volume_feasible="
+                    f"{bool(result_volume_balance and result_volume_balance.get('volume_feasible', False))}"
+                )
 
         return best_x
 
@@ -2767,10 +2799,11 @@ class OptimizationModel():
             self.predictions = None
             self.prediction_uncertainty = None
 
-            print(
-                "<<optimizer>> skipping prediction-grid refresh because "
-                "the GP model has not been initialized"
-            )
+            if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+                print(
+                    "<<optimizer>> skipping prediction-grid refresh because "
+                    "the GP model has not been initialized"
+                )
 
             return (
                 self.predictions,
@@ -2781,7 +2814,10 @@ class OptimizationModel():
             grid_size=grid_size
         )
 
-        if self._get_dimension() == 2:
+        if (
+            self._get_dimension() == 2
+            and getattr(self, 'terminal_verbosity', 'standard') != 'essential'
+        ):
             print(
                 "<<optimizer>> refreshed 2D GP prediction and uncertainty "
                 "grids from the current fitted model using a "
@@ -2965,7 +3001,10 @@ class OptimizationModel():
             None
         )
 
-        if selected_mask is not None:
+        if (
+            getattr(self, 'terminal_verbosity', 'standard') != 'essential'
+            and selected_mask is not None
+        ):
             print(
                 f"<<optimizer>> selected reagent mask "
                 f"{selected_mask.tolist()} for suggested recipe"
@@ -2987,19 +3026,20 @@ class OptimizationModel():
             else 'not used'
         )
 
-        print(
-            "<<optimizer>> acquisition audit: "
-            f"mode={self.last_optimizer_acquisition_mode}, "
-            f"score={self.last_optimizer_acquisition_score:.6f}, "
-            f"predicted_target_error="
-            f"{self.last_optimizer_predicted_target_error_nm:.4f} nm, "
-            f"predicted_lambda_mean={predicted_lambda_max:.4f} nm, "
-            f"predicted_lambda_std={predicted_lambda_std:.4f} nm, "
-            f"incumbent_target_error={incumbent_for_audit}, "
-            f"balanced_exploration_weight="
-            f"{balanced_weight_for_audit}, "
-            f"selected_mask={selected_mask_for_audit}"
-        )
+        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+            print(
+                "<<optimizer>> acquisition audit: "
+                f"mode={self.last_optimizer_acquisition_mode}, "
+                f"score={self.last_optimizer_acquisition_score:.6f}, "
+                f"predicted_target_error="
+                f"{self.last_optimizer_predicted_target_error_nm:.4f} nm, "
+                f"predicted_lambda_mean={predicted_lambda_max:.4f} nm, "
+                f"predicted_lambda_std={predicted_lambda_std:.4f} nm, "
+                f"incumbent_target_error={incumbent_for_audit}, "
+                f"balanced_exploration_weight="
+                f"{balanced_weight_for_audit}, "
+                f"selected_mask={selected_mask_for_audit}"
+            )
 
         volume_balance = getattr(
             self,
@@ -3007,7 +3047,10 @@ class OptimizationModel():
             None
         )
 
-        if volume_balance is not None:
+        if (
+            getattr(self, 'terminal_verbosity', 'standard') != 'essential'
+            and volume_balance is not None
+        ):
             print(
                 "<<optimizer>> suggested recipe volume balance: "
                 f"fixed={volume_balance['fixed_volume_total']:.4f} uL, "
@@ -3016,13 +3059,13 @@ class OptimizationModel():
                 f"feasible={volume_balance['volume_feasible']}"
             )
 
-        print(
-            f"<<optimizer>> suggested normalized recipe {best_x} "
-            f"with predicted lambda max "
-            f"{predicted_lambda_max:.4f} nm "
-            f"and GP predictive std "
-            f"{predicted_lambda_std:.4f} nm"
-        )
+        if getattr(self, 'terminal_verbosity', 'standard') == 'diagnostic':
+            print(
+                f"<<optimizer diagnostic>> suggested normalized recipe "
+                f"{best_x} with predicted lambda max "
+                f"{predicted_lambda_max:.4f} nm and GP predictive std "
+                f"{predicted_lambda_std:.4f} nm"
+            )
 
         return [
             best_x
@@ -3470,11 +3513,12 @@ class OptimizationModel():
             Y_new_array
         )
 
-        print(
-            "<<optimizer>> updated GP with "
-            f"{X_all_array.shape[0]} cumulative observations "
-            f"({X_new_array.shape[0]} new)"
-        )
+        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+            print(
+                "<<optimizer>> updated GP with "
+                f"{X_all_array.shape[0]} cumulative observations "
+                f"({X_new_array.shape[0]} new)"
+            )
     
 
     def update_quit(self, X_new, Y_new):

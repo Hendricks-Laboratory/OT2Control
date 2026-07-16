@@ -206,7 +206,14 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
 
         try:
             min_conc = auto.get_min_conc()
-            print(f'min_conc for variable reagents: {min_conc}')
+            if auto.robo_params.get(
+                'auto_terminal_verbosity',
+                'standard'
+            ) == 'diagnostic':
+                print(
+                    "<<controller diagnostic>> minimum variable "
+                    f"concentrations: {min_conc}"
+                )
             min_conc = list(min_conc.values())
         except Exception as e:
             print(f'Error getting min_conc: {e}')
@@ -215,7 +222,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         bounds = [{'name': f'reagent_{i+1}_conc', 'type': 'continuous', 'domain': (0, 1)} for i in range(y_shape)]
 
         # final_spectra not used?
-        print("<<controller>> setting up Auto optimization model")
+        if auto.robo_params.get(
+            'auto_terminal_verbosity',
+            'standard'
+        ) != 'essential':
+            print("<<controller>> setting up Auto optimization model")
         
         model = OptimizationModel(
             bounds,
@@ -244,6 +255,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             balanced_exploration_weight=auto.robo_params.get(
                 'balanced_exploration_weight',
                 1.0
+            ),
+            terminal_verbosity=auto.robo_params.get(
+                'auto_terminal_verbosity',
+                'standard'
             )
         )
 
@@ -886,6 +901,37 @@ class Controller(ABC):
 
         Older spreadsheets that do not contain auto_plot_profile default to
         standard for backward compatibility.
+
+        Condition-level early stopping is controlled by the optional
+        target_tolerance_nm setting. It is the maximum absolute error, in
+        nanometers, allowed between the requested target and a QC-approved
+        condition mean. Older spreadsheets default to 10 nm. This setting
+        does not bypass replicate-QC, model-training, or target-stop
+        eligibility requirements.
+
+        Auto terminal output is controlled by the optional
+        auto_terminal_verbosity setting:
+
+            essential:
+                Shows safety warnings, QC exclusions, stop decisions, and
+                final run status. This is the least verbose setting; it never
+                suppresses safety-relevant or scientifically consequential
+                information.
+
+            standard:
+                Adds normal Auto configuration, batch, acquisition-selection,
+                volume-balance, GP-update, and output-summary messages. This
+                is the default for older spreadsheets.
+
+            diagnostic:
+                Adds raw seed/model arrays, full controller provenance JSON,
+                and a result line for every explored reagent mask. Complete
+                audit records remain available in Auto CSV/report artifacts at
+                every verbosity level.
+
+        User-friendly aliases are accepted. In particular, off means
+        essential (not silent), limited means standard, and all means
+        diagnostic.
         '''
         header_dict = {
             row[0]: row[1]
@@ -915,6 +961,99 @@ class Controller(ABC):
 
         self.robo_params['target'] = float(
             header_dict['target']
+        )
+
+        # Optional condition-level early-stop threshold. The same canonical
+        # value is also used by the target-probability plots, so their stated
+        # success region always matches the controller's actual stop rule.
+        target_tolerance_value = str(
+            header_dict.get(
+                'target_tolerance_nm',
+                10.0
+            )
+        ).strip()
+
+        try:
+            target_tolerance_nm = float(target_tolerance_value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Header value target_tolerance_nm must be a finite, "
+                "nonnegative number in nm. "
+                f"Received: {target_tolerance_value!r}."
+            )
+
+        if (
+            not math.isfinite(target_tolerance_nm)
+            or target_tolerance_nm < 0.0
+        ):
+            raise ValueError(
+                "Header value target_tolerance_nm must be a finite, "
+                "nonnegative number in nm. "
+                f"Received: {target_tolerance_value!r}."
+            )
+
+        self.robo_params['target_tolerance_nm'] = target_tolerance_nm
+
+        print(
+            "<<controller>> Auto condition-level target tolerance: "
+            f"{target_tolerance_nm:g} nm"
+        )
+
+        # Terminal verbosity intentionally controls presentation only. It
+        # cannot hide safety warnings, QC outcomes, condition-level stop
+        # decisions, or the persistent CSV/report audit trail.
+        terminal_verbosity_value = str(
+            header_dict.get(
+                'auto_terminal_verbosity',
+                'standard'
+            )
+        ).strip().lower()
+
+        terminal_verbosity_value = (
+            terminal_verbosity_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        terminal_verbosity_aliases = {
+            '': 'standard',
+            'default': 'standard',
+            'on': 'standard',
+            'yes': 'standard',
+            'true': 'standard',
+            '1': 'standard',
+            'essential': 'essential',
+            'minimum': 'essential',
+            'minimal': 'essential',
+            'quiet': 'essential',
+            'off': 'essential',
+            'no': 'essential',
+            'false': 'essential',
+            '0': 'essential',
+            'standard': 'standard',
+            'limited': 'standard',
+            'normal': 'standard',
+            'diagnostic': 'diagnostic',
+            'debug': 'diagnostic',
+            'verbose': 'diagnostic',
+            'all': 'diagnostic'
+        }
+
+        if terminal_verbosity_value not in terminal_verbosity_aliases:
+            raise ValueError(
+                "Header value auto_terminal_verbosity must be one of: "
+                "essential, standard, or diagnostic. "
+                "Aliases include off, limited, and all. "
+                f"Received: {terminal_verbosity_value!r}."
+            )
+
+        self.robo_params['auto_terminal_verbosity'] = (
+            terminal_verbosity_aliases[terminal_verbosity_value]
+        )
+
+        print(
+            "<<controller>> Auto terminal verbosity: "
+            f"{self.robo_params['auto_terminal_verbosity']}"
         )
 
         self.robo_params['max_iterations'] = int(
@@ -4006,7 +4145,14 @@ class AutoContr(Controller):
         self.fixed_reagents = self.get_fixed_reagents()
         self.y_shape = len(self.variable_reagents)
         #print(f"y-shape is {self.y_shape}")
-        print(self.robo_params['reagent_df'])
+        if (
+            self.robo_params.get(
+                'auto_terminal_verbosity',
+                'standard'
+            )
+            == 'diagnostic'
+        ):
+            print(self.robo_params['reagent_df'])
         self.run_all_checks()
         self.rxn_df_template = self.rxn_df
         self.reagent_order = self.rxn_df['reagent'].dropna().loc[self.rxn_df['conc'].isna()].unique()
@@ -4113,9 +4259,23 @@ class AutoContr(Controller):
             ignore_index=True
         )
 
-        print("Self experiment data DF:")
-        print(self.experiment_data)
-        print(f"<<controller>> experiment data updated successfully with {len(new_data)} new rows")
+        if (
+            self.robo_params.get(
+                'auto_terminal_verbosity',
+                'standard'
+            )
+            == 'diagnostic'
+        ):
+            print("<<controller diagnostic>> experiment data dataframe:")
+            print(self.experiment_data)
+        if self.robo_params.get(
+            'auto_terminal_verbosity',
+            'standard'
+        ) != 'essential':
+            print(
+                "<<controller>> experiment data updated successfully with "
+                f"{len(new_data)} new rows"
+            )
 
     def _safe_float_or_none(self, value):
         '''
@@ -12698,8 +12858,8 @@ class AutoContr(Controller):
             )
             return
 
-        # Defaults are conservative. These can later be moved into the Header
-        # sheet if we want them user-configurable from the input spreadsheet.
+        # target_tolerance_nm is Header-configurable. Replicate consistency
+        # remains an independent conservative safeguard (25 nm by default).
         target_tolerance_nm = self._get_auto_target_tolerance_nm()
         replicate_sd_tolerance_nm = (
             self._get_auto_replicate_sd_tolerance_nm()
@@ -13352,13 +13512,21 @@ class AutoContr(Controller):
             )
 
         if len(generated_output_paths) > 0:
-            print(
-                f"<<controller>> Auto plot stage {normalized_stage} "
-                "generated: "
-                + ", ".join(
-                    generated_output_paths
-                )
+            terminal_verbosity = self.robo_params.get(
+                'auto_terminal_verbosity',
+                'standard'
             )
+            if terminal_verbosity == 'diagnostic':
+                print(
+                    f"<<controller diagnostic>> Auto plot stage "
+                    f"{normalized_stage} generated: "
+                    + ", ".join(generated_output_paths)
+                )
+            elif terminal_verbosity == 'standard':
+                print(
+                    f"<<controller>> Auto plot stage {normalized_stage} "
+                    f"generated {len(generated_output_paths)} artifact(s)"
+                )
 
         return generated_output_paths
     
@@ -14540,6 +14708,18 @@ class AutoContr(Controller):
                 Executable physical-space recipes and immutable selection
                 metadata when the optimizer proposal passes unchanged.
         '''
+        # Source-level unit tests and downstream audit utilities may call this
+        # helper without a fully initialized Controller. Presentation defaults
+        # to standard in that case, while recipe safety remains unchanged.
+        terminal_verbosity = getattr(
+            self,
+            'robo_params',
+            {}
+        ).get(
+            'auto_terminal_verbosity',
+            'standard'
+        )
+
         selected_normalized_recipes = np.array(
             normalized_recipes,
             dtype=float,
@@ -14674,11 +14854,10 @@ class AutoContr(Controller):
         model.last_controller_selection_metadata = copy.deepcopy(metadata)
 
         # terminal_output.txt is the first artifact reviewed during a
-        # human-supervised dry debug. Emit the complete selected-versus-
-        # prepared recipe and controller volume balances here, before either
-        # export or a fail-closed repair error. The full per-mask search audit
-        # remains in mask_results and the CSV/report artifacts so this line
-        # stays concise enough for live inspection.
+        # human-supervised dry debug. The complete selected-versus-prepared
+        # provenance is valuable for diagnostic runs, while standard terminal
+        # output remains concise and directs the user to the persistent CSV
+        # and report artifacts for the same immutable audit record.
         terminal_provenance = {
             'acquisition_mode': metadata['acquisition_mode'],
             'selected_mask': metadata['selected_mask'],
@@ -14709,10 +14888,12 @@ class AutoContr(Controller):
                 metadata['executed_controller_volume_balances']
             )
         }
-        print(
-            "<<controller>> optimizer selection/execution provenance: "
-            + self._serialize_auto_audit_value(terminal_provenance)
-        )
+        if terminal_verbosity == 'diagnostic':
+            print(
+                "<<controller diagnostic>> optimizer selection/execution "
+                "provenance: "
+                + self._serialize_auto_audit_value(terminal_provenance)
+            )
 
         self._export_auto_batch_recipe_design(
             repaired_recipes=executed_physical_recipes,
@@ -14744,10 +14925,11 @@ class AutoContr(Controller):
             context_label=f"model-suggested {batch_label}"
         )
 
-        print(
-            "<<controller>> optimizer/controller recipe invariant passed; "
-            "no transfer repair was required"
-        )
+        if terminal_verbosity != 'essential':
+            print(
+                "<<controller>> optimizer/controller recipe invariant "
+                "passed; no transfer repair was required"
+            )
 
         return executed_physical_recipes, metadata
 
@@ -14897,7 +15079,11 @@ class AutoContr(Controller):
         # Generate initial data which is a list of recipes (normalized)
         print("<<controller>> generating maximin Latin hypercube initial design")
         X_initial = model.generate_initial_design()
-        print(f"X initial: {X_initial}")
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            == 'diagnostic'
+        ):
+            print(f"<<controller diagnostic>> normalized seed design: {X_initial}")
 
         # The list of recipes is denormalized with different maximums for each reagent
         X_Initial_Denormalized = self.Normalize_Denormalize_Recipes(X_initial, normalize_flag=False)
@@ -14924,7 +15110,14 @@ class AutoContr(Controller):
             batch_label=f"batch_{self.batch_num}"
         )
 
-        print(f"X Initial Denormalized: {X_Initial_Denormalized}")
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            == 'diagnostic'
+        ):
+            print(
+                "<<controller diagnostic>> physical seed design: "
+                f"{X_Initial_Denormalized}"
+            )
 
         # Duplicate each unique recipe according to the Header num_duplicates setting.
         recipes = self.duplicate_list_elements(X_Initial_Denormalized, self.num_duplicates)
@@ -14977,7 +15170,11 @@ class AutoContr(Controller):
 
         # Lambda maxes are Y_intial
         Y_initial = find_max(scan_data)
-        print(f"Lambda Maxes: {Y_initial}")
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            == 'diagnostic'
+        ):
+            print(f"<<controller diagnostic>> seed lambda maxima: {Y_initial}")
 
         self._append_auto_model_performance_rows(
             unique_recipes=X_Initial_Denormalized,
@@ -15052,8 +15249,12 @@ class AutoContr(Controller):
             self.batch_num
         )
 
-        print(f"Model X: {model.optimizer.X}")
-        print(f"Model Y: {model.optimizer.Y}")
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            == 'diagnostic'
+        ):
+            print(f"<<controller diagnostic>> cumulative model X: {model.optimizer.X}")
+            print(f"<<controller diagnostic>> cumulative model Y: {model.optimizer.Y}")
 
         # Update data on the controller side (this function updates the df that is exported to pr_data called self.experiment_data)
         self._update_experiment_data(recipes, Y_initial)
@@ -15077,10 +15278,17 @@ class AutoContr(Controller):
 
             if len(acquisition_modes) == 1:
                 X_new = model.getNextReaction()
-                print(
-                    f'<<controller>> executing batch {self.batch_num}, '
-                    f'Suggested Location: {X_new}'
-                )
+                if (
+                    self.robo_params.get(
+                        'auto_terminal_verbosity',
+                        'standard'
+                    )
+                    == 'diagnostic'
+                ):
+                    print(
+                        f'<<controller diagnostic>> normalized proposal for '
+                        f'batch {self.batch_num}: {X_new}'
+                    )
 
                 (
                     X_new_Denormalized,
@@ -15132,7 +15340,17 @@ class AutoContr(Controller):
             
             # Y_new is lambda maxes from the new recipe
             Y_new = find_max(scan_data)
-            print(f"Lambda Maxes: {Y_new}")
+            if (
+                self.robo_params.get(
+                    'auto_terminal_verbosity',
+                    'standard'
+                )
+                == 'diagnostic'
+            ):
+                print(
+                    f"<<controller diagnostic>> batch {self.batch_num} "
+                    f"lambda maxima: {Y_new}"
+                )
 
             self._append_auto_model_performance_rows(
                 unique_recipes=X_new_Denormalized,
@@ -15228,7 +15446,10 @@ class AutoContr(Controller):
             batch_number=self.batch_num - 1
         )
 
-        print("Success!!!")
+        print(
+            "<<controller>> Auto run completed; condition-level results, "
+            "recipe audits, and configured output artifacts were exported."
+        )
 
         self.close_connection()
         self.pr.shutdown()
