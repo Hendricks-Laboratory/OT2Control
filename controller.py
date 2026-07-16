@@ -54,7 +54,6 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from matplotlib.colors import TwoSlopeNorm
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
@@ -11697,7 +11696,7 @@ class AutoContr(Controller):
         model,
         batch_number=None,
         final_snapshot=False,
-        grid_size=121
+        grid_size=100
     ):
         '''
         Saves conditional two-dimensional GP slice atlases for exactly three
@@ -11710,6 +11709,12 @@ class AutoContr(Controller):
         within Auto's actual condition-level target tolerance.  Feasibility is
         evaluated by OptimizationModel's authoritative volume-balance logic,
         so the plotting layer cannot introduce a competing transfer rule.
+
+        In addition to the three compact atlases, this method saves separate
+        mean and uncertainty feasibility-overlay versions. Those diagnostic
+        figures use the same gray exclusion fill, water boundaries, 5 uL
+        reagent boundaries, target contour, and figure-level legend convention
+        as the established two-variable GP feasibility heatmaps.
 
         This renderer is observational only: it never updates the GP, changes
         acquisition state, repairs recipes, or touches robot-facing data.
@@ -11789,6 +11794,7 @@ class AutoContr(Controller):
 
         target_nm = float(self.getModelInfo()['target'])
         tolerance_nm = self._get_auto_target_tolerance_nm()
+        font_sizes = self._get_auto_design_plot_font_sizes()
 
         # Prefer the best QC-approved condition because it is the most useful
         # scientific operating point.  The first complete finite observation
@@ -11887,10 +11893,55 @@ class AutoContr(Controller):
                 'normalized_recipe': normalized_recipe
             })
 
+        # Match the established two-variable GP field density. Physical
+        # feasibility is evaluated separately below on a denser grid, exactly
+        # as the 2D overlay plots do, so diagnostic boundaries are smooth
+        # without changing the ordinary GP heatmap pixels.
         normalized_axis_values = np.linspace(0.0, 1.0, grid_size)
+        feasibility_grid_size = max(401, grid_size)
+        feasibility_axis_values = np.linspace(
+            0.0,
+            1.0,
+            feasibility_grid_size
+        )
         slice_half_width = 0.5 / float(grid_size - 1)
         orientations = ((0, 1, 2), (0, 2, 1), (1, 2, 0))
         panel_data = []
+
+        def _evaluate_slice_feasibility(recipes, grid_shape):
+            '''Evaluates raw physical feasibility without repairing near zero.'''
+            feasible = np.zeros(recipes.shape[0], dtype=bool)
+            water_volume = np.full(recipes.shape[0], np.nan, dtype=float)
+            transfer_volume_by_reagent = {
+                reagent_name: np.full(
+                    recipes.shape[0],
+                    np.nan,
+                    dtype=float
+                )
+                for reagent_name in reagent_names
+            }
+
+            for point_index, recipe in enumerate(recipes):
+                balance = balance_for_plotting(recipe)
+                feasible[point_index] = bool(balance['volume_feasible'])
+                water_volume[point_index] = float(balance['water_volume'])
+
+                for reagent_name in reagent_names:
+                    transfer_volume_by_reagent[reagent_name][
+                        point_index
+                    ] = float(
+                        balance['variable_transfer_volumes'][reagent_name]
+                    )
+
+            return {
+                'feasible': feasible.reshape(grid_shape),
+                'water_volume_uL': water_volume.reshape(grid_shape),
+                'transfer_volume_uL_by_reagent': {
+                    reagent_name: transfer_volume_grid.reshape(grid_shape)
+                    for reagent_name, transfer_volume_grid
+                    in transfer_volume_by_reagent.items()
+                }
+            }
 
         for x_index, y_index, fixed_index in orientations:
             x_normalized, y_normalized = np.meshgrid(
@@ -11913,12 +11964,32 @@ class AutoContr(Controller):
                 x_normalized.shape
             )
 
-            feasible = np.zeros(recipes.shape[0], dtype=bool)
-            water_volume = np.full(recipes.shape[0], np.nan, dtype=float)
-            for point_index, recipe in enumerate(recipes):
-                balance = balance_for_plotting(recipe)
-                feasible[point_index] = bool(balance['volume_feasible'])
-                water_volume[point_index] = float(balance['water_volume'])
+            ordinary_feasibility = _evaluate_slice_feasibility(
+                recipes,
+                x_normalized.shape
+            )
+
+            feasibility_x_normalized, feasibility_y_normalized = (
+                np.meshgrid(
+                    feasibility_axis_values,
+                    feasibility_axis_values,
+                    indexing='xy'
+                )
+            )
+            feasibility_recipes = np.tile(
+                reference_normalized,
+                (feasibility_x_normalized.size, 1)
+            )
+            feasibility_recipes[:, x_index] = (
+                feasibility_x_normalized.ravel(order='C')
+            )
+            feasibility_recipes[:, y_index] = (
+                feasibility_y_normalized.ravel(order='C')
+            )
+            dense_feasibility = _evaluate_slice_feasibility(
+                feasibility_recipes,
+                feasibility_x_normalized.shape
+            )
 
             panel_data.append({
                 'x_index': x_index,
@@ -11940,8 +12011,26 @@ class AutoContr(Controller):
                     target_nm,
                     tolerance_nm
                 ),
-                'feasible': feasible.reshape(x_normalized.shape),
-                'water_volume_uL': water_volume.reshape(x_normalized.shape)
+                'feasible': ordinary_feasibility['feasible'],
+                'feasibility_x_physical': (
+                    bounds[x_index][0]
+                    + feasibility_x_normalized * (
+                        bounds[x_index][1] - bounds[x_index][0]
+                    )
+                ),
+                'feasibility_y_physical': (
+                    bounds[y_index][0]
+                    + feasibility_y_normalized * (
+                        bounds[y_index][1] - bounds[y_index][0]
+                    )
+                ),
+                'feasibility_mask': dense_feasibility['feasible'],
+                'feasibility_water_volume_uL': (
+                    dense_feasibility['water_volume_uL']
+                ),
+                'feasibility_transfer_volume_uL_by_reagent': (
+                    dense_feasibility['transfer_volume_uL_by_reagent']
+                )
             })
 
         feasible_mean_chunks = [
@@ -11964,15 +12053,9 @@ class AutoContr(Controller):
         feasible_mean_values = np.concatenate(feasible_mean_chunks)
         feasible_std_values = np.concatenate(feasible_std_chunks)
 
-        mean_extent = max(
-            abs(float(np.min(feasible_mean_values)) - target_nm),
-            abs(float(np.max(feasible_mean_values)) - target_nm),
-            1.0
-        )
-        mean_norm = TwoSlopeNorm(
-            vmin=target_nm - mean_extent,
-            vcenter=target_nm,
-            vmax=target_nm + mean_extent
+        mean_norm = plt.Normalize(
+            vmin=float(np.min(feasible_mean_values)),
+            vmax=float(np.max(feasible_mean_values))
         )
         max_std_nm = max(float(np.max(feasible_std_values)), 1.0)
 
@@ -11981,7 +12064,7 @@ class AutoContr(Controller):
                 'mean',
                 'Predicted $\\lambda_{max}$ (nm)',
                 lambda panel: panel['mean_nm'],
-                'coolwarm',
+                'inferno',
                 mean_norm,
                 f'Conditional GP mean; target = {target_nm:g} nm'
             ),
@@ -12005,6 +12088,275 @@ class AutoContr(Controller):
                 )
             )
         )
+
+        def _grid_spans_contour_level(grid, level):
+            '''Returns whether a finite grid crosses one contour level.'''
+            finite_values = np.asarray(grid, dtype=float)
+            finite_values = finite_values[np.isfinite(finite_values)]
+
+            return (
+                finite_values.size > 0
+                and np.min(finite_values) < level
+                and np.max(finite_values) > level
+            )
+
+        def _draw_slice_feasibility_overlay(
+            axis,
+            panel,
+            field_name
+        ):
+            '''Draws the 2D-style physical-boundary overlay for one slice.'''
+            axis.contourf(
+                panel['feasibility_x_physical'],
+                panel['feasibility_y_physical'],
+                (~panel['feasibility_mask']).astype(float),
+                levels=[0.5, 1.5],
+                colors=['0.70'],
+                alpha=0.55,
+                antialiased=True,
+                corner_mask=False,
+                zorder=2
+            )
+
+            water_volume_grid = panel['feasibility_water_volume_uL']
+            if _grid_spans_contour_level(water_volume_grid, 0.0):
+                axis.contour(
+                    panel['feasibility_x_physical'],
+                    panel['feasibility_y_physical'],
+                    water_volume_grid,
+                    levels=[0.0],
+                    colors=['#0072B2'],
+                    linewidths=1.35,
+                    linestyles='solid',
+                    zorder=4
+                )
+
+            if _grid_spans_contour_level(water_volume_grid, 5.0):
+                axis.contour(
+                    panel['feasibility_x_physical'],
+                    panel['feasibility_y_physical'],
+                    water_volume_grid,
+                    levels=[5.0],
+                    colors=['#D55E00'],
+                    linewidths=1.35,
+                    linestyles='dashed',
+                    zorder=4
+                )
+
+            reagent_boundary_colors = (
+                '#009E73',
+                '#CC79A7',
+                '#E69F00'
+            )
+            for reagent_index, reagent_name in enumerate(reagent_names):
+                transfer_volume_grid = panel[
+                    'feasibility_transfer_volume_uL_by_reagent'
+                ][reagent_name]
+
+                if _grid_spans_contour_level(transfer_volume_grid, 5.0):
+                    axis.contour(
+                        panel['feasibility_x_physical'],
+                        panel['feasibility_y_physical'],
+                        transfer_volume_grid,
+                        levels=[5.0],
+                        colors=[reagent_boundary_colors[reagent_index]],
+                        linewidths=1.15,
+                        linestyles='dotted',
+                        zorder=4
+                    )
+
+            if (
+                field_name == 'mean'
+                and _grid_spans_contour_level(
+                    panel['mean_nm'],
+                    target_nm
+                )
+            ):
+                axis.contour(
+                    panel['x_physical'],
+                    panel['y_physical'],
+                    panel['mean_nm'],
+                    levels=[target_nm],
+                    colors=['#000000'],
+                    linewidths=1.1,
+                    linestyles='dashdot',
+                    zorder=5
+                )
+
+        def _build_slice_feasibility_legend(
+            axis,
+            field_name
+        ):
+            '''Builds one figure-level legend using the established 2D style.'''
+            legend_handles = [
+                mpatches.Patch(
+                    facecolor='0.70',
+                    alpha=0.55,
+                    label=(
+                        'Excluded: overflow or non-executable transfer'
+                    )
+                )
+            ]
+
+            water_grids = [
+                panel['feasibility_water_volume_uL']
+                for panel in panel_data
+            ]
+            if any(
+                _grid_spans_contour_level(water_grid, 0.0)
+                for water_grid in water_grids
+            ):
+                water_zero_handle, = axis.plot(
+                    [], [], color='#0072B2', linewidth=1.35,
+                    label='Water = 0 uL boundary'
+                )
+                legend_handles.append(water_zero_handle)
+
+            if any(
+                _grid_spans_contour_level(water_grid, 5.0)
+                for water_grid in water_grids
+            ):
+                water_minimum_handle, = axis.plot(
+                    [], [], color='#D55E00', linewidth=1.35,
+                    linestyle='dashed', label='Water = 5 uL boundary'
+                )
+                legend_handles.append(water_minimum_handle)
+
+            reagent_boundary_colors = (
+                '#009E73',
+                '#CC79A7',
+                '#E69F00'
+            )
+            for reagent_index, reagent_name in enumerate(reagent_names):
+                if any(
+                    _grid_spans_contour_level(
+                        panel['feasibility_transfer_volume_uL_by_reagent'][
+                            reagent_name
+                        ],
+                        5.0
+                    )
+                    for panel in panel_data
+                ):
+                    reagent_minimum_handle, = axis.plot(
+                        [], [],
+                        color=reagent_boundary_colors[reagent_index],
+                        linewidth=1.15,
+                        linestyle='dotted',
+                        label=f'{reagent_name} = 5 uL boundary'
+                    )
+                    legend_handles.append(reagent_minimum_handle)
+
+            if field_name == 'mean' and any(
+                _grid_spans_contour_level(panel['mean_nm'], target_nm)
+                for panel in panel_data
+            ):
+                target_handle, = axis.plot(
+                    [], [], color='#000000', linewidth=1.1,
+                    linestyle='dashdot',
+                    label=f'Target = {target_nm:.0f} nm'
+                )
+                legend_handles.append(target_handle)
+
+            return legend_handles
+
+        def _format_slice_heatmap_axis(axis):
+            '''Applies the grid-free, square 2D GP heatmap frame style.'''
+            # These are heatmaps, rather than point-based design-space plots.
+            # The established 2D GP figures deliberately omit grid lines so
+            # they cannot be mistaken for another measured-data layer.
+            axis.grid(False)
+            axis.tick_params(
+                axis='both',
+                which='both',
+                direction='out',
+                top=False,
+                right=False,
+                width=0.9,
+                labelsize=font_sizes['tick_label']
+            )
+
+            for spine in axis.spines.values():
+                spine.set_visible(True)
+                spine.set_linewidth(0.9)
+                spine.set_color('0.2')
+
+            self._apply_auto_design_square_box_aspect(axis)
+
+        def _center_slice_axes_and_colorbar(axes, colorbar):
+            '''Centers the complete three-panel heatmap group in its figure.'''
+            # set_box_aspect resolves its final active positions during the
+            # draw pass. Resolve that geometry before calculating the shift,
+            # otherwise the later draw would undo the apparent centering.
+            axes[0].figure.canvas.draw()
+            all_axes = list(axes) + [colorbar.ax]
+            group_left = min(axis.get_position().x0 for axis in all_axes)
+            group_right = max(axis.get_position().x1 for axis in all_axes)
+            horizontal_shift = 0.5 - (group_left + group_right) / 2.0
+
+            for axis in all_axes:
+                position = axis.get_position()
+                axis.set_position([
+                    position.x0 + horizontal_shift,
+                    position.y0,
+                    position.width,
+                    position.height
+                ])
+
+        def _is_reference_observation(observation):
+            '''Returns whether one GP-training row is the slice reference.'''
+            return bool(np.allclose(
+                observation['physical_recipe'],
+                reference_recipe,
+                rtol=0.0,
+                atol=1.0e-12
+            ))
+
+        has_visible_near_slice_training_condition = any(
+            abs(
+                observation['normalized_recipe'][panel['fixed_index']]
+                - reference_normalized[panel['fixed_index']]
+            ) <= slice_half_width
+            and not _is_reference_observation(observation)
+            for panel in panel_data
+            for observation in observed_conditions
+        )
+
+        def _build_slice_observation_legend(axis):
+            '''Builds only the marker entries that can be seen in the atlas.'''
+            legend_handles = []
+
+            if has_visible_near_slice_training_condition:
+                training_handle, = axis.plot(
+                    [], [],
+                    marker='o',
+                    markersize=6,
+                    markerfacecolor='white',
+                    markeredgecolor='#202020',
+                    markeredgewidth=0.8,
+                    linestyle='None',
+                    label='Near-slice GP-training condition'
+                )
+                legend_handles.append(training_handle)
+
+            reference_label_for_legend = (
+                'Slice reference (best QC-approved condition)'
+                if reference_label == 'best QC-approved observed condition'
+                else 'Slice reference (first observed condition)'
+            )
+            reference_handle, = axis.plot(
+                [], [],
+                marker='*',
+                markersize=10,
+                markerfacecolor='#f2c14e',
+                markeredgecolor='#1a1a1a',
+                markeredgewidth=0.8,
+                linestyle='None',
+                label=reference_label_for_legend
+            )
+            legend_handles.append(reference_handle)
+
+            return legend_handles
+
         if final_snapshot:
             final_suffix = 'final'
         else:
@@ -12015,24 +12367,29 @@ class AutoContr(Controller):
         for field_name, colorbar_label, value_getter, colormap, norm, title in (
             field_definitions
         ):
-            figure, axes = plt.subplots(1, 3, figsize=(17.5, 5.6))
-            # Reserve a stable title/annotation band and a dedicated right
-            # margin for the shared colorbar.  tight_layout cannot reliably
-            # account for a colorbar spanning several axes.
+            figure, axes = plt.subplots(1, 3, figsize=(15.5, 5.8), dpi=300)
+            # This file enables Matplotlib's global auto-layout setting. The
+            # slice atlas uses explicit panel and colorbar placement instead,
+            # so disable auto-layout for this figure before centering it.
+            figure.set_tight_layout(False)
+            # Center the complete axis-and-colorbar group beneath the title
+            # band.  The small right margin mirrors the left margin instead
+            # of leaving an unused white strip beside the colorbar.
             figure.subplots_adjust(
-                left=0.065,
-                right=0.875,
-                bottom=0.14,
+                left=0.075,
+                right=0.91,
+                bottom=0.16,
                 top=0.76,
-                wspace=0.24
+                wspace=0.26
             )
             image = None
 
             for axis, panel in zip(axes, panel_data):
-                field_values = np.ma.masked_where(
-                    ~panel['feasible'],
-                    value_getter(panel)
-                )
+                # Match the ordinary 2D heatmaps: the primary figure shows
+                # the complete configured GP domain without physical shading.
+                # The separate diagnostic figure below owns every feasibility
+                # overlay, boundary, and target-contour annotation.
+                field_values = value_getter(panel)
                 image = axis.pcolormesh(
                     panel['x_physical'],
                     panel['y_physical'],
@@ -12041,34 +12398,6 @@ class AutoContr(Controller):
                     cmap=colormap,
                     norm=norm
                 )
-                axis.contourf(
-                    panel['x_physical'],
-                    panel['y_physical'],
-                    (~panel['feasible']).astype(float),
-                    levels=[0.5, 1.5],
-                    colors=['#c7c7c7'],
-                    alpha=0.70
-                )
-
-                if field_name == 'mean':
-                    axis.contour(
-                        panel['x_physical'],
-                        panel['y_physical'],
-                        panel['mean_nm'],
-                        levels=[target_nm],
-                        colors=['#111111'],
-                        linewidths=1.2
-                    )
-
-                if field_name == 'target_probability':
-                    axis.contour(
-                        panel['x_physical'],
-                        panel['y_physical'],
-                        panel['probability'],
-                        levels=[0.5],
-                        colors=['#ffffff'],
-                        linewidths=1.0
-                    )
 
                 x_index = panel['x_index']
                 y_index = panel['y_index']
@@ -12102,15 +12431,31 @@ class AutoContr(Controller):
                     zorder=5
                 )
                 axis.set_xlabel(
-                    self._format_auto_design_axis_label(reagent_names[x_index])
+                    self._format_auto_design_axis_label(reagent_names[x_index]),
+                    fontsize=font_sizes['axis_label']
                 )
                 axis.set_ylabel(
-                    self._format_auto_design_axis_label(reagent_names[y_index])
+                    self._format_auto_design_axis_label(reagent_names[y_index]),
+                    fontsize=font_sizes['axis_label']
                 )
                 axis.set_title(
                     f'Hold {reagent_names[fixed_index]} = '
                     f'{reference_recipe[fixed_index]:.4g} mM',
-                    fontsize=10
+                    fontsize=font_sizes['axis_label'],
+                    pad=9
+                )
+                _format_slice_heatmap_axis(axis)
+                # pcolormesh treats these coordinates as cell centers.  Clip
+                # the displayed span back to the configured concentration
+                # endpoints so the 3D slice atlas uses the same true design
+                # bounds as the 2D heatmaps.
+                axis.set_xlim(
+                    float(np.min(panel['x_physical'])),
+                    float(np.max(panel['x_physical']))
+                )
+                axis.set_ylim(
+                    float(np.min(panel['y_physical'])),
+                    float(np.max(panel['y_physical']))
                 )
 
             colorbar = figure.colorbar(
@@ -12119,23 +12464,197 @@ class AutoContr(Controller):
                 shrink=0.91,
                 pad=0.02
             )
-            colorbar.set_label(colorbar_label)
-            figure.suptitle(title, fontsize=15, y=0.955)
-            figure.text(
-                0.5,
-                0.865,
-                'Gray regions are physically infeasible; white markers are '
-                'near-slice GP-training conditions; star = '
-                f'{reference_label}.',
-                ha='center',
-                va='center',
-                fontsize=8
+            colorbar.set_label(
+                colorbar_label,
+                fontsize=font_sizes['axis_label']
+            )
+            colorbar.ax.tick_params(
+                labelsize=font_sizes['tick_label'],
+                width=0.9
+            )
+            _center_slice_axes_and_colorbar(axes, colorbar)
+            figure.suptitle(
+                title,
+                fontsize=font_sizes['title'],
+                fontweight='normal',
+                y=0.965
+            )
+            observation_legend_handles = _build_slice_observation_legend(
+                axes[0]
+            )
+            figure.legend(
+                observation_legend_handles,
+                [handle.get_label() for handle in observation_legend_handles],
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.91),
+                ncol=len(observation_legend_handles),
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.2,
+                handletextpad=0.45,
+                columnspacing=1.0
             )
             output_path = os.path.join(
                 self.plot_path,
                 f'gpr_3d_{field_name}_orthogonal_slices_{final_suffix}.png'
             )
-            figure.savefig(output_path, dpi=200)
+            # Keep these multi-panel scientific figures at print resolution
+            # so they can be placed directly in posters and presentations.
+            figure.savefig(output_path, dpi=300)
+            plt.close(figure)
+            generated_plot_paths.append(output_path)
+
+        # Preserve the compact original atlases above, then emit separate
+        # feasibility-overlay versions matching the established 2D diagnostic
+        # convention. Target probability does not have a direct 2D analogue,
+        # so only mean and uncertainty receive these extra physical-boundary
+        # figures.
+        for (
+            field_name,
+            colorbar_label,
+            value_getter,
+            colormap,
+            norm,
+            title
+        ) in field_definitions[:2]:
+            figure, axes = plt.subplots(1, 3, figsize=(15.5, 6.6), dpi=300)
+            # Keep the manually centered panel-plus-colorbar group intact at
+            # save time rather than allowing global auto-layout to move it.
+            figure.set_tight_layout(False)
+            figure.subplots_adjust(
+                left=0.075,
+                right=0.91,
+                bottom=0.15,
+                top=0.74,
+                wspace=0.26
+            )
+            image = None
+
+            for axis, panel in zip(axes, panel_data):
+                # Deliberately leave the GP field unmasked in the diagnostic
+                # version, as the existing 2D feasibility plots do. The gray
+                # overlay and labeled boundaries then make the physical region
+                # explicit without changing the GP's configured domain.
+                image = axis.pcolormesh(
+                    panel['x_physical'],
+                    panel['y_physical'],
+                    value_getter(panel),
+                    shading='auto',
+                    cmap=colormap,
+                    norm=norm
+                )
+                _draw_slice_feasibility_overlay(
+                    axis,
+                    panel,
+                    field_name
+                )
+
+                x_index = panel['x_index']
+                y_index = panel['y_index']
+                fixed_index = panel['fixed_index']
+                for observation in observed_conditions:
+                    if abs(
+                        observation['normalized_recipe'][fixed_index]
+                        - reference_normalized[fixed_index]
+                    ) > slice_half_width:
+                        continue
+
+                    axis.scatter(
+                        observation['physical_recipe'][x_index],
+                        observation['physical_recipe'][y_index],
+                        marker='o',
+                        s=35,
+                        facecolors='white',
+                        edgecolors='#202020',
+                        linewidths=0.8,
+                        zorder=6
+                    )
+
+                axis.scatter(
+                    reference_recipe[x_index],
+                    reference_recipe[y_index],
+                    marker='*',
+                    s=105,
+                    facecolors='#f2c14e',
+                    edgecolors='#1a1a1a',
+                    linewidths=0.8,
+                    zorder=7
+                )
+                axis.set_xlabel(
+                    self._format_auto_design_axis_label(reagent_names[x_index]),
+                    fontsize=font_sizes['axis_label']
+                )
+                axis.set_ylabel(
+                    self._format_auto_design_axis_label(reagent_names[y_index]),
+                    fontsize=font_sizes['axis_label']
+                )
+                axis.set_title(
+                    f'Hold {reagent_names[fixed_index]} = '
+                    f'{reference_recipe[fixed_index]:.4g} mM',
+                    fontsize=font_sizes['axis_label'],
+                    pad=9
+                )
+                _format_slice_heatmap_axis(axis)
+                # The field uses the 100 x 100 ordinary GP grid, while the
+                # physical boundaries use a separate 401 x 401 grid.  Exact
+                # endpoint limits prevent a half-cell display fringe between
+                # those dense overlays and the heatmap border.
+                axis.set_xlim(
+                    float(np.min(panel['x_physical'])),
+                    float(np.max(panel['x_physical']))
+                )
+                axis.set_ylim(
+                    float(np.min(panel['y_physical'])),
+                    float(np.max(panel['y_physical']))
+                )
+
+            colorbar = figure.colorbar(
+                image,
+                ax=list(axes),
+                shrink=0.91,
+                pad=0.02
+            )
+            colorbar.set_label(
+                colorbar_label,
+                fontsize=font_sizes['axis_label']
+            )
+            colorbar.ax.tick_params(
+                labelsize=font_sizes['tick_label'],
+                width=0.9
+            )
+            _center_slice_axes_and_colorbar(axes, colorbar)
+            figure.suptitle(
+                f'{title}: physical feasibility overlay',
+                fontsize=font_sizes['title'],
+                fontweight='normal',
+                y=0.97
+            )
+            feasibility_legend_handles = _build_slice_feasibility_legend(
+                axes[0],
+                field_name
+            )
+            feasibility_legend_handles.extend(
+                _build_slice_observation_legend(axes[0])
+            )
+            figure.legend(
+                feasibility_legend_handles,
+                [handle.get_label() for handle in feasibility_legend_handles],
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.91),
+                ncol=3,
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.7,
+                columnspacing=0.9
+            )
+            output_path = os.path.join(
+                self.plot_path,
+                f'gpr_3d_{field_name}_orthogonal_slices_feasibility_'
+                f'{final_suffix}.png'
+            )
+            # Save the overlay counterpart at the same print resolution as
+            # its ordinary GP slice atlas.
+            figure.savefig(output_path, dpi=300)
             plt.close(figure)
             generated_plot_paths.append(output_path)
 

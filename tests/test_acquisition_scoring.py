@@ -3321,6 +3321,40 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         self.assertFalse(balance['volume_feasible'])
         self.assertFalse(balance['variable_transfers_executable'])
 
+    def test_slice_renderer_keeps_originals_and_adds_2d_style_overlays(self):
+        renderer_node = _get_auto_controller_method_node(
+            'plot_3D_GPR_orthogonal_slices'
+        )
+        renderer_source = ast.unparse(renderer_node)
+
+        self.assertIn(
+            'gpr_3d_{field_name}_orthogonal_slices_{final_suffix}.png',
+            renderer_source
+        )
+        self.assertIn(
+            'gpr_3d_{field_name}_orthogonal_slices_feasibility_',
+            renderer_source
+        )
+        self.assertIn(
+            'Water = 5 uL boundary',
+            renderer_source
+        )
+        self.assertIn(
+            'Target = {target_nm:.0f} nm',
+            renderer_source
+        )
+        self.assertIn(
+            'field_values = value_getter(panel)',
+            renderer_source
+        )
+        self.assertIn('grid_size=100', renderer_source)
+        self.assertIn(
+            'feasibility_grid_size = max(401, grid_size)',
+            renderer_source
+        )
+        self.assertIn('feasibility_x_physical', renderer_source)
+        self.assertNotIn('masked_where', renderer_source)
+
     def test_slice_tolerance_uses_the_controller_stop_setting(self):
         controller = self.SliceController()
         controller.robo_params = {'target_tolerance_nm': 7.5}
