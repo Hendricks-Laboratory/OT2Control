@@ -3438,6 +3438,28 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         )
         self.assertIn('feasibility_x_physical', renderer_source)
         self.assertNotIn('masked_where', renderer_source)
+        self.assertIn(
+            'GP probability of meeting the controller stopping criterion',
+            renderer_source
+        )
+        self.assertIn('maximum = {maximum_probability:.3f}', renderer_source)
+        self.assertIn('figsize=(18.2, 5.8)', renderer_source)
+        self.assertIn('figsize=(18.2, 6.6)', renderer_source)
+
+    def test_three_d_design_plot_excludes_best_point_from_base_marker(self):
+        renderer_node = _get_auto_controller_method_node(
+            '_plot_initial_training_design_3d'
+        )
+        renderer_source = ast.unparse(renderer_node)
+
+        self.assertIn(
+            'display_optimizer_mask = optimizer_mask & ~best_mask',
+            renderer_source
+        )
+        self.assertIn(
+            'display_seed_mask = seed_mask & ~best_mask',
+            renderer_source
+        )
 
     def test_slice_tolerance_uses_the_controller_stop_setting(self):
         controller = self.SliceController()

@@ -8067,64 +8067,18 @@ class AutoContr(Controller):
             seed_mask | optimizer_mask
         )
 
-        legend_handles = []
-        legend_labels = []
-
-        if seed_mask.any():
-            seed_handle = ax.scatter(
-                plot_df.loc[seed_mask, x_column],
-                plot_df.loc[seed_mask, y_column],
-                plot_df.loc[seed_mask, z_column],
-                s=46,
-                marker='o',
-                facecolors='none',
-                edgecolors='tab:blue',
-                linewidths=1.2,
-                alpha=0.95,
-                label='Seed condition',
-                depthshade=False
-            )
-
-            legend_handles.append(seed_handle)
-            legend_labels.append('Seed condition')
-
-        if optimizer_mask.any():
-            optimizer_handle = ax.scatter(
-                plot_df.loc[optimizer_mask, x_column],
-                plot_df.loc[optimizer_mask, y_column],
-                plot_df.loc[optimizer_mask, z_column],
-                s=48,
-                marker='s',
-                facecolors='none',
-                edgecolors='tab:orange',
-                linewidths=1.2,
-                alpha=0.95,
-                label='Optimizer-selected',
-                depthshade=False
-            )
-
-            legend_handles.append(optimizer_handle)
-            legend_labels.append('Optimizer-selected')
-
-        if other_mask.any():
-            other_handle = ax.scatter(
-                plot_df.loc[other_mask, x_column],
-                plot_df.loc[other_mask, y_column],
-                plot_df.loc[other_mask, z_column],
-                s=42,
-                marker='^',
-                facecolors='none',
-                edgecolors='0.35',
-                linewidths=1.1,
-                alpha=0.85,
-                label='Other condition',
-                depthshade=False
-            )
-
-            legend_handles.append(other_handle)
-            legend_labels.append('Other condition')
-
+        # The best condition is a presentation category of its own.  Do not
+        # also draw its seed/optimizer marker at the identical 3D coordinate:
+        # Matplotlib's depth sorting can otherwise place that marker over the
+        # red star even when the star is created later.  Excluding the point
+        # from its underlying category changes neither the plotted data nor
+        # the best-condition calculation; it only makes the highlighted point
+        # visually unambiguous.
         best_condition_number = None
+        best_mask = pd.Series(
+            False,
+            index=plot_df.index
+        )
 
         if include_best_condition:
             best_condition_number = (
@@ -8142,31 +8096,91 @@ class AutoContr(Controller):
                     plot_df['reaction_number'].astype(float)
                     == float(best_condition_number)
                 )
-
             except Exception:
                 best_mask = pd.Series(
                     False,
                     index=plot_df.index
                 )
 
-            if best_mask.any():
-                best_handle = ax.scatter(
-                    plot_df.loc[best_mask, x_column],
-                    plot_df.loc[best_mask, y_column],
-                    plot_df.loc[best_mask, z_column],
-                    s=125,
-                    marker='*',
-                    color='tab:red',
-                    linewidths=0.9,
-                    alpha=0.95,
-                    label='Best observed condition',
-                    depthshade=False
-                )
+        display_seed_mask = seed_mask & ~best_mask
+        display_optimizer_mask = optimizer_mask & ~best_mask
+        display_other_mask = other_mask & ~best_mask
 
-                legend_handles.append(best_handle)
-                legend_labels.append(
-                    'Best observed condition'
-                )
+        legend_handles = []
+        legend_labels = []
+
+        if display_seed_mask.any():
+            seed_handle = ax.scatter(
+                plot_df.loc[display_seed_mask, x_column],
+                plot_df.loc[display_seed_mask, y_column],
+                plot_df.loc[display_seed_mask, z_column],
+                s=46,
+                marker='o',
+                facecolors='none',
+                edgecolors='tab:blue',
+                linewidths=1.2,
+                alpha=0.95,
+                label='Seed condition',
+                depthshade=False
+            )
+
+            legend_handles.append(seed_handle)
+            legend_labels.append('Seed condition')
+
+        if display_optimizer_mask.any():
+            optimizer_handle = ax.scatter(
+                plot_df.loc[display_optimizer_mask, x_column],
+                plot_df.loc[display_optimizer_mask, y_column],
+                plot_df.loc[display_optimizer_mask, z_column],
+                s=48,
+                marker='s',
+                facecolors='none',
+                edgecolors='tab:orange',
+                linewidths=1.2,
+                alpha=0.95,
+                label='Optimizer-selected',
+                depthshade=False
+            )
+
+            legend_handles.append(optimizer_handle)
+            legend_labels.append('Optimizer-selected')
+
+        if display_other_mask.any():
+            other_handle = ax.scatter(
+                plot_df.loc[display_other_mask, x_column],
+                plot_df.loc[display_other_mask, y_column],
+                plot_df.loc[display_other_mask, z_column],
+                s=42,
+                marker='^',
+                facecolors='none',
+                edgecolors='0.35',
+                linewidths=1.1,
+                alpha=0.85,
+                label='Other condition',
+                depthshade=False
+            )
+
+            legend_handles.append(other_handle)
+            legend_labels.append('Other condition')
+
+        if best_mask.any():
+            best_handle = ax.scatter(
+                plot_df.loc[best_mask, x_column],
+                plot_df.loc[best_mask, y_column],
+                plot_df.loc[best_mask, z_column],
+                s=125,
+                marker='*',
+                color='tab:red',
+                linewidths=0.9,
+                alpha=0.95,
+                label='Best observed condition',
+                depthshade=False
+            )
+
+            legend_handles.append(best_handle)
+            legend_labels.append(
+                'Best observed condition'
+            )
 
         if (
             'reaction_number' in plot_df.columns
@@ -12238,13 +12252,13 @@ class AutoContr(Controller):
             ),
             (
                 'target_probability',
-                'P(|$\\lambda_{max}$ - target| <= tolerance)',
+                'Probability of meeting target criterion',
                 lambda panel: panel['probability'],
                 'cividis',
                 plt.Normalize(vmin=0.0, vmax=1.0),
                 (
-                    'Probability within the controller target tolerance '
-                    f'({tolerance_nm:g} nm)'
+                    'GP probability of meeting the controller stopping '
+                    f'criterion (target ± {tolerance_nm:g} nm)'
                 )
             )
         )
@@ -12527,7 +12541,20 @@ class AutoContr(Controller):
         for field_name, colorbar_label, value_getter, colormap, norm, title in (
             field_definitions
         ):
-            figure, axes = plt.subplots(1, 3, figsize=(15.5, 5.8), dpi=300)
+            if field_name == 'target_probability':
+                maximum_probability = max(
+                    float(np.max(panel['probability']))
+                    for panel in panel_data
+                )
+                title = (
+                    f'{title}; maximum = {maximum_probability:.3f}'
+                )
+
+            # Long reagent names require more physical separation than a
+            # compact three-panel atlas provides.  This wider canvas retains
+            # square data panels and a centered colorbar while preventing a
+            # panel's y-axis title from encroaching on its neighbor.
+            figure, axes = plt.subplots(1, 3, figsize=(18.2, 5.8), dpi=300)
             # This file enables Matplotlib's global auto-layout setting. The
             # slice atlas uses explicit panel and colorbar placement instead,
             # so disable auto-layout for this figure before centering it.
@@ -12536,11 +12563,11 @@ class AutoContr(Controller):
             # band.  The small right margin mirrors the left margin instead
             # of leaving an unused white strip beside the colorbar.
             figure.subplots_adjust(
-                left=0.075,
-                right=0.91,
+                left=0.07,
+                right=0.92,
                 bottom=0.16,
                 top=0.76,
-                wspace=0.26
+                wspace=0.38
             )
             image = None
 
@@ -12677,16 +12704,16 @@ class AutoContr(Controller):
             norm,
             title
         ) in field_definitions[:2]:
-            figure, axes = plt.subplots(1, 3, figsize=(15.5, 6.6), dpi=300)
+            figure, axes = plt.subplots(1, 3, figsize=(18.2, 6.6), dpi=300)
             # Keep the manually centered panel-plus-colorbar group intact at
             # save time rather than allowing global auto-layout to move it.
             figure.set_tight_layout(False)
             figure.subplots_adjust(
-                left=0.075,
-                right=0.91,
+                left=0.07,
+                right=0.92,
                 bottom=0.15,
                 top=0.74,
-                wspace=0.26
+                wspace=0.38
             )
             image = None
 
