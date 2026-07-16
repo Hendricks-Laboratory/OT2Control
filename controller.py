@@ -194,6 +194,14 @@ class Controller(ABC):
         translate_wellmap() void: used to convert a wellmap.tsv from robot to wells locs 
           that correspond to platereader  
     '''
+    # The deployed Raspberry Pi currently uses tube tare constants that are
+    # 0.3 g lower than the corrected laboratory values. This controller-side
+    # compatibility constant is applied only to the robot init payload until
+    # that Pi deployment is updated. When the Pi's tare constants are
+    # corrected, remove this compatibility adjustment or set it to 0.0;
+    # retaining both corrections would understate every source liquid volume.
+    LEGACY_PI_TARE_OFFSET_G = 0.3
+
     #this has two keys, 'deck_pos' and 'loc'. They map to the plate reader and the loc on that plate
     #reader given a regular loc for a 96well plate.
     #Please do not read this. paste it into a nice json viewer.
@@ -828,6 +836,28 @@ class Controller(ABC):
         df['loc'] = df.apply(lambda r: r['loc'] if (r['deck_pos'] not in [4,7]) else self.PLATEREADER_INDEX_TRANSLATOR.inv[(r['loc'],'platereader'+str(r['deck_pos']))],axis=1)
         df.to_csv(os.path.join(self.eve_files_path,'translated_wellmap.tsv'),sep='\t',index=False)
 
+    def _get_pi_compatible_reagent_payload(self):
+        '''
+        Returns reagent data adjusted only for the deployed Raspberry Pi's
+        legacy tube-tare calculation.
+
+        The fixed controller-side compatibility offset is subtracted from
+        every reagent mass in a deep copy sent to the Pi. Because the Pi's
+        tare is lower than the corrected laboratory tare by the same amount,
+        its existing ``mass - tare`` calculation yields the correct liquid
+        mass. The controller's stored reagent dataframe remains unchanged.
+        '''
+        payload_df = self.robo_params['reagent_df'].copy(deep=True)
+        measured_masses_g = pd.to_numeric(
+            payload_df['mass'],
+            errors='raise'
+        )
+        payload_df['mass'] = (
+            measured_masses_g - self.LEGACY_PI_TARE_OFFSET_G
+        )
+
+        return payload_df.reset_index().to_dict()
+
     def init_robot(self, simulate):
         '''
         this does the dirty work of sending accumulated params over network to the robot  
@@ -841,7 +871,7 @@ class Controller(ABC):
         cid = self.portal.send_pack('init', simulate, 
                 self.robo_params['using_temp_ctrl'], self.robo_params['temp'],
                 self.robo_params['labware_df'].to_dict(), self.robo_params['instruments'],
-                self.robo_params['reagent_df'].reset_index().to_dict(), self.my_ip,
+                self._get_pi_compatible_reagent_payload(), self.my_ip,
                 self.robo_params['dry_containers'].to_dict())
 
     @abstractmethod
