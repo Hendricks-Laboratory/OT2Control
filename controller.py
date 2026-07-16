@@ -54,6 +54,7 @@ from boltons.socketutils import BufferedSocket
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.lines import Line2D
 from matplotlib import rcParams
 rcParams.update({'figure.autolayout': True})
 
@@ -13256,6 +13257,8 @@ class AutoContr(Controller):
 
                 standard:
                     Generates cumulative lambda progress and replicate plots.
+                    Portfolio runs additionally generate a companion trace
+                    with acquisition-mode-specific marker styles.
 
                 final_only or off:
                     Generates nothing.
@@ -13523,6 +13526,17 @@ class AutoContr(Controller):
                 )
             )
 
+            if len(getattr(model, 'acquisition_modes', [])) > 1:
+                _run_output_step(
+                    (
+                        f"portfolio acquisition trace through batch "
+                        f"{completed_batch_number}"
+                    ),
+                    lambda: self._plot_auto_portfolio_trace_after_batch(
+                        completed_batch_number
+                    )
+                )
+
             _run_output_step(
                 (
                     f"lambda replicate plot through batch "
@@ -13629,6 +13643,16 @@ class AutoContr(Controller):
                     )
                 )
             )
+
+            if len(getattr(model, 'acquisition_modes', [])) > 1:
+                _run_output_step(
+                    'final portfolio acquisition trace',
+                    lambda: self._plot_auto_portfolio_trace_after_batch(
+                        completed_batch_number,
+                        plot_filename='acquisition_portfolio_trace_final.png',
+                        plot_title='Final Auto Acquisition Portfolio Trace'
+                    )
+                )
 
             _run_output_step(
                 'final dimension-aware Auto design-space plots',
@@ -14531,6 +14555,447 @@ class AutoContr(Controller):
 
         print(
             "<<controller>> saved lambda replicate progress plot to "
+            f"{plot_path}"
+        )
+
+        return plot_path
+
+    def _plot_auto_portfolio_trace_after_batch(
+        self,
+        batch_number,
+        plot_filename=None,
+        plot_title=None,
+        y_display_min_nm=300.0,
+        y_display_max_nm=1000.0
+    ):
+        '''
+        Generates a portfolio-specific companion plot without changing the
+        established lambda progress or replicate diagnostic figures.
+
+        Each acquisition mode receives a fixed, colorblind-friendly color and
+        marker shape. Filled markers represent observed condition means in
+        the upper panel and QC-included individual replicates in the lower
+        panel. Hollow markers represent pre-experiment GP predictions; red
+        outlines in the replicate panel identify QC-excluded observations.
+
+        The visualization is intentionally a trace of the ordered portfolio,
+        rather than a separate GP plot per mode. Every portfolio member is
+        selected from the same pre-batch GP and all QC-approved observations
+        update that one shared model after the batch is complete.
+        '''
+        if len(self.auto_model_performance_rows) == 0:
+            return None
+
+        performance_df = pd.DataFrame(self.auto_model_performance_rows)
+        performance_df = performance_df[
+            performance_df['batch_number'] <= batch_number
+        ].copy()
+
+        if performance_df.empty:
+            return None
+
+        performance_df = performance_df.sort_values('reaction_number')
+        performance_df['reaction_number'] = performance_df[
+            'reaction_number'
+        ].astype(float)
+
+        mode_styles = {
+            'seed': {
+                'label': 'Seed condition',
+                'color': '0.30',
+                'marker': 'o'
+            },
+            'exploit': {
+                'label': 'Exploit',
+                'color': '#0072B2',
+                'marker': 's'
+            },
+            'explore': {
+                'label': 'Explore',
+                'color': '#009E73',
+                'marker': '^'
+            },
+            'balanced': {
+                'label': 'Balanced',
+                'color': '#E69F00',
+                'marker': 'D'
+            },
+            'target_ei': {
+                'label': 'Target EI',
+                'color': '#CC79A7',
+                'marker': 'P'
+            },
+            'other': {
+                'label': 'Other optimizer mode',
+                'color': '#56B4E9',
+                'marker': 'v'
+            }
+        }
+        style_order = [
+            'seed',
+            'exploit',
+            'explore',
+            'balanced',
+            'target_ei',
+            'other'
+        ]
+
+        def _get_style_key(row):
+            condition_type = str(row.get('condition_type', '')).strip().lower()
+
+            if condition_type == 'seed':
+                return 'seed'
+
+            acquisition_mode = row.get('acquisition_mode')
+
+            if acquisition_mode is None or pd.isna(acquisition_mode):
+                return 'other'
+
+            acquisition_mode = str(acquisition_mode).strip().lower()
+
+            if acquisition_mode in mode_styles:
+                return acquisition_mode
+
+            return 'other'
+
+        performance_df['_portfolio_style_key'] = performance_df.apply(
+            _get_style_key,
+            axis=1
+        )
+
+        active_style_keys = [
+            style_key
+            for style_key in style_order
+            if style_key in set(performance_df['_portfolio_style_key'])
+        ]
+
+        target_lambda = float(
+            performance_df['target_lambda_max_nm'].iloc[0]
+        )
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+        fig, (summary_ax, replicate_ax) = plt.subplots(
+            2,
+            1,
+            figsize=(8.4, 7.3),
+            dpi=300,
+            sharex=True
+        )
+        fig.set_tight_layout(False)
+
+        target_handle = summary_ax.axhline(
+            target_lambda,
+            color='0.25',
+            linestyle='--',
+            linewidth=1.1,
+            alpha=0.8,
+            zorder=1
+        )
+        replicate_ax.axhline(
+            target_lambda,
+            color='0.25',
+            linestyle='--',
+            linewidth=1.1,
+            alpha=0.8,
+            zorder=1
+        )
+
+        for style_key in active_style_keys:
+            style = mode_styles[style_key]
+            mode_df = performance_df[
+                performance_df['_portfolio_style_key'] == style_key
+            ].copy()
+            x_values = mode_df['reaction_number'].to_numpy(dtype=float)
+            actual_means = pd.to_numeric(
+                mode_df['actual_lambda_mean_nm'],
+                errors='coerce'
+            ).to_numpy(dtype=float)
+            actual_sems = pd.to_numeric(
+                mode_df['actual_lambda_sem_nm'],
+                errors='coerce'
+            ).fillna(0.0).to_numpy(dtype=float)
+            actual_yerr, _ = self._clip_errorbars_to_lambda_display_window(
+                means=actual_means,
+                errors=actual_sems,
+                condition_numbers=x_values,
+                y_min_nm=y_display_min_nm,
+                y_max_nm=y_display_max_nm
+            )
+
+            summary_ax.errorbar(
+                x_values,
+                actual_means,
+                yerr=actual_yerr,
+                fmt=style['marker'],
+                color=style['color'],
+                ecolor=style['color'],
+                markerfacecolor=style['color'],
+                markeredgecolor=style['color'],
+                markeredgewidth=1.0,
+                elinewidth=1.0,
+                capsize=4,
+                markersize=5.0,
+                barsabove=True,
+                alpha=0.92,
+                zorder=4
+            )
+
+            prediction_df = mode_df[
+                pd.to_numeric(
+                    mode_df['predicted_lambda_mean_nm'],
+                    errors='coerce'
+                ).notna()
+            ].copy()
+
+            if not prediction_df.empty:
+                prediction_x = prediction_df['reaction_number'].to_numpy(
+                    dtype=float
+                )
+                prediction_means = pd.to_numeric(
+                    prediction_df['predicted_lambda_mean_nm'],
+                    errors='coerce'
+                ).to_numpy(dtype=float)
+                prediction_stds = pd.to_numeric(
+                    prediction_df['predicted_lambda_std_nm'],
+                    errors='coerce'
+                ).fillna(0.0).to_numpy(dtype=float)
+                prediction_yerr, _ = (
+                    self._clip_errorbars_to_lambda_display_window(
+                        means=prediction_means,
+                        errors=prediction_stds,
+                        condition_numbers=prediction_x,
+                        y_min_nm=y_display_min_nm,
+                        y_max_nm=y_display_max_nm
+                    )
+                )
+
+                summary_ax.errorbar(
+                    prediction_x,
+                    prediction_means,
+                    yerr=prediction_yerr,
+                    fmt=style['marker'],
+                    color=style['color'],
+                    ecolor=style['color'],
+                    markerfacecolor='none',
+                    markeredgecolor=style['color'],
+                    markeredgewidth=1.2,
+                    elinewidth=1.0,
+                    capsize=4,
+                    markersize=5.8,
+                    barsabove=True,
+                    alpha=0.78,
+                    zorder=3
+                )
+
+        replicate_value_columns = sorted(
+            [
+                column
+                for column in performance_df.columns
+                if (
+                    column.startswith('actual_lambda_rep_')
+                    and column.endswith('_nm')
+                )
+            ],
+            key=lambda column: int(
+                column.replace('actual_lambda_rep_', '').replace('_nm', '')
+            )
+        )
+
+        has_qc_exclusion = False
+
+        for _, row in performance_df.iterrows():
+            style = mode_styles[row['_portfolio_style_key']]
+            reaction_number = float(row['reaction_number'])
+
+            for value_column in replicate_value_columns:
+                replicate_value = row.get(value_column)
+
+                if replicate_value is None or pd.isna(replicate_value):
+                    continue
+
+                replicate_number = int(
+                    value_column.replace('actual_lambda_rep_', '').replace(
+                        '_nm',
+                        ''
+                    )
+                )
+                qc_column = (
+                    f'actual_lambda_rep_{replicate_number}_included_in_qc'
+                )
+                qc_value = row.get(qc_column, True)
+
+                if isinstance(qc_value, str):
+                    included_in_qc = qc_value.strip().lower() in [
+                        'true',
+                        '1',
+                        'yes',
+                        'y'
+                    ]
+                elif qc_value is None or pd.isna(qc_value):
+                    included_in_qc = True
+                else:
+                    included_in_qc = bool(qc_value)
+
+                if included_in_qc:
+                    replicate_ax.scatter(
+                        [reaction_number],
+                        [float(replicate_value)],
+                        s=30,
+                        marker=style['marker'],
+                        facecolors=style['color'],
+                        edgecolors=style['color'],
+                        linewidths=0.9,
+                        alpha=0.9,
+                        zorder=4
+                    )
+                else:
+                    has_qc_exclusion = True
+                    replicate_ax.scatter(
+                        [reaction_number],
+                        [float(replicate_value)],
+                        s=38,
+                        marker=style['marker'],
+                        facecolors='none',
+                        edgecolors='#D55E00',
+                        linewidths=1.3,
+                        alpha=0.95,
+                        zorder=5
+                    )
+
+        summary_ax.set_ylabel(
+            r'Condition mean $\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
+        replicate_ax.set_ylabel(
+            r'Replicate $\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
+        replicate_ax.set_xlabel(
+            'Reaction condition number',
+            fontsize=font_sizes['axis_label'],
+            labelpad=5
+        )
+
+        for axis in (summary_ax, replicate_ax):
+            axis.set_ylim(y_display_min_nm, y_display_max_nm)
+            self._apply_auto_lambda_plot_lab_frame_style(axis)
+
+        integer_ticks = performance_df['reaction_number'].astype(int).to_list()
+        replicate_ax.set_xticks(integer_ticks)
+
+        if plot_title is None:
+            plot_title = (
+                f'Auto Acquisition Portfolio Trace After Batch {batch_number}'
+            )
+
+        fig.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.985
+        )
+
+        mode_handles = [
+            Line2D(
+                [0],
+                [0],
+                marker=mode_styles[style_key]['marker'],
+                color=mode_styles[style_key]['color'],
+                markerfacecolor=mode_styles[style_key]['color'],
+                markersize=6,
+                linewidth=0,
+                label=mode_styles[style_key]['label']
+            )
+            for style_key in active_style_keys
+        ]
+        semantic_handles = [
+            Line2D(
+                [0],
+                [0],
+                marker='o',
+                color='0.20',
+                markerfacecolor='0.20',
+                markersize=5,
+                linewidth=0,
+                label='Filled: observed / QC-included'
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker='o',
+                color='0.20',
+                markerfacecolor='none',
+                markersize=5,
+                linewidth=0,
+                label='Hollow: GP prediction'
+            )
+        ]
+
+        if has_qc_exclusion:
+            semantic_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    marker='o',
+                    color='#D55E00',
+                    markerfacecolor='none',
+                    markersize=5,
+                    linewidth=0,
+                    label='Red outline: QC-excluded'
+                )
+            )
+
+        target_legend_handle = Line2D(
+            [0],
+            [0],
+            color=target_handle.get_color(),
+            linestyle='--',
+            linewidth=1.1,
+            label=f'Target = {target_lambda:.0f} nm'
+        )
+        legend_handles = mode_handles + semantic_handles + [
+            target_legend_handle
+        ]
+
+        fig.legend(
+            legend_handles,
+            [handle.get_label() for handle in legend_handles],
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.955),
+            ncol=4,
+            frameon=False,
+            fontsize=font_sizes['legend'],
+            handlelength=1.1,
+            handletextpad=0.4,
+            columnspacing=0.8
+        )
+        fig.text(
+            0.5,
+            0.02,
+            'Mode markers identify the selection rule; all modes share one '
+            'pre-batch GP and jointly update it after QC.',
+            ha='center',
+            va='center',
+            fontsize=font_sizes['footer'],
+            color='0.35'
+        )
+        fig.subplots_adjust(
+            left=0.16,
+            right=0.97,
+            bottom=0.10,
+            top=0.80,
+            hspace=0.18
+        )
+
+        if plot_filename is None:
+            plot_filename = (
+                f'acquisition_portfolio_trace_after_batch_{batch_number}.png'
+            )
+
+        plot_path = os.path.join(self.plot_path, plot_filename)
+        fig.savefig(plot_path)
+        plt.close(fig)
+        print(
+            "<<controller>> saved acquisition portfolio trace to "
             f"{plot_path}"
         )
 
