@@ -192,7 +192,8 @@ def _load_base_controller_methods(method_names):
     )
     namespace = {
         'math': math,
-        'np': np
+        'np': np,
+        'pd': pd
     }
 
     exec(
@@ -1478,7 +1479,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.Controller = _load_base_controller_methods([
-            '_init_robo_header_params'
+            '_init_robo_header_params',
+            '_get_pi_compatible_reagent_payload'
         ])
 
     def _base_header(self):
@@ -1502,7 +1504,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         target_tolerance_nm=None,
         auto_terminal_verbosity=None,
         auto_source_volume_check=None,
-        auto_source_reserve_volume_uL=None
+        auto_source_reserve_volume_uL=None,
+        pi_legacy_tare_offset_g=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1551,6 +1554,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(auto_source_reserve_volume_uL)
             ])
 
+        if pi_legacy_tare_offset_g is not None:
+            header.append([
+                'pi_legacy_tare_offset_g',
+                str(pi_legacy_tare_offset_g)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1566,6 +1575,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['target_tolerance_nm'], 10.0)
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
         self.assertEqual(parsed['auto_source_volume_check'], 'off')
+        self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.0)
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
 
@@ -1593,6 +1603,39 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 auto_source_volume_check='required',
                 auto_source_reserve_volume_uL='-1'
             )
+
+    def test_pi_legacy_tare_offset_is_optional_and_payload_only(self):
+        parsed = self._parse_header(pi_legacy_tare_offset_g='0.3')
+        self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.3)
+
+        with self.assertRaisesRegex(ValueError, 'finite, nonnegative mass'):
+            self._parse_header(pi_legacy_tare_offset_g='-0.3')
+
+        controller = self.Controller()
+        controller.robo_params = {
+            'pi_legacy_tare_offset_g': 0.3,
+            'reagent_df': pd.DataFrame(
+                {
+                    'mass': [7.5731, 14.2950],
+                    'conc': [1.0, 1.0]
+                },
+                index=['reagent_aC1.0', 'reagent_bC1.0']
+            )
+        }
+
+        payload = controller._get_pi_compatible_reagent_payload()
+
+        self.assertEqual(
+            list(payload['mass'].values()),
+            [7.2731, 13.9950]
+        )
+        self.assertEqual(
+            controller.robo_params['reagent_df'].loc[
+                'reagent_aC1.0',
+                'mass'
+            ],
+            7.5731
+        )
 
     def test_header_target_tolerance_is_optional_and_validated(self):
         parsed = self._parse_header(target_tolerance_nm=5.0)
