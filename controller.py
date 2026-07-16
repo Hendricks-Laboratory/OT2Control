@@ -344,7 +344,7 @@ class Controller(ABC):
             str loc: the loc of the well on it's labware (translated to human if on pr)  
             int deck_pos: the position of the labware it's on  
             float vol: the volume in the container  
-            float aspiratible_vol: the volume minus dead vol  
+            float aspirable_vol: the volume minus dead volume
     CONSTANTS:  
         bidict<str:tuple<str,str>> PLATEREADER_INDEX_TRANSLATOR: used to translate from locs on
         wellplate to locs on the opentrons object. Use a json viewer for more structural info  
@@ -17225,7 +17225,10 @@ class AutoContr(Controller):
                 )
                 continue
 
-            available_aspirable_uL = float(source_entry.aspiratible_vol)
+            # ChemCacheEntry mirrors the Raspberry Pi's ``loc_resp`` payload,
+            # whose fourth volume field is the liquid that remains aspiratable
+            # after the robot's dead-volume allowance.
+            available_aspirable_uL = float(source_entry.aspirable_vol)
             required_aspirable_uL = (
                 planned_usage_uL + reserve_volume_uL
             )

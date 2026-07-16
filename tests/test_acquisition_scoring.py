@@ -1808,13 +1808,13 @@ class AutoSourceVolumePreflightTests(unittest.TestCase):
                 loc='A1',
                 deck_pos=1,
                 vol=100.0,
-                aspiratible_vol=80.0
+                aspirable_vol=80.0
             ),
             'WaterC1.0': SimpleNamespace(
                 loc='A2',
                 deck_pos=1,
                 vol=300.0,
-                aspiratible_vol=280.0
+                aspirable_vol=280.0
             )
         }
         return controller
@@ -1868,7 +1868,7 @@ class AutoSourceVolumePreflightTests(unittest.TestCase):
 
     def test_preflight_rejects_insufficient_aggregate_aspirable_volume(self):
         controller = self._build_controller()
-        controller._cached_reader_locs['reagent_aC1.0'].aspiratible_vol = 44.0
+        controller._cached_reader_locs['reagent_aC1.0'].aspirable_vol = 44.0
 
         with self.assertRaisesRegex(
             ValueError,
