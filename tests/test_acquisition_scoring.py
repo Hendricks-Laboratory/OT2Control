@@ -1560,6 +1560,27 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 acquisition_modes='off'
             )
 
+    def test_portfolio_distance_accepts_readable_aliases_and_numbers(self):
+        cases = {
+            'NONE': 0.00,
+            'modest': 0.05,
+            'Strong': 0.10,
+            'very strong': 0.15,
+            '0.075': 0.075
+        }
+
+        for workbook_value, expected_distance in cases.items():
+            with self.subTest(workbook_value=workbook_value):
+                parsed = self._parse_header(
+                    acquisition_mode='off',
+                    acquisition_modes='core3',
+                    portfolio_min_distance=workbook_value
+                )
+                self.assertEqual(
+                    parsed['portfolio_min_distance'],
+                    expected_distance
+                )
+
     def test_portfolio_rejects_duplicate_modes_and_target_ei_singletons(self):
         with self.assertRaisesRegex(ValueError, 'must not repeat'):
             self._parse_header(

@@ -1143,16 +1143,40 @@ class Controller(ABC):
             header_dict.get('portfolio_min_distance', '0.05')
         ).strip()
 
-        try:
-            portfolio_min_distance = float(
-                portfolio_min_distance_value
-            )
-        except ValueError:
-            raise ValueError(
-                "Header portfolio_min_distance must be a finite value "
-                "between 0 and 1 in normalized RMS recipe space. Received: "
-                f"{portfolio_min_distance_value!r}."
-            )
+        # The numeric threshold remains available for advanced users, while
+        # these spreadsheet-friendly labels make the portfolio-diversity
+        # setting understandable in a Header dropdown.  The stored parameter
+        # is always the corresponding normalized RMS distance.
+        portfolio_distance_aliases = {
+            'none': 0.00,
+            'modest': 0.05,
+            'strong': 0.10,
+            'very_strong': 0.15,
+            'very strong': 0.15,
+            'default': 0.05
+        }
+        normalized_portfolio_distance_value = (
+            portfolio_min_distance_value.lower()
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        if normalized_portfolio_distance_value in portfolio_distance_aliases:
+            portfolio_min_distance = portfolio_distance_aliases[
+                normalized_portfolio_distance_value
+            ]
+        else:
+            try:
+                portfolio_min_distance = float(
+                    portfolio_min_distance_value
+                )
+            except ValueError:
+                raise ValueError(
+                    "Header portfolio_min_distance must be one of: none, "
+                    "modest, strong, very_strong, or a finite number between "
+                    "0 and 1 in normalized RMS recipe space. Received: "
+                    f"{portfolio_min_distance_value!r}."
+                )
 
         if (
             not math.isfinite(portfolio_min_distance)
