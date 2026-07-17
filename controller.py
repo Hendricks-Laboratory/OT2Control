@@ -12109,6 +12109,20 @@ class AutoContr(Controller):
                 "conditional map."
             )
 
+        terminal_verbosity = str(
+            getattr(self, 'robo_params', {}).get(
+                'auto_terminal_verbosity',
+                'standard'
+            )
+        ).strip().lower()
+        show_progress = terminal_verbosity in {'standard', 'diagnostic'}
+
+        if show_progress:
+            print(
+                "<<controller>> preparing 3D GP slice data and physical "
+                "feasibility boundaries; please wait"
+            )
+
         predict_batch = getattr(
             model,
             'predict_lambda_distribution_nm_batch',
@@ -12723,9 +12737,25 @@ class AutoContr(Controller):
                 batch_number = getattr(self, 'batch_num', 0)
             final_suffix = f'after_batch_{int(batch_number)}'
 
-        for field_name, colorbar_label, value_getter, colormap, norm, title in (
-            field_definitions
-        ):
+        if show_progress:
+            print(
+                "<<controller>> rendering 5 high-resolution 3D GP slice "
+                "atlases; please wait"
+            )
+
+        for render_index, (
+            field_name,
+            colorbar_label,
+            value_getter,
+            colormap,
+            norm,
+            title
+        ) in enumerate(field_definitions, start=1):
+            if show_progress:
+                print(
+                    "<<controller>> rendering 3D GP slice atlas "
+                    f"{render_index}/5: {field_name}"
+                )
             if field_name == 'target_probability':
                 maximum_probability = max(
                     float(np.max(panel['probability']))
@@ -12881,14 +12911,19 @@ class AutoContr(Controller):
         # convention. Target probability does not have a direct 2D analogue,
         # so only mean and uncertainty receive these extra physical-boundary
         # figures.
-        for (
+        for render_index, (
             field_name,
             colorbar_label,
             value_getter,
             colormap,
             norm,
             title
-        ) in field_definitions[:2]:
+        ) in enumerate(field_definitions[:2], start=4):
+            if show_progress:
+                print(
+                    "<<controller>> rendering 3D GP feasibility atlas "
+                    f"{render_index}/5: {field_name}"
+                )
             figure, axes = plt.subplots(1, 3, figsize=(18.2, 6.6), dpi=300)
             # Keep the manually centered panel-plus-colorbar group intact at
             # save time rather than allowing global auto-layout to move it.
@@ -15899,10 +15934,23 @@ class AutoContr(Controller):
         )
 
         # Create the model with QC-filtered initial data.
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            != 'essential'
+        ):
+            print(
+                "<<controller>> fitting GP model from QC-approved seed "
+                "observations; please wait"
+            )
         model.initialize_optimizer(
             qc_X_initial_normalized,
             qc_Y_initial_normalized
         )
+        if (
+            self.robo_params.get('auto_terminal_verbosity', 'standard')
+            != 'essential'
+        ):
+            print("<<controller>> GP model initialized")
 
         # Synchronize target EI only after the seed observations have been
         # successfully incorporated into the fitted GP. The incumbent comes
@@ -16069,12 +16117,31 @@ class AutoContr(Controller):
             )
 
             # Update the model with only QC-included replicate observations.
+            if (
+                self.robo_params.get(
+                    'auto_terminal_verbosity',
+                    'standard'
+                )
+                != 'essential'
+            ):
+                print(
+                    "<<controller>> updating GP model with QC-approved "
+                    f"batch {self.batch_num} observations; please wait"
+                )
             model.update_experiment_data(
                 np.vstack((model.optimizer.X, qc_X_new_normalized)),
                 np.vstack((model.optimizer.Y, qc_Y_new_normalized)),
                 qc_X_new_normalized,
                 qc_Y_new_normalized
             )
+            if (
+                self.robo_params.get(
+                    'auto_terminal_verbosity',
+                    'standard'
+                )
+                != 'essential'
+            ):
+                print("<<controller>> GP model updated")
 
             # Keep target EI aligned with the newly fitted GP only after its
             # QC-filtered batch update succeeds.
