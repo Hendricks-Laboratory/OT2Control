@@ -2739,6 +2739,7 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_run_lambda_replicate_qc',
             '_get_auto_model_training_decision_from_replicate_qc',
             '_get_auto_target_eligibility_decision',
+            '_summarize_auto_scan_quality',
             '_append_auto_model_performance_rows',
             '_update_auto_model_performance_closest_so_far',
             '_export_auto_model_performance_log',
@@ -3466,6 +3467,82 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(row['predicted_lambda_std_nm'], 2.0)
         self.assertEqual(row['predicted_target_error_nm'], 1.0)
         self.assertEqual(row['selected_mask'], '[0, 1]')
+
+    def test_scan_quality_metadata_warns_without_changing_qc_training(self):
+        controller = self._build_exact_controller()
+        scan_quality = controller._summarize_auto_scan_quality(
+            [300.0, 625.0],
+            [0.01, 0.42]
+        )
+
+        self.assertEqual(
+            scan_quality,
+            [
+                {
+                    'peak_wavelength_nm': 300.0,
+                    'blank_corrected_peak_absorbance': 0.01,
+                    'peak_at_scan_boundary': True
+                },
+                {
+                    'peak_wavelength_nm': 625.0,
+                    'blank_corrected_peak_absorbance': 0.42,
+                    'peak_at_scan_boundary': False
+                }
+            ]
+        )
+
+        with redirect_stdout(io.StringIO()):
+            controller._append_auto_model_performance_rows(
+                unique_recipes=np.array([[0.2, 0.2]], dtype=float),
+                lambda_max_values=[300.0, 625.0],
+                condition_type='seed',
+                batch_number=0,
+                scan_quality_by_replicate=scan_quality
+            )
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertEqual(row['spectral_quality_status'], 'edge_peak_warning')
+        self.assertEqual(row['n_spectral_edge_peaks'], 1)
+        self.assertEqual(row['spectral_edge_peak_replicate_indices'], [0])
+        self.assertTrue(row['use_for_model_training'])
+        self.assertEqual(
+            row['actual_lambda_rep_1_blank_corrected_peak_absorbance'],
+            0.01
+        )
+        self.assertTrue(row['actual_lambda_rep_1_peak_at_scan_boundary'])
+        self.assertFalse(row['actual_lambda_rep_2_peak_at_scan_boundary'])
+
+    def test_current_controller_completion_marker_updates_report_status(self):
+        controller = self._build_exact_controller()
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            os.makedirs(os.path.join(temp_directory, 'Debug'))
+            os.makedirs(controller.plot_path)
+
+            terminal_path = os.path.join(
+                temp_directory,
+                'Debug',
+                'terminal_output.txt'
+            )
+            Path(terminal_path).write_text(
+                'Exit due to max_iters\n'
+                '<<controller>> Auto run completed; condition-level results, '
+                'recipe audits, and configured output artifacts were exported.\n'
+                '<<controller>> shutting down\n'
+            )
+
+            summary = controller._summarize_auto_run_status_for_report()
+
+        self.assertEqual(
+            summary['completion_status'],
+            'Completed controller workflow'
+        )
+        self.assertEqual(summary['exit_reason'], 'max_iters reached')
+        self.assertTrue(summary['controller_completion_marker_found'])
+        self.assertTrue(summary['success_marker_found'])
+        self.assertFalse(summary['pre_success_traceback_found'])
 
     def test_report_does_not_call_single_replicate_target_match_validated(self):
         controller = self._build_exact_controller()

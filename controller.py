@@ -5173,6 +5173,67 @@ class AutoContr(Controller):
             np.asarray(model_recipes, dtype=float),
             np.asarray(model_lambda_values, dtype=float)
         )
+
+    def _summarize_auto_scan_quality(
+        self,
+        lambda_max_wavelengths,
+        lambda_max_abs
+    ):
+        '''
+        Builds objective, warning-only diagnostics for extracted UV maxima.
+
+        A maximum exactly at either endpoint of the fixed 300-1000 nm scan
+        window is recorded because it can indicate that the scan did not
+        contain a resolved interior maximum. The blank-corrected peak height
+        is retained for later chemistry-specific review. This method does not
+        define a low-signal threshold and must not decide replicate QC, GP
+        model eligibility, target-EI incumbents, or early stopping.
+
+        params:
+            list lambda_max_wavelengths:
+                Extracted blank-corrected peak wavelength for each physical
+                replicate scan.
+
+            list lambda_max_abs:
+                Corresponding blank-corrected peak absorbance for each scan.
+
+        returns:
+            list:
+                One serializable diagnostic dictionary per physical replicate
+                scan, in the same order as the supplied lambda maxima.
+        '''
+        lambda_max_wavelengths = list(lambda_max_wavelengths)
+        lambda_max_abs = list(lambda_max_abs)
+
+        if len(lambda_max_wavelengths) != len(lambda_max_abs):
+            raise ValueError(
+                "Auto scan-quality diagnostics require one peak height for "
+                "each extracted lambda maximum."
+            )
+
+        diagnostics = []
+
+        for wavelength, peak_absorbance in zip(
+            lambda_max_wavelengths,
+            lambda_max_abs
+        ):
+            peak_wavelength_nm = self._safe_float_or_none(wavelength)
+            corrected_peak_absorbance = self._safe_float_or_none(
+                peak_absorbance
+            )
+            peak_at_scan_boundary = (
+                peak_wavelength_nm in [300.0, 1000.0]
+            )
+
+            diagnostics.append({
+                'peak_wavelength_nm': peak_wavelength_nm,
+                'blank_corrected_peak_absorbance': (
+                    corrected_peak_absorbance
+                ),
+                'peak_at_scan_boundary': peak_at_scan_boundary
+            })
+
+        return diagnostics
     
     def _append_auto_model_performance_rows(
         self,
@@ -5180,7 +5241,8 @@ class AutoContr(Controller):
         lambda_max_values,
         condition_type,
         batch_number,
-        prediction_metadata=None
+        prediction_metadata=None,
+        scan_quality_by_replicate=None
     ):
         '''
         Appends condition-level rows to the Auto model performance log.
@@ -5222,6 +5284,12 @@ class AutoContr(Controller):
                 as acquisition mode and score, selected mask, predicted lambda
                 distribution, predicted target error, and target-EI incumbent.
 
+            list scan_quality_by_replicate:
+                Optional objective diagnostics from the blank-corrected scan
+                for every physical replicate well. These are audit-only: they
+                do not alter replicate QC, GP model training, the target-EI
+                incumbent, or target stopping.
+
         returns:
             None
         '''
@@ -5242,6 +5310,19 @@ class AutoContr(Controller):
                 f"num_duplicates ({self.num_duplicates}) = "
                 f"{expected_lambda_count}."
             )
+
+        if scan_quality_by_replicate is None:
+            scan_quality_by_replicate = [None] * expected_lambda_count
+        else:
+            scan_quality_by_replicate = list(scan_quality_by_replicate)
+
+            if len(scan_quality_by_replicate) != expected_lambda_count:
+                raise ValueError(
+                    "Cannot append Auto scan-quality diagnostics because "
+                    f"their count ({len(scan_quality_by_replicate)}) does "
+                    f"not match the expected physical replicate-well count "
+                    f"({expected_lambda_count})."
+                )
 
         if prediction_metadata is None:
             prediction_metadata = {}
@@ -5300,6 +5381,32 @@ class AutoContr(Controller):
             start_i = recipe_i * self.num_duplicates
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
+            replicate_scan_quality = scan_quality_by_replicate[start_i:end_i]
+
+            spectral_edge_peak_indices = [
+                rep_i
+                for rep_i, scan_quality in enumerate(replicate_scan_quality)
+                if isinstance(scan_quality, dict)
+                and scan_quality.get('peak_at_scan_boundary', False)
+            ]
+
+            if spectral_edge_peak_indices:
+                spectral_quality_status = 'edge_peak_warning'
+                spectral_quality_reason = (
+                    f'{len(spectral_edge_peak_indices)} of '
+                    f'{self.num_duplicates} replicate scan(s) had a '
+                    'blank-corrected maximum at the 300-1000 nm scan '
+                    'boundary. This is an audit warning only; it does not '
+                    'automatically exclude data from replicate QC or GP '
+                    'model training.'
+                )
+            else:
+                spectral_quality_status = 'not_flagged'
+                spectral_quality_reason = (
+                    'No extracted blank-corrected lambda maximum was at the '
+                    '300-1000 nm scan boundary. Peak-height values are '
+                    'recorded for review; no low-signal threshold is applied.'
+                )
 
             raw_mean, raw_sd, raw_sem = (
                 self._summarize_duplicate_lambda_values(
@@ -5573,6 +5680,17 @@ class AutoContr(Controller):
                     replicate_qc['replicate_outlier_threshold_nm']
                 ),
 
+                # Spectrum-level diagnostics are intentionally separate from
+                # replicate agreement QC. A boundary maximum is objective but
+                # is not, by itself, a chemistry-independent reason to
+                # discard an observation.
+                'spectral_quality_status': spectral_quality_status,
+                'spectral_quality_reason': spectral_quality_reason,
+                'n_spectral_edge_peaks': len(spectral_edge_peak_indices),
+                'spectral_edge_peak_replicate_indices': (
+                    spectral_edge_peak_indices
+                ),
+
                 # Explicit GP model-training decision.
                 'use_for_model_training': (
                     model_training_decision['use_for_model_training']
@@ -5761,10 +5879,45 @@ class AutoContr(Controller):
                 include_col_name = f'actual_lambda_rep_{rep_i + 1}_included_in_qc'
 
                 raw_value = replicate_lambda_values[rep_i]
+                scan_quality = replicate_scan_quality[rep_i]
 
                 row[col_name] = self._safe_float_or_none(raw_value)
                 row[include_col_name] = (
                     rep_i in replicate_qc['included_indices']
+                )
+
+                if isinstance(scan_quality, dict):
+                    row[
+                        f'actual_lambda_rep_{rep_i + 1}_'
+                        'blank_corrected_peak_absorbance'
+                    ] = self._safe_float_or_none(
+                        scan_quality.get('blank_corrected_peak_absorbance')
+                    )
+                    row[
+                        f'actual_lambda_rep_{rep_i + 1}_'
+                        'peak_at_scan_boundary'
+                    ] = bool(
+                        scan_quality.get('peak_at_scan_boundary', False)
+                    )
+                else:
+                    row[
+                        f'actual_lambda_rep_{rep_i + 1}_'
+                        'blank_corrected_peak_absorbance'
+                    ] = None
+                    row[
+                        f'actual_lambda_rep_{rep_i + 1}_'
+                        'peak_at_scan_boundary'
+                    ] = None
+
+            if spectral_edge_peak_indices:
+                print(
+                    "<<controller warning>> Auto spectral-quality warning "
+                    f"for batch {batch_number}, condition "
+                    f"{self.auto_condition_counter}: "
+                    f"boundary maximum in replicate(s) "
+                    f"{[index + 1 for index in spectral_edge_peak_indices]}; "
+                    "recorded for review without changing QC or model "
+                    "training."
                 )
 
             self.auto_model_performance_rows.append(row)
@@ -6172,7 +6325,25 @@ class AutoContr(Controller):
             terminal_read_error = str(exc)
             terminal_text = ''
 
-        success_marker_found = 'Success!!!' in terminal_text
+        # Historical terminal logs use ``Success!!!``.  Current Auto runs
+        # finish with the controller completion message below instead.  Treat
+        # either as a completion marker so a normally completed current run is
+        # not incorrectly labelled ``Unknown`` in its final report.
+        legacy_success_marker = 'Success!!!'
+        controller_completion_marker = (
+            '<<controller>> Auto run completed; condition-level results, '
+            'recipe audits, and configured output artifacts were exported.'
+        )
+        legacy_success_marker_found = (
+            legacy_success_marker in terminal_text
+        )
+        controller_completion_marker_found = (
+            controller_completion_marker in terminal_text
+        )
+        success_marker_found = (
+            legacy_success_marker_found
+            or controller_completion_marker_found
+        )
 
         if 'Exit due to max_iters' in terminal_text:
             exit_reason = 'max_iters reached'
@@ -6185,7 +6356,19 @@ class AutoContr(Controller):
         else:
             exit_reason = 'terminal output not found'
 
-        success_index = terminal_text.find('Success!!!')
+        success_marker_indices = [
+            marker_index
+            for marker_index in [
+                terminal_text.find(legacy_success_marker),
+                terminal_text.find(controller_completion_marker)
+            ]
+            if marker_index >= 0
+        ]
+        success_index = (
+            min(success_marker_indices)
+            if success_marker_indices
+            else -1
+        )
 
         if success_index >= 0:
             pre_success_text = terminal_text[:success_index]
@@ -6249,7 +6432,10 @@ class AutoContr(Controller):
             )
 
         if success_marker_found and not pre_success_traceback_found:
-            completion_status = 'Success'
+            if controller_completion_marker_found:
+                completion_status = 'Completed controller workflow'
+            else:
+                completion_status = 'Success'
         elif pre_success_traceback_found or pre_success_exception_found:
             completion_status = 'Possible failure before success marker'
         elif terminal_output_present:
@@ -6266,6 +6452,10 @@ class AutoContr(Controller):
             'terminal_output_present': terminal_output_present,
             'terminal_read_error': terminal_read_error,
             'success_marker_found': success_marker_found,
+            'legacy_success_marker_found': legacy_success_marker_found,
+            'controller_completion_marker_found': (
+                controller_completion_marker_found
+            ),
             'pre_success_traceback_found': pre_success_traceback_found,
             'pre_success_exception_found': pre_success_exception_found,
             'post_success_cleanup_warning_found': (
@@ -6377,7 +6567,10 @@ class AutoContr(Controller):
 
         lines.append('')
 
-        if run_status_summary['completion_status'] == 'Success':
+        if run_status_summary['completion_status'] in [
+            'Success',
+            'Completed controller workflow'
+        ]:
             if run_status_summary[
                 'post_success_cleanup_warning_found'
             ]:
@@ -16188,10 +16381,15 @@ class AutoContr(Controller):
                 lambda_max_abs = lambda_max_abs + [find_max_df.loc[(x),:].max()]
 
 
-            return lambda_max_wavelengths
+            scan_quality_by_replicate = self._summarize_auto_scan_quality(
+                lambda_max_wavelengths,
+                lambda_max_abs
+            )
+
+            return lambda_max_wavelengths, scan_quality_by_replicate
 
         # Lambda maxes are Y_intial
-        Y_initial = find_max(scan_data)
+        Y_initial, initial_scan_quality = find_max(scan_data)
         if (
             self.robo_params.get('auto_terminal_verbosity', 'standard')
             == 'diagnostic'
@@ -16208,7 +16406,8 @@ class AutoContr(Controller):
                     'Initial seed design; no pre-experiment GP prediction '
                     'available.'
                 )
-            }
+            },
+            scan_quality_by_replicate=initial_scan_quality
         )
         
         self._generate_auto_plot_suite(
@@ -16374,7 +16573,7 @@ class AutoContr(Controller):
             scan_data = self._get_sample_data(wellnames, last_filename) 
             
             # Y_new is lambda maxes from the new recipe
-            Y_new = find_max(scan_data)
+            Y_new, new_scan_quality = find_max(scan_data)
             if (
                 self.robo_params.get(
                     'auto_terminal_verbosity',
@@ -16392,7 +16591,8 @@ class AutoContr(Controller):
                 lambda_max_values=Y_new,
                 condition_type='optimizer_selected',
                 batch_number=self.batch_num,
-                prediction_metadata=optimizer_prediction_metadata
+                prediction_metadata=optimizer_prediction_metadata,
+                scan_quality_by_replicate=new_scan_quality
             )
 
             self._generate_auto_plot_suite(

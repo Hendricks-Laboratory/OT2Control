@@ -1,12 +1,12 @@
 # Auto Mode Validation Notes
 
 **Repository:** Hendricks-Laboratory / OT2Control  
-**Branch context:** Stable Auto mode baseline  
-**Stable branch:** `stable/auto-rtg-v1`  
-**Next development branch:** `feature/acquisition-modes`  
+**Branch context:** Historical stable baseline plus active Auto-RTG development record
+**Stable branch:** `Auto-RTG-v1`
+**Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-13  
+**Updated through:** 2026-07-17
 
 ---
 
@@ -25,6 +25,178 @@ It is intended as a branch-specific record of:
 > [!NOTE]  
 > This note is **not** intended to describe the whole shared `OT2Control` repository.  
 > It specifically documents Auto mode branch work around autonomous reaction selection, true-zero reagent handling, volume feasibility, mixed mask optimization, cumulative GP model history, model-performance logging, lifecycle-aware plotting, debug exports, terminal-output capture, reporting, and protocol validation.
+
+---
+
+# Current Auto-RTG Development Record — July 17, 2026
+
+> [!IMPORTANT]
+> The older sections below preserve historical `Auto-RTG-v1` validation
+> evidence. This section is authoritative for active work on `Auto-RTG`.
+> `main` and `Auto-RTG-v1` remain protected; development stays on `Auto-RTG`.
+
+## Current branch purpose
+
+`Auto-RTG` is a target-seeking, physically constrained Bayesian-optimization
+workflow for two- and three-variable reaction spaces. It proposes
+robot-executable formulations near a requested λmax target while retaining
+condition-level replicate QC, cumulative GP history, true-zero masks,
+water/overflow feasibility, and controller-owned stopping.
+
+The active branch also supports ordered acquisition portfolios. A `core3`
+batch compares `exploit`, `explore`, and `balanced` selections from the same
+current QC-approved cumulative GP model; the modes do not maintain isolated
+model histories. Each selected condition is then measured with its configured
+duplicate count and returns through the usual QC/model-update pathway.
+
+## Implemented active-branch capabilities
+
+| Capability | Current status | Validation scope |
+|---|---|---|
+| `exploit`, `explore`, `balanced`, and `target_ei` acquisition modes | Implemented | Synthetic scoring and controller/optimizer integration tests; dry-debug review |
+| Ordered `acquisition_modes` portfolios and `core3` | Implemented | Synthetic portfolio/controller handoff tests |
+| QC-approved condition-level target-EI incumbent | Implemented | Synthetic incumbent and stop-eligibility tests |
+| Friendly `portfolio_min_distance` inputs plus numeric values | Implemented | Header normalization tests |
+| Three-variable GP slice atlases and matching feasibility overlays | Implemented | Static/synthetic plotting validation and controlled debug-output review |
+| Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
+| Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
+| Controller-side Raspberry Pi legacy tare compatibility offset | Implemented | Header/payload compatibility tests; physical weighing remains human-verified |
+| Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
+| SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
+| Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
+| Objective UV scan-quality diagnostics | Implemented, warning-only | Records blank-corrected peak height and 300/1000 nm boundary maxima; does not alter QC, GP training, target EI, or stopping |
+
+### Current acquisition semantics
+
+Every candidate first passes the existing mask and physical-feasibility route.
+The remaining selection score is minimized as follows:
+
+| Mode | Minimized score |
+|---|---|
+| `exploit` | `(predicted_mean_nm - target_nm)^2` |
+| `explore` | `-predicted_standard_deviation_nm` |
+| `balanced` | `abs(predicted_mean_nm - target_nm) - weight * predicted_standard_deviation_nm` |
+| `target_ei` | negative expected improvement in QC-approved condition-level target error |
+
+`target_ei` is not ordinary expected improvement on raw λmax, and its
+incumbent is never set by one favorable replicate. The all-off mask remains
+excluded; ON variable reagents must be at least 5 µL; OFF reagents are exactly
+zero; water top-off is either zero or at least 5 µL; overflow is infeasible.
+
+### Current plotting/output behavior
+
+New controller-generated Auto plots use this categorized layout. Existing
+root-level plot locations remain readable through report fallback logic.
+
+```text
+Plots/
+  progress/
+  design_space/
+  gp_surfaces/
+    2d/
+      mean/
+      uncertainty/
+      .../feasibility_overlays/
+    3d/
+      mean/
+      uncertainty/
+      target_probability/
+        atlases/
+        conditional_slices/
+        feasibility_overlays/conditional_slices/
+  auto_plot_manifest.csv
+```
+
+For each three-variable plot stage, the five established multi-panel slice
+atlases are preserved. Fifteen standalone conditional slices are added: one
+per held reagent for mean, uncertainty, target probability, mean-feasibility,
+and uncertainty-feasibility. These are renderings of the same already-computed
+conditional GP panel data; they do not change model fitting, acquisition,
+recipe generation, or robot execution. They add expected rendering time.
+
+## Evidence current through this update
+
+```text
+cf2fcb9  Organize Auto plots and add standalone 3D slices
+```
+
+The plot-organization stage passed hardware-free validation on Python 3.9.6:
+
+```text
+git diff --check
+PYTHONPYCACHEPREFIX=/tmp/ot2control_pycache /usr/bin/python3 -m py_compile \
+  controller.py optimizers.py tests/test_acquisition_scoring.py \
+  tests/test_auto_plot_organization.py
+/usr/bin/python3 -m unittest -v tests.test_auto_plot_organization \
+  tests.test_acquisition_scoring
+```
+
+Result: 104 isolated tests passed. No controller launcher, robot, plate
+reader, credentials, or live protocol path was invoked. The new output layout
+and standalone slices are statically and synthetically validated, not yet
+validated by a post-change physical run.
+
+## Recommended roadmap from the current state
+
+### 1. Next controlled validation: short three-variable output audit
+
+Before adding further visualization or acquisition features, run a small,
+human-supervised three-variable dry/debug or water-only workflow using the
+current `Auto-RTG` commit. Confirm the output folders, plot manifest,
+standalone slices, lifecycle messages, source preflight, recipe-design CSVs,
+volume balances, performance log, and report in the actual lab environment.
+This is an output/workflow check, not a claim of chemical optimization.
+
+### 2. Before a medium supervised three-variable chemistry run
+
+The next high-value work is operational and scientific hardening—not more
+cosmetic plotting.
+
+1. **Review the new λmax scan-quality diagnostics and specify a chemistry
+   policy.** The performance log now records blank-corrected peak height and
+   endpoint maxima as warning-only metadata. Low-amplitude or edge-dominated
+   spectra can still yield numeric λmax values that are not scientifically
+   informative. Before changing model eligibility, explicitly choose and
+   validate any peak-height, prominence, or signal-to-noise threshold against
+   chemistry-relevant controls.
+2. **Verify source inventory against prepared vessels.** The source preflight
+   is fail-closed only when cached source inventory is current. Confirm vessel
+   identity, aspiratable volume, reserve, and full-batch demand. Do not assume
+   that an aggregate controller-side check proves automatic backup-source
+   switching at the robot-control layer.
+3. **Resolve or audit water-tip reuse.** A transfer/tip audit CSV and explicit
+   tip-policy decision are advisable before a larger or contamination-sensitive
+   chemistry campaign, especially if water-used tips can transition to other
+   reagents.
+4. **Run the medium `core3` experiment under direct supervision.** With six
+   seed conditions, two optimizer iterations, three modes, and three
+   duplicates, the planned total is 36 wells:
+
+   ```text
+   seeds:      6 conditions × 3 duplicates = 18 wells
+   iterations: 2 × 3 modes × 3 duplicates = 18 wells
+   total:                                 36 wells
+   ```
+
+   Interpret it as controlled chemistry validation. Review every
+   condition-level QC decision and selected acquisition mode before claiming
+   optimization success.
+
+### 3. After that run passes review
+
+- repeat the chemistry system on another day to assess reproducibility;
+- compare portfolio-mode outcomes using their common cumulative GP history;
+- decide whether `target_ei` adds practical value for the chemistry;
+- only then increase plate occupancy or iteration count.
+
+### Deferred, not immediate
+
+- further plot styling unless a new controlled output audit finds a readability
+  defect;
+- high-dimensional visualizations beyond the existing 3D conditional slices;
+- broader model changes such as heteroscedastic/noise-aware GP fitting;
+- unattended or large-scale chemistry optimization;
+- promotion of `Auto-RTG` into `Auto-RTG-v1`.
 
 ---
 
