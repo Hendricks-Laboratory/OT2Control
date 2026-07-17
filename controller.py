@@ -2395,8 +2395,7 @@ class Controller(ABC):
                 )
             )
 
-            full_plot_path = os.path.join(
-                self.plot_path,
+            full_plot_path = self._get_auto_plot_output_path(
                 plot_filename
             )
 
@@ -2415,11 +2414,6 @@ class Controller(ABC):
             )
 
             return full_plot_path
-
-        os.makedirs(
-            self.plot_path,
-            exist_ok=True
-        )
 
         prediction_plot_path = _save_2d_gpr_heatmap(
             heatmap_array=prediction_array,
@@ -6234,17 +6228,25 @@ class AutoContr(Controller):
             'experiment_data.csv'
         )
 
-        final_progress_plot_path = os.path.join(
-            self.out_path,
-            'Plots',
-            'lambda_progress_final.png'
-        )
-
-        final_replicate_plot_path = os.path.join(
-            self.out_path,
-            'Plots',
-            'lambda_replicates_final.png'
-        )
+        # Keep this summary usable by lightweight controller stubs used for
+        # report-only validation. Full Auto controllers resolve the new
+        # categorized plot location and retain a legacy root-level fallback.
+        if hasattr(self, '_resolve_auto_plot_path'):
+            final_progress_plot_path, _ = self._resolve_auto_plot_path(
+                'lambda_progress_final.png'
+            )
+            final_replicate_plot_path, _ = self._resolve_auto_plot_path(
+                'lambda_replicates_final.png'
+            )
+        else:
+            final_progress_plot_path = os.path.join(
+                self.plot_path,
+                'lambda_progress_final.png'
+            )
+            final_replicate_plot_path = os.path.join(
+                self.plot_path,
+                'lambda_replicates_final.png'
+            )
 
         if success_marker_found and not pre_success_traceback_found:
             completion_status = 'Success'
@@ -7471,14 +7473,9 @@ class AutoContr(Controller):
 
     def _save_auto_design_plot(self, fig, plot_filename):
         '''
-        Saves an Auto design-space plot to self.plot_path.
+        Saves an Auto design-space plot to its categorized output directory.
         '''
-        os.makedirs(self.plot_path, exist_ok=True)
-
-        plot_path = os.path.join(
-            self.plot_path,
-            plot_filename
-        )
+        plot_path = self._get_auto_plot_output_path(plot_filename)
 
         fig.savefig(plot_path, bbox_inches='tight')
         plt.close(fig)
@@ -7489,6 +7486,158 @@ class AutoContr(Controller):
         )
 
         return plot_path
+
+    def _get_auto_plot_relative_path(self, plot_filename):
+        '''
+        Returns a stable, human-readable relative output path for an Auto
+        plot. Existing non-Auto protocol plots continue to use ``plot_path``
+        directly; this helper organizes only controller-generated Auto output.
+        '''
+        filename = os.path.basename(str(plot_filename))
+
+        if filename.startswith('lambda_') or filename.startswith(
+            'acquisition_portfolio_trace'
+        ):
+            category = os.path.join('progress')
+        elif filename.startswith('gpr_predictions'):
+            category_parts = ['gp_surfaces', '2d', 'mean']
+            if 'feasibility' in filename:
+                category_parts.append('feasibility_overlays')
+            category = os.path.join(*category_parts)
+        elif filename.startswith('gpr_uncertainty'):
+            category_parts = ['gp_surfaces', '2d', 'uncertainty']
+            if 'feasibility' in filename:
+                category_parts.append('feasibility_overlays')
+            category = os.path.join(*category_parts)
+        elif filename.startswith('gpr_3d_'):
+            if filename.startswith('gpr_3d_target_probability'):
+                field_name = 'target_probability'
+            elif filename.startswith('gpr_3d_uncertainty'):
+                field_name = 'uncertainty'
+            else:
+                field_name = 'mean'
+            is_conditional_slice = '__hold--' in filename
+            if 'feasibility' in filename and is_conditional_slice:
+                category = os.path.join(
+                    'gp_surfaces', '3d', field_name,
+                    'feasibility_overlays', 'conditional_slices'
+                )
+            elif 'feasibility' in filename:
+                category = os.path.join(
+                    'gp_surfaces', '3d', field_name,
+                    'feasibility_overlays'
+                )
+            elif is_conditional_slice:
+                category = os.path.join(
+                    'gp_surfaces', '3d', field_name, 'conditional_slices'
+                )
+            else:
+                category = os.path.join(
+                    'gp_surfaces', '3d', field_name, 'atlases'
+                )
+        elif (
+            filename.startswith('initial_maximin_seed_design_')
+            or filename.startswith('auto_design_space_exploration_')
+        ):
+            category = os.path.join('design_space')
+        else:
+            category = os.path.join('other')
+
+        return os.path.join(category, filename)
+
+    def _get_auto_plot_output_path(self, plot_filename):
+        '''Returns and creates the categorized output path for one Auto plot.'''
+        relative_path = self._get_auto_plot_relative_path(plot_filename)
+        output_path = os.path.join(self.plot_path, relative_path)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        return output_path
+
+    def _resolve_auto_plot_path(self, plot_filename):
+        '''
+        Resolves an Auto plot for report/status use without creating folders.
+
+        The legacy root-level location remains a read-only fallback so reports
+        generated from pre-organization runs remain interpretable.
+        '''
+        relative_path = self._get_auto_plot_relative_path(plot_filename)
+        categorized_path = os.path.join(self.plot_path, relative_path)
+
+        if os.path.exists(categorized_path):
+            return categorized_path, relative_path
+
+        legacy_path = os.path.join(
+            self.plot_path,
+            os.path.basename(str(plot_filename))
+        )
+        if os.path.exists(legacy_path):
+            return legacy_path, os.path.basename(str(plot_filename))
+
+        return categorized_path, relative_path
+
+    def _append_auto_plot_manifest(self, stage, artifact_paths):
+        '''Appends a concise manifest row for each newly generated Auto plot.'''
+        if len(artifact_paths) == 0:
+            return
+
+        manifest_rows = []
+        for artifact_path in artifact_paths:
+            if artifact_path is None:
+                continue
+
+            try:
+                relative_path = os.path.relpath(
+                    os.fspath(artifact_path),
+                    self.plot_path
+                )
+            except (TypeError, ValueError):
+                continue
+
+            if relative_path.startswith('..'):
+                continue
+
+            filename = os.path.basename(relative_path)
+            batch_match = re.search(
+                r'(after_batch_\d+|final)',
+                filename
+            )
+            slice_match = re.search(
+                r'__hold--(.+?)--([0-9.eE+-]+)mM',
+                filename
+            )
+
+            manifest_rows.append({
+                'generated_at_utc': datetime.datetime.utcnow().isoformat() + 'Z',
+                'lifecycle_stage': stage,
+                'relative_path': relative_path,
+                'plot_category': os.path.dirname(relative_path),
+                'plot_filename': filename,
+                'batch_label': (
+                    batch_match.group(1) if batch_match is not None else None
+                ),
+                'held_reagent': (
+                    slice_match.group(1) if slice_match is not None else None
+                ),
+                'held_concentration_mM': (
+                    float(slice_match.group(2))
+                    if slice_match is not None
+                    else None
+                )
+            })
+
+        if len(manifest_rows) == 0:
+            return
+
+        os.makedirs(self.plot_path, exist_ok=True)
+        manifest_path = os.path.join(
+            self.plot_path,
+            'auto_plot_manifest.csv'
+        )
+        pd.DataFrame(manifest_rows).to_csv(
+            manifest_path,
+            mode='a',
+            header=not os.path.exists(manifest_path),
+            index=False
+        )
 
     def _plot_auto_design_grouped_points_2d(
         self,
@@ -10137,10 +10286,16 @@ class AutoContr(Controller):
             list:
                 Markdown lines. Empty list if the plot does not exist.
         '''
-        plot_path = os.path.join(
-            self.plot_path,
-            plot_filename
-        )
+        # Report-only test stubs intentionally bind only report methods. Use
+        # their historical flat Plot directory when the path helper is absent;
+        # production Auto controllers always use the categorized resolver.
+        if hasattr(self, '_resolve_auto_plot_path'):
+            plot_path, relative_plot_path = self._resolve_auto_plot_path(
+                plot_filename
+            )
+        else:
+            relative_plot_path = os.path.basename(str(plot_filename))
+            plot_path = os.path.join(self.plot_path, relative_plot_path)
 
         if not os.path.exists(plot_path):
             return []
@@ -10155,7 +10310,7 @@ class AutoContr(Controller):
             lines.append('')
 
         lines.append(
-            f'![{title}](../Plots/{plot_filename})'
+            f'![{title}](../Plots/{relative_plot_path})'
         )
         lines.append('')
 
@@ -11857,7 +12012,17 @@ class AutoContr(Controller):
             plot_description,
             plot_is_applicable
         ) in design_plot_file_entries:
-            relative_plot_path = os.path.join('Plots', plot_filename)
+            if hasattr(self, '_get_auto_plot_relative_path'):
+                relative_plot_path = self._get_auto_plot_relative_path(
+                    plot_filename
+                )
+            else:
+                # Maintain report-only compatibility for lightweight
+                # controller stubs that predate categorized Auto plots.
+                relative_plot_path = os.path.basename(
+                    str(plot_filename)
+                )
+            relative_plot_path = os.path.join('Plots', relative_plot_path)
 
             if plot_is_applicable:
                 lines.append(
@@ -12737,10 +12902,143 @@ class AutoContr(Controller):
                 batch_number = getattr(self, 'batch_num', 0)
             final_suffix = f'after_batch_{int(batch_number)}'
 
+        def _slice_filename(field_name, panel, feasibility_overlay=False):
+            '''Builds an auditable filename for one conditional GP slice.'''
+            held_reagent = re.sub(
+                r'[^A-Za-z0-9]+',
+                '_',
+                str(reagent_names[panel['fixed_index']])
+            ).strip('_')
+            held_value = float(
+                reference_recipe[panel['fixed_index']]
+            )
+            overlay_suffix = (
+                '_feasibility' if feasibility_overlay else ''
+            )
+            return (
+                f'gpr_3d_{field_name}_slice{overlay_suffix}'
+                f'__hold--{held_reagent}--{held_value:.6g}mM_'
+                f'{final_suffix}.png'
+            )
+
+        def _render_individual_slice(
+            field_name,
+            colorbar_label,
+            value_getter,
+            colormap,
+            norm,
+            title,
+            panel,
+            feasibility_overlay=False
+        ):
+            '''Renders one native, poster-ready conditional GP slice panel.'''
+            figure, axis = plt.subplots(figsize=(6.4, 5.8), dpi=300)
+            figure.set_tight_layout(False)
+
+            image = axis.pcolormesh(
+                panel['x_physical'],
+                panel['y_physical'],
+                value_getter(panel),
+                shading='auto',
+                cmap=colormap,
+                norm=norm
+            )
+
+            if feasibility_overlay:
+                _draw_slice_feasibility_overlay(axis, panel, field_name)
+
+            x_index = panel['x_index']
+            y_index = panel['y_index']
+            fixed_index = panel['fixed_index']
+            for observation in observed_conditions:
+                if abs(
+                    observation['normalized_recipe'][fixed_index]
+                    - reference_normalized[fixed_index]
+                ) > slice_half_width:
+                    continue
+
+                axis.scatter(
+                    observation['physical_recipe'][x_index],
+                    observation['physical_recipe'][y_index],
+                    marker='o', s=35, facecolors='white',
+                    edgecolors='#202020', linewidths=0.8,
+                    zorder=6 if feasibility_overlay else 4
+                )
+
+            axis.scatter(
+                reference_recipe[x_index],
+                reference_recipe[y_index],
+                marker='*', s=105, facecolors='#f2c14e',
+                edgecolors='#1a1a1a', linewidths=0.8,
+                zorder=7 if feasibility_overlay else 5
+            )
+            axis.set_xlabel(
+                self._format_auto_design_axis_label(reagent_names[x_index]),
+                fontsize=font_sizes['axis_label']
+            )
+            axis.set_ylabel(
+                self._format_auto_design_axis_label(reagent_names[y_index]),
+                fontsize=font_sizes['axis_label']
+            )
+            _format_slice_heatmap_axis(axis)
+            axis.set_xlim(
+                float(np.min(panel['x_physical'])),
+                float(np.max(panel['x_physical']))
+            )
+            axis.set_ylim(
+                float(np.min(panel['y_physical'])),
+                float(np.max(panel['y_physical']))
+            )
+
+            colorbar = figure.colorbar(image, ax=axis, fraction=0.046, pad=0.05)
+            colorbar.set_label(
+                colorbar_label,
+                fontsize=font_sizes['axis_label']
+            )
+            colorbar.ax.tick_params(
+                labelsize=font_sizes['tick_label'], width=0.9
+            )
+
+            held_reagent = reagent_names[fixed_index]
+            held_value = reference_recipe[fixed_index]
+            figure.suptitle(
+                f'{title}; hold {held_reagent} = {held_value:.4g} mM'
+                + ('; physical feasibility overlay' if feasibility_overlay else ''),
+                fontsize=font_sizes['title'], fontweight='normal', y=0.975
+            )
+
+            legend_handles = _build_slice_observation_legend(axis)
+            if feasibility_overlay:
+                legend_handles = _build_slice_feasibility_legend(
+                    axis, field_name
+                ) + legend_handles
+
+            figure.legend(
+                legend_handles,
+                [handle.get_label() for handle in legend_handles],
+                loc='upper center', bbox_to_anchor=(0.5, 0.91),
+                ncol=2, frameon=False, fontsize=font_sizes['legend'],
+                handlelength=1.5, columnspacing=0.9
+            )
+            figure.subplots_adjust(
+                left=0.16, right=0.86, bottom=0.15,
+                top=0.74 if feasibility_overlay else 0.82
+            )
+
+            output_path = self._get_auto_plot_output_path(
+                _slice_filename(
+                    field_name, panel,
+                    feasibility_overlay=feasibility_overlay
+                )
+            )
+            figure.savefig(output_path, dpi=300)
+            plt.close(figure)
+            return output_path
+
         if show_progress:
             print(
                 "<<controller>> rendering 5 high-resolution 3D GP slice "
-                "atlases; please wait"
+                "atlases and 15 standalone conditional slices; please wait"
             )
 
         for render_index, (
@@ -12896,8 +13194,7 @@ class AutoContr(Controller):
                 handletextpad=0.45,
                 columnspacing=1.0
             )
-            output_path = os.path.join(
-                self.plot_path,
+            output_path = self._get_auto_plot_output_path(
                 f'gpr_3d_{field_name}_orthogonal_slices_{final_suffix}.png'
             )
             # Keep these multi-panel scientific figures at print resolution
@@ -12905,6 +13202,14 @@ class AutoContr(Controller):
             figure.savefig(output_path, dpi=300)
             plt.close(figure)
             generated_plot_paths.append(output_path)
+
+            for panel in panel_data:
+                generated_plot_paths.append(
+                    _render_individual_slice(
+                        field_name, colorbar_label, value_getter, colormap,
+                        norm, title, panel
+                    )
+                )
 
         # Preserve the compact original atlases above, then emit separate
         # feasibility-overlay versions matching the established 2D diagnostic
@@ -13054,8 +13359,7 @@ class AutoContr(Controller):
                 handlelength=1.7,
                 columnspacing=0.9
             )
-            output_path = os.path.join(
-                self.plot_path,
+            output_path = self._get_auto_plot_output_path(
                 f'gpr_3d_{field_name}_orthogonal_slices_feasibility_'
                 f'{final_suffix}.png'
             )
@@ -13064,6 +13368,14 @@ class AutoContr(Controller):
             figure.savefig(output_path, dpi=300)
             plt.close(figure)
             generated_plot_paths.append(output_path)
+
+            for panel in panel_data:
+                generated_plot_paths.append(
+                    _render_individual_slice(
+                        field_name, colorbar_label, value_getter, colormap,
+                        norm, title, panel, feasibility_overlay=True
+                    )
+                )
 
         return generated_plot_paths
 
@@ -13782,6 +14094,10 @@ class AutoContr(Controller):
             )
 
         if len(generated_output_paths) > 0:
+            self._append_auto_plot_manifest(
+                normalized_stage,
+                generated_output_paths
+            )
             terminal_verbosity = self.robo_params.get(
                 'auto_terminal_verbosity',
                 'standard'
@@ -14196,10 +14512,7 @@ class AutoContr(Controller):
         if plot_filename is None:
             plot_filename = f'lambda_progress_after_batch_{batch_number}.png'
 
-        plot_path = os.path.join(
-            self.plot_path,
-            plot_filename
-        )
+        plot_path = self._get_auto_plot_output_path(plot_filename)
 
         fig.savefig(plot_path)
         plt.close(fig)
@@ -14660,10 +14973,7 @@ class AutoContr(Controller):
                 f'lambda_replicates_after_batch_{batch_number}.png'
             )
 
-        plot_path = os.path.join(
-            self.plot_path,
-            plot_filename
-        )
+        plot_path = self._get_auto_plot_output_path(plot_filename)
 
         fig.savefig(plot_path)
         plt.close(fig)
@@ -15106,7 +15416,7 @@ class AutoContr(Controller):
                 f'acquisition_portfolio_trace_after_batch_{batch_number}.png'
             )
 
-        plot_path = os.path.join(self.plot_path, plot_filename)
+        plot_path = self._get_auto_plot_output_path(plot_filename)
         fig.savefig(plot_path)
         plt.close(fig)
         print(
