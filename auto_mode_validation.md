@@ -200,7 +200,9 @@ cosmetic plotting.
    is fail-closed only when cached source inventory is current. Confirm vessel
    identity, aspiratable volume, reserve, and full-batch demand. Do not assume
    that an aggregate controller-side check proves automatic backup-source
-   switching at the robot-control layer.
+   switching at the robot-control layer. Keep
+   `auto_source_volume_check` set to `required` for supervised chemistry runs;
+   the reserve setting is intentionally inactive when the check is `off`.
 3. **Resolve or audit water-tip reuse.** A transfer/tip audit CSV and explicit
    tip-policy decision are advisable before a larger or contamination-sensitive
    chemistry campaign, especially if water-used tips can transition to other
@@ -226,10 +228,46 @@ cosmetic plotting.
 - decide whether `target_ei` adds practical value for the chemistry;
 - only then increase plate occupancy or iteration count.
 
+### 4. Planned safety feature: batch-boundary source replenishment workflow
+
+The implemented `auto_source_volume_check=required` preflight is intentionally
+an operational gate rather than an acquisition constraint. After the optimizer
+has selected the next scientifically appropriate batch, the controller builds
+the exact duplicate-expanded protocol dataframe and checks its resolved
+transfers against current robot-reported aggregate aspiratable inventory plus
+the configured reserve. It must continue to reject a deficient batch before
+any liquid handling begins.
+
+The next planned enhancement is a human-supervised replenishment/resume
+workflow at that safe batch boundary:
+
+1. retain the already selected, fully audited batch without re-optimizing it;
+2. present the insufficient source, available aspiratable volume, planned
+   demand, reserve, and deficit in terminal output and a persistent audit file;
+3. pause before protocol execution, allowing the operator to replenish or
+   replace the affected stock, reweigh it, and verify its identity;
+4. refresh and reconcile robot-reported inventory; then either execute the
+   unchanged approved batch or fail closed if inventory remains insufficient.
+
+The controller may keep a shadow withdrawal ledger for prediction and audit,
+but a fresh robot inventory response at every batch boundary remains the
+authority because actual consumption can differ through dead volume, priming,
+retries, manual handling, or robot-side tube switching. This feature must not
+silently alter GP acquisition scores or make a scientifically valuable recipe
+unavailable merely because a stock is temporarily low.
+
+The safe stop-before-batch behavior is computer-side and already partially
+implemented. A true in-session reweigh-and-continue path requires verifying
+that the deployed frozen Raspberry Pi runtime accepts a refreshed reagent or
+inventory payload. Until that behavior is confirmed, the conservative response
+to insufficient inventory remains an exported audit and clean stop; do not
+claim automatic backup-tube switching from the aggregate controller preflight.
+
 ### Deferred, not immediate
 
 - further plot styling unless a new controlled output audit finds a readability
   defect;
+- batch-boundary replenishment/resume after a failed source-volume preflight;
 - high-dimensional visualizations beyond the existing 3D conditional slices;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;
 - unattended or large-scale chemistry optimization;
