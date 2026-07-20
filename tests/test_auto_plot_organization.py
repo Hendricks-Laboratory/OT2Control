@@ -90,6 +90,23 @@ class AutoPlotOrganizationTests(unittest.TestCase):
                     expected
                 )
 
+    def test_portfolio_trace_labels_observed_and_gp_error_bars(self):
+        '''The portfolio figure must not leave its two uncertainty types vague.'''
+        source = CONTROLLER_PATH.read_text(encoding='utf-8')
+
+        self.assertIn(
+            'observed mean ± replicate SEM',
+            source
+        )
+        self.assertIn(
+            'pre-execution GP mean ± posterior SD',
+            source
+        )
+        self.assertIn(
+            'filled error bars = replicate SEM; hollow error ',
+            source
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

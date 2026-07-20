@@ -15282,10 +15282,12 @@ class AutoContr(Controller):
         established lambda progress or replicate diagnostic figures.
 
         Each acquisition mode receives a fixed, colorblind-friendly color and
-        marker shape. Filled markers represent observed condition means in
-        the upper panel and QC-included individual replicates in the lower
-        panel. Hollow markers represent pre-experiment GP predictions; red
-        outlines in the replicate panel identify QC-excluded observations.
+        marker shape. In the upper panel, filled markers and their error bars
+        represent observed condition mean ± replicate SEM, while hollow
+        markers and their error bars represent pre-experiment GP mean ±
+        predictive standard deviation. In the lower panel, filled markers are
+        QC-included individual replicates; red outlines identify QC-excluded
+        observations.
 
         The visualization is intentionally a trace of the ordered portfolio,
         rather than a separate GP plot per mode. Every portfolio member is
@@ -15616,27 +15618,40 @@ class AutoContr(Controller):
             )
             for style_key in active_style_keys
         ]
+        # Use real ErrorbarContainer handles so the legend visibly shows the
+        # two different vertical-bar conventions in the upper panel. NaN
+        # coordinates keep these explanatory samples out of the plotted data.
+        observed_errorbar_handle = summary_ax.errorbar(
+            [np.nan],
+            [np.nan],
+            yerr=[1.0],
+            fmt='o',
+            color='0.20',
+            ecolor='0.20',
+            markerfacecolor='0.20',
+            markeredgecolor='0.20',
+            elinewidth=1.0,
+            capsize=4,
+            markersize=5,
+            label='Filled + bar: observed mean ± replicate SEM'
+        )
+        predicted_errorbar_handle = summary_ax.errorbar(
+            [np.nan],
+            [np.nan],
+            yerr=[1.0],
+            fmt='o',
+            color='0.20',
+            ecolor='0.20',
+            markerfacecolor='none',
+            markeredgecolor='0.20',
+            elinewidth=1.0,
+            capsize=4,
+            markersize=5,
+            label='Hollow + bar: pre-execution GP mean ± posterior SD'
+        )
         semantic_handles = [
-            Line2D(
-                [0],
-                [0],
-                marker='o',
-                color='0.20',
-                markerfacecolor='0.20',
-                markersize=5,
-                linewidth=0,
-                label='Filled: observed / QC-included'
-            ),
-            Line2D(
-                [0],
-                [0],
-                marker='o',
-                color='0.20',
-                markerfacecolor='none',
-                markersize=5,
-                linewidth=0,
-                label='Hollow: GP prediction'
-            )
+            observed_errorbar_handle,
+            predicted_errorbar_handle
         ]
 
         if has_qc_exclusion:
@@ -15670,12 +15685,22 @@ class AutoContr(Controller):
             [handle.get_label() for handle in legend_handles],
             loc='upper center',
             bbox_to_anchor=(0.5, 0.955),
-            ncol=4,
+            ncol=3,
             frameon=False,
             fontsize=font_sizes['legend'],
             handlelength=1.1,
             handletextpad=0.4,
             columnspacing=0.8
+        )
+        fig.text(
+            0.5,
+            0.815,
+            'Upper panel: filled error bars = replicate SEM; hollow error '
+            'bars = pre-execution GP posterior SD.',
+            ha='center',
+            va='center',
+            fontsize=font_sizes['footer'],
+            color='0.35'
         )
         fig.text(
             0.5,
@@ -15691,7 +15716,7 @@ class AutoContr(Controller):
             left=0.16,
             right=0.97,
             bottom=0.10,
-            top=0.80,
+            top=0.77,
             hspace=0.18
         )
 
