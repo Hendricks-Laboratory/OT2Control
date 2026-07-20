@@ -54,6 +54,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Capability | Current status | Validation scope |
 |---|---|---|
 | `exploit`, `explore`, `balanced`, and `target_ei` acquisition modes | Implemented | Synthetic scoring and controller/optimizer integration tests; dry-debug review |
+| Selective true-zero variable-reagent masks | Implemented | Header normalization, controller-bound/repair, mask, and feasibility-overlay regression tests |
 | Ordered `acquisition_modes` portfolios and `core3` | Implemented | Synthetic portfolio/controller handoff tests |
 | QC-approved condition-level target-EI incumbent | Implemented | Synthetic incumbent and stop-eligibility tests |
 | Friendly `portfolio_min_distance` inputs plus numeric values | Implemented | Header normalization tests |

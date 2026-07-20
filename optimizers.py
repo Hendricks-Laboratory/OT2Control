@@ -90,6 +90,7 @@ class OptimizationModel():
         total_volume=None,
         fixed_reagent_volumes=None,
         allow_true_zero=False,
+        true_zero_reagents=None,
         acquisition_mode='exploit',
         balanced_exploration_weight=1.0,
         terminal_verbosity='standard'
@@ -148,6 +149,11 @@ class OptimizationModel():
                 OFF as exact-zero transfers. If False, all variable reagents
                 remain ON and are optimized only in executable transfer ranges.
 
+            list[str] or None true_zero_reagents:
+                Optional canonical variable-reagent names eligible for exact
+                zero. When omitted, allow_true_zero preserves its legacy
+                all-or-none behavior. Reagents not listed here remain ON.
+
             str acquisition_mode:
                 Canonical Auto acquisition mode supplied by the controller.
                 Older callers default to exploit. Modes that are recognized
@@ -191,6 +197,67 @@ class OptimizationModel():
         self.total_volume = total_volume
         self.fixed_reagent_volumes = fixed_reagent_volumes
         self.allow_true_zero = bool(allow_true_zero)
+
+        if true_zero_reagents is None:
+            resolved_true_zero_reagents = (
+                list(self.variable_reagents)
+                if self.allow_true_zero
+                else []
+            )
+        else:
+            if isinstance(true_zero_reagents, str):
+                raise ValueError(
+                    "true_zero_reagents must be a list of variable reagent "
+                    "names, not one unparsed string."
+                )
+
+            resolved_true_zero_reagents = [
+                str(reagent_name)
+                for reagent_name in true_zero_reagents
+            ]
+            available_reagents = {
+                str(reagent_name)
+                for reagent_name in self.variable_reagents
+            }
+            unknown_reagents = [
+                reagent_name
+                for reagent_name in resolved_true_zero_reagents
+                if reagent_name not in available_reagents
+            ]
+
+            if unknown_reagents:
+                raise ValueError(
+                    "true_zero_reagents contains unknown variable reagent(s): "
+                    + ', '.join(unknown_reagents)
+                )
+
+            if len(set(resolved_true_zero_reagents)) != len(
+                resolved_true_zero_reagents
+            ):
+                raise ValueError(
+                    "true_zero_reagents must not contain duplicate reagent "
+                    "names."
+                )
+
+        if self.allow_true_zero and len(resolved_true_zero_reagents) == 0:
+            raise ValueError(
+                "allow_true_zero requires at least one eligible variable "
+                "reagent."
+            )
+
+        if not self.allow_true_zero and resolved_true_zero_reagents:
+            raise ValueError(
+                "true_zero_reagents requires allow_true_zero to be True."
+            )
+
+        self.true_zero_reagents = resolved_true_zero_reagents
+        self.true_zero_reagent_indices = [
+            reagent_index
+            for reagent_index, reagent_name in enumerate(
+                self.variable_reagents
+            )
+            if str(reagent_name) in self.true_zero_reagents
+        ]
 
         if acquisition_mode not in self._SUPPORTED_ACQUISITION_MODES:
             raise ValueError(
@@ -249,6 +316,18 @@ class OptimizationModel():
                 "<<optimizer>> Auto acquisition mode: "
                 f"{self.acquisition_mode}"
             )
+
+        if self.terminal_verbosity != 'essential':
+            if self.true_zero_reagents:
+                print(
+                    "<<optimizer>> true-zero eligible variable reagents: "
+                    + ', '.join(self.true_zero_reagents)
+                )
+            else:
+                print(
+                    "<<optimizer>> true-zero search disabled for all "
+                    "variable reagents"
+                )
 
         if (
             self.terminal_verbosity != 'essential'
@@ -423,11 +502,25 @@ class OptimizationModel():
             # condition from Auto seed recipes. The current workflow already
             # performs blank/background subtraction, so an all-variable-off
             # Auto recipe is usually redundant.
-            if self.allow_true_zero and np.allclose(
-                repaired_candidate,
-                0.0,
-                rtol=0,
-                atol=1e-9
+            all_reagents_zero_eligible = (
+                len(
+                    getattr(
+                        self,
+                        'true_zero_reagent_indices',
+                        list(range(n_dimensions))
+                    )
+                ) == n_dimensions
+            )
+
+            if (
+                self.allow_true_zero
+                and all_reagents_zero_eligible
+                and np.allclose(
+                    repaired_candidate,
+                    0.0,
+                    rtol=0,
+                    atol=1e-9
+                )
             ):
                 continue
 
@@ -518,7 +611,11 @@ class OptimizationModel():
         '''
         return len(self.variable_reagents)
     
-    def _generate_reagent_masks(self, include_all_off_mask=False):
+    def _generate_reagent_masks(
+        self,
+        include_all_off_mask=False,
+        true_zero_reagent_indices=None
+    ):
         '''
         Generates binary ON/OFF masks for the variable reagents.
 
@@ -541,22 +638,54 @@ class OptimizationModel():
             bool include_all_off_mask:
                 If True, include the all-zero mask. If False, exclude it.
 
+            list[int] or None true_zero_reagent_indices:
+                Optional variable-reagent indices eligible to turn OFF. When
+                omitted, every dimension remains eligible for backward
+                compatibility with the established global true-zero setting.
+
         returns:
             list[np.ndarray]:
                 List of binary masks, each with shape:
                     n_dimensions
         '''
         n_dimensions = self._get_dimension()
+        if true_zero_reagent_indices is None:
+            true_zero_reagent_indices = list(range(n_dimensions))
+        else:
+            true_zero_reagent_indices = [
+                int(reagent_index)
+                for reagent_index in true_zero_reagent_indices
+            ]
+
+        if any(
+            reagent_index < 0 or reagent_index >= n_dimensions
+            for reagent_index in true_zero_reagent_indices
+        ):
+            raise ValueError(
+                "true_zero_reagent_indices contains an index outside the "
+                "optimizer dimensionality."
+            )
+
+        if len(set(true_zero_reagent_indices)) != len(
+            true_zero_reagent_indices
+        ):
+            raise ValueError(
+                "true_zero_reagent_indices must not contain duplicates."
+            )
+
         masks = []
 
-        for mask_int in range(2 ** n_dimensions):
-            mask = np.array(
-                [
-                    (mask_int >> reagent_i) & 1
-                    for reagent_i in range(n_dimensions)
-                ],
-                dtype=int
-            )
+        for mask_int in range(2 ** len(true_zero_reagent_indices)):
+            # Reagents that are not eligible for true zero remain ON in every
+            # mask. Only the selected dimensions vary between OFF and ON.
+            mask = np.ones(n_dimensions, dtype=int)
+
+            for mask_position, reagent_index in enumerate(
+                true_zero_reagent_indices
+            ):
+                mask[reagent_index] = (
+                    (mask_int >> mask_position) & 1
+                )
 
             if not include_all_off_mask and not mask.any():
                 continue
@@ -583,7 +712,12 @@ class OptimizationModel():
 
         if self.allow_true_zero:
             return self._generate_reagent_masks(
-                include_all_off_mask=False
+                include_all_off_mask=False,
+                true_zero_reagent_indices=getattr(
+                    self,
+                    'true_zero_reagent_indices',
+                    list(range(n_dimensions))
+                )
             )
 
         return [
@@ -1953,8 +2087,22 @@ class OptimizationModel():
         total_volume = float(self.total_volume)
 
         repaired_x = np.array(x, dtype=float, copy=True)
+        true_zero_reagent_indices = set(
+            getattr(
+                self,
+                'true_zero_reagent_indices',
+                list(range(n_dimensions))
+                if getattr(self, 'allow_true_zero', False)
+                else []
+            )
+        )
 
         for reagent_i, reagent_name in enumerate(self.variable_reagents):
+            # Required-ON reagents already have a 5 uL-equivalent lower bound.
+            # Do not apply a repair that could convert one of them to zero.
+            if reagent_i not in true_zero_reagent_indices:
+                continue
+
             stock_conc = self._get_variable_reagent_stock_conc(reagent_name)
 
             if math.isclose(stock_conc, 0.0, rel_tol=0, abs_tol=1e-12):

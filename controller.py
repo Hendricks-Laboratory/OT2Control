@@ -247,6 +247,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             total_volume=auto.template_meta['tot_vol'],
             fixed_reagent_volumes=auto._get_fixed_reagent_volumes(),
             allow_true_zero=auto.robo_params.get('allow_true_zero', False),
+            true_zero_reagents=auto.robo_params.get(
+                'true_zero_reagents',
+                None
+            ),
             acquisition_mode=auto.robo_params.get(
                 'acquisition_mode',
                 'exploit'
@@ -668,10 +672,11 @@ class Controller(ABC):
         bound for each variable reagent. This keeps the optimizer inside the
         normal continuous pipetting region.
 
-        If Header allow_true_zero is enabled, the lower bound becomes 0 for
-        each variable reagent. The true-zero repair logic then handles the
-        forbidden 0-5 uL transfer region by mapping candidates to either true
-        zero or the minimum executable transfer volume.
+        Reagents selected through Header true_zero_reagents receive a lower
+        bound of 0. All other variable reagents use the concentration produced
+        by a 5 uL transfer, so they remain required ON. The true-zero repair
+        logic then handles the forbidden 0-5 uL transfer region only for the
+        explicitly selected reagents.
 
         Input:
             None
@@ -682,29 +687,49 @@ class Controller(ABC):
         """
         min_concs = {}
 
-        if self.robo_params.get('allow_true_zero', False):
-            for var_reagent in self.get_variable_reagents():
-                min_concs[var_reagent] = 0.0
-
-            print(
-                "<<controller>> true-zero search enabled: "
-                "variable reagent lower bounds set to 0"
+        configured_true_zero_reagents = self.robo_params.get(
+            'true_zero_reagents',
+            None
+        )
+        true_zero_reagents = (
+            set(configured_true_zero_reagents)
+            if configured_true_zero_reagents is not None
+            else (
+                {
+                    str(reagent)
+                    for reagent in self.get_variable_reagents()
+                }
+                if self.robo_params.get('allow_true_zero', False)
+                else set()
             )
-            return min_concs
+        )
 
-        # Default behavior: use the concentration produced by a 5 uL transfer
-        # from the stock reagent into the template reaction volume.
+        # Every non-selected reagent uses the concentration produced by a 5 uL
+        # transfer from the stock into the template reaction volume. Selected
+        # reagents instead receive a true-zero lower bound.
         for var_reagent in self.get_variable_reagents():
+            if var_reagent in true_zero_reagents:
+                min_concs[var_reagent] = 0.0
+                continue
+
             stock_conc = self._get_variable_reagent_stock_conc(var_reagent)
             total_volume = float(self.template_meta['tot_vol'])
 
             min_conc = stock_conc * 5.0 / total_volume
             min_concs[var_reagent] = min_conc
 
-        print(
-            "<<controller>> true-zero search disabled: "
-            "variable reagent lower bounds use 5 uL-equivalent concentrations"
-        )
+        if true_zero_reagents:
+            print(
+                "<<controller>> true-zero lower bounds set to 0 for: "
+                + ', '.join(sorted(true_zero_reagents))
+            )
+        else:
+            print(
+                "<<controller>> true-zero search disabled: "
+                "variable reagent lower bounds use 5 uL-equivalent "
+                "concentrations"
+            )
+
         return min_concs
     
     def get_max_conc(self):
@@ -1307,6 +1332,15 @@ class Controller(ABC):
             ]
         )
 
+        # Optional selective true-zero setting. Validation against actual
+        # variable-reagent names occurs in AutoContr after the template has
+        # been parsed. Keeping the raw Header value here preserves legacy
+        # worksheets, whose allow_true_zero setting applies to every variable
+        # reagent when this field is absent.
+        self.robo_params['true_zero_reagents_requested'] = str(
+            header_dict.get('true_zero_reagents', '')
+        ).strip()
+
         # The singular acquisition_mode remains the legacy interface. New
         # portfolio-enabled Header sheets must make the inactive interface
         # explicit with ``off`` so an experiment cannot start from an
@@ -1781,9 +1815,26 @@ class Controller(ABC):
             dtype=bool
         )
         volume_tolerance = 1e-9
-        true_zero_allowed = bool(
-            getattr(model, 'allow_true_zero', False)
+        configured_true_zero_reagents = getattr(
+            model,
+            'true_zero_reagents',
+            None
         )
+
+        # Older optimizer objects have only the global boolean. Preserve their
+        # all-or-none interpretation while allowing current models to mark the
+        # exact-zero region separately for each plotted reagent.
+        if configured_true_zero_reagents is None:
+            true_zero_reagents = (
+                set(reagent_names)
+                if getattr(model, 'allow_true_zero', False)
+                else set()
+            )
+        else:
+            true_zero_reagents = {
+                str(reagent_name)
+                for reagent_name in configured_true_zero_reagents
+            }
 
         for reagent_name, concentration_grid in zip(
             reagent_names,
@@ -1821,7 +1872,7 @@ class Controller(ABC):
                 transfer_volume_grid < 5.0 - volume_tolerance
             )
 
-            if true_zero_allowed:
+            if reagent_name in true_zero_reagents:
                 variable_transfer_infeasible |= (
                     below_executable_minimum & ~is_exact_zero
                 )
@@ -4432,6 +4483,7 @@ class AutoContr(Controller):
     def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4, use_cache=False, cache_path='Cache', num_duplicates=3):
         super().__init__(rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path)
         self.variable_reagents = self.get_variable_reagents()
+        self._resolve_true_zero_reagents()
         #print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
         self.y_shape = len(self.variable_reagents)
@@ -4460,6 +4512,126 @@ class AutoContr(Controller):
         # which remains row-per-well for raw output and model training.
         self.auto_model_performance_rows = []
         self.auto_condition_counter = 0
+
+    def _resolve_true_zero_reagents(self):
+        '''
+        Resolves the optional Header true_zero_reagents selection.
+
+        The legacy allow_true_zero switch remains the master enablement flag.
+        When no selective list is supplied, its historical behavior is
+        preserved: true enables every variable reagent and false enables none.
+        A supplied list may contain variable-reagent names separated by commas
+        or semicolons, matched case-insensitively while preserving the
+        template's canonical names. ``all`` and ``none`` are accepted aliases.
+        '''
+        variable_reagents = [
+            str(reagent)
+            for reagent in self.variable_reagents
+        ]
+        canonical_by_normalized_name = {
+            reagent.lower(): reagent
+            for reagent in variable_reagents
+        }
+        requested_value = str(
+            self.robo_params.get('true_zero_reagents_requested', '')
+        ).strip()
+        allow_true_zero = bool(
+            self.robo_params.get('allow_true_zero', False)
+        )
+
+        if not requested_value:
+            resolved_reagents = (
+                list(variable_reagents)
+                if allow_true_zero
+                else []
+            )
+        else:
+            normalized_request = requested_value.lower()
+
+            if normalized_request in ('none', 'off', 'false', '0'):
+                if allow_true_zero:
+                    raise ValueError(
+                        "Header true_zero_reagents is 'none', but "
+                        "allow_true_zero is enabled. Set allow_true_zero to "
+                        "FALSE or provide one or more variable reagents."
+                    )
+                resolved_reagents = []
+            else:
+                if not allow_true_zero:
+                    raise ValueError(
+                        "Header true_zero_reagents requires "
+                        "allow_true_zero to be TRUE."
+                    )
+
+                if normalized_request in ('all', '*'):
+                    resolved_reagents = list(variable_reagents)
+                else:
+                    requested_names = [
+                        name.strip()
+                        for name in re.split('[,;]', requested_value)
+                        if name.strip()
+                    ]
+
+                    if len(requested_names) == 0:
+                        raise ValueError(
+                            "Header true_zero_reagents must name one or more "
+                            "variable reagents, 'all', or 'none'."
+                        )
+
+                    normalized_names = [
+                        name.lower()
+                        for name in requested_names
+                    ]
+                    duplicate_names = sorted({
+                        name
+                        for name in normalized_names
+                        if normalized_names.count(name) > 1
+                    })
+
+                    if duplicate_names:
+                        raise ValueError(
+                            "Header true_zero_reagents contains duplicate "
+                            "reagent name(s): "
+                            + ', '.join(duplicate_names)
+                        )
+
+                    unknown_names = [
+                        name
+                        for name in requested_names
+                        if name.lower() not in canonical_by_normalized_name
+                    ]
+
+                    if unknown_names:
+                        raise ValueError(
+                            "Header true_zero_reagents names reagent(s) that "
+                            "are not variable transfer reagents: "
+                            + ', '.join(unknown_names)
+                            + '. Available variable reagents: '
+                            + ', '.join(variable_reagents)
+                        )
+
+                    resolved_reagents = [
+                        canonical_by_normalized_name[name.lower()]
+                        for name in requested_names
+                    ]
+
+        self.robo_params['true_zero_reagents'] = resolved_reagents
+        self.robo_params['true_zero_reagent_indices'] = [
+            reagent_index
+            for reagent_index, reagent_name in enumerate(variable_reagents)
+            if reagent_name in resolved_reagents
+        ]
+
+        if resolved_reagents:
+            print(
+                "<<controller>> true-zero eligible variable reagents: "
+                + ', '.join(resolved_reagents)
+            )
+        else:
+            print(
+                "<<controller>> true-zero search disabled for all variable "
+                "reagents"
+            )
 
     # Update experiment_data DataFrame after each batch
     def _update_experiment_data(self, recipes, Experiment_result, axis=1):
@@ -4567,6 +4739,35 @@ class AutoContr(Controller):
                 "<<controller>> experiment data updated successfully with "
                 f"{len(new_data)} new rows"
             )
+
+    def _build_labeled_auto_experiment_data_export(self):
+        '''
+        Returns a human-readable copy of the raw Auto well-level data.
+
+        Auto stores recipe values internally under bare reagent names for
+        compatibility with the existing controller workflow. At export time,
+        however, the values need to state their scientific meaning explicitly:
+        they are denormalized final-reaction concentrations in mM, not the
+        normalized 0--1 coordinates used by the Gaussian process. The measured
+        result is the wavelength of maximum absorbance in nm.
+
+        The returned dataframe is a copy. It does not change
+        self.experiment_data, model-training data, recipes, or any execution
+        behavior.
+        '''
+        export_dataframe = self.experiment_data.copy()
+        renamed_columns = {
+            str(reagent): (
+                f'{str(reagent)}_final_reaction_concentration_mM'
+            )
+            for reagent in self.variable_reagents
+            if str(reagent) in export_dataframe.columns
+        }
+
+        if 'Experiment_result' in export_dataframe.columns:
+            renamed_columns['Experiment_result'] = 'lambda_max_nm'
+
+        return export_dataframe.rename(columns=renamed_columns)
 
     def _safe_float_or_none(self, value):
         '''
@@ -5679,6 +5880,11 @@ class AutoContr(Controller):
                 'batch_number': int(batch_number),
                 'reaction_number': int(self.auto_condition_counter),
                 'condition_type': condition_type,
+                'true_zero_eligible_reagents': (
+                    self._serialize_auto_audit_value(
+                        self.robo_params.get('true_zero_reagents', [])
+                    )
+                ),
                 'replicate_sample_names': (
                     self._serialize_auto_audit_value(condition_wellnames)
                     if any(name is not None for name in condition_wellnames)
@@ -11087,6 +11293,7 @@ class AutoContr(Controller):
         max_iterations = robo_params.get('max_iterations', None)
         num_duplicates = robo_params.get('num_duplicates', None)
         allow_true_zero = robo_params.get('allow_true_zero', None)
+        true_zero_reagents = robo_params.get('true_zero_reagents', None)
         target_tolerance_nm = robo_params.get('target_tolerance_nm', 10.0)
         pi_legacy_tare_offset_g = robo_params.get(
             'pi_legacy_tare_offset_g',
@@ -11832,9 +12039,15 @@ class AutoContr(Controller):
         lines.append(
             '- True-zero mixed masks allowed: '
             + self._format_auto_report_value(allow_true_zero)
-            + '. When enabled, variable reagents may be exactly zero; all '
-            'non-empty masks remain subject to executable-transfer and '
-            'volume-feasibility checks.'
+            + '. Eligible variable reagents: '
+            + (
+                ', '.join(true_zero_reagents)
+                if true_zero_reagents
+                else 'none'
+            )
+            + '. Eligible reagents may be exactly zero; required-ON reagents '
+            'remain subject to the minimum executable transfer. Every mask '
+            'remains subject to volume-feasibility checks.'
         )
         lines.append('')
         lines.append('### Operational reproducibility settings')
@@ -17161,7 +17374,7 @@ class AutoContr(Controller):
         # Save the row-per-well experiment data used for raw output and model
         # audit. This remains separate from the condition-level Auto
         # performance log.
-        self.experiment_data.to_csv(
+        self._build_labeled_auto_experiment_data_export().to_csv(
             f'{os.path.join(self.out_path, "pr_data")}/experiment_data.csv',
             index=False
         )
@@ -17715,12 +17928,49 @@ class AutoContr(Controller):
                 as recipes.
         '''
         repaired_recipes = np.array(recipes, dtype=float, copy=True)
+        robo_params = getattr(self, 'robo_params', None)
+
+        if robo_params is None:
+            # Lightweight legacy callers and isolated controller tests may not
+            # construct spreadsheet-backed robo_params. Preserve the former
+            # all-variable repair behavior for that compatibility path.
+            true_zero_reagents = {
+                str(reagent)
+                for reagent in self.variable_reagents
+            }
+        else:
+            configured_true_zero_reagents = robo_params.get(
+                'true_zero_reagents',
+                None
+            )
+            true_zero_reagents = (
+                set(configured_true_zero_reagents)
+                if configured_true_zero_reagents is not None
+                else (
+                    {
+                        str(reagent)
+                        for reagent in self.variable_reagents
+                    }
+                    if robo_params.get('allow_true_zero', False)
+                    else set()
+                )
+            )
 
         for recipe_i in range(repaired_recipes.shape[0]):
             for reagent_i, reagent_name in enumerate(self.variable_reagents):
                 target_conc = float(repaired_recipes[recipe_i, reagent_i])
+                reagent_allows_true_zero = (
+                    reagent_name in true_zero_reagents
+                )
 
                 if math.isclose(target_conc, 0.0, rel_tol=0, abs_tol=1e-12):
+                    if not reagent_allows_true_zero:
+                        raise ValueError(
+                            "Auto recipe attempts a true-zero transfer for "
+                            f"required-ON variable reagent {reagent_name}. "
+                            "Only Header true_zero_reagents may be exactly "
+                            "zero."
+                        )
                     repaired_recipes[recipe_i, reagent_i] = 0.0
                     continue
 
@@ -17737,6 +17987,16 @@ class AutoContr(Controller):
                 # _convert_conc_to_vol() effectively uses:
                 # transfer_volume = target_concentration * total_volume / stock_concentration
                 transfer_volume = target_conc * total_volume / stock_conc
+
+                if not reagent_allows_true_zero:
+                    if transfer_volume < 5.0 - 1e-9:
+                        raise ValueError(
+                            "Auto recipe has a non-executable transfer for "
+                            f"required-ON variable reagent {reagent_name}: "
+                            f"{transfer_volume:.4f} uL. Required-ON "
+                            "reagents must transfer at least 5 uL."
+                        )
+                    continue
 
                 repaired_volume = self._apply_true_zero_transfer_rule_to_volume(
                     transfer_volume

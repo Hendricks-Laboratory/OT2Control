@@ -9,6 +9,7 @@ import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -150,7 +151,8 @@ def _load_auto_controller_methods(method_names, extra_namespace=None):
         'math': math,
         'np': np,
         'os': os,
-        'pd': pd
+        'pd': pd,
+        're': re
     }
 
     if extra_namespace is not None:
@@ -873,6 +875,25 @@ class MaskAndExecutableBoundsTests(unittest.TestCase):
 
         self.assertEqual([mask.tolist() for mask in masks], [[1, 1, 1]])
 
+    def test_selective_true_zero_masks_keep_required_reagents_on(self):
+        model = self._build_model(allow_true_zero=True)
+        model.true_zero_reagent_indices = [0, 2]
+
+        masks = [
+            mask.tolist()
+            for mask in model._get_reagent_masks_for_current_settings()
+        ]
+
+        self.assertEqual(
+            masks,
+            [
+                [0, 1, 0],
+                [1, 1, 0],
+                [0, 1, 1],
+                [1, 1, 1]
+            ]
+        )
+
     def test_active_bounds_start_at_five_ul_executable_transfer(self):
         model = self._build_model(allow_true_zero=True)
         bounds = model._get_masked_bounds([1, 0, 1])
@@ -934,6 +955,22 @@ class GprFeasibilityOverlayTests(unittest.TestCase):
         )
 
         self.assertTrue(overlay['variable_transfer_infeasible'][0, 0])
+
+    def test_overlay_respects_selected_true_zero_reagents(self):
+        controller, model = self._build_controller_and_model(
+            allow_true_zero=True
+        )
+        model.true_zero_reagents = ['reagent_a']
+
+        overlay = controller._get_2d_gpr_feasibility_overlay_data(
+            model=model,
+            x_values=[0.0, 0.1],
+            y_values=[0.0, 0.1]
+        )
+
+        # reagent_a may be exactly zero, but reagent_b remains required ON.
+        self.assertTrue(overlay['variable_transfer_infeasible'][0, 0])
+        self.assertFalse(overlay['variable_transfer_infeasible'][1, 0])
 
 
 class AcquisitionRoutingTests(unittest.TestCase):
@@ -1200,6 +1237,49 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('balanced_exploration_weight', report_strings)
         self.assertIn('optimizer_recipe_repaired', report_strings)
         self.assertIn('## Condition-Level Results', report_strings)
+
+
+class ExperimentDataExportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_build_labeled_auto_experiment_data_export'
+        ])
+
+    def test_raw_well_export_labels_physical_concentrations_and_lambda_max(
+        self
+    ):
+        controller = self.Controller()
+        controller.variable_reagents = [
+            'silver_nitrate',
+            'potassium_bromide'
+        ]
+        controller.experiment_data = pd.DataFrame({
+            'silver_nitrate': [0.10],
+            'potassium_bromide': [0.002],
+            'Experiment_result': [625.0]
+        })
+
+        export_dataframe = (
+            controller._build_labeled_auto_experiment_data_export()
+        )
+
+        self.assertEqual(
+            list(export_dataframe.columns),
+            [
+                'silver_nitrate_final_reaction_concentration_mM',
+                'potassium_bromide_final_reaction_concentration_mM',
+                'lambda_max_nm'
+            ]
+        )
+        self.assertEqual(
+            export_dataframe.iloc[0].tolist(),
+            [0.10, 0.002, 625.0]
+        )
+        self.assertEqual(
+            list(controller.experiment_data.columns),
+            ['silver_nitrate', 'potassium_bromide', 'Experiment_result']
+        )
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):
@@ -1548,7 +1628,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         auto_terminal_verbosity=None,
         auto_source_volume_check=None,
         auto_source_reserve_volume_uL=None,
-        pi_legacy_tare_offset_g=None
+        pi_legacy_tare_offset_g=None,
+        true_zero_reagents=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1609,6 +1690,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(pi_legacy_tare_offset_g)
             ])
 
+        if true_zero_reagents is not None:
+            header.append([
+                'true_zero_reagents',
+                str(true_zero_reagents)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1621,6 +1708,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['auto_plot_profile'], 'standard')
         self.assertEqual(parsed['num_duplicates'], 3)
         self.assertFalse(parsed['allow_true_zero'])
+        self.assertEqual(parsed['true_zero_reagents_requested'], '')
         self.assertEqual(parsed['target_tolerance_nm'], 10.0)
         self.assertEqual(parsed['replicate_sd_tolerance_nm'], 25.0)
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
@@ -1628,6 +1716,16 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.0)
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
+
+    def test_header_preserves_selective_true_zero_request_for_auto_resolution(self):
+        parsed = self._parse_header(
+            true_zero_reagents='Silver_Nitrate; PVP'
+        )
+
+        self.assertEqual(
+            parsed['true_zero_reagents_requested'],
+            'Silver_Nitrate; PVP'
+        )
 
     def test_header_source_volume_protection_is_explicit_and_fail_closed(self):
         parsed = self._parse_header(
@@ -1839,6 +1937,119 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 acquisition_modes='exploit;target_ei',
                 num_duplicates=1
             )
+
+
+class SelectiveTrueZeroControllerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_resolve_true_zero_reagents',
+            '_apply_true_zero_transfer_rule_to_volume',
+            '_apply_true_zero_transfer_rule_to_recipes'
+        ])
+        cls.BaseController = _load_base_controller_methods([
+            'get_min_conc'
+        ])
+
+    def _build_controller(self, requested_value, allow_true_zero=True):
+        controller = self.AutoController()
+        controller.variable_reagents = [
+            'silver_nitrate',
+            'potassium_bromide',
+            'PVP'
+        ]
+        controller.robo_params = {
+            'allow_true_zero': allow_true_zero,
+            'true_zero_reagents_requested': requested_value
+        }
+        controller.template_meta = {'tot_vol': 100.0}
+        controller.get_variable_reagents = lambda: controller.variable_reagents
+        controller._get_variable_reagent_stock_conc = (
+            lambda reagent_name: 1.0
+        )
+        return controller
+
+    def _get_min_concentrations(self, resolved_robo_params):
+        controller = self.BaseController()
+        controller.variable_reagents = [
+            'silver_nitrate',
+            'potassium_bromide',
+            'PVP'
+        ]
+        controller.robo_params = resolved_robo_params
+        controller.template_meta = {'tot_vol': 100.0}
+        controller.get_variable_reagents = lambda: controller.variable_reagents
+        controller._get_variable_reagent_stock_conc = (
+            lambda reagent_name: 1.0
+        )
+
+        with redirect_stdout(io.StringIO()):
+            return controller.get_min_conc()
+
+    def test_selected_reagents_are_case_insensitive_and_only_they_get_zero_bounds(
+        self
+    ):
+        controller = self._build_controller('SILVER_NITRATE; pvp')
+
+        with redirect_stdout(io.StringIO()):
+            controller._resolve_true_zero_reagents()
+
+        min_concentrations = self._get_min_concentrations(
+            controller.robo_params
+        )
+
+        self.assertEqual(
+            controller.robo_params['true_zero_reagents'],
+            ['silver_nitrate', 'PVP']
+        )
+        self.assertEqual(
+            controller.robo_params['true_zero_reagent_indices'],
+            [0, 2]
+        )
+        self.assertEqual(min_concentrations['silver_nitrate'], 0.0)
+        self.assertEqual(min_concentrations['PVP'], 0.0)
+        self.assertEqual(min_concentrations['potassium_bromide'], 0.05)
+
+    def test_legacy_blank_selection_preserves_all_or_none_behavior(self):
+        enabled_controller = self._build_controller('')
+        disabled_controller = self._build_controller('', allow_true_zero=False)
+
+        with redirect_stdout(io.StringIO()):
+            enabled_controller._resolve_true_zero_reagents()
+            disabled_controller._resolve_true_zero_reagents()
+
+        self.assertEqual(
+            enabled_controller.robo_params['true_zero_reagents'],
+            enabled_controller.variable_reagents
+        )
+        self.assertEqual(
+            disabled_controller.robo_params['true_zero_reagents'],
+            []
+        )
+
+    def test_controller_rejects_zero_for_required_on_reagent(self):
+        controller = self._build_controller('silver_nitrate')
+
+        with redirect_stdout(io.StringIO()):
+            controller._resolve_true_zero_reagents()
+
+        with self.assertRaisesRegex(ValueError, 'required-ON'):
+            controller._apply_true_zero_transfer_rule_to_recipes(
+                np.array([[0.0, 0.0, 0.1]])
+            )
+
+    def test_invalid_selection_fails_clearly_before_run(self):
+        controller = self._build_controller('unknown_reagent')
+
+        with self.assertRaisesRegex(ValueError, 'not variable transfer'):
+            with redirect_stdout(io.StringIO()):
+                controller._resolve_true_zero_reagents()
+
+        controller = self._build_controller('silver_nitrate', False)
+
+        with self.assertRaisesRegex(ValueError, 'allow_true_zero'):
+            with redirect_stdout(io.StringIO()):
+                controller._resolve_true_zero_reagents()
 
 
 class AutoSourceVolumePreflightTests(unittest.TestCase):
