@@ -1170,14 +1170,26 @@ class AcquisitionRoutingTests(unittest.TestCase):
         report_method = _get_auto_controller_method_node(
             '_write_auto_run_report'
         )
+        responsive_section_method = _get_auto_controller_method_node(
+            '_build_auto_report_responsive_sections'
+        )
+        full_audit_appendix_method = _get_auto_controller_method_node(
+            '_build_auto_report_full_audit_appendix'
+        )
         report_strings = {
             node.value
-            for node in ast.walk(report_method)
+            for method_node in [
+                report_method,
+                responsive_section_method,
+                full_audit_appendix_method
+            ]
+            for node in ast.walk(method_node)
             if isinstance(node, ast.Constant)
             and isinstance(node.value, str)
         }
 
         self.assertIn('## Acquisition Audit Trail', report_strings)
+        self.assertIn('## Full Audit Appendix', report_strings)
         self.assertIn('acquisition_mode', report_strings)
         self.assertIn('acquisition_score', report_strings)
         self.assertIn('predicted_target_error_nm', report_strings)
@@ -1185,13 +1197,9 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('predicted_lambda_std_nm', report_strings)
         self.assertIn('incumbent_target_error_nm', report_strings)
         self.assertIn('selected_mask', report_strings)
-        self.assertIn('SciPy result', report_strings)
-        self.assertIn('### Optimizer Recipe Execution Provenance', report_strings)
         self.assertIn('balanced_exploration_weight', report_strings)
         self.assertIn('optimizer_recipe_repaired', report_strings)
-        self.assertIn('selected_normalized_recipe', report_strings)
-        self.assertIn('selected_fixed_volume_total_uL', report_strings)
-        self.assertIn('executed_fixed_volume_total_uL', report_strings)
+        self.assertIn('## Condition-Level Results', report_strings)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):
@@ -2824,6 +2832,8 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_format_auto_report_volume_summary',
             '_format_auto_report_optimizer_status',
             '_format_auto_report_replicate_list_value',
+            '_build_auto_report_responsive_sections',
+            '_build_auto_report_full_audit_appendix',
             '_build_padded_auto_report_markdown_table',
             '_auto_report_plot_markdown_if_exists',
             '_write_auto_run_report'
@@ -3397,17 +3407,22 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             70.0
         )
         self.assertIn('## Acquisition Audit Trail', report_text)
+        self.assertIn('### Condition 0 — Optimizer Batch 1', report_text)
+        self.assertIn('## Full Audit Appendix', report_text)
+        self.assertIn('<details>', report_text)
+        self.assertIn('"selected_normalized_recipe": [', report_text)
+        self.assertIn('"mask_results": [', report_text)
         self.assertIn(
-            '### Optimizer Recipe Execution Provenance',
+            'Full selected/executed recipe arrays remain in '
+            '`auto_model_performance_log.csv`',
             report_text
         )
-        self.assertIn('[[0.0,0.2]]', report_text)
         self.assertIn(
             'fixed=10 uL; variable=20 uL; water=70 uL; total=100 uL; '
             'feasible=True',
             report_text
         )
-        self.assertIn('SciPy result', report_text)
+        self.assertIn('Optimizer result:', report_text)
         self.assertIn(
             'not applicable: 2-variable Auto run',
             report_text
@@ -3694,7 +3709,7 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn('Replicate SD tolerance', report_text)
         self.assertIn('5 nm', report_text)
         self.assertIn('minimum normalized RMS distance', report_text)
-        self.assertIn('Minimize −(predicted GP SD).', report_text)
+        self.assertIn('Minimizes `−(predicted GP SD)` (nm)', report_text)
         self.assertIn(
             'Each listed mode selected one physically feasible condition',
             report_text

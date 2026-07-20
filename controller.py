@@ -7112,6 +7112,356 @@ class AutoContr(Controller):
 
         return self._escape_auto_report_markdown_table_value(parsed_value)
 
+    def _build_auto_report_responsive_sections(
+        self,
+        performance_df,
+        acquisition_audit_df
+    ):
+        '''Builds narrow, naturally wrapping report sections for audit data.'''
+        acquisition_lines = []
+        condition_lines = []
+
+        if acquisition_audit_df.empty:
+            acquisition_lines.append(
+                'No optimizer-selected conditions were available for the '
+                'acquisition audit trail.'
+            )
+        else:
+            for _, row in acquisition_audit_df.sort_values(
+                'reaction_number'
+            ).iterrows():
+                condition_number = self._format_auto_report_table_value(
+                    self._safe_auto_report_get(row, 'reaction_number', None)
+                )
+                batch_number = self._format_auto_report_table_value(
+                    self._safe_auto_report_get(row, 'batch_number', None)
+                )
+                acquisition_lines.extend([
+                    f'### Condition {condition_number} — Optimizer Batch '
+                    f'{batch_number}',
+                    '',
+                    '- Acquisition mode: `'
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'acquisition_mode',
+                            None
+                        )
+                    )
+                    + '`',
+                    '- Minimized acquisition score: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'acquisition_score',
+                            None
+                        )
+                    ),
+                    '- GP prediction before execution: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'predicted_lambda_mean_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    )
+                    + ' mean; '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'predicted_lambda_std_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    )
+                    + ' SD.',
+                    '- Predicted target error: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'predicted_target_error_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    ),
+                    '- Target-EI incumbent before selection: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'incumbent_target_error_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    ),
+                    '- Selected mask and masks evaluated: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(row, 'selected_mask', None)
+                    )
+                    + '; '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'mask_result_count',
+                            None
+                        )
+                    ),
+                    '- Optimizer result: '
+                    + self._format_auto_report_optimizer_status(
+                        self._safe_auto_report_get(
+                            row,
+                            'optimizer_method',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'optimizer_success',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'optimizer_status',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'optimizer_message',
+                            None
+                        )
+                    ),
+                    '- Controller recipe repair: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'optimizer_recipe_repaired',
+                            None
+                        )
+                    ),
+                    '- Executed volume balance: '
+                    + self._format_auto_report_volume_summary(
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_fixed_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_variable_volume_total_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_water_volume_uL',
+                            None
+                        ),
+                        self._safe_auto_report_get(
+                            row,
+                            'executed_volume_feasible',
+                            None
+                        )
+                    ),
+                    ''
+                ])
+
+        if performance_df.empty:
+            condition_lines.append(
+                'No condition-level rows were available for reporting.'
+            )
+        else:
+            for _, row in performance_df.sort_values(
+                'reaction_number'
+            ).iterrows():
+                condition_number = self._format_auto_report_table_value(
+                    self._safe_auto_report_get(row, 'reaction_number', None)
+                )
+                batch_number = self._format_auto_report_table_value(
+                    self._safe_auto_report_get(row, 'batch_number', None)
+                )
+                condition_lines.extend([
+                    f'### Condition {condition_number} — Batch {batch_number}',
+                    '',
+                    '- Type: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'condition_type',
+                            None
+                        )
+                    ),
+                    '- Physical replicate wells: '
+                    + self._format_auto_report_replicate_list_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'replicate_well_locations',
+                            None
+                        )
+                    ),
+                    '- Raw replicate λmax values: '
+                    + self._format_auto_report_replicate_list_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_values_raw_nm',
+                            None
+                        )
+                    )
+                    + ' nm',
+                    '- QC-used replicate λmax values: '
+                    + self._format_auto_report_replicate_list_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_values_nm',
+                            None
+                        )
+                    )
+                    + ' nm',
+                    '- QC-cleaned mean and SD: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_mean_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    )
+                    + '; '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'actual_lambda_sd_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    )
+                    + ' SD.',
+                    '- Absolute target error: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'target_error_nm',
+                            None
+                        ),
+                        suffix='nm'
+                    ),
+                    '- Replicate QC and target-stop eligibility: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'replicate_qc_status',
+                            None
+                        )
+                    )
+                    + '; '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'eligible_for_target_stop',
+                            None
+                        )
+                    ),
+                    ''
+                ])
+
+        return acquisition_lines, condition_lines
+
+    def _build_auto_report_full_audit_appendix(self, performance_df):
+        '''
+        Builds a collapsible, complete Markdown appendix for each condition.
+
+        The main report intentionally uses compact condition cards for normal
+        viewing. This appendix preserves every condition-level performance-log
+        field, including nested recipe and mask diagnostics, without forcing a
+        width-sensitive table into the main narrative.
+        '''
+        if performance_df.empty:
+            return [
+                'No condition-level audit rows were available for export.'
+            ]
+
+        def make_json_safe(value):
+            if isinstance(value, np.ndarray):
+                return make_json_safe(value.tolist())
+
+            if isinstance(value, np.generic):
+                return make_json_safe(value.item())
+
+            if isinstance(value, dict):
+                return {
+                    str(key): make_json_safe(item)
+                    for key, item in value.items()
+                }
+
+            if isinstance(value, (list, tuple)):
+                return [make_json_safe(item) for item in value]
+
+            if isinstance(value, str):
+                stripped_value = value.strip()
+
+                if (
+                    len(stripped_value) > 1
+                    and stripped_value[0] in ['[', '{']
+                    and stripped_value[-1] in [']', '}']
+                ):
+                    try:
+                        return make_json_safe(json.loads(stripped_value))
+                    except (TypeError, ValueError):
+                        pass
+
+                return value
+
+            try:
+                if pd.isna(value):
+                    return None
+            except (TypeError, ValueError):
+                pass
+
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
+
+            if value is None or isinstance(value, (bool, int, float)):
+                return value
+
+            return str(value)
+
+        lines = []
+
+        for _, row in performance_df.sort_values('reaction_number').iterrows():
+            condition_number = self._format_auto_report_table_value(
+                self._safe_auto_report_get(row, 'reaction_number', None)
+            )
+            batch_number = self._format_auto_report_table_value(
+                self._safe_auto_report_get(row, 'batch_number', None)
+            )
+            condition_type = self._format_auto_report_table_value(
+                self._safe_auto_report_get(row, 'condition_type', None)
+            )
+            full_record = {
+                str(key): make_json_safe(value)
+                for key, value in row.to_dict().items()
+            }
+            formatted_record = json.dumps(
+                full_record,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False
+            )
+
+            lines.extend([
+                '<details>',
+                (
+                    f'<summary>Condition {condition_number} — batch '
+                    f'{batch_number}, {condition_type}: full audit record</summary>'
+                ),
+                '',
+                '```json',
+                formatted_record,
+                '```',
+                '',
+                '</details>',
+                ''
+            ])
+
+        return lines
+
     def _build_padded_auto_report_markdown_table(
         self,
         headers,
@@ -11252,8 +11602,6 @@ class AutoContr(Controller):
                 f'data and excluding only clearer isolated outliers.'
             )
 
-        acquisition_audit_table_lines = []
-
         if (
             performance_df.empty
             or 'condition_type' not in performance_df.columns
@@ -11264,441 +11612,16 @@ class AutoContr(Controller):
                 performance_df['condition_type'] == 'optimizer_selected'
             ]
 
-        if acquisition_audit_df.empty:
-            acquisition_audit_table_lines.append(
-                'No optimizer-selected conditions were available for the '
-                'acquisition audit trail.'
-            )
-        else:
-            acquisition_audit_headers = [
-                'Condition',
-                'Batch',
-                'Mode',
-                'Balanced weight',
-                'Score',
-                'Predicted target error',
-                'Predicted λmax',
-                'GP SD',
-                'Incumbent target error',
-                'Selected mask',
-                'SciPy result',
-                'Recipe repaired',
-                'Masks evaluated'
-            ]
-            acquisition_audit_alignments = [
-                'right',
-                'right',
-                'left',
-                'right',
-                'right',
-                'right',
-                'right',
-                'right',
-                'right',
-                'left',
-                'left',
-                'left',
-                'right'
-            ]
-            acquisition_audit_rows = []
-
-            for _, row in acquisition_audit_df.sort_values(
-                'reaction_number'
-            ).iterrows():
-                acquisition_audit_rows.append(
-                    [
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'reaction_number',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'batch_number',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'acquisition_mode',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'balanced_exploration_weight',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'acquisition_score',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'predicted_target_error_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'predicted_lambda_mean_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'predicted_lambda_std_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'incumbent_target_error_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'selected_mask',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_optimizer_status(
-                            self._safe_auto_report_get(
-                                row,
-                                'optimizer_method',
-                                None
-                            ),
-                            self._safe_auto_report_get(
-                                row,
-                                'optimizer_success',
-                                None
-                            ),
-                            self._safe_auto_report_get(
-                                row,
-                                'optimizer_status',
-                                None
-                            ),
-                            self._safe_auto_report_get(
-                                row,
-                                'optimizer_message',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'optimizer_recipe_repaired',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'mask_result_count',
-                                None
-                            )
-                        )
-                    ]
-                )
-
-            acquisition_audit_table_lines.extend(
-                self._build_padded_auto_report_markdown_table(
-                    headers=acquisition_audit_headers,
-                    rows=acquisition_audit_rows,
-                    alignments=acquisition_audit_alignments
-                )
-            )
-
-        acquisition_provenance_table_lines = []
-
-        if acquisition_audit_df.empty:
-            acquisition_provenance_table_lines.append(
-                'No optimizer-selected recipe provenance was available.'
-            )
-        else:
-            provenance_headers = [
-                'Condition',
-                'Selected normalized recipe',
-                'Executed normalized recipe',
-                'Selected physical recipe',
-                'Executed physical recipe',
-                'Selected volume summary',
-                'Executed volume summary'
-            ]
-            provenance_alignments = [
-                'right',
-                'left',
-                'left',
-                'left',
-                'left',
-                'left',
-                'left'
-            ]
-            provenance_rows = []
-
-            for _, row in acquisition_audit_df.sort_values(
-                'reaction_number'
-            ).iterrows():
-                provenance_rows.append([
-                    self._format_auto_report_table_value(
-                        self._safe_auto_report_get(
-                            row,
-                            'reaction_number',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_table_value(
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_normalized_recipe',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_table_value(
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_normalized_recipe',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_table_value(
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_physical_recipe',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_table_value(
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_physical_recipe',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_volume_summary(
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_fixed_volume_total_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_variable_volume_total_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_water_volume_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'selected_volume_feasible',
-                            None
-                        )
-                    ),
-                    self._format_auto_report_volume_summary(
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_fixed_volume_total_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_variable_volume_total_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_water_volume_uL',
-                            None
-                        ),
-                        self._safe_auto_report_get(
-                            row,
-                            'executed_volume_feasible',
-                            None
-                        )
-                    )
-                ])
-
-            acquisition_provenance_table_lines.extend(
-                self._build_padded_auto_report_markdown_table(
-                    headers=provenance_headers,
-                    rows=provenance_rows,
-                    alignments=provenance_alignments
-                )
-            )
-
-        condition_table_lines = []
-
-        if performance_df.empty:
-            condition_table_lines.append(
-                'No condition-level rows were available for tabulation.'
-            )
-        else:
-            condition_table_headers = [
-                'Condition',
-                'Batch',
-                'Type',
-                'Physical replicate wells',
-                'Predicted λmax',
-                'GP SD',
-                'Raw λmax values',
-                'QC-used λmax values',
-                'Mean λmax',
-                'Target error',
-                'QC status',
-                'Target eligible',
-                'Target eligibility status'
-            ]
-
-            condition_table_alignments = [
-                'right',
-                'right',
-                'left',
-                'left',
-                'right',
-                'right',
-                'left',
-                'left',
-                'right',
-                'right',
-                'left',
-                'left',
-                'left'
-            ]
-
-            condition_table_rows = []
-
-            for _, row in performance_df.sort_values(
-                'reaction_number'
-            ).iterrows():
-                condition_table_rows.append(
-                    [
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'reaction_number',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'batch_number',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'condition_type',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_replicate_list_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'replicate_well_locations',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'predicted_lambda_mean_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'predicted_lambda_std_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_replicate_list_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'actual_lambda_values_raw_nm',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_replicate_list_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'actual_lambda_values_nm',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'actual_lambda_mean_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'target_error_nm',
-                                None
-                            ),
-                            suffix='nm'
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'replicate_qc_status',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'eligible_for_target_incumbent',
-                                None
-                            )
-                        ),
-                        self._format_auto_report_table_value(
-                            self._safe_auto_report_get(
-                                row,
-                                'target_eligibility_status',
-                                None
-                            )
-                        )
-                    ]
-                )
-
-            condition_table_lines.extend(
-                self._build_padded_auto_report_markdown_table(
-                    headers=condition_table_headers,
-                    rows=condition_table_rows,
-                    alignments=condition_table_alignments
-                )
-            )
+        (
+            acquisition_audit_report_lines,
+            condition_result_report_lines
+        ) = self._build_auto_report_responsive_sections(
+            performance_df=performance_df,
+            acquisition_audit_df=acquisition_audit_df
+        )
+        full_audit_appendix_lines = (
+            self._build_auto_report_full_audit_appendix(performance_df)
+        )
 
         lines = []
 
@@ -11860,106 +11783,87 @@ class AutoContr(Controller):
         lines.append('')
         lines.append('## Auto Settings')
         lines.append('')
-        lines.extend(
-            self._build_padded_auto_report_markdown_table(
-                headers=['Configuration', 'Value', 'Scientific role'],
-                rows=[
-                    [
-                        'Target λmax',
-                        self._format_auto_report_value(
-                            target_lambda_max_nm,
-                            'nm'
-                        ),
-                        'Requested response value.'
-                    ],
-                    [
-                        'Target tolerance',
-                        self._format_auto_report_value(
-                            target_tolerance_nm,
-                            'nm'
-                        ),
-                        'Maximum condition-level absolute error permitted '
-                        'for a target-based early stop.'
-                    ],
-                    [
-                        'Replicate SD tolerance',
-                        self._format_auto_report_value(
-                            replicate_sd_tolerance_nm,
-                            'nm'
-                        ),
-                        'Maximum QC-cleaned sample SD permitted for the '
-                        'target-EI incumbent and early stopping.'
-                    ],
-                    [
-                        'Replicates per condition',
-                        self._format_auto_report_value(num_duplicates),
-                        'Physical wells aggregated to one condition-level '
-                        'observation after replicate QC.'
-                    ],
-                    [
-                        'Replicate outlier threshold',
-                        self._format_auto_report_value(
-                            replicate_outlier_threshold_nm,
-                            'nm'
-                        ),
-                        'Threshold used by the documented replicate-QC rule.'
-                    ],
-                    [
-                        'Initial seed conditions',
-                        self._format_auto_report_value(initial_data),
-                        'Initial feasible maximin design size requested.'
-                    ],
-                    [
-                        'Maximum optimizer batches',
-                        self._format_auto_report_value(max_iterations),
-                        'Upper limit; a validated target hit may end the run '
-                        'earlier.'
-                    ],
-                    [
-                        'True-zero masks',
-                        self._format_auto_report_value(allow_true_zero),
-                        'When enabled, variable reagents may be exactly zero; '
-                        'all non-empty masks remain subject to executability '
-                        'and volume feasibility.'
-                    ],
-                    [
-                        'Temperature control',
-                        (
-                            self._format_auto_report_value(temperature_c, '°C')
-                            if using_temp_ctrl
-                            else 'not enabled'
-                        ),
-                        'Configured module temperature for this run.'
-                    ],
-                    [
-                        'Source-volume preflight',
-                        self._format_auto_report_value(
-                            auto_source_volume_check
-                        ),
-                        'Operational safeguard evaluated before a batch; it '
-                        'does not alter GP acquisition scores.'
-                    ],
-                    [
-                        'Source reserve volume',
-                        self._format_auto_report_value(
-                            auto_source_reserve_volume_uL,
-                            'uL'
-                        ),
-                        'Configured reserve retained by source-volume '
-                        'preflight when enabled.'
-                    ],
-                    [
-                        'Legacy Pi tare offset',
-                        self._format_auto_report_value(
-                            pi_legacy_tare_offset_g,
-                            'g'
-                        ),
-                        'Computer-side compatibility correction for the '
-                        'legacy Raspberry Pi payload measurement path.'
-                    ]
-                ],
-                alignments=['left', 'left', 'left']
+        lines.append('### Target and stopping rule')
+        lines.append('')
+        lines.append(
+            '- Target λmax: '
+            + self._format_auto_report_value(target_lambda_max_nm, 'nm')
+        )
+        lines.append(
+            '- Target tolerance: '
+            + self._format_auto_report_value(target_tolerance_nm, 'nm')
+            + '. A condition-level early stop requires an absolute error no '
+            'greater than this value.'
+        )
+        lines.append(
+            '- Replicate SD tolerance: '
+            + self._format_auto_report_value(
+                replicate_sd_tolerance_nm,
+                'nm'
             )
+            + '. The QC-cleaned condition SD must not exceed this value for '
+            'a target-EI incumbent or early stop.'
+        )
+        lines.append('')
+        lines.append('### Replicate and run design')
+        lines.append('')
+        lines.append(
+            '- Replicates per condition: '
+            + self._format_auto_report_value(num_duplicates)
+            + '. Physical wells are aggregated only after replicate QC.'
+        )
+        lines.append(
+            '- Replicate outlier threshold: '
+            + self._format_auto_report_value(
+                replicate_outlier_threshold_nm,
+                'nm'
+            )
+            + '.'
+        )
+        lines.append(
+            '- Initial feasible maximin seed conditions requested: '
+            + self._format_auto_report_value(initial_data)
+        )
+        lines.append(
+            '- Maximum optimizer batches requested: '
+            + self._format_auto_report_value(max_iterations)
+            + '. A validated target hit may end the run earlier.'
+        )
+        lines.append(
+            '- True-zero mixed masks allowed: '
+            + self._format_auto_report_value(allow_true_zero)
+            + '. When enabled, variable reagents may be exactly zero; all '
+            'non-empty masks remain subject to executable-transfer and '
+            'volume-feasibility checks.'
+        )
+        lines.append('')
+        lines.append('### Operational reproducibility settings')
+        lines.append('')
+        lines.append(
+            '- Temperature control: '
+            + (
+                self._format_auto_report_value(temperature_c, '°C')
+                if using_temp_ctrl
+                else 'not enabled'
+            )
+        )
+        lines.append(
+            '- Source-volume preflight: '
+            + self._format_auto_report_value(auto_source_volume_check)
+            + '. This is an operational safeguard and does not alter GP '
+            'acquisition scores.'
+        )
+        lines.append(
+            '- Source reserve volume: '
+            + self._format_auto_report_value(
+                auto_source_reserve_volume_uL,
+                'uL'
+            )
+        )
+        lines.append(
+            '- Legacy Pi tare offset: '
+            + self._format_auto_report_value(pi_legacy_tare_offset_g, 'g')
+            + '.'
         )
         lines.append('')
         lines.append('## Acquisition Strategy')
@@ -11997,46 +11901,40 @@ class AutoContr(Controller):
             'are preferred within a mode.'
         )
         lines.append('')
-        acquisition_definition_rows = []
         for mode in acquisition_modes:
             if mode == 'exploit':
-                acquisition_definition_rows.append([
-                    '`exploit`',
-                    'Minimize (predicted mean − target)².',
-                    'Favors the feasible prediction closest to the target; '
-                    'score unit: nm².'
-                ])
-            elif mode == 'explore':
-                acquisition_definition_rows.append([
-                    '`explore`',
-                    'Minimize −(predicted GP SD).',
-                    'Favors the greatest feasible predictive uncertainty; '
-                    'score unit: nm.'
-                ])
-            elif mode == 'balanced':
-                acquisition_definition_rows.append([
-                    '`balanced`',
-                    'Minimize |predicted mean − target| − weight × GP SD.',
-                    'Trades target proximity against uncertainty; score unit: '
-                    'nm.'
-                ])
-            elif mode == 'target_ei':
-                acquisition_definition_rows.append([
-                    '`target_ei`',
-                    'Minimize negative expected improvement in absolute '
-                    'target error.',
-                    'Uses only the best QC-approved, condition-level '
-                    'incumbent; score unit: nm.'
-                ])
-
-        if acquisition_definition_rows:
-            lines.extend(
-                self._build_padded_auto_report_markdown_table(
-                    headers=['Mode', 'Minimized target-aware score', 'Meaning'],
-                    rows=acquisition_definition_rows,
-                    alignments=['left', 'left', 'left']
+                lines.append('### `exploit`')
+                lines.append('')
+                lines.append(
+                    'Minimizes `(predicted mean − target)²` (nm²), favoring '
+                    'the feasible prediction closest to the requested target.'
                 )
-            )
+            elif mode == 'explore':
+                lines.append('### `explore`')
+                lines.append('')
+                lines.append(
+                    'Minimizes `−(predicted GP SD)` (nm), favoring the '
+                    'feasible condition with the greatest predictive '
+                    'uncertainty.'
+                )
+            elif mode == 'balanced':
+                lines.append('### `balanced`')
+                lines.append('')
+                lines.append(
+                    'Minimizes `|predicted mean − target| − weight × GP SD` '
+                    '(nm), trading target proximity against predictive '
+                    'uncertainty.'
+                )
+            elif mode == 'target_ei':
+                lines.append('### `target_ei`')
+                lines.append('')
+                lines.append(
+                    'Minimizes the negative expected improvement in absolute '
+                    'target error (nm). Its incumbent is the best '
+                    'QC-approved, replicate-validated condition-level error; '
+                    'it is never set by one favorable replicate.'
+                )
+
             lines.append('')
 
         if 'balanced' in acquisition_modes:
@@ -12053,21 +11951,12 @@ class AutoContr(Controller):
             'before the experiment ran: canonical mode, minimized score, '
             'predicted target error, GP mean and standard deviation, target-EI '
             'incumbent when applicable, balanced weight when used, selected '
-            'reagent mask, mask count, and repair status.'
+            'reagent mask, mask count, optimizer status, repair status, and '
+            'executed volume balance. Full selected/executed recipe arrays '
+            'remain in `auto_model_performance_log.csv`.'
         )
         lines.append('')
-        lines.extend(acquisition_audit_table_lines)
-        lines.append('')
-        lines.append('### Optimizer Recipe Execution Provenance')
-        lines.append('')
-        lines.append(
-            'The selected and executed representations below are captured '
-            'before measurement. A controlled run may proceed only when the '
-            'controller reports `optimizer_recipe_repaired = False`; otherwise '
-            'the batch stops before robot commands are created.'
-        )
-        lines.append('')
-        lines.extend(acquisition_provenance_table_lines)
+        lines.extend(acquisition_audit_report_lines)
         lines.append('')
         lines.append('## Best Condition Found')
         lines.append('')
@@ -12124,9 +12013,15 @@ class AutoContr(Controller):
         lines.append('')
         lines.append(best_interpretation)
         lines.append('')
-        lines.append('## Compact Condition Table')
+        lines.append('## Condition-Level Results')
         lines.append('')
-        lines.extend(condition_table_lines)
+        lines.append(
+            'Each condition below is a QC-governed aggregate of its physical '
+            'replicate wells. The full machine-readable audit remains in '
+            '`auto_model_performance_log.csv`.'
+        )
+        lines.append('')
+        lines.extend(condition_result_report_lines)
         lines.append('')
         lines.append('## Replicate QC Summary')
         lines.append('')
@@ -12589,6 +12484,17 @@ class AutoContr(Controller):
             )
             lines.append('')
             lines.extend(exploration_design_plot_lines)
+
+        lines.append('## Full Audit Appendix')
+        lines.append('')
+        lines.append(
+            'The compact cards above are intended for ordinary reading. '
+            'Expand an entry below to view the complete condition-level '
+            'record preserved in `auto_model_performance_log.csv`, including '
+            'full recipe, mask, optimizer, QC, and volume-balance metadata.'
+        )
+        lines.append('')
+        lines.extend(full_audit_appendix_lines)
 
         lines.append('## Generated Files')
         lines.append('')
