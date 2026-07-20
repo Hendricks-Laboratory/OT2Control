@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-17
+**Updated through:** 2026-07-20
 
 ---
 
@@ -64,6 +64,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
 | Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
+| Configured target-stop, acquisition, and portfolio report provenance | Implemented | Hardware-free report regression test with an early-stop condition and physical replicate-well locations |
 | Objective UV scan-quality diagnostics | Implemented, warning-only | Records blank-corrected peak height and 300/1000 nm boundary maxima; does not alter QC, GP training, target EI, or stopping |
 
 ### Current acquisition semantics
@@ -82,6 +83,17 @@ The remaining selection score is minimized as follows:
 incumbent is never set by one favorable replicate. The all-off mask remains
 excluded; ON variable reagents must be at least 5 µL; OFF reagents are exactly
 zero; water top-off is either zero or at least 5 µL; overflow is infeasible.
+
+### Current report provenance
+
+`auto_run_report.md` records the configured target tolerance and replicate-SD
+tolerance alongside the condition-level QC stopping rule. When terminal output
+records a validated target stop, the report identifies the triggering batch,
+condition, QC-cleaned mean, target error, replicate SD, and physical replicate
+well locations captured in `auto_model_performance_log.csv`. It also defines
+each active acquisition mode and explains the ordered portfolio's normalized
+RMS diversity radius. These report fields are audit metadata only; they do not
+alter recipe selection, QC, GP training, or robot execution.
 
 ### Current plotting/output behavior
 

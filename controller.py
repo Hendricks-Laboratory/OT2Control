@@ -2186,10 +2186,22 @@ class Controller(ABC):
                 str:
                     Saved plot path.
             '''
+            # Feasibility overlays use the same fixed, poster-ready canvas
+            # as standalone 3D conditional slices.  Their multi-line audit
+            # legend needs a dedicated header above the data axes; keeping a
+            # fixed canvas also makes their exported pixel dimensions stable.
+            figure_size = (
+                (8.4, 7.4)
+                if feasibility_overlay is not None
+                else (6.4, 5.8)
+            )
             fig, ax = plt.subplots(
-                figsize=(6.4, 5.8),
+                figsize=figure_size,
                 dpi=300
             )
+
+            if feasibility_overlay is not None:
+                fig.set_tight_layout(False)
 
             heatmap_mesh = ax.pcolormesh(
                 x_values,
@@ -2214,6 +2226,13 @@ class Controller(ABC):
                     feasibility_overlay['infeasible'],
                     dtype=bool
                 )
+                water_transfer_infeasible_mask = np.asarray(
+                    feasibility_overlay.get(
+                        'water_transfer_infeasible',
+                        np.zeros_like(infeasible_mask, dtype=bool)
+                    ),
+                    dtype=bool
+                )
 
                 expected_feasibility_shape = (
                     feasibility_y_values.size,
@@ -2225,6 +2244,26 @@ class Controller(ABC):
                         "Feasibility overlay shape does not match its "
                         "physical concentration axes."
                     )
+
+                if (
+                    water_transfer_infeasible_mask.shape
+                    != expected_feasibility_shape
+                ):
+                    raise ValueError(
+                        "Water-transfer feasibility overlay shape does not "
+                        "match its physical concentration axes."
+                    )
+
+                # The dense rendering mask must independently retain the
+                # physically invalid 0--5 uL water band. This is normally
+                # already included in ``infeasible`` by the data helper, but
+                # the explicit union protects the plotted diagnostic against
+                # incomplete or legacy overlay dictionaries. It remains part
+                # of the one shared exclusion layer, matching the 3D style.
+                infeasible_mask = (
+                    infeasible_mask
+                    | water_transfer_infeasible_mask
+                )
 
                 if np.any(infeasible_mask):
                     # Contour fill on a dense independent feasibility grid
@@ -2401,7 +2440,10 @@ class Controller(ABC):
                     plot_title,
                     fontsize=font_sizes['title'],
                     fontweight='normal',
-                    y=0.975
+                    # Anchor the title inside the fixed header so it cannot
+                    # be clipped at the top export edge.
+                    y=0.985,
+                    verticalalignment='top'
                 )
 
             colorbar = fig.colorbar(
@@ -2429,20 +2471,35 @@ class Controller(ABC):
                         for handle in feasibility_legend_handles
                     ],
                     loc='upper center',
-                    bbox_to_anchor=(0.5, 0.925),
+                    # Use the same dedicated header treatment as the 3D
+                    # slice figures.  Two columns retain a poster-readable
+                    # heatmap while keeping every audit key outside the axes.
+                    bbox_to_anchor=(0.5, 0.88),
                     ncol=2,
                     frameon=False,
-                    fontsize=font_sizes['tick_label'] * 0.68,
-                    handlelength=1.7,
+                    fontsize=font_sizes['legend'],
+                    handlelength=1.5,
+                    labelspacing=0.45,
                     columnspacing=0.9
                 )
 
             fig.subplots_adjust(
-                left=0.15,
-                right=0.86,
+                # A square heatmap shrinks horizontally inside its allocated
+                # subplot area.  Shift that area left for feasibility plots
+                # to balance the colorbar and its label on the right.
+                left=(
+                    0.08
+                    if feasibility_overlay is not None
+                    else 0.15
+                ),
+                right=(
+                    0.79
+                    if feasibility_overlay is not None
+                    else 0.86
+                ),
                 bottom=0.14,
                 top=(
-                    0.75
+                    0.70
                     if feasibility_overlay is not None
                     else 0.88
                 )
@@ -2452,10 +2509,20 @@ class Controller(ABC):
                 plot_filename
             )
 
-            fig.savefig(
-                full_plot_path,
-                bbox_inches='tight'
-            )
+            if feasibility_overlay is not None:
+                # Do not tight-crop the fixed header canvas.  At 8.4 x 7.4
+                # inches and 300 dpi, all 2D feasibility overlays export at
+                # 2520 x 2220 pixels, matching standalone 3D slice style.
+                fig.savefig(
+                    full_plot_path,
+                    dpi=300
+                )
+
+            else:
+                fig.savefig(
+                    full_plot_path,
+                    bbox_inches='tight'
+                )
 
             plt.close(
                 fig
@@ -5295,7 +5362,8 @@ class AutoContr(Controller):
         condition_type,
         batch_number,
         prediction_metadata=None,
-        scan_quality_by_replicate=None
+        scan_quality_by_replicate=None,
+        replicate_wellnames=None
     ):
         '''
         Appends condition-level rows to the Auto model performance log.
@@ -5343,6 +5411,13 @@ class AutoContr(Controller):
                 do not alter replicate QC, GP model training, the target-EI
                 incumbent, or target stopping.
 
+            list replicate_wellnames:
+                Optional internal sample names, one per physical replicate
+                well. When the plate-reader location cache is available, their
+                physical reader locations are preserved in the condition-level
+                log so the final report can identify the wells that supported
+                a validated early-stop decision. This is audit metadata only.
+
         returns:
             None
         '''
@@ -5374,6 +5449,19 @@ class AutoContr(Controller):
                     "Cannot append Auto scan-quality diagnostics because "
                     f"their count ({len(scan_quality_by_replicate)}) does "
                     f"not match the expected physical replicate-well count "
+                    f"({expected_lambda_count})."
+                )
+
+        if replicate_wellnames is None:
+            replicate_wellnames = [None] * expected_lambda_count
+        else:
+            replicate_wellnames = list(replicate_wellnames)
+
+            if len(replicate_wellnames) != expected_lambda_count:
+                raise ValueError(
+                    "Cannot append Auto replicate-well provenance because "
+                    f"its count ({len(replicate_wellnames)}) does not match "
+                    "the expected physical replicate-well count "
                     f"({expected_lambda_count})."
                 )
 
@@ -5435,6 +5523,27 @@ class AutoContr(Controller):
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
             replicate_scan_quality = scan_quality_by_replicate[start_i:end_i]
+            condition_wellnames = replicate_wellnames[start_i:end_i]
+            condition_well_locations = []
+
+            for wellname in condition_wellnames:
+                if wellname is None:
+                    continue
+
+                try:
+                    cached_location = self._cached_reader_locs.get(wellname)
+                    physical_location = getattr(cached_location, 'loc', None)
+                except Exception:
+                    physical_location = None
+
+                # A legacy/stubbed controller may not have a reader location
+                # cache. Retain the sample identifier rather than inventing a
+                # physical plate coordinate.
+                condition_well_locations.append(
+                    str(physical_location)
+                    if physical_location is not None
+                    else str(wellname)
+                )
 
             spectral_edge_peak_indices = [
                 rep_i
@@ -5570,6 +5679,16 @@ class AutoContr(Controller):
                 'batch_number': int(batch_number),
                 'reaction_number': int(self.auto_condition_counter),
                 'condition_type': condition_type,
+                'replicate_sample_names': (
+                    self._serialize_auto_audit_value(condition_wellnames)
+                    if any(name is not None for name in condition_wellnames)
+                    else None
+                ),
+                'replicate_well_locations': (
+                    self._serialize_auto_audit_value(condition_well_locations)
+                    if len(condition_well_locations) > 0
+                    else None
+                ),
                 'acquisition_mode': acquisition_mode,
                 'acquisition_score': acquisition_score,
                 'balanced_exploration_weight': (
@@ -10618,6 +10737,7 @@ class AutoContr(Controller):
         max_iterations = robo_params.get('max_iterations', None)
         num_duplicates = robo_params.get('num_duplicates', None)
         allow_true_zero = robo_params.get('allow_true_zero', None)
+        target_tolerance_nm = robo_params.get('target_tolerance_nm', 10.0)
         pi_legacy_tare_offset_g = robo_params.get(
             'pi_legacy_tare_offset_g',
             0.0
@@ -10647,6 +10767,16 @@ class AutoContr(Controller):
         replicate_sd_tolerance_nm = robo_params.get(
             'replicate_sd_tolerance_nm',
             25.0
+        )
+        using_temp_ctrl = robo_params.get('using_temp_ctrl', None)
+        temperature_c = robo_params.get('temp', None)
+        auto_source_volume_check = robo_params.get(
+            'auto_source_volume_check',
+            None
+        )
+        auto_source_reserve_volume_uL = robo_params.get(
+            'auto_source_reserve_volume_uL',
+            None
         )
 
         acquisition_objective_descriptions = {
@@ -10746,6 +10876,69 @@ class AutoContr(Controller):
                     best_condition_row = performance_df.loc[best_index]
             except Exception:
                 best_condition_row = None
+
+        # A target-based early stop is a condition-level decision, never a
+        # favorable individual replicate. Reconstruct the decision from the
+        # persistent performance log rather than relying on an informal
+        # terminal-text interpretation alone.
+        stop_condition_row = None
+        early_stop_reported = (
+            run_status_summary.get('exit_reason')
+            == 'validated condition-level target hit'
+        )
+
+        if early_stop_reported and not performance_df.empty:
+            try:
+                stop_target_error = self._safe_auto_report_numeric(
+                    performance_df.get('target_error_nm')
+                )
+                stop_replicate_sd = self._safe_auto_report_numeric(
+                    performance_df.get('actual_lambda_sd_nm')
+                )
+                stop_eligible = (
+                    performance_df.get(
+                        'eligible_for_target_stop',
+                        pd.Series(False, index=performance_df.index)
+                    ) == True
+                )
+                stop_finite_replicates = self._safe_auto_report_numeric(
+                    performance_df.get(
+                        'n_finite_qc_replicates_for_target_validation',
+                        pd.Series(float('nan'), index=performance_df.index)
+                    )
+                )
+                stop_validated = (
+                    stop_target_error.notna()
+                    & (stop_target_error <= float(target_tolerance_nm))
+                    & stop_eligible
+                    & stop_replicate_sd.notna()
+                    & np.isfinite(stop_replicate_sd)
+                    & (stop_replicate_sd <= float(replicate_sd_tolerance_nm))
+                    & (stop_finite_replicates >= 2)
+                )
+
+                if stop_validated.any():
+                    stop_candidates = performance_df.loc[
+                        stop_validated
+                    ].copy()
+                    stop_candidates['_target_error_for_report'] = (
+                        stop_target_error.loc[stop_validated]
+                    )
+                    stop_candidates['_batch_for_report'] = (
+                        self._safe_auto_report_numeric(
+                            stop_candidates.get('batch_number')
+                        ).fillna(-1)
+                    )
+                    stop_candidates = stop_candidates.sort_values(
+                        ['_batch_for_report', '_target_error_for_report'],
+                        ascending=[False, True]
+                    )
+                    stop_condition_row = stop_candidates.iloc[0]
+            except Exception:
+                # A report must remain available for older or partially
+                # populated logs. The explicit section below will disclose
+                # that the specific triggering row could not be reconstructed.
+                stop_condition_row = None
 
         prediction_rows = 0
         prediction_error_mean = None
@@ -10902,6 +11095,7 @@ class AutoContr(Controller):
         best_qc_status = 'not recorded'
         best_target_eligible = False
         best_target_eligibility_status = 'not recorded'
+        best_well_locations = None
 
         if best_condition_row is not None:
             best_reaction_number = self._safe_auto_report_get(
@@ -10940,6 +11134,11 @@ class AutoContr(Controller):
             best_target_eligibility_status = self._safe_auto_report_get(
                 best_condition_row,
                 'target_eligibility_status'
+            )
+            best_well_locations = self._safe_auto_report_get(
+                best_condition_row,
+                'replicate_well_locations',
+                None
             )
 
         if best_condition_row is None:
@@ -10996,31 +11195,29 @@ class AutoContr(Controller):
 
         if best_target_error is not None:
             try:
-                if float(best_target_error) <= 10.0:
+                if float(best_target_error) <= float(target_tolerance_nm):
                     if best_target_eligible:
                         best_interpretation += (
-                            ' The best condition was within 10 nm of the target '
+                            ' The best condition was within the configured '
+                            f'{self._format_auto_report_value(target_tolerance_nm, "nm")} '
+                            'target tolerance '
                             'and passed replicate validation, so it is a '
                             'validated target hit for incumbent and stopping '
                             'decisions.'
                         )
                     else:
                         best_interpretation += (
-                            ' The best condition was numerically within 10 nm '
-                            'of the target, but it did not pass replicate '
+                            ' The best condition was numerically within the '
+                            'configured target tolerance, but it did not pass '
+                            'replicate '
                             'validation and therefore cannot establish a '
                             'target-EI incumbent or authorize a target-based '
                             'stop.'
                         )
-                elif float(best_target_error) <= 25.0:
-                    best_interpretation += (
-                        ' The best condition was within 25 nm of the target, '
-                        'indicating close approach to the requested wavelength.'
-                    )
                 else:
                     best_interpretation += (
-                        ' The best condition approached the requested target '
-                        'but did not reach a close-target threshold in this run.'
+                        ' The best condition did not meet the configured '
+                        'target tolerance in this run.'
                     )
             except Exception:
                 pass
@@ -11362,6 +11559,7 @@ class AutoContr(Controller):
                 'Condition',
                 'Batch',
                 'Type',
+                'Physical replicate wells',
                 'Predicted λmax',
                 'GP SD',
                 'Raw λmax values',
@@ -11376,6 +11574,7 @@ class AutoContr(Controller):
             condition_table_alignments = [
                 'right',
                 'right',
+                'left',
                 'left',
                 'right',
                 'right',
@@ -11413,6 +11612,13 @@ class AutoContr(Controller):
                             self._safe_auto_report_get(
                                 row,
                                 'condition_type',
+                                None
+                            )
+                        ),
+                        self._format_auto_report_replicate_list_value(
+                            self._safe_auto_report_get(
+                                row,
+                                'replicate_well_locations',
                                 None
                             )
                         ),
@@ -11507,6 +11713,141 @@ class AutoContr(Controller):
             self._build_auto_run_status_report_lines(run_status_summary)
         )
 
+        lines.append('## Target-Stopping Decision')
+        lines.append('')
+
+        if not early_stop_reported:
+            lines.append(
+                'The run was not recorded as ending through the validated '
+                'condition-level target-stop rule. The configured target and '
+                'replicate-consistency gates remain listed below for '
+                'interpretation of the final condition table.'
+            )
+        elif stop_condition_row is None:
+            lines.append(
+                'Terminal output reports a validated condition-level target '
+                'stop, but the specific triggering condition could not be '
+                'reconstructed from the available condition-level performance '
+                'rows. Review `auto_model_performance_log.csv` and '
+                '`Debug/terminal_output.txt` together.'
+            )
+        else:
+            stop_condition_number = self._safe_auto_report_get(
+                stop_condition_row,
+                'reaction_number'
+            )
+            stop_batch_number = self._safe_auto_report_get(
+                stop_condition_row,
+                'batch_number'
+            )
+            stop_condition_type = self._safe_auto_report_get(
+                stop_condition_row,
+                'condition_type'
+            )
+            stop_well_locations = self._format_auto_report_replicate_list_value(
+                self._safe_auto_report_get(
+                    stop_condition_row,
+                    'replicate_well_locations',
+                    None
+                ),
+                missing_value='not recorded in this performance log'
+            )
+            stop_mode = self._safe_auto_report_get(
+                stop_condition_row,
+                'acquisition_mode',
+                None
+            )
+            stop_stage = (
+                'the initial seed batch'
+                if stop_condition_type == 'seed'
+                else f'optimizer batch {stop_batch_number}'
+            )
+
+            lines.append(
+                f'The run stopped early after measurement and QC of '
+                f'{stop_stage}. Condition {stop_condition_number} met every '
+                'controller-owned target-stop gate; no individual replicate '
+                'can authorize this decision.'
+            )
+            lines.append('')
+            lines.extend(
+                self._build_padded_auto_report_markdown_table(
+                    headers=['Stop-gate field', 'Recorded value'],
+                    rows=[
+                        ['Condition', stop_condition_number],
+                        ['Condition type', stop_condition_type],
+                        ['Acquisition mode', stop_mode],
+                        ['Physical replicate wells', stop_well_locations],
+                        [
+                            'QC-cleaned condition mean λmax',
+                            self._format_auto_report_value(
+                                self._safe_auto_report_get(
+                                    stop_condition_row,
+                                    'actual_lambda_mean_nm',
+                                    None
+                                ),
+                                'nm'
+                            )
+                        ],
+                        [
+                            'Absolute target error',
+                            self._format_auto_report_value(
+                                self._safe_auto_report_get(
+                                    stop_condition_row,
+                                    'target_error_nm',
+                                    None
+                                ),
+                                'nm'
+                            )
+                        ],
+                        [
+                            'Required target tolerance',
+                            self._format_auto_report_value(
+                                target_tolerance_nm,
+                                'nm'
+                            )
+                        ],
+                        [
+                            'QC replicate SD',
+                            self._format_auto_report_value(
+                                self._safe_auto_report_get(
+                                    stop_condition_row,
+                                    'actual_lambda_sd_nm',
+                                    None
+                                ),
+                                'nm'
+                            )
+                        ],
+                        [
+                            'Maximum permitted replicate SD',
+                            self._format_auto_report_value(
+                                replicate_sd_tolerance_nm,
+                                'nm'
+                            )
+                        ],
+                        [
+                            'Finite QC replicates',
+                            self._safe_auto_report_get(
+                                stop_condition_row,
+                                'n_finite_qc_replicates_for_target_validation',
+                                None
+                            )
+                        ],
+                        [
+                            'Target-stop eligibility',
+                            self._safe_auto_report_get(
+                                stop_condition_row,
+                                'eligible_for_target_stop',
+                                None
+                            )
+                        ]
+                    ],
+                    alignments=['left', 'left']
+                )
+            )
+
+        lines.append('')
+
         lines.append('## Experiment Overview')
         lines.append('')
         lines.append(f'- Experiment name: `{experiment_name}`')
@@ -11519,69 +11860,129 @@ class AutoContr(Controller):
         lines.append('')
         lines.append('## Auto Settings')
         lines.append('')
-        lines.append(
-            f'- Target λmax: '
-            f'{self._format_auto_report_value(target_lambda_max_nm, "nm")}'
-        )
-        lines.append(
-            f'- Initial seed conditions requested: '
-            f'{self._format_auto_report_value(initial_data)}'
-        )
-        lines.append(
-            f'- Maximum optimizer iterations requested: '
-            f'{self._format_auto_report_value(max_iterations)}'
-        )
-        lines.append(
-            f'- Replicates / duplicates per condition: '
-            f'{self._format_auto_report_value(num_duplicates)}'
-        )
-        lines.append(
-            f'- True-zero mixed masks allowed: '
-            f'{self._format_auto_report_value(allow_true_zero)}'
-        )
-        lines.append(
-            f'- Raspberry Pi legacy tare payload offset: '
-            f'{self._format_auto_report_value(pi_legacy_tare_offset_g, "g")}'
-        )
-        lines.append(
-            f'- Acquisition mode(s): '
-            f'`{self._format_auto_report_value(";".join(acquisition_modes))}`'
-        )
-
-        if using_acquisition_portfolio:
-            lines.append(
-                '- Portfolio selection order resolves only near-duplicate '
-                'candidates; every member used the same pre-batch GP and '
-                'target-EI incumbent.'
+        lines.extend(
+            self._build_padded_auto_report_markdown_table(
+                headers=['Configuration', 'Value', 'Scientific role'],
+                rows=[
+                    [
+                        'Target λmax',
+                        self._format_auto_report_value(
+                            target_lambda_max_nm,
+                            'nm'
+                        ),
+                        'Requested response value.'
+                    ],
+                    [
+                        'Target tolerance',
+                        self._format_auto_report_value(
+                            target_tolerance_nm,
+                            'nm'
+                        ),
+                        'Maximum condition-level absolute error permitted '
+                        'for a target-based early stop.'
+                    ],
+                    [
+                        'Replicate SD tolerance',
+                        self._format_auto_report_value(
+                            replicate_sd_tolerance_nm,
+                            'nm'
+                        ),
+                        'Maximum QC-cleaned sample SD permitted for the '
+                        'target-EI incumbent and early stopping.'
+                    ],
+                    [
+                        'Replicates per condition',
+                        self._format_auto_report_value(num_duplicates),
+                        'Physical wells aggregated to one condition-level '
+                        'observation after replicate QC.'
+                    ],
+                    [
+                        'Replicate outlier threshold',
+                        self._format_auto_report_value(
+                            replicate_outlier_threshold_nm,
+                            'nm'
+                        ),
+                        'Threshold used by the documented replicate-QC rule.'
+                    ],
+                    [
+                        'Initial seed conditions',
+                        self._format_auto_report_value(initial_data),
+                        'Initial feasible maximin design size requested.'
+                    ],
+                    [
+                        'Maximum optimizer batches',
+                        self._format_auto_report_value(max_iterations),
+                        'Upper limit; a validated target hit may end the run '
+                        'earlier.'
+                    ],
+                    [
+                        'True-zero masks',
+                        self._format_auto_report_value(allow_true_zero),
+                        'When enabled, variable reagents may be exactly zero; '
+                        'all non-empty masks remain subject to executability '
+                        'and volume feasibility.'
+                    ],
+                    [
+                        'Temperature control',
+                        (
+                            self._format_auto_report_value(temperature_c, '°C')
+                            if using_temp_ctrl
+                            else 'not enabled'
+                        ),
+                        'Configured module temperature for this run.'
+                    ],
+                    [
+                        'Source-volume preflight',
+                        self._format_auto_report_value(
+                            auto_source_volume_check
+                        ),
+                        'Operational safeguard evaluated before a batch; it '
+                        'does not alter GP acquisition scores.'
+                    ],
+                    [
+                        'Source reserve volume',
+                        self._format_auto_report_value(
+                            auto_source_reserve_volume_uL,
+                            'uL'
+                        ),
+                        'Configured reserve retained by source-volume '
+                        'preflight when enabled.'
+                    ],
+                    [
+                        'Legacy Pi tare offset',
+                        self._format_auto_report_value(
+                            pi_legacy_tare_offset_g,
+                            'g'
+                        ),
+                        'Computer-side compatibility correction for the '
+                        'legacy Raspberry Pi payload measurement path.'
+                    ]
+                ],
+                alignments=['left', 'left', 'left']
             )
-            lines.append(
-                f'- Portfolio minimum normalized RMS distance: '
-                f'{self._format_auto_report_value(portfolio_min_distance)}'
-            )
-
-        if 'balanced' in acquisition_modes:
-            lines.append(
-                f'- Balanced exploration weight: '
-                f'{self._format_auto_report_value(balanced_exploration_weight)}'
-            )
-
-        lines.append(
-            f'- Replicate outlier threshold: '
-            f'{self._format_auto_report_value(replicate_outlier_threshold_nm, "nm")}'
-        )
-        lines.append(
-            f'- Replicate SD tolerance for incumbents/stopping: '
-            f'{self._format_auto_report_value(replicate_sd_tolerance_nm, "nm")}'
         )
         lines.append('')
-        lines.append('## Optimization Objective')
+        lines.append('## Acquisition Strategy')
         lines.append('')
         if using_acquisition_portfolio:
             lines.append(
                 'Auto mode used the ordered target-aware acquisition portfolio '
-                f'`{";".join(acquisition_modes)}`. Each mode selected one '
-                'physically feasible, portfolio-distinct condition before the '
-                'batch was measured or the GP was updated.'
+                f'`{";".join(acquisition_modes)}`. Each listed mode selected '
+                'one physically feasible condition from the same pre-batch GP '
+                'and, when applicable, the same target-EI incumbent. The GP '
+                'was updated only after the complete batch was measured and QC '
+                'decisions were recorded.'
+            )
+            lines.append('')
+            lines.append(
+                f'The portfolio minimum normalized RMS distance was '
+                f'`{self._format_auto_report_value(portfolio_min_distance)}`. '
+                'It is applied only within one unmeasured portfolio batch: '
+                'when two independently selected recipes are too similar in '
+                'full normalized recipe space, the earlier mode retains its '
+                'candidate and the later mode seeks a distinct feasible '
+                'alternative. A value of 0 disables the radius but exact '
+                'duplicates still fail closed.'
             )
         else:
             lines.append(
@@ -11593,10 +11994,58 @@ class AutoContr(Controller):
             'All acquisition modes are converted to minimization scores and '
             'use the same reagent-mask, exact-zero, executable-transfer, water '
             'top-off, and overflow feasibility rules. Lower recorded scores '
-            'are preferred within a mode. Score units depend on the mode: '
-            '`exploit` uses nm²; `explore`, `balanced`, and `target_ei` use nm.'
+            'are preferred within a mode.'
         )
         lines.append('')
+        acquisition_definition_rows = []
+        for mode in acquisition_modes:
+            if mode == 'exploit':
+                acquisition_definition_rows.append([
+                    '`exploit`',
+                    'Minimize (predicted mean − target)².',
+                    'Favors the feasible prediction closest to the target; '
+                    'score unit: nm².'
+                ])
+            elif mode == 'explore':
+                acquisition_definition_rows.append([
+                    '`explore`',
+                    'Minimize −(predicted GP SD).',
+                    'Favors the greatest feasible predictive uncertainty; '
+                    'score unit: nm.'
+                ])
+            elif mode == 'balanced':
+                acquisition_definition_rows.append([
+                    '`balanced`',
+                    'Minimize |predicted mean − target| − weight × GP SD.',
+                    'Trades target proximity against uncertainty; score unit: '
+                    'nm.'
+                ])
+            elif mode == 'target_ei':
+                acquisition_definition_rows.append([
+                    '`target_ei`',
+                    'Minimize negative expected improvement in absolute '
+                    'target error.',
+                    'Uses only the best QC-approved, condition-level '
+                    'incumbent; score unit: nm.'
+                ])
+
+        if acquisition_definition_rows:
+            lines.extend(
+                self._build_padded_auto_report_markdown_table(
+                    headers=['Mode', 'Minimized target-aware score', 'Meaning'],
+                    rows=acquisition_definition_rows,
+                    alignments=['left', 'left', 'left']
+                )
+            )
+            lines.append('')
+
+        if 'balanced' in acquisition_modes:
+            lines.append(
+                f'Balanced exploration weight: '
+                f'`{self._format_auto_report_value(balanced_exploration_weight)}`.'
+            )
+            lines.append('')
+
         lines.append('## Acquisition Audit Trail')
         lines.append('')
         lines.append(
@@ -11653,6 +12102,12 @@ class AutoContr(Controller):
             lines.append(
                 f'- Target error: '
                 f'{self._format_auto_report_value(best_target_error, "nm")}'
+            )
+            lines.append(
+                '- Physical replicate wells: '
+                + self._format_auto_report_replicate_list_value(
+                    best_well_locations
+                )
             )
             lines.append(f'- Replicate QC status: {best_qc_status}')
             lines.append(
@@ -16523,7 +16978,8 @@ class AutoContr(Controller):
                     'available.'
                 )
             },
-            scan_quality_by_replicate=initial_scan_quality
+            scan_quality_by_replicate=initial_scan_quality,
+            replicate_wellnames=wellnames
         )
         
         self._generate_auto_plot_suite(
@@ -16708,7 +17164,8 @@ class AutoContr(Controller):
                 condition_type='optimizer_selected',
                 batch_number=self.batch_num,
                 prediction_metadata=optimizer_prediction_metadata,
-                scan_quality_by_replicate=new_scan_quality
+                scan_quality_by_replicate=new_scan_quality,
+                replicate_wellnames=wellnames
             )
 
             self._generate_auto_plot_suite(

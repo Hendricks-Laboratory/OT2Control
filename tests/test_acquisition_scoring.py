@@ -3630,6 +3630,76 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             'validated condition-level target hit'
         )
 
+    def test_report_explains_header_tolerances_portfolio_and_early_stop_wells(self):
+        controller = self._build_exact_controller()
+        controller.num_duplicates = 3
+        controller.robo_params.update({
+            'num_duplicates': 3,
+            'target_tolerance_nm': 4.0,
+            'replicate_sd_tolerance_nm': 5.0,
+            'acquisition_mode': 'exploit',
+            'acquisition_modes': ['exploit', 'explore', 'balanced'],
+            'using_acquisition_portfolio': True,
+            'portfolio_min_distance': 0.05,
+            'auto_source_volume_check': 'required',
+            'auto_source_reserve_volume_uL': 100.0
+        })
+        controller._cached_reader_locs = {
+            'sample_a': SimpleNamespace(loc='A6'),
+            'sample_b': SimpleNamespace(loc='B6'),
+            'sample_c': SimpleNamespace(loc='C6')
+        }
+
+        controller._append_auto_model_performance_rows(
+            unique_recipes=np.array([[0.2, 0.2]], dtype=float),
+            lambda_max_values=[622.0, 624.0, 625.0],
+            condition_type='optimizer_selected',
+            batch_number=1,
+            prediction_metadata={'acquisition_mode': 'explore'},
+            replicate_wellnames=['sample_a', 'sample_b', 'sample_c']
+        )
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            os.makedirs(os.path.join(temp_directory, 'Debug'))
+            os.makedirs(controller.plot_path)
+            Path(
+                os.path.join(temp_directory, 'Debug', 'terminal_output.txt')
+            ).write_text(
+                '<<controller>> Exit due to validated condition-level target '
+                'hit\n'
+                '<<controller>> Auto run completed; condition-level results, '
+                'recipe audits, and configured output artifacts were exported.\n'
+            )
+
+            with redirect_stdout(io.StringIO()):
+                report_path = controller._write_auto_run_report()
+
+            report_text = Path(report_path).read_text()
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertEqual(
+            json.loads(row['replicate_well_locations']),
+            ['A6', 'B6', 'C6']
+        )
+        self.assertIn('## Target-Stopping Decision', report_text)
+        self.assertIn(
+            'stopped early after measurement and QC of optimizer batch 1',
+            report_text
+        )
+        self.assertIn('A6, B6, C6', report_text)
+        self.assertIn('Target tolerance', report_text)
+        self.assertIn('4 nm', report_text)
+        self.assertIn('Replicate SD tolerance', report_text)
+        self.assertIn('5 nm', report_text)
+        self.assertIn('minimum normalized RMS distance', report_text)
+        self.assertIn('Minimize −(predicted GP SD).', report_text)
+        self.assertIn(
+            'Each listed mode selected one physically feasible condition',
+            report_text
+        )
+
     def test_report_plot_helper_uses_categorized_progress_path(self):
         controller = self._build_exact_controller()
 
