@@ -1426,6 +1426,40 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
             )
         self.assertFalse(model.quit)
 
+    def test_stricter_configured_sd_threshold_rejects_target_mean_stop(self):
+        # This mirrors the RTG_014 pattern: the condition mean is inside the
+        # target window, but the individual replicate spread is too broad for
+        # a 15 nm target-decision agreement requirement. The observations can
+        # still be useful GP training data; only incumbent/stopping authority
+        # is denied.
+        controller = self._build_controller(3)
+        controller.robo_params['replicate_sd_tolerance_nm'] = 15.0
+        controller._append_auto_model_performance_rows(
+            unique_recipes=np.array([[0.1]], dtype=float),
+            lambda_max_values=[642.0, 614.0, 600.0],
+            condition_type='seed',
+            batch_number=0
+        )
+        row = controller.auto_model_performance_rows[0]
+
+        self.assertAlmostEqual(row['actual_lambda_mean_nm'], 618.6666666667)
+        self.assertAlmostEqual(row['target_error_nm'], 6.3333333333)
+        self.assertTrue(row['use_for_model_training'])
+        self.assertFalse(row['eligible_for_target_incumbent'])
+        self.assertFalse(row['eligible_for_target_stop'])
+        self.assertEqual(
+            row['target_eligibility_status'],
+            'ineligible_replicate_sd_above_tolerance'
+        )
+
+        model = SimpleNamespace(curr_iter=0, max_iters=4, quit=False)
+        with redirect_stdout(io.StringIO()):
+            controller._update_auto_quit_from_condition_level_performance(
+                model,
+                0
+            )
+        self.assertFalse(model.quit)
+
     def test_consistent_replicates_can_set_incumbent_and_stop(self):
         controller, row = self._append_condition([624.0, 626.0])
 
@@ -1502,6 +1536,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         acquisition_modes=None,
         portfolio_min_distance=None,
         target_tolerance_nm=None,
+        replicate_sd_tolerance_nm=None,
         auto_terminal_verbosity=None,
         auto_source_volume_check=None,
         auto_source_reserve_volume_uL=None,
@@ -1534,6 +1569,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             header.append([
                 'target_tolerance_nm',
                 str(target_tolerance_nm)
+            ])
+
+        if replicate_sd_tolerance_nm is not None:
+            header.append([
+                'replicate_sd_tolerance_nm',
+                str(replicate_sd_tolerance_nm)
             ])
 
         if auto_terminal_verbosity is not None:
@@ -1573,6 +1614,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['num_duplicates'], 3)
         self.assertFalse(parsed['allow_true_zero'])
         self.assertEqual(parsed['target_tolerance_nm'], 10.0)
+        self.assertEqual(parsed['replicate_sd_tolerance_nm'], 25.0)
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
         self.assertEqual(parsed['auto_source_volume_check'], 'off')
         self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.0)
@@ -1649,6 +1691,20 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 ):
                     self._parse_header(
                         target_tolerance_nm=invalid_tolerance
+                    )
+
+    def test_header_replicate_sd_tolerance_is_optional_and_validated(self):
+        parsed = self._parse_header(replicate_sd_tolerance_nm=15.0)
+        self.assertEqual(parsed['replicate_sd_tolerance_nm'], 15.0)
+
+        for invalid_tolerance in ('', '-1', 'nan', 'inf', 'not_a_number'):
+            with self.subTest(invalid_tolerance=invalid_tolerance):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    'finite, nonnegative'
+                ):
+                    self._parse_header(
+                        replicate_sd_tolerance_nm=invalid_tolerance
                     )
 
     def test_header_terminal_verbosity_normalizes_and_fails_clearly(self):
@@ -2757,6 +2813,8 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_safe_auto_report_numeric',
             '_format_auto_report_value',
             '_count_auto_report_status',
+            '_get_auto_plot_relative_path',
+            '_resolve_auto_plot_path',
             '_auto_report_file_line',
             '_auto_report_not_applicable_file_line',
             '_summarize_auto_run_status_for_report',
@@ -3544,6 +3602,103 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertTrue(summary['success_marker_found'])
         self.assertFalse(summary['pre_success_traceback_found'])
 
+    def test_target_hit_exit_reason_precedes_completion_marker(self):
+        controller = self._build_exact_controller()
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            os.makedirs(os.path.join(temp_directory, 'Debug'))
+            os.makedirs(controller.plot_path)
+
+            terminal_path = os.path.join(
+                temp_directory,
+                'Debug',
+                'terminal_output.txt'
+            )
+            Path(terminal_path).write_text(
+                '<<controller>> Exit due to validated condition-level target '
+                'hit\n'
+                '<<controller>> Auto run completed; condition-level results, '
+                'recipe audits, and configured output artifacts were exported.\n'
+            )
+
+            summary = controller._summarize_auto_run_status_for_report()
+
+        self.assertEqual(
+            summary['exit_reason'],
+            'validated condition-level target hit'
+        )
+
+    def test_report_plot_helper_uses_categorized_progress_path(self):
+        controller = self._build_exact_controller()
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            progress_directory = os.path.join(
+                controller.plot_path,
+                'progress'
+            )
+            os.makedirs(progress_directory)
+            Path(
+                os.path.join(progress_directory, 'lambda_progress_final.png')
+            ).touch()
+
+            report_lines = controller._auto_report_plot_markdown_if_exists(
+                plot_filename='lambda_progress_final.png',
+                title='Final λmax Progress Plot'
+            )
+
+        self.assertIn(
+            '![Final λmax Progress Plot](../Plots/progress/'
+            'lambda_progress_final.png)',
+            report_lines
+        )
+
+    def test_report_generated_file_status_uses_categorized_progress_path(self):
+        controller = self._build_exact_controller()
+        controller._append_auto_model_performance_rows(
+            unique_recipes=np.array([[0.2, 0.2]], dtype=float),
+            lambda_max_values=[624.0, 626.0],
+            condition_type='seed',
+            batch_number=0
+        )
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            progress_directory = os.path.join(
+                controller.plot_path,
+                'progress'
+            )
+            os.makedirs(progress_directory)
+            Path(
+                os.path.join(progress_directory, 'lambda_progress_final.png')
+            ).touch()
+            Path(
+                os.path.join(progress_directory, 'lambda_replicates_final.png')
+            ).touch()
+
+            with redirect_stdout(io.StringIO()):
+                report_path = controller._write_auto_run_report()
+
+            report_text = Path(report_path).read_text()
+
+        self.assertIn(
+            '![Final λmax Progress Plot](../Plots/progress/'
+            'lambda_progress_final.png)',
+            report_text
+        )
+        self.assertIn(
+            '`Plots/progress/lambda_progress_final.png` (present)',
+            report_text
+        )
+        self.assertIn(
+            '`Plots/progress/lambda_replicates_final.png` (present)',
+            report_text
+        )
+
     def test_report_does_not_call_single_replicate_target_match_validated(self):
         controller = self._build_exact_controller()
         controller.num_duplicates = 1
@@ -3805,6 +3960,9 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         self.assertIn('maximum = {maximum_probability:.3f}', renderer_source)
         self.assertIn('figsize=(18.2, 5.8)', renderer_source)
         self.assertIn('figsize=(18.2, 6.6)', renderer_source)
+        self.assertIn('textwrap.wrap(title, width=52)', renderer_source)
+        self.assertIn('figsize=(8.4, 7.4 if feasibility_overlay else 6.5)', renderer_source)
+        self.assertIn('ncol=1', renderer_source)
 
     def test_three_d_design_plot_excludes_best_point_from_base_marker(self):
         renderer_node = _get_auto_controller_method_node(

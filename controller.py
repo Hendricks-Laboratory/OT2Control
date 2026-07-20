@@ -39,6 +39,7 @@ import functools
 import datetime
 import sys
 import traceback
+import textwrap
 
 from bidict import bidict
 import gspread
@@ -910,6 +911,16 @@ class Controller(ABC):
         does not bypass replicate-QC, model-training, or target-stop
         eligibility requirements.
 
+        Replicate agreement for target decisions is controlled by the optional
+        replicate_sd_tolerance_nm setting. It is the maximum sample standard
+        deviation, in nanometers, across the QC-included physical replicates
+        of one condition. It gates target-EI incumbents and condition-level
+        early stopping, but does not by itself exclude observations from GP
+        model training. Older spreadsheets default to 25 nm, preserving the
+        established target-decision policy. This is intentionally a replicate
+        SD threshold rather than an SEM threshold: SEM can decrease merely by
+        adding replicates while the individual-well variation remains large.
+
         Auto terminal output is controlled by the optional
         auto_terminal_verbosity setting:
 
@@ -1026,6 +1037,48 @@ class Controller(ABC):
         print(
             "<<controller>> Auto condition-level target tolerance: "
             f"{target_tolerance_nm:g} nm"
+        )
+
+        # Target decisions require both a condition mean near the requested
+        # target and sufficiently consistent QC-included replicates. This
+        # setting has always had a 25 nm default in the eligibility helper;
+        # parse it here so a workbook can explicitly select a stricter or
+        # looser scientifically justified agreement requirement.
+        replicate_sd_tolerance_value = str(
+            header_dict.get(
+                'replicate_sd_tolerance_nm',
+                25.0
+            )
+        ).strip()
+
+        try:
+            replicate_sd_tolerance_nm = float(
+                replicate_sd_tolerance_value
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                "Header value replicate_sd_tolerance_nm must be a finite, "
+                "nonnegative number in nm. "
+                f"Received: {replicate_sd_tolerance_value!r}."
+            )
+
+        if (
+            not math.isfinite(replicate_sd_tolerance_nm)
+            or replicate_sd_tolerance_nm < 0.0
+        ):
+            raise ValueError(
+                "Header value replicate_sd_tolerance_nm must be a finite, "
+                "nonnegative number in nm. "
+                f"Received: {replicate_sd_tolerance_value!r}."
+            )
+
+        self.robo_params['replicate_sd_tolerance_nm'] = (
+            replicate_sd_tolerance_nm
+        )
+
+        print(
+            "<<controller>> Auto replicate SD tolerance for target "
+            f"decisions: {replicate_sd_tolerance_nm:g} nm"
         )
 
         # Terminal verbosity intentionally controls presentation only. It
@@ -6345,7 +6398,12 @@ class AutoContr(Controller):
             or controller_completion_marker_found
         )
 
-        if 'Exit due to max_iters' in terminal_text:
+        if (
+            'Exit due to validated condition-level target hit'
+            in terminal_text
+        ):
+            exit_reason = 'validated condition-level target hit'
+        elif 'Exit due to max_iters' in terminal_text:
             exit_reason = 'max_iters reached'
         elif 'max_iters' in terminal_text:
             exit_reason = 'max_iters mentioned'
@@ -11786,16 +11844,18 @@ class AutoContr(Controller):
         lines.append('')
         lines.append('## Key Plots')
         lines.append('')
-        lines.append('### Final λmax Progress Plot')
-        lines.append('')
-        lines.append('![Final λmax Progress](../Plots/lambda_progress_final.png)')
-        lines.append('')
-        lines.append('### Final Replicate Diagnostic Plot')
-        lines.append('')
-        lines.append(
-            '![Final Replicate Diagnostic](../Plots/lambda_replicates_final.png)'
+        lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='lambda_progress_final.png',
+                title='Final λmax Progress Plot'
+            )
         )
-        lines.append('')
+        lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='lambda_replicates_final.png',
+                title='Final Replicate Diagnostic Plot'
+            )
+        )
 
         if len(getattr(self, 'variable_reagents', [])) == 3:
             lines.append('### Final Conditional GP Slice Atlases')
@@ -12103,22 +12163,29 @@ class AutoContr(Controller):
             '`pr_data/auto_run_report.md` (present)'
         )
 
+        if hasattr(self, '_resolve_auto_plot_path'):
+            _, final_progress_relative_path = self._resolve_auto_plot_path(
+                'lambda_progress_final.png'
+            )
+            _, final_replicate_relative_path = self._resolve_auto_plot_path(
+                'lambda_replicates_final.png'
+            )
+        else:
+            # Preserve report-only test compatibility for historical flat
+            # Plot directories.
+            final_progress_relative_path = 'lambda_progress_final.png'
+            final_replicate_relative_path = 'lambda_replicates_final.png'
+
         lines.append(
             self._auto_report_file_line(
-                os.path.join(
-                    'Plots',
-                    'lambda_progress_final.png'
-                ),
+                os.path.join('Plots', final_progress_relative_path),
                 'Final condition-level lambda progress plot'
             )
         )
 
         lines.append(
             self._auto_report_file_line(
-                os.path.join(
-                    'Plots',
-                    'lambda_replicates_final.png'
-                ),
+                os.path.join('Plots', final_replicate_relative_path),
                 'Final replicate-level lambda diagnostic plot'
             )
         )
@@ -13125,7 +13192,14 @@ class AutoContr(Controller):
             feasibility_overlay=False
         ):
             '''Renders one native, poster-ready conditional GP slice panel.'''
-            figure, axis = plt.subplots(figsize=(6.4, 5.8), dpi=300)
+            # A single slice needs its own title and legend band. The compact
+            # atlas layout does not scale down safely because long reagent
+            # names and feasibility labels would be clipped at the canvas
+            # edges. Keep the heatmap native and give the header enough room.
+            figure, axis = plt.subplots(
+                figsize=(8.4, 7.4 if feasibility_overlay else 6.5),
+                dpi=300
+            )
             figure.set_tight_layout(False)
 
             image = axis.pcolormesh(
@@ -13194,10 +13268,19 @@ class AutoContr(Controller):
 
             held_reagent = reagent_names[fixed_index]
             held_value = reference_recipe[fixed_index]
+            title_lines = textwrap.wrap(title, width=52)
+            title_lines.append(
+                f'Hold {held_reagent} = {held_value:.4g} mM'
+            )
+            if feasibility_overlay:
+                title_lines.append('Physical feasibility overlay')
+
             figure.suptitle(
-                f'{title}; hold {held_reagent} = {held_value:.4g} mM'
-                + ('; physical feasibility overlay' if feasibility_overlay else ''),
-                fontsize=font_sizes['title'], fontweight='normal', y=0.975
+                '\n'.join(title_lines),
+                fontsize=font_sizes['title'],
+                fontweight='normal',
+                y=0.985,
+                linespacing=1.15
             )
 
             legend_handles = _build_slice_observation_legend(axis)
@@ -13209,13 +13292,21 @@ class AutoContr(Controller):
             figure.legend(
                 legend_handles,
                 [handle.get_label() for handle in legend_handles],
-                loc='upper center', bbox_to_anchor=(0.5, 0.91),
-                ncol=2, frameon=False, fontsize=font_sizes['legend'],
-                handlelength=1.5, columnspacing=0.9
+                loc='upper center',
+                bbox_to_anchor=(0.5, 0.84),
+                # A single centered legend column avoids clipping the long
+                # feasibility descriptions while retaining all audit keys.
+                ncol=1,
+                frameon=False,
+                fontsize=font_sizes['legend'],
+                handlelength=1.5,
+                labelspacing=0.45
             )
             figure.subplots_adjust(
-                left=0.16, right=0.86, bottom=0.15,
-                top=0.74 if feasibility_overlay else 0.82
+                left=0.15,
+                right=0.85,
+                bottom=0.14,
+                top=0.52 if feasibility_overlay else 0.72
             )
 
             output_path = self._get_auto_plot_output_path(

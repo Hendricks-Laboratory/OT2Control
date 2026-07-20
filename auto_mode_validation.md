@@ -136,6 +136,43 @@ reader, credentials, or live protocol path was invoked. The new output layout
 and standalone slices are statically and synthetically validated, not yet
 validated by a post-change physical run.
 
+### RTG_014 output-audit follow-up — July 17, 2026
+
+The saved RTG_014 three-variable chemistry output was reviewed after it
+stopped on a validated condition-level target hit. The categorized plot files
+and manifest were produced correctly, but two presentation/report defects were
+identified:
+
+- standalone conditional-slice titles and legends could be clipped because
+  their compact canvas did not accommodate long reagent and feasibility labels;
+- the Markdown report still hard-coded root-level final progress/replicate
+  paths, causing broken embeds and false `not found` entries despite the files
+  existing in `Plots/progress/`.
+
+The active working-tree follow-up gives individual slices a wrapped title and
+dedicated legend band, routes final progress/replicate report links and file
+status through the categorized-path resolver, and records an explicit
+condition-level-target-hit exit reason. It does not change chemistry,
+liquid-handling, GP fitting, QC, acquisition, or stopping behavior. This
+follow-up requires a later controlled output review to validate the rendered
+standalone figures in the lab environment.
+
+### Spreadsheet-configurable replicate agreement — July 20, 2026
+
+`replicate_sd_tolerance_nm` is an optional Header setting for the maximum
+sample SD across QC-included replicates of a single condition when deciding
+whether that condition may establish a target-EI incumbent or stop an Auto
+run. A missing value preserves the established 25 nm default. This is a
+replicate-SD threshold, not an SEM threshold: more replicates can lower SEM
+without making their individual λmax values agree more closely.
+
+The setting does not change replicate outlier exclusion, model-training
+eligibility, GP fitting, acquisition scoring, or liquid handling. It only
+controls the stricter target-decision gate already applied after QC. For
+example, a value of `15` nm rejects a condition with a QC-included replicate
+SD above 15 nm as a target-EI incumbent and early-stop candidate, while its
+approved observations may still contribute to GP training.
+
 ## Recommended roadmap from the current state
 
 ### 1. Next controlled validation: short three-variable output audit
