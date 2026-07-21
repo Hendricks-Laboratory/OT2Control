@@ -28,20 +28,50 @@ It is intended as a branch-specific record of:
 
 ---
 
-# Current Auto-RTG Development Record — July 17, 2026
+# Current Auto-RTG Development Record — Complete Reconciliation, July 21, 2026
 
 > [!IMPORTANT]
 > The older sections below preserve historical `Auto-RTG-v1` validation
 > evidence. This section is authoritative for active work on `Auto-RTG`.
 > `main` and `Auto-RTG-v1` remain protected; development stays on `Auto-RTG`.
+> Statements in the historical sections that describe acquisition modes,
+> source-volume preflight, or other features as deferred are not current
+> `Auto-RTG` status.
+
+## Reconciliation scope and code identity
+
+This current record was reconciled against the complete repository range from
+the pre-Auto-RTG baseline branch to the active branch, rather than against one
+recent feature commit only.
+
+| Item | Reconciled value |
+|---|---|
+| Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
+| Active branch and commit | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
+| Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
+| Reviewed range | `Auto...Auto-RTG`, containing 174 commits |
+| Files changed in the range | `controller.py`, `optimizers.py`, `ot2_robot.py`, Auto tests, validation/governance documents, `.gitignore`, and removal of an ignored local `.DS_Store` artifact |
+| Current validation result | Python 3.9.6 compilation passed; 121 isolated hardware-free tests passed on July 21, 2026 |
+
+The reconciliation inspected current controller, optimizer, robot-container,
+plot/report, and test code as well as the accumulated Git history. It did not
+run a controller launcher, robot, plate reader, credential workflow, or live
+protocol. Therefore it confirms code/documentation coverage and isolated
+behavior, not physical-run clearance.
 
 ## Current branch purpose
 
 `Auto-RTG` is a target-seeking, physically constrained Bayesian-optimization
-workflow for two- and three-variable reaction spaces. It proposes
-robot-executable formulations near a requested λmax target while retaining
-condition-level replicate QC, cumulative GP history, true-zero masks,
-water/overflow feasibility, and controller-owned stopping.
+workflow. It proposes robot-executable formulations near a requested λmax
+target while retaining condition-level replicate QC, cumulative GP history,
+true-zero masks, water/overflow feasibility, and controller-owned stopping.
+
+The optimizer and protocol path accept a general number of variable reagents.
+GP-surface visualizations are specialized for two and three variable reagents;
+dimension-aware design-space visualizations additionally support one variable,
+four through six variables, and seven or more variables. Higher-dimensional
+plots are projections or summaries, not a claim that a two-dimensional image
+fully represents the corresponding chemistry space.
 
 The active branch also supports ordered acquisition portfolios. A `core3`
 batch compares `exploit`, `explore`, and `balanced` selections from the same
@@ -53,15 +83,21 @@ duplicate count and returns through the usual QC/model-update pathway.
 
 | Capability | Current status | Validation scope |
 |---|---|---|
+| Maximin initial design, cumulative GP history, and post-update plot refresh | Implemented | Synthetic cumulative-history and timing regression tests; controlled debug-output review |
+| Physical recipe constraints: overflow, water top-off, 5 uL executable-transfer bounds, mixed masks, and all-off exclusion | Implemented | Isolated feasibility, mask, and controller-handoff tests |
 | `exploit`, `explore`, `balanced`, and `target_ei` acquisition modes | Implemented | Synthetic scoring and controller/optimizer integration tests; dry-debug review |
 | Selective true-zero variable-reagent masks | Implemented | Header normalization, controller-bound/repair, mask, and feasibility-overlay regression tests |
 | Ordered `acquisition_modes` portfolios and `core3` | Implemented | Synthetic portfolio/controller handoff tests |
 | QC-approved condition-level target-EI incumbent | Implemented | Synthetic incumbent and stop-eligibility tests |
 | Friendly `portfolio_min_distance` inputs plus numeric values | Implemented | Header normalization tests |
-| Three-variable GP slice atlases and matching feasibility overlays | Implemented | Static/synthetic plotting validation and controlled debug-output review |
+| Condition-level replicate QC, GP-training eligibility, and controller-owned target stopping | Implemented | Isolated condition/QC/stop-eligibility regression tests; saved-run review |
+| Configurable condition target tolerance and replicate-SD target-decision gate | Implemented | Header and target-decision regression tests |
+| Two-variable GP mean/uncertainty heatmaps and matching feasibility overlays | Implemented | Static/synthetic orientation, overlay, and rendering-semantics tests |
+| Three-variable mean, uncertainty, target-probability, and feasibility slice atlases | Implemented | Static/synthetic conditional-slice and tolerance-propagation tests; controlled debug-output review |
+| Dimension-aware design-space plots and portfolio trace with mode-specific markers | Implemented | Isolated plot-classification and marker/error-bar legend tests |
 | Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
-| Controller-side Raspberry Pi legacy tare compatibility offset | Implemented | Header/payload compatibility tests; physical weighing remains human-verified |
+| Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
 | Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
@@ -96,6 +132,58 @@ The all-off recipe remains excluded. A missing list preserves legacy behavior:
 all variable reagents are eligible when `allow_true_zero` is true, and none
 are eligible when it is false. Unknown, duplicate, fixed-reagent, or
 contradictory Header values fail before Auto execution.
+
+### Current spreadsheet Header interface
+
+Header rows are read by key, so their physical row order does not matter.
+Every setting below is resolved before Auto execution. New optional settings
+retain the stated legacy defaults when their Header row is absent.
+
+| Header key | Current behavior and legacy default |
+|---|---|
+| `using_temp_ctrl`, `temp` | Existing temperature-module settings. `using_temp_ctrl` must be `yes` to enable temperature control; `temp` is then required and constrained to 4–95 °C. |
+| `data_dir` | Existing output-directory identifier used by the Auto workflow. |
+| `dilution_cont`, `dilution_vol` | Existing dilution-container and dilution-volume settings. |
+| `target` | Required λmax target in nm. |
+| `initial_data`, `max_iterations` | Required seed-condition count and maximum optimizer-batch count. |
+| `num_duplicates` | Physical replicate wells per selected condition; defaults to `3`; must be at least `1`. In a portfolio, this count applies independently to each listed acquisition mode. |
+| `target_tolerance_nm` | Maximum absolute condition-mean target error eligible for an early stop; defaults to `10` nm. It does not bypass QC or replicate-agreement requirements. |
+| `replicate_sd_tolerance_nm` | Maximum sample SD across QC-included replicates for a condition to establish a target-EI incumbent or an early stop; defaults to `25` nm. It gates target decisions, not normal model-training eligibility. |
+| `allow_true_zero` | Enables true-zero search. A missing row remains `false`, preserving legacy all-ON optimization. |
+| `true_zero_reagents` | Optional selective true-zero list used only when `allow_true_zero` is enabled. It accepts case-insensitive comma- or semicolon-separated variable-reagent names, plus `all` and `none`. A missing list preserves legacy all-or-none true-zero behavior. |
+| `acquisition_mode` | Singular interface: `exploit`, `explore`, `balanced`, or `target_ei`; missing defaults to `exploit`. `target_ei` requires at least two duplicates so a replicate-agreement decision is defined. When a portfolio is active, set this field explicitly to `off`. |
+| `acquisition_modes` | Optional ordered semicolon-separated portfolio with no duplicate canonical modes. `core3` expands to `exploit;explore;balanced`. `off` disables the portfolio. The listed order is a preference order only when selections collide within the configured diversity radius; all modes otherwise select from the same pre-batch cumulative GP. A portfolio containing `target_ei` also requires at least two duplicates. |
+| `portfolio_min_distance` | Portfolio diversity radius in normalized design space. Friendly values include `none` = `0.00`, `modest` = `0.05`, `strong` = `0.10`, and `very_strong` = `0.15`; finite numeric input from `0` through `1` is also accepted. It is inactive when `acquisition_modes` is off. |
+| `auto_plot_profile` | `standard`, `final_only`, or `off`; missing defaults to `standard`. It controls automatic diagnostic/final plots, not model fitting, acquisition, QC, or execution. |
+| `auto_terminal_verbosity` | `essential`, `standard`, or `diagnostic`; missing defaults to `standard`. `off` means essential safety/scientific output, not silence; `limited` maps to standard; `all` maps to diagnostic. Persistent CSV/report audit output is unaffected. |
+| `auto_source_volume_check` | `off` (legacy default) or `required`. `required` performs a fail-closed aggregate source-inventory preflight before each batch. |
+| `auto_source_reserve_volume_uL` | Nonnegative additional source reserve beyond the robot's dead-volume calculation; defaults to `0`. It matters only when source-volume checking is required. |
+| `pi_legacy_tare_offset_g` | Nonnegative payload-only compatibility offset for a deployed Raspberry Pi that still uses the old tare constants; defaults to `0`. Do not enable after the Pi has the corrected constants. |
+
+The singular and portfolio acquisition interfaces are deliberately mutually
+explicit. A new portfolio worksheet must put `off` in `acquisition_mode`; a
+legacy worksheet lacking `acquisition_modes` remains singular and defaults to
+`exploit`. This prevents a spreadsheet from silently mixing two selection
+interfaces.
+
+### Tare correction and Raspberry Pi compatibility
+
+`Auto-RTG` contains two distinct +0.3 g tare mechanisms that must not be
+confused:
+
+1. `ot2_robot.py` corrects the default tare constants used by the repository's
+   2 mL, 15 mL,
+   and 50 mL tube models: 1.4 → 1.7 g, 6.9731 → 7.2731 g, and 13.3950 →
+   13.6950 g, respectively. This is the corrected baseline for a runtime that
+   actually receives the current `ot2_robot.py`.
+2. `pi_legacy_tare_offset_g` is a controller-side compatibility shim. It
+   subtracts an operator-selected positive offset only from the reagent mass
+   payload sent to a Raspberry Pi still running old, lower tube tares, while
+   preserving the real measured tube-plus-solution mass in controller records.
+
+The first change does not alter a frozen remote Pi by itself. The second is
+therefore needed only while that remote runtime remains on the old constants.
+Neither mechanism substitutes for physical tare verification.
 
 ### Current report provenance
 
@@ -138,12 +226,13 @@ column labels, and report usability/provenance improvements in:
 2678599  Improve Auto report readability and plate reuse guidance
 ```
 
-The source-level validation for this follow-up covered Header parsing,
+The source-level validation at the time of this follow-up covered Header parsing,
 selective mask generation, controller transfer validation, 2D feasibility
 overlay semantics, legacy all-or-none true-zero compatibility, labeled raw
 export columns, appendix placement after the conclusion, and plate-span/reuse
-guidance. The current hardware-free suite result was 118 passing tests after
-`git diff --check` and Python compilation using the available local runtime.
+guidance. That point-in-time hardware-free suite result was 118 passing tests
+after compilation using the available local runtime. The superseding current
+reconciliation result is 121 passing tests and is recorded above.
 No controller launcher, robot, plate reader, credentials, or live protocol
 path was invoked. These results validate code behavior and audit output only;
 they do not substitute for a supervised physical validation of selective
@@ -180,27 +269,55 @@ and uncertainty-feasibility. These are renderings of the same already-computed
 conditional GP panel data; they do not change model fitting, acquisition,
 recipe generation, or robot execution. They add expected rendering time.
 
-## Evidence current through this update
+### Dimension-aware plotting scope
+
+| Variable-reagent count | Current Auto plot behavior | Interpretation boundary |
+|---:|---|---|
+| 0 | No design-space plot; a warning explains that no variable concentration columns were found. | No chemistry-space visualization is possible. |
+| 1 | Seed and full 1D design-space strip plots. | Direct physical concentration axis. |
+| 2 | Square seed/full design-space plots; GP mean and uncertainty heatmaps; separate feasibility-overlay versions of those heatmaps. | Both axes are physical reagent concentrations. The original and overlay figures remain distinct artifacts. |
+| 3 | Pairwise and cubic seed/full design-space plots; conditional mean, uncertainty, target-probability, and feasibility slice atlases plus standalone slices. | Each GP slice holds one reagent at a stated physical concentration while displaying the other two. It is a conditional view, not a full 3D response surface. |
+| 4–6 | Complete pairwise-projection and parallel-coordinate seed/full design-space plots. | Projections show coverage, not a complete multidimensional response surface. |
+| 7+ | Compact pairwise, parallel-coordinate, and two-component PCA seed/full design-space plots. | PCA axes are display coordinates rather than physical reagent axes. |
+
+Portfolio runs also produce an acquisition trace alongside the ordinary
+progress and replicate plots. The trace uses mode-specific markers for
+`exploit`, `explore`, and `balanced`, distinguishes filled QC-included observed
+condition means from hollow GP predictions, and labels observed SEM separately
+from predictive GP SD. Its data are common-model portfolio diagnostics; it
+does not create separate GPs or alter the ordinary cumulative plots.
+
+## Current hardware-free validation evidence
 
 ```text
-cf2fcb9  Organize Auto plots and add standalone 3D slices
+Baseline: Auto at 356971a
+Active commit: Auto-RTG at b152ed1
+Reviewed range: Auto...Auto-RTG (174 commits)
 ```
 
-The plot-organization stage passed hardware-free validation on Python 3.9.6:
+The reconciled current source passed the following hardware-free validation on
+Python 3.9.6:
 
 ```text
-git diff --check
 PYTHONPYCACHEPREFIX=/tmp/ot2control_pycache /usr/bin/python3 -m py_compile \
-  controller.py optimizers.py tests/test_acquisition_scoring.py \
+  controller.py optimizers.py ot2_robot.py tests/test_acquisition_scoring.py \
   tests/test_auto_plot_organization.py
 /usr/bin/python3 -m unittest -v tests.test_auto_plot_organization \
   tests.test_acquisition_scoring
 ```
 
-Result: 104 isolated tests passed. No controller launcher, robot, plate
-reader, credentials, or live protocol path was invoked. The new output layout
-and standalone slices are statically and synthetically validated, not yet
-validated by a post-change physical run.
+Result: 121 isolated tests passed. Source-level AST inspection also found no
+duplicate class-method definitions in `controller.py`, `optimizers.py`, or
+`ot2_robot.py`. No controller launcher, robot, plate reader, credentials, or
+live protocol path was invoked. These results validate isolated code behavior
+and audit output only; they do not establish physical readiness or replace a
+human-supervised dry/debug or chemistry review.
+
+`git diff --check Auto...Auto-RTG` still reports accumulated trailing
+whitespace in historical legacy code and Markdown hard-break lines. That is a
+nonfunctional formatting debt in the full branch range, not a failed
+controller/optimizer validation. It should be addressed only in a separate
+formatting-only review, not mixed into scientific or robot-control work.
 
 ### RTG_014 output-audit follow-up — July 17, 2026
 
@@ -215,7 +332,7 @@ identified:
   paths, causing broken embeds and false `not found` entries despite the files
   existing in `Plots/progress/`.
 
-The active working-tree follow-up gives individual slices a wrapped title and
+The subsequent active-branch follow-up gives individual slices a wrapped title and
 dedicated legend band, routes final progress/replicate report links and file
 status through the categorized-path resolver, and records an explicit
 condition-level-target-hit exit reason. It does not change chemistry,
@@ -334,13 +451,24 @@ claim automatic backup-tube switching from the aggregate controller preflight.
 - further plot styling unless a new controlled output audit finds a readability
   defect;
 - batch-boundary replenishment/resume after a failed source-volume preflight;
-- high-dimensional visualizations beyond the existing 3D conditional slices;
+- higher-dimensional GP-surface visualization beyond the existing projection,
+  parallel-coordinate, PCA, and three-variable conditional-slice views;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;
 - unattended or large-scale chemistry optimization;
 - promotion of `Auto-RTG` into `Auto-RTG-v1`.
 
 ---
 
+
+# Historical Stable-v1 Record — Not Current Auto-RTG Status
+
+> [!IMPORTANT]
+> Everything below this heading is retained as provenance for the stable-v1
+> checkpoint and the development plan that preceded `Auto-RTG`. It is not a
+> current implementation checklist. References to `stable/auto-rtg-v1`,
+> `feature/acquisition-modes`, deferred acquisition modes, or a missing
+> source-volume hard-stop describe the historical state, not the active
+> `Auto-RTG` branch reconciled above.
 
 # Stable V1 Branch Checkpoint
 
