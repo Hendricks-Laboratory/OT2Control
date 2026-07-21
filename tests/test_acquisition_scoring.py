@@ -3043,6 +3043,8 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_format_auto_report_volume_summary',
             '_format_auto_report_optimizer_status',
             '_format_auto_report_replicate_list_value',
+            '_get_96_well_plate_order',
+            '_summarize_auto_report_physical_well_span',
             '_build_auto_report_responsive_sections',
             '_build_auto_report_full_audit_appendix',
             '_build_padded_auto_report_markdown_table',
@@ -3620,6 +3622,10 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn('## Acquisition Audit Trail', report_text)
         self.assertIn('### Condition 0 — Optimizer Batch 1', report_text)
         self.assertIn('## Full Audit Appendix', report_text)
+        self.assertGreater(
+            report_text.index('## Full Audit Appendix'),
+            report_text.index('## Conclusion')
+        )
         self.assertIn('<details>', report_text)
         self.assertIn('"selected_normalized_recipe": [', report_text)
         self.assertIn('"mask_results": [', report_text)
@@ -3915,6 +3921,18 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             report_text
         )
         self.assertIn('A6, B6, C6', report_text)
+        self.assertIn(
+            'Physical plate-well span: A6 through C6 in controller '
+            'execution order (3 unique physical wells).',
+            report_text
+        )
+        self.assertIn(
+            'Same-plate reuse guidance: 53 sequential unused wells remain '
+            'after C6. Set the active plate-reader first usable well to '
+            '`D6` for the next experiment, after confirming no other wells '
+            'were used.',
+            report_text
+        )
         self.assertIn('Target tolerance', report_text)
         self.assertIn('4 nm', report_text)
         self.assertIn('Replicate SD tolerance', report_text)

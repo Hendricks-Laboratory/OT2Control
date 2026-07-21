@@ -7318,6 +7318,118 @@ class AutoContr(Controller):
 
         return self._escape_auto_report_markdown_table_value(parsed_value)
 
+    def _summarize_auto_report_physical_well_span(self, performance_df):
+        '''
+        Summarizes the physical plate-well coverage recorded for an Auto run.
+
+        The condition-level performance log stores each condition's physical
+        replicate-well locations in controller execution order. This helper
+        derives a compact report summary from that audit metadata without
+        reconstructing plate positions from assumptions about batch size,
+        duplicate count, or early stopping.
+
+        params:
+            pandas.DataFrame performance_df:
+                Condition-level Auto performance rows.
+
+        returns:
+            dict or None:
+                First well, final well, and unique physical-well count when
+                valid 96-well locations are available; otherwise None.
+        '''
+        if (
+            performance_df.empty
+            or 'replicate_well_locations' not in performance_df.columns
+        ):
+            return None
+
+        ordered_performance_df = performance_df
+
+        if 'reaction_number' in performance_df.columns:
+            try:
+                ordered_performance_df = performance_df.sort_values(
+                    'reaction_number',
+                    kind='mergesort'
+                )
+            except Exception:
+                # Preserve original performance-row order when legacy rows
+                # cannot be sorted reliably.
+                ordered_performance_df = performance_df
+
+        # Use the same top-to-bottom, left-to-right 96-well ordering used by
+        # the controller's capacity checks. This makes same-plate reuse
+        # guidance consistent with actual Auto allocation behavior.
+        plate_order = self._get_96_well_plate_order()
+        plate_well_indices = {
+            well_name: well_index
+            for well_index, well_name in enumerate(plate_order)
+        }
+        ordered_wells = []
+
+        for raw_well_locations in ordered_performance_df[
+            'replicate_well_locations'
+        ]:
+            parsed_well_locations = raw_well_locations
+
+            if isinstance(raw_well_locations, str):
+                try:
+                    parsed_well_locations = json.loads(
+                        raw_well_locations
+                    )
+                except (TypeError, ValueError):
+                    parsed_well_locations = []
+
+            if isinstance(parsed_well_locations, np.ndarray):
+                parsed_well_locations = parsed_well_locations.tolist()
+
+            if not isinstance(parsed_well_locations, (list, tuple)):
+                parsed_well_locations = [parsed_well_locations]
+
+            for well_location in parsed_well_locations:
+                if well_location is None:
+                    continue
+
+                try:
+                    if pd.isna(well_location):
+                        continue
+                except Exception:
+                    pass
+
+                well_text = str(well_location).strip().upper()
+
+                if well_text not in plate_well_indices:
+                    continue
+
+                if well_text not in ordered_wells:
+                    ordered_wells.append(well_text)
+
+        if len(ordered_wells) == 0:
+            return None
+
+        first_well = min(
+            ordered_wells,
+            key=lambda well_name: plate_well_indices[well_name]
+        )
+        last_well = max(
+            ordered_wells,
+            key=lambda well_name: plate_well_indices[well_name]
+        )
+        last_well_index = plate_well_indices[last_well]
+        next_well_index = last_well_index + 1
+        next_well = (
+            plate_order[next_well_index]
+            if next_well_index < len(plate_order)
+            else None
+        )
+
+        return {
+            'first_well': first_well,
+            'last_well': last_well,
+            'unique_well_count': len(ordered_wells),
+            'remaining_well_count': len(plate_order) - next_well_index,
+            'next_well': next_well
+        }
+
     def _build_auto_report_responsive_sections(
         self,
         performance_df,
@@ -11829,6 +11941,9 @@ class AutoContr(Controller):
         full_audit_appendix_lines = (
             self._build_auto_report_full_audit_appendix(performance_df)
         )
+        physical_well_span = self._summarize_auto_report_physical_well_span(
+            performance_df
+        )
 
         lines = []
 
@@ -11987,6 +12102,31 @@ class AutoContr(Controller):
         lines.append(
             f'- Optimizer-selected conditions: {optimizer_conditions}'
         )
+        if physical_well_span is None:
+            lines.append('- Physical plate-well span: not recorded.')
+        else:
+            lines.append(
+                '- Physical plate-well span: '
+                f'{physical_well_span["first_well"]} through '
+                f'{physical_well_span["last_well"]} in controller execution '
+                f'order ({physical_well_span["unique_well_count"]} unique '
+                'physical wells).'
+            )
+            if physical_well_span['next_well'] is None:
+                lines.append(
+                    '- Same-plate reuse guidance: no sequential wells remain '
+                    'after the final recorded well; use a new plate.'
+                )
+            else:
+                lines.append(
+                    '- Same-plate reuse guidance: '
+                    f'{physical_well_span["remaining_well_count"]} sequential '
+                    f'unused wells remain after '
+                    f'{physical_well_span["last_well"]}. Set the active '
+                    'plate-reader first usable well to '
+                    f'`{physical_well_span["next_well"]}` for the next '
+                    'experiment, after confirming no other wells were used.'
+                )
         lines.append('')
         lines.append('## Auto Settings')
         lines.append('')
@@ -12698,17 +12838,6 @@ class AutoContr(Controller):
             lines.append('')
             lines.extend(exploration_design_plot_lines)
 
-        lines.append('## Full Audit Appendix')
-        lines.append('')
-        lines.append(
-            'The compact cards above are intended for ordinary reading. '
-            'Expand an entry below to view the complete condition-level '
-            'record preserved in `auto_model_performance_log.csv`, including '
-            'full recipe, mask, optimizer, QC, and volume-balance metadata.'
-        )
-        lines.append('')
-        lines.extend(full_audit_appendix_lines)
-
         lines.append('## Generated Files')
         lines.append('')
 
@@ -12937,6 +13066,22 @@ class AutoContr(Controller):
                 f'{self._format_auto_report_value(best_target_error, "nm")}. '
                 f'{best_interpretation}'
             )
+
+        # Keep the full, machine-oriented audit records after the reader-facing
+        # conclusion. Markdown-aware viewers can collapse each record, while
+        # plain-text previews such as Google Drive show the scientific summary
+        # without an intervening wall of JSON-like audit metadata.
+        lines.append('')
+        lines.append('## Full Audit Appendix')
+        lines.append('')
+        lines.append(
+            'The compact cards above are intended for ordinary reading. '
+            'Expand an entry below to view the complete condition-level '
+            'record preserved in `auto_model_performance_log.csv`, including '
+            'full recipe, mask, optimizer, QC, and volume-balance metadata.'
+        )
+        lines.append('')
+        lines.extend(full_audit_appendix_lines)
 
         lines.append('')
         lines.append('---')
