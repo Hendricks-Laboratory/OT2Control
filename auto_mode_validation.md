@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-20
+**Updated through:** 2026-07-21
 
 ---
 
@@ -66,6 +66,8 @@ duplicate count and returns through the usual QC/model-update pathway.
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
 | Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
 | Configured target-stop, acquisition, and portfolio report provenance | Implemented | Hardware-free report regression test with an early-stop condition and physical replicate-well locations |
+| Labeled raw well-level Auto export | Implemented | Hardware-free export regression test; exported columns identify final-reaction concentration in mM and measured λmax in nm without changing internal training data |
+| Reader-oriented report appendix and plate-reuse guidance | Implemented | Hardware-free report regression tests for appendix ordering, physical well span, remaining sequential capacity, and next-well recommendation |
 | Objective UV scan-quality diagnostics | Implemented, warning-only | Records blank-corrected peak height and 300/1000 nm boundary maxima; does not alter QC, GP training, target EI, or stopping |
 
 ### Current acquisition semantics
@@ -85,6 +87,16 @@ incumbent is never set by one favorable replicate. The all-off mask remains
 excluded; ON variable reagents must be at least 5 µL; OFF reagents are exactly
 zero; water top-off is either zero or at least 5 µL; overflow is infeasible.
 
+When `allow_true_zero` is enabled, the optional Header
+`true_zero_reagents` setting selects which variable reagents may be exactly
+zero. It accepts comma- or semicolon-separated canonical variable-reagent
+names case-insensitively, plus `all` and `none` aliases. Unselected variable
+reagents remain required ON and retain their 5 µL-equivalent lower bound.
+The all-off recipe remains excluded. A missing list preserves legacy behavior:
+all variable reagents are eligible when `allow_true_zero` is true, and none
+are eligible when it is false. Unknown, duplicate, fixed-reagent, or
+contradictory Header values fail before Auto execution.
+
 ### Current report provenance
 
 `auto_run_report.md` records the configured target tolerance and replicate-SD
@@ -95,6 +107,47 @@ well locations captured in `auto_model_performance_log.csv`. It also defines
 each active acquisition mode and explains the ordered portfolio's normalized
 RMS diversity radius. These report fields are audit metadata only; they do not
 alter recipe selection, QC, GP training, or robot execution.
+
+The report keeps compact reader-facing results, warnings, and conclusion ahead
+of the complete machine-oriented audit appendix. The appendix remains in the
+same Markdown file after the conclusion so Markdown-aware viewers can expand
+full recipe, mask, optimizer, QC, and volume-balance records, while Google
+Drive plain-text preview reaches the scientific narrative first.
+
+Experiment Overview also derives the physical plate-well span from recorded
+condition-level replicate-well locations. It reports the first and final wells
+in controller plate order, unique physical-well count, remaining sequential
+well capacity, and the recommended next plate-reader starting well for
+same-plate reuse. This is audit-derived guidance, not a capacity prediction;
+the operator must still confirm that no other wells were used before reusing
+the plate.
+
+`experiment_data.csv` remains the physical-well-level export. Its Auto
+variable-reagent columns are labeled as final-reaction concentrations in mM
+and its response column as λmax in nm. These labels clarify exported physical
+units without changing internal normalized GP coordinates, raw data, model
+training, recipe selection, or execution.
+
+### July 21, 2026 — Selective true-zero and report-usability follow-up
+
+The active branch incorporated selective true-zero masks, explicit raw-data
+column labels, and report usability/provenance improvements in:
+
+```text
+7567290  Add selective true-zero controls and label Auto experiment exports
+2678599  Improve Auto report readability and plate reuse guidance
+```
+
+The source-level validation for this follow-up covered Header parsing,
+selective mask generation, controller transfer validation, 2D feasibility
+overlay semantics, legacy all-or-none true-zero compatibility, labeled raw
+export columns, appendix placement after the conclusion, and plate-span/reuse
+guidance. The current hardware-free suite result was 118 passing tests after
+`git diff --check` and Python compilation using the available local runtime.
+No controller launcher, robot, plate reader, credentials, or live protocol
+path was invoked. These results validate code behavior and audit output only;
+they do not substitute for a supervised physical validation of selective
+true-zero chemistry or same-plate reuse.
 
 ### Current plotting/output behavior
 
