@@ -9804,7 +9804,11 @@ class AutoContr(Controller):
         # plotting panels.
         panel_width = 3.9
         panel_height = 3.9
-        figure_header_height = 0.75
+        # Four-variable pairwise matrices have a title, a shared legend, and
+        # a dense top row of panels. Reserve dedicated header height so those
+        # elements remain visually distinct without changing the square panel
+        # geometry used for the scientific projections.
+        figure_header_height = 1.20
 
         fig, axes = plt.subplots(
             n_rows,
@@ -9962,7 +9966,7 @@ class AutoContr(Controller):
             display_title,
             fontsize=font_sizes['title'],
             fontweight='normal',
-            y=0.985
+            y=0.980
         )
 
         if len(final_legend_handles) > 0:
@@ -9970,7 +9974,7 @@ class AutoContr(Controller):
                 final_legend_handles,
                 final_legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.948),
+                bbox_to_anchor=(0.5, 0.925),
                 ncol=min(
                     len(final_legend_handles),
                     4
@@ -9982,10 +9986,10 @@ class AutoContr(Controller):
                 columnspacing=1.0
             )
 
-            top_margin = 0.875
+            top_margin = 0.820
 
         else:
-            top_margin = 0.92
+            top_margin = 0.865
 
         fig.subplots_adjust(
             left=0.07,
@@ -10145,10 +10149,10 @@ class AutoContr(Controller):
         fig, ax = plt.subplots(
             figsize=(
                 max(
-                    8.4,
-                    len(column_names) * 1.15
+                    8.9,
+                    len(column_names) * 1.30
                 ),
-                5.4
+                6.2
             ),
             dpi=300
         )
@@ -10248,7 +10252,11 @@ class AutoContr(Controller):
 
             if (
                 'reaction_number' in display_df.columns
-                and len(display_df) <= 20
+                # Direct labels are useful for short debug figures, but they
+                # become an unreadable stack at the final reagent axis in
+                # medium and long Auto runs. The CSV and pairwise plots retain
+                # exact condition identity for larger runs.
+                and len(display_df) <= 8
                 and np.isfinite(y_values[-1])
             ):
                 try:
@@ -10270,17 +10278,24 @@ class AutoContr(Controller):
 
         ax.set_xticklabels(
             reagent_names,
-            rotation=35,
-            ha='right',
+            rotation=25,
+            ha='center',
             fontsize=font_sizes['compact_axis_label']
         )
 
+        # Keep the outer reagent labels inside the widened plotting frame.
+        # Centered intermediate labels avoid the lower-left collision between
+        # a long first reagent name and the normalized-concentration ylabel.
+        tick_labels = ax.get_xticklabels()
+
+        if len(tick_labels) > 0:
+            tick_labels[0].set_ha('left')
+            tick_labels[-1].set_ha('right')
+
         ax.set_ylabel(
-            (
-                'Normalized concentration within '
-                'executable reagent range'
-            ),
-            fontsize=font_sizes['axis_label']
+            'Normalized concentration (executable range)',
+            fontsize=font_sizes['compact_axis_label'],
+            labelpad=11
         )
 
         ax.set_xlim(
@@ -10407,9 +10422,9 @@ class AutoContr(Controller):
             top_margin = 0.84
 
         fig.subplots_adjust(
-            left=0.11,
-            right=0.94,
-            bottom=0.25,
+            left=0.16,
+            right=0.95,
+            bottom=0.30,
             top=top_margin
         )
 
@@ -16106,7 +16121,11 @@ class AutoContr(Controller):
         fig, (summary_ax, replicate_ax) = plt.subplots(
             2,
             1,
-            figsize=(8.4, 7.3),
+            # The portfolio plot carries mode, observation, prediction, and
+            # target semantics. Give that header a wider canvas instead of
+            # forcing long legend entries into the data panels or clipping
+            # them at the figure edge.
+            figsize=(10.0, 8.0),
             dpi=300,
             sharex=True
         )
@@ -16395,25 +16414,53 @@ class AutoContr(Controller):
             linewidth=1.1,
             label=f'Target = {target_lambda:.0f} nm'
         )
-        legend_handles = mode_handles + semantic_handles + [
-            target_legend_handle
-        ]
-
+        # Keep the selection-mode key distinct from the measurement/model
+        # semantics. A single three-column legend cannot reliably fit the
+        # descriptive error-bar entries at poster-readable font sizes.
         fig.legend(
-            legend_handles,
-            [handle.get_label() for handle in legend_handles],
+            mode_handles,
+            [handle.get_label() for handle in mode_handles],
             loc='upper center',
-            bbox_to_anchor=(0.5, 0.955),
-            ncol=3,
+            bbox_to_anchor=(0.5, 0.940),
+            ncol=min(len(mode_handles), 4),
             frameon=False,
             fontsize=font_sizes['legend'],
             handlelength=1.1,
             handletextpad=0.4,
             columnspacing=0.8
         )
+
+        semantic_legend_handles = semantic_handles + [
+            target_legend_handle
+        ]
+        fig.legend(
+            semantic_legend_handles,
+            [handle.get_label() for handle in semantic_legend_handles],
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.885),
+            # One explanatory item per row keeps all text inside the output
+            # width for every active portfolio and QC state.
+            ncol=1,
+            frameon=False,
+            fontsize=font_sizes['legend'],
+            handlelength=1.1,
+            handletextpad=0.4,
+            columnspacing=0.8
+        )
+
+        semantic_row_count = len(semantic_legend_handles)
+
+        if semantic_row_count >= 4:
+            explanatory_text_y = 0.690
+            axes_top = 0.640
+
+        else:
+            explanatory_text_y = 0.735
+            axes_top = 0.685
+
         fig.text(
             0.5,
-            0.815,
+            explanatory_text_y,
             'Upper panel: filled error bars = replicate SEM; hollow error '
             'bars = pre-execution GP posterior SD.',
             ha='center',
@@ -16432,10 +16479,10 @@ class AutoContr(Controller):
             color='0.35'
         )
         fig.subplots_adjust(
-            left=0.16,
+            left=0.14,
             right=0.97,
             bottom=0.10,
-            top=0.77,
+            top=axes_top,
             hspace=0.18
         )
 
