@@ -1939,6 +1939,76 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             )
 
 
+class VariableReagentStockConcentrationTests(unittest.TestCase):
+    '''Regression coverage for same-stock backup source containers.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_get_variable_reagent_stock_conc'
+        ])
+
+    def _build_controller(self, reagent_rows, reagent_index):
+        controller = self.AutoController()
+        controller.robo_params = {
+            'reagent_df': pd.DataFrame(
+                reagent_rows,
+                index=reagent_index
+            )
+        }
+        return controller
+
+    def test_same_stock_backup_tubes_return_shared_concentration(self):
+        controller = self._build_controller(
+            {
+                'conc': [6.25, 6.25],
+                'deck_pos': [3, 3],
+                'loc': ['A1', 'A2']
+            },
+            ['sodium_borohydride', 'sodium_borohydride']
+        )
+
+        self.assertEqual(
+            controller._get_variable_reagent_stock_conc(
+                'sodium_borohydride'
+            ),
+            6.25
+        )
+
+    def test_different_stock_backup_tubes_fail_before_recipe_calculation(self):
+        controller = self._build_controller(
+            {
+                'conc': [6.25, 3.125],
+                'deck_pos': [3, 3],
+                'loc': ['A1', 'A2']
+            },
+            ['sodium_borohydride', 'sodium_borohydride']
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'different stock concentrations'
+        ):
+            controller._get_variable_reagent_stock_conc(
+                'sodium_borohydride'
+            )
+
+    def test_concentration_marked_container_name_remains_supported(self):
+        controller = self._build_controller(
+            {
+                'conc': [0.375],
+                'deck_pos': [2],
+                'loc': ['A1']
+            },
+            ['silver_nitrateC0.375']
+        )
+
+        self.assertEqual(
+            controller._get_variable_reagent_stock_conc('silver_nitrate'),
+            0.375
+        )
+
+
 class SelectiveTrueZeroControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

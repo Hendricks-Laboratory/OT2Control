@@ -18171,7 +18171,17 @@ class AutoContr(Controller):
             potassium_bromideC0.01
 
         This helper matches the base reagent name before the concentration
-        marker and returns the deck concentration from reagent_df.
+        marker and returns the deck concentration from reagent_df. Multiple
+        same-name source containers are supported when they contain the same
+        stock concentration. The robot represents those containers as a
+        MultiContainer and switches between them during aspiration when the
+        current tube becomes insufficient. Auto concentration-to-volume
+        calculations therefore use their shared stock concentration.
+
+        Multiple containers with different stock concentrations are rejected
+        deliberately. A single Auto variable represents one concentration
+        dimension, so silently choosing one concentration would produce
+        incorrect transfer-volume and feasibility calculations.
 
         params:
             str reagent_name:
@@ -18183,9 +18193,13 @@ class AutoContr(Controller):
         '''
         reagent_df = self.robo_params['reagent_df']
 
-        matching_concs = []
+        matching_sources = []
 
-        for reagent_container_name in reagent_df.index:
+        # Iterate over rows rather than looking each name up with ``.loc``.
+        # ``.loc[name, 'conc']`` returns a Series when same-name backup tubes
+        # create a duplicate reagent_df index, which is a supported robot-side
+        # MultiContainer configuration rather than an invalid spreadsheet.
+        for reagent_container_name, reagent_row in reagent_df.iterrows():
             reagent_container_name = str(reagent_container_name)
 
             if 'C' in reagent_container_name:
@@ -18194,22 +18208,62 @@ class AutoContr(Controller):
                 base_name = reagent_container_name
 
             if base_name == reagent_name:
-                matching_concs.append(float(reagent_df.loc[reagent_container_name, 'conc']))
+                try:
+                    stock_conc = float(reagent_row['conc'])
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "Could not parse stock concentration for variable "
+                        f"reagent {reagent_name!r} from source container "
+                        f"{reagent_container_name!r}."
+                    )
 
-        if len(matching_concs) == 0:
+                if not math.isfinite(stock_conc) or stock_conc <= 0.0:
+                    raise ValueError(
+                        "Stock concentration for variable reagent "
+                        f"{reagent_name!r} in source container "
+                        f"{reagent_container_name!r} must be finite and "
+                        f"greater than zero. Received {stock_conc!r}."
+                    )
+
+                matching_sources.append((
+                    reagent_container_name,
+                    reagent_row.get('deck_pos', None),
+                    reagent_row.get('loc', None),
+                    stock_conc
+                ))
+
+        if len(matching_sources) == 0:
             raise ValueError(
                 f"Could not find stock concentration for variable reagent "
                 f"{reagent_name} in reagent_df."
             )
 
-        if len(matching_concs) > 1:
+        reference_conc = matching_sources[0][3]
+        inconsistent_sources = [
+            source
+            for source in matching_sources[1:]
+            if not math.isclose(
+                source[3],
+                reference_conc,
+                rel_tol=1e-9,
+                abs_tol=1e-12
+            )
+        ]
+
+        if inconsistent_sources:
+            source_details = '; '.join(
+                f"{name} at deck {deck_pos}, {loc}: {conc:g}"
+                for name, deck_pos, loc, conc in matching_sources
+            )
             raise ValueError(
-                f"Found multiple stock concentrations for variable reagent "
-                f"{reagent_name}: {matching_concs}. The true-zero debug export "
-                f"currently expects one stock concentration per variable reagent."
+                "Variable reagent "
+                f"{reagent_name!r} has source containers with different "
+                "stock concentrations. A single Auto variable reagent must "
+                "use one stock concentration so concentration-to-volume and "
+                f"feasibility calculations remain valid. Sources: {source_details}."
             )
 
-        return matching_concs[0]
+        return reference_conc
 
     def _get_fixed_reagent_volumes(self):
         '''
