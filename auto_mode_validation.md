@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-21
+**Updated through:** 2026-07-22
 
 ---
 
@@ -67,11 +67,16 @@ target while retaining condition-level replicate QC, cumulative GP history,
 true-zero masks, water/overflow feasibility, and controller-owned stopping.
 
 The optimizer and protocol path accept a general number of variable reagents.
-GP-surface visualizations are specialized for two and three variable reagents;
-dimension-aware design-space visualizations additionally support one variable,
-four through six variables, and seven or more variables. Higher-dimensional
-plots are projections or summaries, not a claim that a two-dimensional image
-fully represents the corresponding chemistry space.
+Two-variable GP-surface visualizations remain direct physical concentration
+maps. The established three-variable conditional slice atlases are retained.
+For four or more variable reagents, Auto-RTG now generates every two-reagent
+conditional GP slice, freezing all remaining reagents at one shared
+QC-aware reference recipe (the best QC-approved observed condition when
+available). These are paginated into readable atlases and saved individually,
+alongside mean, uncertainty, target-probability, and feasibility-overlay
+variants. Higher-dimensional plots are conditional views, projections, or
+summaries; they do not claim that a two-dimensional image fully represents the
+corresponding chemistry space.
 
 The active branch also supports ordered acquisition portfolios. A `core3`
 batch compares `exploit`, `explore`, and `balanced` selections from the same
@@ -94,6 +99,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Configurable condition target tolerance and replicate-SD target-decision gate | Implemented | Header and target-decision regression tests |
 | Two-variable GP mean/uncertainty heatmaps and matching feasibility overlays | Implemented | Static/synthetic orientation, overlay, and rendering-semantics tests |
 | Three-variable mean, uncertainty, target-probability, and feasibility slice atlases | Implemented | Static/synthetic conditional-slice and tolerance-propagation tests; controlled debug-output review |
+| Four-or-more-variable all-pair conditional GP slice atlases and standalone slices | Implemented | Synthetic four-variable pair/held-recipe and rendering/path validation; full hardware-free test suite |
 | Dimension-aware design-space plots and portfolio trace with mode-specific markers | Implemented | Isolated plot-classification and marker/error-bar legend tests |
 | Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
@@ -250,17 +256,34 @@ Plots/
   gp_surfaces/
     2d/
       mean/
+        atlases/
       uncertainty/
-      .../feasibility_overlays/
+        atlases/
+      {field}/feasibility_overlays/
+        atlases/
     3d/
-      mean/
-      uncertainty/
-      target_probability/
+      {mean, uncertainty, target_probability}/
         atlases/
         conditional_slices/
-        feasibility_overlays/conditional_slices/
+        feasibility_overlays/
+          atlases/
+          conditional_slices/
+    {4d-and-higher}/
+      {mean, uncertainty, target_probability}/
+        atlases/
+        conditional_slices/
+        feasibility_overlays/
+          atlases/
+          conditional_slices/
   auto_plot_manifest.csv
 ```
+
+All GP-surface artifacts now use the same directory vocabulary. An `atlases`
+folder contains the complete surface for that field (a single 2D map, a 3D
+three-slice atlas, or a paginated higher-dimensional atlas); a
+`conditional_slices` folder contains individual held-recipe views; and
+`feasibility_overlays` mirrors the same distinction for physical-constraint
+diagnostics. Existing filenames remain stable for report compatibility.
 
 For each three-variable plot stage, the five established multi-panel slice
 atlases are preserved. Fifteen standalone conditional slices are added: one
@@ -277,8 +300,8 @@ recipe generation, or robot execution. They add expected rendering time.
 | 1 | Seed and full 1D design-space strip plots. | Direct physical concentration axis. |
 | 2 | Square seed/full design-space plots; GP mean and uncertainty heatmaps; separate feasibility-overlay versions of those heatmaps. | Both axes are physical reagent concentrations. The original and overlay figures remain distinct artifacts. |
 | 3 | Pairwise and cubic seed/full design-space plots; conditional mean, uncertainty, target-probability, and feasibility slice atlases plus standalone slices. | Each GP slice holds one reagent at a stated physical concentration while displaying the other two. It is a conditional view, not a full 3D response surface. |
-| 4–6 | Complete pairwise-projection and parallel-coordinate seed/full design-space plots. | Projections show coverage, not a complete multidimensional response surface. |
-| 7+ | Compact pairwise, parallel-coordinate, and two-component PCA seed/full design-space plots. | PCA axes are display coordinates rather than physical reagent axes. |
+| 4–6 | Complete pairwise-projection and parallel-coordinate seed/full design-space plots, plus every two-reagent conditional GP slice as paginated atlases and standalone views. | Each slice holds all non-displayed reagents at one stated shared QC-aware reference recipe; projections and slices do not show a complete multidimensional response surface. |
+| 7+ | Compact pairwise, parallel-coordinate, and two-component PCA seed/full design-space plots, plus paginated all-pair conditional GP slice atlases and standalone views. | PCA axes are display coordinates rather than physical reagent axes. Conditional-slice count grows as D choose 2, so plot generation time and output volume increase with dimension. |
 
 Portfolio runs also produce an acquisition trace alongside the ordinary
 progress and replicate plots. The trace uses mode-specific markers for

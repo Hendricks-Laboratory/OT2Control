@@ -4241,6 +4241,12 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
             '_get_auto_target_tolerance_nm',
             '_calculate_auto_target_probability'
         ])
+        cls.GeneralSliceController = _load_auto_controller_methods([
+            '_get_auto_design_bound_value',
+            '_get_auto_target_tolerance_nm',
+            '_calculate_auto_target_probability',
+            '_build_auto_conditional_slice_panel_data'
+        ])
 
     def test_batch_prediction_converts_mean_and_standard_deviation_units(self):
         class FakeGp:
@@ -4367,6 +4373,85 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         controller = self.SliceController()
         controller.robo_params = {'target_tolerance_nm': 7.5}
         self.assertEqual(controller._get_auto_target_tolerance_nm(), 7.5)
+
+    def test_generalized_slice_data_varies_each_pair_and_holds_all_others(self):
+        '''Four-variable slices must evaluate full recipes with two holds.'''
+        class FakeModel:
+            variable_reagents = ['A', 'B', 'C', 'D']
+
+            def predict_lambda_distribution_nm_batch(self, recipes):
+                recipes = np.asarray(recipes, dtype=float)
+                weights = np.asarray([1.0, 2.0, 4.0, 8.0])
+                return (
+                    600.0 + 100.0 * np.dot(recipes, weights),
+                    np.full(recipes.shape[0], 5.0)
+                )
+
+            def get_candidate_volume_balance_for_plotting(self, recipe):
+                recipe = np.asarray(recipe, dtype=float)
+                transfer_volumes = {
+                    reagent_name: float(value * 100.0)
+                    for reagent_name, value in zip(
+                        self.variable_reagents,
+                        recipe
+                    )
+                }
+                water_volume = 200.0 - sum(transfer_volumes.values())
+                variable_transfers_executable = all(
+                    value == 0.0 or value >= 5.0
+                    for value in transfer_volumes.values()
+                )
+                return {
+                    'volume_feasible': (
+                        variable_transfers_executable
+                        and (water_volume == 0.0 or water_volume >= 5.0)
+                    ),
+                    'water_volume': water_volume,
+                    'variable_transfer_volumes': transfer_volumes
+                }
+
+        controller = self.GeneralSliceController()
+        controller.variable_reagents = ['A', 'B', 'C', 'D']
+        controller.min_conc = [0.0, 0.0, 0.0, 0.0]
+        controller.max_conc = [1.0, 1.0, 1.0, 1.0]
+        controller.robo_params = {'target_tolerance_nm': 10.0}
+        controller.getModelInfo = lambda: {'target': 625.0}
+        controller.auto_model_performance_rows = [{
+            'A_concentration': 0.1,
+            'B_concentration': 0.2,
+            'C_concentration': 0.3,
+            'D_concentration': 0.4,
+            'target_error_nm': 1.0,
+            'use_for_model_training': True,
+            'eligible_for_target_incumbent': True
+        }]
+
+        slice_data = controller._build_auto_conditional_slice_panel_data(
+            model=FakeModel(),
+            grid_size=21,
+            feasibility_grid_size=21
+        )
+
+        self.assertEqual(len(slice_data['panel_data']), 6)
+        self.assertEqual(
+            [(panel['x_index'], panel['y_index'])
+             for panel in slice_data['panel_data']],
+            [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+        )
+
+        first_panel = slice_data['panel_data'][0]
+        self.assertEqual(first_panel['held_indices'], (2, 3))
+        self.assertEqual(
+            first_panel['held_recipe'],
+            {'C': 0.3, 'D': 0.4}
+        )
+        # The first pixel varies A and B at zero while C and D remain at the
+        # selected reference condition: 600 + 100 * (4*.3 + 8*.4).
+        self.assertAlmostEqual(first_panel['mean_nm'][0, 0], 1040.0)
+        self.assertEqual(first_panel['mean_nm'].shape, (21, 21))
+        self.assertEqual(first_panel['feasibility_mask'].shape, (21, 21))
+        self.assertTrue(first_panel['feasibility_mask'][0, 0])
+        self.assertFalse(first_panel['feasibility_mask'][-1, -1])
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):

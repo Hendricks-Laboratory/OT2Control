@@ -8541,11 +8541,13 @@ class AutoContr(Controller):
             category_parts = ['gp_surfaces', '2d', 'mean']
             if 'feasibility' in filename:
                 category_parts.append('feasibility_overlays')
+            category_parts.append('atlases')
             category = os.path.join(*category_parts)
         elif filename.startswith('gpr_uncertainty'):
             category_parts = ['gp_surfaces', '2d', 'uncertainty']
             if 'feasibility' in filename:
                 category_parts.append('feasibility_overlays')
+            category_parts.append('atlases')
             category = os.path.join(*category_parts)
         elif filename.startswith('gpr_3d_'):
             if filename.startswith('gpr_3d_target_probability'):
@@ -8563,7 +8565,7 @@ class AutoContr(Controller):
             elif 'feasibility' in filename:
                 category = os.path.join(
                     'gp_surfaces', '3d', field_name,
-                    'feasibility_overlays'
+                    'feasibility_overlays', 'atlases'
                 )
             elif is_conditional_slice:
                 category = os.path.join(
@@ -8572,6 +8574,46 @@ class AutoContr(Controller):
             else:
                 category = os.path.join(
                     'gp_surfaces', '3d', field_name, 'atlases'
+                )
+        elif (
+            re.match(r'^gpr_[0-9]+d_', filename)
+            and int(re.match(r'^gpr_([0-9]+)d_', filename).group(1)) >= 4
+        ):
+            dimension_match = re.match(r'^gpr_([0-9]+)d_', filename)
+            dimension_label = dimension_match.group(1) + 'd'
+            if '_target_probability_' in filename:
+                field_name = 'target_probability'
+            elif '_uncertainty_' in filename:
+                field_name = 'uncertainty'
+            else:
+                field_name = 'mean'
+
+            # Higher-dimensional atlas files contain ``conditional_slices``
+            # in their descriptive name, whereas standalone files contain
+            # ``_slice__``. Keep those artifacts in distinct directories so
+            # an atlas is never mistaken for one physical conditional view.
+            is_standalone_slice = (
+                '_slice__' in filename
+                or '_slice_feasibility__' in filename
+            )
+            if 'feasibility' in filename and is_standalone_slice:
+                category = os.path.join(
+                    'gp_surfaces', dimension_label, field_name,
+                    'feasibility_overlays', 'conditional_slices'
+                )
+            elif 'feasibility' in filename:
+                category = os.path.join(
+                    'gp_surfaces', dimension_label, field_name,
+                    'feasibility_overlays', 'atlases'
+                )
+            elif is_standalone_slice:
+                category = os.path.join(
+                    'gp_surfaces', dimension_label, field_name,
+                    'conditional_slices'
+                )
+            else:
+                category = os.path.join(
+                    'gp_surfaces', dimension_label, field_name, 'atlases'
                 )
         elif (
             filename.startswith('initial_maximin_seed_design_')
@@ -8642,6 +8684,10 @@ class AutoContr(Controller):
                 r'__hold--(.+?)--([0-9.eE+-]+)mM',
                 filename
             )
+            displayed_pair_match = re.search(
+                r'__x--(.+?)__y--(.+?)__reference_recipe',
+                filename
+            )
 
             manifest_rows.append({
                 'generated_at_utc': datetime.datetime.utcnow().isoformat() + 'Z',
@@ -8659,6 +8705,26 @@ class AutoContr(Controller):
                     float(slice_match.group(2))
                     if slice_match is not None
                     else None
+                ),
+                # Higher-dimensional conditional slices hold more than one
+                # reagent. Their full values are printed on the plot itself;
+                # the manifest records the displayed pair and the shared,
+                # QC-aware reference-recipe convention without forcing long
+                # multi-reagent values into filenames or legacy columns.
+                'slice_x_reagent': (
+                    displayed_pair_match.group(1)
+                    if displayed_pair_match is not None
+                    else None
+                ),
+                'slice_y_reagent': (
+                    displayed_pair_match.group(2)
+                    if displayed_pair_match is not None
+                    else None
+                ),
+                'slice_reference': (
+                    'shared_qc_aware_reference_recipe'
+                    if displayed_pair_match is not None
+                    else None
                 )
             })
 
@@ -8670,7 +8736,21 @@ class AutoContr(Controller):
             self.plot_path,
             'auto_plot_manifest.csv'
         )
-        pd.DataFrame(manifest_rows).to_csv(
+        manifest_dataframe = pd.DataFrame(manifest_rows)
+
+        # New runs receive the richer higher-dimensional columns. When an
+        # older manifest already exists (for example after resuming a legacy
+        # output directory), write only its established header rather than
+        # shifting columns in an append-only CSV.
+        if os.path.exists(manifest_path):
+            existing_columns = list(
+                pd.read_csv(manifest_path, nrows=0).columns
+            )
+            manifest_dataframe = manifest_dataframe.reindex(
+                columns=existing_columns
+            )
+
+        manifest_dataframe.to_csv(
             manifest_path,
             mode='a',
             header=not os.path.exists(manifest_path),
@@ -10282,15 +10362,6 @@ class AutoContr(Controller):
             ha='center',
             fontsize=font_sizes['compact_axis_label']
         )
-
-        # Keep the outer reagent labels inside the widened plotting frame.
-        # Centered intermediate labels avoid the lower-left collision between
-        # a long first reagent name and the normalized-concentration ylabel.
-        tick_labels = ax.get_xticklabels()
-
-        if len(tick_labels) > 0:
-            tick_labels[0].set_ha('left')
-            tick_labels[-1].set_ha('right')
 
         ax.set_ylabel(
             'Normalized concentration (executable range)',
@@ -12613,6 +12684,54 @@ class AutoContr(Controller):
                     )
                 )
 
+        elif len(getattr(self, 'variable_reagents', [])) >= 4:
+            n_conditional_dimensions = len(self.variable_reagents)
+            lines.append('### Final Conditional GP Slice Atlases')
+            lines.append('')
+            lines.append(
+                'These are conditional two-reagent slices through the '
+                f'{n_conditional_dimensions}-reagent fitted GP. Every panel '
+                'varies its displayed pair and holds all remaining reagents '
+                'at the same renderer-reported reference recipe (best '
+                'QC-approved condition when available). Atlas pages are '
+                'paginated for readability; standalone views with the full '
+                'held-recipe annotation are available in the conditional '
+                'slices folders.'
+            )
+            lines.append('')
+            for field_name, plot_title, plot_caption in (
+                (
+                    'mean',
+                    'Conditional GP Mean Slices — Atlas Page 1',
+                    'Predicted lambda-max conditional slices. Additional '
+                    'pages and separate feasibility-overlay views are listed '
+                    'in the Auto plot manifest.'
+                ),
+                (
+                    'uncertainty',
+                    'Conditional GP Uncertainty Slices — Atlas Page 1',
+                    'Predictive GP standard-deviation conditional slices on '
+                    'a shared nanometer scale.'
+                ),
+                (
+                    'target_probability',
+                    'Conditional Target-Tolerance Probability Slices — '
+                    'Atlas Page 1',
+                    'Probability of falling within the same target tolerance '
+                    'used by controller stopping.'
+                )
+            ):
+                lines.extend(
+                    self._auto_report_plot_markdown_if_exists(
+                        plot_filename=(
+                            f'gpr_{n_conditional_dimensions}d_{field_name}_'
+                            'conditional_slices_page_01_final.png'
+                        ),
+                        title=plot_title,
+                        caption=plot_caption
+                    )
+                )
+
         seed_design_plot_lines = []
         exploration_design_plot_lines = []
 
@@ -13208,6 +13327,401 @@ class AutoContr(Controller):
             )
 
         return np.clip(probability, 0.0, 1.0)
+
+    def _build_auto_conditional_slice_panel_data(
+        self,
+        model,
+        grid_size=100,
+        feasibility_grid_size=None
+    ):
+        '''
+        Builds read-only two-dimensional conditional GP slice data for every
+        reagent pair in an Auto run with three or more variable reagents.
+
+        Each panel varies one pair of variable reagents over their configured
+        executable concentration ranges. Every remaining reagent is held at
+        the same documented reference recipe: the best QC-approved observed
+        condition when one exists, otherwise the first complete observed
+        condition. This is a conditional view of a D-dimensional GP, not a
+        projection or marginalization of the omitted dimensions.
+
+        The returned data include ordinary-grid GP mean, predictive standard
+        deviation, and target-tolerance probability, plus a denser independent
+        feasibility grid. Feasibility is evaluated through OptimizationModel's
+        authoritative volume-balance helper; this renderer never repairs a
+        recipe or changes model, acquisition, QC, or robot-facing state.
+
+        params:
+            OptimizationModel model:
+                Fitted model exposing the read-only batch-prediction and
+                feasibility helpers.
+
+            int grid_size:
+                Points along each displayed reagent axis. The production
+                renderer uses 100, matching the existing 3D slice density.
+
+            int or None feasibility_grid_size:
+                Optional dense grid size used only for physical overlays.
+                None preserves the established max(401, grid_size) behavior.
+                The optional value supports small hardware-free synthetic
+                tests without weakening production rendering density.
+
+        returns:
+            dict:
+                Complete conditional-slice metadata and panel arrays. Each
+                panel contains x/y reagent indices, all held indices, physical
+                axes, GP fields, and feasibility fields.
+        '''
+        reagent_names = [
+            str(reagent_name)
+            for reagent_name in list(
+                getattr(self, 'variable_reagents', [])
+            )
+        ]
+        n_dimensions = len(reagent_names)
+
+        if n_dimensions < 3:
+            raise ValueError(
+                "Conditional GP slice plots require at least three variable "
+                "reagents."
+            )
+
+        if model is None:
+            raise ValueError(
+                "Conditional GP slice plots require an initialized "
+                "OptimizationModel."
+            )
+
+        try:
+            grid_size = int(grid_size)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Conditional GP slice grid_size must be an integer."
+            )
+
+        if grid_size < 21:
+            raise ValueError(
+                "Conditional GP slice grid_size must be at least 21 for a "
+                "useful conditional map."
+            )
+
+        if feasibility_grid_size is None:
+            feasibility_grid_size = max(401, grid_size)
+
+        try:
+            feasibility_grid_size = int(feasibility_grid_size)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Conditional GP feasibility_grid_size must be an integer."
+            )
+
+        if feasibility_grid_size < grid_size:
+            raise ValueError(
+                "Conditional GP feasibility_grid_size must be at least "
+                "grid_size."
+            )
+
+        predict_batch = getattr(
+            model,
+            'predict_lambda_distribution_nm_batch',
+            None
+        )
+        balance_for_plotting = getattr(
+            model,
+            'get_candidate_volume_balance_for_plotting',
+            None
+        )
+
+        if not callable(predict_batch) or not callable(balance_for_plotting):
+            raise AttributeError(
+                "Conditional GP slice plots require the read-only batch-"
+                "prediction and feasibility helpers supplied by "
+                "OptimizationModel."
+            )
+
+        bounds = []
+        for reagent_index, reagent_name in enumerate(reagent_names):
+            lower_bound = self._get_auto_design_bound_value(
+                self.min_conc,
+                reagent_index,
+                reagent_name
+            )
+            upper_bound = self._get_auto_design_bound_value(
+                self.max_conc,
+                reagent_index,
+                reagent_name
+            )
+
+            if (
+                not np.isfinite(lower_bound)
+                or not np.isfinite(upper_bound)
+                or upper_bound <= lower_bound
+            ):
+                raise ValueError(
+                    "Conditional GP slice plots require finite increasing "
+                    f"concentration bounds for {reagent_name}."
+                )
+
+            bounds.append((float(lower_bound), float(upper_bound)))
+
+        target_nm = float(self.getModelInfo()['target'])
+        tolerance_nm = self._get_auto_target_tolerance_nm()
+
+        # Prefer one QC-approved condition for every panel so all slices are
+        # anchored to the same full physical recipe and remain comparable.
+        ranked_rows = []
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            values = []
+            for reagent_name in reagent_names:
+                try:
+                    value = float(row.get(f'{reagent_name}_concentration'))
+                except (TypeError, ValueError):
+                    value = np.nan
+                values.append(value)
+
+            if not np.all(np.isfinite(values)):
+                continue
+
+            try:
+                target_error = float(row.get('target_error_nm'))
+            except (TypeError, ValueError):
+                target_error = np.inf
+
+            is_qc_approved = bool(
+                row.get('use_for_model_training', False)
+                and row.get('eligible_for_target_incumbent', False)
+                and math.isfinite(target_error)
+            )
+            ranked_rows.append((not is_qc_approved, target_error, values))
+
+        if len(ranked_rows) == 0:
+            raise ValueError(
+                "Conditional GP slice plots require at least one complete "
+                "observed condition to define a scientifically interpretable "
+                "slice."
+            )
+
+        ranked_rows.sort(key=lambda item: (item[0], item[1]))
+        reference_recipe = np.asarray(ranked_rows[0][2], dtype=float)
+        reference_label = (
+            'best QC-approved observed condition'
+            if not ranked_rows[0][0]
+            else 'first available observed condition'
+        )
+
+        reference_normalized = np.asarray([
+            (reference_recipe[index] - bounds[index][0])
+            / (bounds[index][1] - bounds[index][0])
+            for index in range(n_dimensions)
+        ], dtype=float)
+
+        if not np.all(
+            np.isfinite(reference_normalized)
+            & (reference_normalized >= -1e-9)
+            & (reference_normalized <= 1.0 + 1e-9)
+        ):
+            raise ValueError(
+                "The selected conditional-slice reference recipe lies "
+                "outside the configured Auto concentration bounds."
+            )
+
+        observed_conditions = []
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            if not row.get('use_for_model_training', False):
+                continue
+
+            observed_recipe = []
+            for reagent_name in reagent_names:
+                try:
+                    concentration = float(
+                        row.get(f'{reagent_name}_concentration')
+                    )
+                except (TypeError, ValueError):
+                    concentration = np.nan
+                observed_recipe.append(concentration)
+
+            if not np.all(np.isfinite(observed_recipe)):
+                continue
+
+            normalized_recipe = np.asarray([
+                (observed_recipe[index] - bounds[index][0])
+                / (bounds[index][1] - bounds[index][0])
+                for index in range(n_dimensions)
+            ], dtype=float)
+
+            if np.all(np.isfinite(normalized_recipe)):
+                observed_conditions.append({
+                    'physical_recipe': np.asarray(
+                        observed_recipe,
+                        dtype=float
+                    ),
+                    'normalized_recipe': normalized_recipe
+                })
+
+        normalized_axis_values = np.linspace(0.0, 1.0, grid_size)
+        feasibility_axis_values = np.linspace(
+            0.0,
+            1.0,
+            feasibility_grid_size
+        )
+        slice_half_width = 0.5 / float(grid_size - 1)
+
+        def _evaluate_slice_feasibility(recipes, grid_shape):
+            '''Evaluates raw full-recipe feasibility without repairing zero.'''
+            feasible = np.zeros(recipes.shape[0], dtype=bool)
+            water_volume = np.full(recipes.shape[0], np.nan, dtype=float)
+            transfer_volume_by_reagent = {
+                reagent_name: np.full(
+                    recipes.shape[0],
+                    np.nan,
+                    dtype=float
+                )
+                for reagent_name in reagent_names
+            }
+
+            for point_index, recipe in enumerate(recipes):
+                balance = balance_for_plotting(recipe)
+                feasible[point_index] = bool(balance['volume_feasible'])
+                water_volume[point_index] = float(balance['water_volume'])
+
+                for reagent_name in reagent_names:
+                    transfer_volume_by_reagent[reagent_name][
+                        point_index
+                    ] = float(
+                        balance['variable_transfer_volumes'][reagent_name]
+                    )
+
+            return {
+                'feasible': feasible.reshape(grid_shape),
+                'water_volume_uL': water_volume.reshape(grid_shape),
+                'transfer_volume_uL_by_reagent': {
+                    reagent_name: transfer_volume_grid.reshape(grid_shape)
+                    for reagent_name, transfer_volume_grid
+                    in transfer_volume_by_reagent.items()
+                }
+            }
+
+        panel_data = []
+        for x_index in range(n_dimensions):
+            for y_index in range(x_index + 1, n_dimensions):
+                held_indices = tuple(
+                    index
+                    for index in range(n_dimensions)
+                    if index not in (x_index, y_index)
+                )
+                x_normalized, y_normalized = np.meshgrid(
+                    normalized_axis_values,
+                    normalized_axis_values,
+                    indexing='xy'
+                )
+                recipes = np.tile(
+                    reference_normalized,
+                    (x_normalized.size, 1)
+                )
+                recipes[:, x_index] = x_normalized.ravel(order='C')
+                recipes[:, y_index] = y_normalized.ravel(order='C')
+
+                predicted_mean, predicted_std = predict_batch(recipes)
+                predicted_mean = np.asarray(
+                    predicted_mean,
+                    dtype=float
+                ).reshape(x_normalized.shape)
+                predicted_std = np.asarray(
+                    predicted_std,
+                    dtype=float
+                ).reshape(x_normalized.shape)
+
+                ordinary_feasibility = _evaluate_slice_feasibility(
+                    recipes,
+                    x_normalized.shape
+                )
+
+                feasibility_x_normalized, feasibility_y_normalized = (
+                    np.meshgrid(
+                        feasibility_axis_values,
+                        feasibility_axis_values,
+                        indexing='xy'
+                    )
+                )
+                feasibility_recipes = np.tile(
+                    reference_normalized,
+                    (feasibility_x_normalized.size, 1)
+                )
+                feasibility_recipes[:, x_index] = (
+                    feasibility_x_normalized.ravel(order='C')
+                )
+                feasibility_recipes[:, y_index] = (
+                    feasibility_y_normalized.ravel(order='C')
+                )
+                dense_feasibility = _evaluate_slice_feasibility(
+                    feasibility_recipes,
+                    feasibility_x_normalized.shape
+                )
+
+                panel_data.append({
+                    'x_index': x_index,
+                    'y_index': y_index,
+                    'held_indices': held_indices,
+                    'held_recipe': {
+                        reagent_names[index]: float(reference_recipe[index])
+                        for index in held_indices
+                    },
+                    'x_physical': (
+                        bounds[x_index][0]
+                        + x_normalized * (
+                            bounds[x_index][1] - bounds[x_index][0]
+                        )
+                    ),
+                    'y_physical': (
+                        bounds[y_index][0]
+                        + y_normalized * (
+                            bounds[y_index][1] - bounds[y_index][0]
+                        )
+                    ),
+                    'mean_nm': predicted_mean,
+                    'std_nm': predicted_std,
+                    'probability': self._calculate_auto_target_probability(
+                        predicted_mean,
+                        predicted_std,
+                        target_nm,
+                        tolerance_nm
+                    ),
+                    'feasible': ordinary_feasibility['feasible'],
+                    'feasibility_x_physical': (
+                        bounds[x_index][0]
+                        + feasibility_x_normalized * (
+                            bounds[x_index][1] - bounds[x_index][0]
+                        )
+                    ),
+                    'feasibility_y_physical': (
+                        bounds[y_index][0]
+                        + feasibility_y_normalized * (
+                            bounds[y_index][1] - bounds[y_index][0]
+                        )
+                    ),
+                    'feasibility_mask': dense_feasibility['feasible'],
+                    'feasibility_water_volume_uL': (
+                        dense_feasibility['water_volume_uL']
+                    ),
+                    'feasibility_transfer_volume_uL_by_reagent': (
+                        dense_feasibility[
+                            'transfer_volume_uL_by_reagent'
+                        ]
+                    )
+                })
+
+        return {
+            'reagent_names': reagent_names,
+            'bounds': bounds,
+            'target_nm': target_nm,
+            'tolerance_nm': tolerance_nm,
+            'reference_recipe': reference_recipe,
+            'reference_normalized': reference_normalized,
+            'reference_label': reference_label,
+            'observed_conditions': observed_conditions,
+            'slice_half_width': slice_half_width,
+            'panel_data': panel_data
+        }
 
     def plot_3D_GPR_orthogonal_slices(
         self,
@@ -14397,6 +14911,605 @@ class AutoContr(Controller):
 
         return generated_plot_paths
 
+    def plot_higher_dimensional_GPR_conditional_slices(
+        self,
+        model,
+        batch_number=None,
+        final_snapshot=False,
+        grid_size=100
+    ):
+        '''
+        Saves conditional 2D GP heatmaps for every pair of reagents in a
+        four-or-more-variable Auto run.
+
+        Every panel is a full-dimensional conditional evaluation: its two
+        displayed reagents vary, while all remaining reagents are frozen at
+        one QC-aware reference recipe. Primary mean, uncertainty, and target-
+        probability atlases remain separate from mean/uncertainty feasibility
+        overlays, matching the established 3D and 2D conventions.
+
+        Atlases are paginated at six panels per page so higher-dimensional
+        figures remain readable. Each pair is also exported as a standalone
+        poster-ready conditional slice. This method is observational only.
+        '''
+        terminal_verbosity = str(
+            getattr(self, 'robo_params', {}).get(
+                'auto_terminal_verbosity',
+                'standard'
+            )
+        ).strip().lower()
+        show_progress = terminal_verbosity in {'standard', 'diagnostic'}
+        configured_dimensions = len(
+            getattr(model, 'variable_reagents', [])
+        )
+        if configured_dimensions >= 4 and show_progress:
+            configured_pair_count = (
+                configured_dimensions * (configured_dimensions - 1)
+            ) // 2
+            print(
+                "<<controller>> preparing "
+                f"{configured_dimensions}D conditional GP slices for "
+                f"{configured_pair_count} displayed reagent pairs; please "
+                "wait"
+            )
+
+        slice_data = self._build_auto_conditional_slice_panel_data(
+            model=model,
+            grid_size=grid_size
+        )
+        reagent_names = slice_data['reagent_names']
+        n_dimensions = len(reagent_names)
+
+        if n_dimensions < 4:
+            print(
+                "<<controller>> skipping higher-dimensional conditional GP "
+                "slice plots because fewer than four variable reagents are "
+                "active"
+            )
+            return []
+
+        panel_data = slice_data['panel_data']
+        target_nm = slice_data['target_nm']
+        tolerance_nm = slice_data['tolerance_nm']
+        reference_recipe = slice_data['reference_recipe']
+        reference_label = slice_data['reference_label']
+        reference_normalized = slice_data['reference_normalized']
+        observed_conditions = slice_data['observed_conditions']
+        slice_half_width = slice_data['slice_half_width']
+        font_sizes = self._get_auto_design_plot_font_sizes()
+
+        # Higher-dimensional pages must remain presentation-readable. Do not
+        # shrink text to fit more chemistry into the same canvas; retain the
+        # established 3D print-safe sizes and modestly increase them as the
+        # held-recipe annotation becomes more information-dense. The layout
+        # below grows the canvas/header for that information instead.
+        readability_scale = 1.0 + min(
+            0.16,
+            0.025 * max(0, n_dimensions - 3)
+        )
+        readable_font_minima = {
+            'title': 15.0,
+            'axis_label': 13.0,
+            'tick_label': 11.0,
+            'legend': 10.0,
+            'annotation': 9.0,
+            'compact_axis_label': 11.0,
+            'compact_tick_label': 10.0
+        }
+        font_sizes = {
+            font_name: max(
+                font_value * readability_scale,
+                readable_font_minima.get(font_name, font_value)
+            )
+            for font_name, font_value in font_sizes.items()
+        }
+        generated_plot_paths = []
+
+        if final_snapshot:
+            final_suffix = 'final'
+        else:
+            if batch_number is None:
+                batch_number = getattr(self, 'batch_num', 0)
+            final_suffix = f'after_batch_{int(batch_number)}'
+
+        feasible_mean_values = np.concatenate([
+            panel['mean_nm'][panel['feasible']]
+            for panel in panel_data
+            if np.any(panel['feasible'])
+        ])
+        feasible_std_values = np.concatenate([
+            panel['std_nm'][panel['feasible']]
+            for panel in panel_data
+            if np.any(panel['feasible'])
+        ])
+
+        if feasible_mean_values.size == 0 or feasible_std_values.size == 0:
+            raise ValueError(
+                "No physically executable points were available for the "
+                "conditional GP slices."
+            )
+
+        mean_norm = plt.Normalize(
+            vmin=float(np.min(feasible_mean_values)),
+            vmax=float(np.max(feasible_mean_values))
+        )
+        max_std_nm = max(float(np.max(feasible_std_values)), 1.0)
+        field_definitions = (
+            (
+                'mean',
+                r'Predicted $\lambda_{max}$ (nm)',
+                lambda panel: panel['mean_nm'],
+                'inferno',
+                mean_norm,
+                f'Conditional GP mean; target = {target_nm:g} nm'
+            ),
+            (
+                'uncertainty',
+                'Predictive GP SD (nm)',
+                lambda panel: panel['std_nm'],
+                'viridis',
+                plt.Normalize(vmin=0.0, vmax=max_std_nm),
+                'Conditional GP predictive uncertainty'
+            ),
+            (
+                'target_probability',
+                'Probability of meeting target criterion',
+                lambda panel: panel['probability'],
+                'cividis',
+                plt.Normalize(vmin=0.0, vmax=1.0),
+                (
+                    'GP probability of meeting the controller stopping '
+                    f'criterion (target ± {tolerance_nm:g} nm)'
+                )
+            )
+        )
+        boundary_colors = (
+            '#009E73', '#CC79A7', '#E69F00', '#56B4E9',
+            '#D55E00', '#0072B2', '#999999', '#000000'
+        )
+
+        def _grid_spans_contour_level(grid, level):
+            finite_values = np.asarray(grid, dtype=float)
+            finite_values = finite_values[np.isfinite(finite_values)]
+            return (
+                finite_values.size > 0
+                and np.min(finite_values) < level
+                and np.max(finite_values) > level
+            )
+
+        def _near_slice_observation(observation, panel):
+            return all(
+                abs(
+                    observation['normalized_recipe'][held_index]
+                    - reference_normalized[held_index]
+                ) <= slice_half_width
+                for held_index in panel['held_indices']
+            )
+
+        def _is_reference_observation(observation):
+            return bool(np.allclose(
+                observation['physical_recipe'],
+                reference_recipe,
+                rtol=0.0,
+                atol=1.0e-12
+            ))
+
+        def _format_axis(axis):
+            axis.grid(False)
+            axis.tick_params(
+                axis='both', which='both', direction='out', top=False,
+                right=False, width=0.9,
+                labelsize=font_sizes['tick_label']
+            )
+            for spine in axis.spines.values():
+                spine.set_visible(True)
+                spine.set_linewidth(0.9)
+                spine.set_color('0.2')
+            self._apply_auto_design_square_box_aspect(axis)
+
+        def _center_atlas_axes_and_colorbar(axes, colorbar):
+            '''Centers a page's visible heatmaps and shared colorbar.'''
+            axes[0].figure.canvas.draw()
+            all_axes = list(axes) + [colorbar.ax]
+            group_left = min(axis.get_position().x0 for axis in all_axes)
+            group_right = max(axis.get_position().x1 for axis in all_axes)
+            horizontal_shift = 0.5 - (group_left + group_right) / 2.0
+
+            for axis in all_axes:
+                position = axis.get_position()
+                axis.set_position([
+                    position.x0 + horizontal_shift,
+                    position.y0,
+                    position.width,
+                    position.height
+                ])
+
+        def _held_recipe_text(panel, compact=False):
+            held_items = [
+                f'{reagent_names[index]} = '
+                f'{reference_recipe[index]:.4g} mM'
+                for index in panel['held_indices']
+            ]
+            separator = '; ' if compact else '\n'
+            return separator.join(held_items)
+
+        def _draw_feasibility_overlay(axis, panel, field_name):
+            axis.contourf(
+                panel['feasibility_x_physical'],
+                panel['feasibility_y_physical'],
+                (~panel['feasibility_mask']).astype(float),
+                levels=[0.5, 1.5], colors=['0.70'], alpha=0.55,
+                antialiased=True, corner_mask=False, zorder=2
+            )
+            water_grid = panel['feasibility_water_volume_uL']
+            if _grid_spans_contour_level(water_grid, 0.0):
+                axis.contour(
+                    panel['feasibility_x_physical'],
+                    panel['feasibility_y_physical'], water_grid,
+                    levels=[0.0], colors=['#0072B2'], linewidths=1.35,
+                    zorder=4
+                )
+            if _grid_spans_contour_level(water_grid, 5.0):
+                axis.contour(
+                    panel['feasibility_x_physical'],
+                    panel['feasibility_y_physical'], water_grid,
+                    levels=[5.0], colors=['#D55E00'], linewidths=1.35,
+                    linestyles='dashed', zorder=4
+                )
+            for reagent_index, reagent_name in enumerate(reagent_names):
+                transfer_grid = panel[
+                    'feasibility_transfer_volume_uL_by_reagent'
+                ][reagent_name]
+                if _grid_spans_contour_level(transfer_grid, 5.0):
+                    axis.contour(
+                        panel['feasibility_x_physical'],
+                        panel['feasibility_y_physical'], transfer_grid,
+                        levels=[5.0],
+                        colors=[
+                            boundary_colors[
+                                reagent_index % len(boundary_colors)
+                            ]
+                        ],
+                        linewidths=1.15, linestyles='dotted', zorder=4
+                    )
+            if (
+                field_name == 'mean'
+                and _grid_spans_contour_level(panel['mean_nm'], target_nm)
+            ):
+                axis.contour(
+                    panel['x_physical'], panel['y_physical'],
+                    panel['mean_nm'], levels=[target_nm], colors=['#000000'],
+                    linewidths=1.1, linestyles='dashdot', zorder=5
+                )
+
+        def _draw_panel(axis, panel, field_name, value_getter, colormap,
+                        norm, feasibility_overlay=False, compact=False,
+                        show_held_recipe=True):
+            image = axis.pcolormesh(
+                panel['x_physical'], panel['y_physical'],
+                value_getter(panel), shading='auto', cmap=colormap, norm=norm
+            )
+            if feasibility_overlay:
+                _draw_feasibility_overlay(axis, panel, field_name)
+
+            for observation in observed_conditions:
+                if not _near_slice_observation(observation, panel):
+                    continue
+                axis.scatter(
+                    observation['physical_recipe'][panel['x_index']],
+                    observation['physical_recipe'][panel['y_index']],
+                    marker='o', s=35, facecolors='white',
+                    edgecolors='#202020', linewidths=0.8,
+                    zorder=6 if feasibility_overlay else 4
+                )
+            axis.scatter(
+                reference_recipe[panel['x_index']],
+                reference_recipe[panel['y_index']], marker='*', s=105,
+                facecolors='#f2c14e', edgecolors='#1a1a1a', linewidths=0.8,
+                zorder=7 if feasibility_overlay else 5
+            )
+            axis.set_xlabel(
+                self._format_auto_design_axis_label(
+                    reagent_names[panel['x_index']]
+                ),
+                fontsize=(font_sizes['compact_axis_label'] if compact
+                          else font_sizes['axis_label'])
+            )
+            axis.set_ylabel(
+                self._format_auto_design_axis_label(
+                    reagent_names[panel['y_index']]
+                ),
+                fontsize=(font_sizes['compact_axis_label'] if compact
+                          else font_sizes['axis_label'])
+            )
+            if show_held_recipe:
+                held_recipe_title = '\n'.join(textwrap.wrap(
+                    'Hold: ' + _held_recipe_text(panel, compact=True),
+                    # Keep each title inside its own square heatmap. Longer
+                    # held-recipe lists wrap vertically instead of intruding
+                    # into a neighbor or the shared colorbar.
+                    width=30 if compact else 34
+                ))
+                axis.set_title(
+                    held_recipe_title,
+                    fontsize=(font_sizes['compact_axis_label'] if compact
+                              else font_sizes['axis_label']),
+                    pad=8
+                )
+            _format_axis(axis)
+            axis.set_xlim(
+                float(np.min(panel['x_physical'])),
+                float(np.max(panel['x_physical']))
+            )
+            axis.set_ylim(
+                float(np.min(panel['y_physical'])),
+                float(np.max(panel['y_physical']))
+            )
+            return image
+
+        def _observation_legend_handles(axis):
+            has_near_condition = any(
+                _near_slice_observation(observation, panel)
+                and not _is_reference_observation(observation)
+                for panel in panel_data
+                for observation in observed_conditions
+            )
+            handles = []
+            if has_near_condition:
+                near_handle, = axis.plot(
+                    [], [], marker='o', markersize=6,
+                    markerfacecolor='white', markeredgecolor='#202020',
+                    markeredgewidth=0.8, linestyle='None',
+                    label='Near-slice GP-training condition'
+                )
+                handles.append(near_handle)
+            reference_handle, = axis.plot(
+                [], [], marker='*', markersize=10,
+                markerfacecolor='#f2c14e', markeredgecolor='#1a1a1a',
+                markeredgewidth=0.8, linestyle='None',
+                label=(
+                    'Slice reference (best QC-approved condition)'
+                    if reference_label == 'best QC-approved observed condition'
+                    else 'Slice reference (first observed condition)'
+                )
+            )
+            handles.append(reference_handle)
+            return handles
+
+        def _feasibility_legend_handles(axis, field_name):
+            handles = [mpatches.Patch(
+                facecolor='0.70', alpha=0.55,
+                label='Excluded: overflow or non-executable transfer'
+            )]
+            water_grids = [
+                panel['feasibility_water_volume_uL']
+                for panel in panel_data
+            ]
+            if any(_grid_spans_contour_level(grid, 0.0)
+                   for grid in water_grids):
+                handle, = axis.plot(
+                    [], [], color='#0072B2', linewidth=1.35,
+                    label='Water = 0 uL boundary'
+                )
+                handles.append(handle)
+            if any(_grid_spans_contour_level(grid, 5.0)
+                   for grid in water_grids):
+                handle, = axis.plot(
+                    [], [], color='#D55E00', linewidth=1.35,
+                    linestyle='dashed', label='Water = 5 uL boundary'
+                )
+                handles.append(handle)
+            for reagent_index, reagent_name in enumerate(reagent_names):
+                if any(_grid_spans_contour_level(
+                        panel['feasibility_transfer_volume_uL_by_reagent'][
+                            reagent_name
+                        ], 5.0
+                       ) for panel in panel_data):
+                    handle, = axis.plot(
+                        [], [],
+                        color=boundary_colors[
+                            reagent_index % len(boundary_colors)
+                        ],
+                        linewidth=1.15, linestyle='dotted',
+                        label=f'{reagent_name} = 5 uL boundary'
+                    )
+                    handles.append(handle)
+            if field_name == 'mean' and any(
+                    _grid_spans_contour_level(panel['mean_nm'], target_nm)
+                    for panel in panel_data):
+                handle, = axis.plot(
+                    [], [], color='#000000', linewidth=1.1,
+                    linestyle='dashdot', label=f'Target = {target_nm:.0f} nm'
+                )
+                handles.append(handle)
+            return handles
+
+        def _safe_reagent_filename(reagent_name):
+            return re.sub(r'[^A-Za-z0-9]+', '_', str(reagent_name)).strip('_')
+
+        def _individual_filename(field_name, panel, feasibility_overlay):
+            overlay_suffix = '_feasibility' if feasibility_overlay else ''
+            return (
+                f'gpr_{n_dimensions}d_{field_name}_slice{overlay_suffix}'
+                f'__x--{_safe_reagent_filename(reagent_names[panel["x_index"]])}'
+                f'__y--{_safe_reagent_filename(reagent_names[panel["y_index"]])}'
+                f'__reference_recipe_{final_suffix}.png'
+            )
+
+        def _render_individual_slice(field_name, colorbar_label, value_getter,
+                                     colormap, norm, title, panel,
+                                     feasibility_overlay=False):
+            figure, axis = plt.subplots(
+                figsize=(8.4, 7.4 if feasibility_overlay else 6.5), dpi=300
+            )
+            figure.set_tight_layout(False)
+            image = _draw_panel(
+                axis, panel, field_name, value_getter, colormap, norm,
+                feasibility_overlay=feasibility_overlay, compact=False,
+                show_held_recipe=False
+            )
+            colorbar = figure.colorbar(image, ax=axis, fraction=0.046,
+                                       pad=0.05)
+            colorbar.set_label(colorbar_label, fontsize=font_sizes['axis_label'])
+            colorbar.ax.tick_params(labelsize=font_sizes['tick_label'], width=0.9)
+            figure.suptitle(
+                '\n'.join(textwrap.wrap(
+                    f'{title}: {reagent_names[panel["x_index"]]} vs '
+                    f'{reagent_names[panel["y_index"]]}', width=52
+                )),
+                fontsize=font_sizes['title'], fontweight='normal', y=0.97
+            )
+            legend_handles = _observation_legend_handles(axis)
+            if feasibility_overlay:
+                legend_handles = (
+                    _feasibility_legend_handles(axis, field_name)
+                    + legend_handles
+                )
+            figure.legend(
+                legend_handles,
+                [handle.get_label() for handle in legend_handles],
+                loc='upper center', bbox_to_anchor=(0.5, 0.88), ncol=2,
+                frameon=False, fontsize=font_sizes['legend'],
+                handlelength=1.5, handletextpad=0.45, columnspacing=0.8
+            )
+            figure.text(
+                0.5,
+                0.59 if feasibility_overlay else 0.69,
+                'Hold: ' + _held_recipe_text(panel, compact=True),
+                ha='center', va='center',
+                fontsize=font_sizes['axis_label']
+            )
+            figure.subplots_adjust(
+                left=0.12, right=0.90, bottom=0.13,
+                top=0.54 if feasibility_overlay else 0.64
+            )
+            output_path = self._get_auto_plot_output_path(
+                _individual_filename(field_name, panel, feasibility_overlay)
+            )
+            figure.savefig(output_path, dpi=300)
+            plt.close(figure)
+            return output_path
+
+        max_panels_per_page = 6
+        panel_pages = [
+            panel_data[start_index:start_index + max_panels_per_page]
+            for start_index in range(0, len(panel_data), max_panels_per_page)
+        ]
+        all_field_definitions = list(field_definitions) + [
+            definition for definition in field_definitions[:2]
+        ]
+
+        for field_index, definition in enumerate(all_field_definitions, start=1):
+            field_name, colorbar_label, value_getter, colormap, norm, title = definition
+            feasibility_overlay = field_index > len(field_definitions)
+            for page_index, page_panels in enumerate(panel_pages, start=1):
+                n_cols = min(3, len(page_panels))
+                n_rows = int(np.ceil(len(page_panels) / float(n_cols)))
+                max_held_title_lines = max(
+                    len(textwrap.wrap(
+                        'Hold: ' + _held_recipe_text(panel, compact=True),
+                        width=34
+                    ))
+                    for panel in page_panels
+                )
+                extra_held_title_lines = max(0, max_held_title_lines - 2)
+                # Preserve the established 3D atlas canvas width and print
+                # resolution. Additional pair rows increase the canvas height
+                # rather than shrinking each heatmap: every page therefore
+                # retains the readable panel scale of the validated 3D atlas.
+                figure_height = (
+                    5.8 + ((n_rows - 1) * 5.2)
+                    + (0.8 if feasibility_overlay else 0.0)
+                    + (0.35 * extra_held_title_lines)
+                )
+                figure, axes = plt.subplots(
+                    n_rows, n_cols,
+                    figsize=(18.2, figure_height), dpi=300,
+                    squeeze=False
+                )
+                figure.set_tight_layout(False)
+                axes = list(np.asarray(axes).reshape(-1))
+                image = None
+                for axis, panel in zip(axes, page_panels):
+                    image = _draw_panel(
+                        axis, panel, field_name, value_getter, colormap,
+                        norm, feasibility_overlay=feasibility_overlay,
+                        compact=False
+                    )
+                for axis in axes[len(page_panels):]:
+                    axis.set_visible(False)
+                visible_axes = axes[:len(page_panels)]
+                figure.subplots_adjust(
+                    left=0.07,
+                    right=0.92,
+                    bottom=0.15,
+                    top=(
+                        (0.74 if feasibility_overlay else 0.76)
+                        - (0.03 * extra_held_title_lines)
+                    ),
+                    hspace=0.64,
+                    wspace=0.38
+                )
+                colorbar = figure.colorbar(
+                    image,
+                    ax=visible_axes,
+                    shrink=0.91,
+                    pad=0.02
+                )
+                colorbar.set_label(
+                    colorbar_label, fontsize=font_sizes['axis_label']
+                )
+                colorbar.ax.tick_params(
+                    labelsize=font_sizes['tick_label'], width=0.9
+                )
+                _center_atlas_axes_and_colorbar(visible_axes, colorbar)
+                suffix = ' feasibility overlay' if feasibility_overlay else ''
+                figure.suptitle(
+                    f'{n_dimensions}D {title}{suffix} '
+                    f'(atlas page {page_index}/{len(panel_pages)})',
+                    fontsize=font_sizes['title'], fontweight='normal',
+                    y=0.97 if feasibility_overlay else 0.965
+                )
+                legend_handles = _observation_legend_handles(visible_axes[0])
+                if feasibility_overlay:
+                    legend_handles = (
+                        _feasibility_legend_handles(
+                            visible_axes[0], field_name
+                        ) + legend_handles
+                    )
+                figure.legend(
+                    legend_handles,
+                    [handle.get_label() for handle in legend_handles],
+                    loc='upper center', bbox_to_anchor=(0.5, 0.91),
+                    ncol=(3 if feasibility_overlay else len(legend_handles)),
+                    frameon=False, fontsize=font_sizes['legend'],
+                    handlelength=(1.7 if feasibility_overlay else 1.2),
+                    handletextpad=0.45, columnspacing=0.9
+                )
+                overlay_suffix = '_feasibility' if feasibility_overlay else ''
+                output_path = self._get_auto_plot_output_path(
+                    f'gpr_{n_dimensions}d_{field_name}_conditional_slices'
+                    f'{overlay_suffix}_page_{page_index:02d}_{final_suffix}.png'
+                )
+                figure.savefig(output_path, dpi=300)
+                plt.close(figure)
+                generated_plot_paths.append(output_path)
+
+            for panel in panel_data:
+                generated_plot_paths.append(_render_individual_slice(
+                    field_name, colorbar_label, value_getter, colormap, norm,
+                    title, panel, feasibility_overlay=feasibility_overlay
+                ))
+
+        if show_progress:
+            print(
+                "<<controller>> generated "
+                f"{len(generated_plot_paths)} {n_dimensions}D conditional "
+                "GP slice artifacts"
+            )
+
+        return generated_plot_paths
+
     def _update_auto_quit_from_condition_level_performance(
         self,
         model,
@@ -14714,7 +15827,7 @@ class AutoContr(Controller):
                 standard:
                     Refreshes the fitted two-dimensional GP prediction grid and
                     generates prediction and uncertainty heatmaps when there
-                    are exactly two variable reagents. For exactly three
+                    are exactly two variable reagents. For three or more
                     reagents, generates conditional mean, uncertainty, and
                     target-tolerance probability slice atlases instead.
 
@@ -14732,8 +15845,9 @@ class AutoContr(Controller):
                 final_only:
                     Generates the same final outputs. Two-variable runs first
                     refresh the fitted GP grid for one final heatmap pair;
-                    three-variable runs generate one final conditional-slice
-                    atlas set because per-batch plotting was suppressed.
+                    three-or-more-variable runs generate one final
+                    conditional-slice atlas set because per-batch plotting was
+                    suppressed.
 
                 off:
                     Generates no automatic plots or report.
@@ -14960,6 +16074,26 @@ class AutoContr(Controller):
                 final_snapshot=final_snapshot
             )
 
+        def _plot_higher_dimensional_gp_slices(
+            optimization_model,
+            plot_batch_number,
+            final_snapshot=False
+        ):
+            '''Generates read-only conditional GP slices for four-plus axes.'''
+            if optimization_model is None:
+                print(
+                    "<<controller warning>> skipping higher-dimensional "
+                    "conditional GP slice plots because no optimization "
+                    "model was supplied"
+                )
+                return []
+
+            return self.plot_higher_dimensional_GPR_conditional_slices(
+                model=optimization_model,
+                batch_number=plot_batch_number,
+                final_snapshot=final_snapshot
+            )
+
         if normalized_stage == 'after_measurement':
             _run_output_step(
                 (
@@ -15027,6 +16161,18 @@ class AutoContr(Controller):
                     )
                 )
 
+            elif n_variable_reagents >= 4:
+                _run_output_step(
+                    (
+                        f"{n_variable_reagents}D conditional GP slice "
+                        f"atlases after batch {completed_batch_number}"
+                    ),
+                    lambda: _plot_higher_dimensional_gp_slices(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number
+                    )
+                )
+
         elif normalized_stage == 'final':
             # final_only suppresses all per-batch GP plots, so create one final
             # fitted-model snapshot here when exactly two variables are used.
@@ -15058,6 +16204,22 @@ class AutoContr(Controller):
                 _run_output_step(
                     'final 3D conditional GP slice atlases',
                     lambda: _plot_3d_gp_slices(
+                        optimization_model=model,
+                        plot_batch_number=completed_batch_number,
+                        final_snapshot=True
+                    )
+                )
+
+            elif len(
+                getattr(
+                    self,
+                    'variable_reagents',
+                    []
+                )
+            ) >= 4:
+                _run_output_step(
+                    'final higher-dimensional conditional GP slice atlases',
+                    lambda: _plot_higher_dimensional_gp_slices(
                         optimization_model=model,
                         plot_batch_number=completed_batch_number,
                         final_snapshot=True
@@ -16414,33 +17576,18 @@ class AutoContr(Controller):
             linewidth=1.1,
             label=f'Target = {target_lambda:.0f} nm'
         )
-        # Keep the selection-mode key distinct from the measurement/model
-        # semantics. A single three-column legend cannot reliably fit the
-        # descriptive error-bar entries at poster-readable font sizes.
-        fig.legend(
-            mode_handles,
-            [handle.get_label() for handle in mode_handles],
-            loc='upper center',
-            bbox_to_anchor=(0.5, 0.940),
-            ncol=min(len(mode_handles), 4),
-            frameon=False,
-            fontsize=font_sizes['legend'],
-            handlelength=1.1,
-            handletextpad=0.4,
-            columnspacing=0.8
-        )
-
-        semantic_legend_handles = semantic_handles + [
+        # Use the same compact, three-column legend grammar as the established
+        # three-variable portfolio trace. The wider canvas keeps its complete
+        # error-bar descriptions inside the figure without intruding on data.
+        legend_handles = mode_handles + semantic_handles + [
             target_legend_handle
         ]
         fig.legend(
-            semantic_legend_handles,
-            [handle.get_label() for handle in semantic_legend_handles],
+            legend_handles,
+            [handle.get_label() for handle in legend_handles],
             loc='upper center',
-            bbox_to_anchor=(0.5, 0.885),
-            # One explanatory item per row keeps all text inside the output
-            # width for every active portfolio and QC state.
-            ncol=1,
+            bbox_to_anchor=(0.5, 0.955),
+            ncol=3,
             frameon=False,
             fontsize=font_sizes['legend'],
             handlelength=1.1,
@@ -16448,19 +17595,9 @@ class AutoContr(Controller):
             columnspacing=0.8
         )
 
-        semantic_row_count = len(semantic_legend_handles)
-
-        if semantic_row_count >= 4:
-            explanatory_text_y = 0.690
-            axes_top = 0.640
-
-        else:
-            explanatory_text_y = 0.735
-            axes_top = 0.685
-
         fig.text(
             0.5,
-            explanatory_text_y,
+            0.805,
             'Upper panel: filled error bars = replicate SEM; hollow error '
             'bars = pre-execution GP posterior SD.',
             ha='center',
@@ -16482,7 +17619,7 @@ class AutoContr(Controller):
             left=0.14,
             right=0.97,
             bottom=0.10,
-            top=axes_top,
+            top=0.77,
             hspace=0.18
         )
 
