@@ -12,7 +12,11 @@ import numpy as np
 
 from auto_model_checkpoint import (
     ModelCheckpointError,
+    get_model_checkpoint_import_inbox,
+    prepare_model_checkpoint_import,
+    prepare_model_checkpoint_import_from_path,
     read_model_checkpoint,
+    write_model_checkpoint_import_provenance,
     write_model_checkpoint
 )
 
@@ -141,6 +145,105 @@ class ModelCheckpointPackageTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ModelCheckpointError, 'contain exactly'):
                 read_model_checkpoint(checkpoint_path)
+
+    def test_import_requires_one_valid_package_and_preserves_a_lineage_copy(self):
+        with TemporaryDirectory() as temporary_directory:
+            inbox_directory = get_model_checkpoint_import_inbox(
+                temporary_directory
+            )
+            source_path = write_model_checkpoint(
+                inbox_directory,
+                'model_final',
+                self._manifest(),
+                self._arrays(),
+                []
+            )
+
+            prepared = prepare_model_checkpoint_import(temporary_directory)
+
+            self.assertEqual(
+                Path(prepared['source_checkpoint_path']).resolve(),
+                Path(source_path).resolve()
+            )
+            self.assertTrue(Path(source_path).is_file())
+            self.assertTrue(
+                Path(prepared['archived_checkpoint_path']).is_file()
+            )
+            self.assertEqual(
+                prepared['manifest']['run_id'],
+                'DEBUGRTG_checkpoint_test'
+            )
+            self.assertEqual(prepared['import_method'], 'manual_inbox')
+
+    def test_selected_source_import_archives_metadata_and_provenance(self):
+        with TemporaryDirectory() as temporary_directory:
+            source_directory = Path(temporary_directory) / 'Prior Run'
+            destination_directory = Path(temporary_directory) / 'New Run'
+            source_directory.mkdir()
+            source_path = write_model_checkpoint(
+                source_directory,
+                'model_final',
+                self._manifest(),
+                self._arrays(),
+                []
+            )
+
+            prepared = prepare_model_checkpoint_import_from_path(
+                destination_directory,
+                source_path,
+                'existing_output_run',
+                {
+                    'source_run_folder': 'RTG_020',
+                    'source_checkpoint_filename': 'model_final.zip'
+                }
+            )
+            provenance_path = write_model_checkpoint_import_provenance(
+                destination_directory,
+                {
+                    'import_method': prepared['import_method'],
+                    'archive': prepared['archived_checkpoint_path'],
+                    'seed_design_skipped': True
+                }
+            )
+
+            self.assertEqual(
+                prepared['import_method'],
+                'existing_output_run'
+            )
+            self.assertEqual(
+                prepared['import_source_metadata']['source_run_folder'],
+                'RTG_020'
+            )
+            self.assertTrue(Path(prepared['archived_checkpoint_path']).is_file())
+            persisted = json.loads(Path(provenance_path).read_text())
+            self.assertTrue(persisted['seed_design_skipped'])
+            self.assertEqual(persisted['import_method'], 'existing_output_run')
+
+    def test_import_rejects_missing_or_multiple_packages(self):
+        with TemporaryDirectory() as temporary_directory:
+            with self.assertRaisesRegex(ModelCheckpointError, 'exactly one'):
+                prepare_model_checkpoint_import(temporary_directory)
+
+            inbox_directory = get_model_checkpoint_import_inbox(
+                temporary_directory
+            )
+            write_model_checkpoint(
+                inbox_directory,
+                'model_one',
+                self._manifest(),
+                self._arrays(),
+                []
+            )
+            write_model_checkpoint(
+                inbox_directory,
+                'model_two',
+                self._manifest(),
+                self._arrays(),
+                []
+            )
+
+            with self.assertRaisesRegex(ModelCheckpointError, 'exactly one'):
+                prepare_model_checkpoint_import(temporary_directory)
 
 
 if __name__ == '__main__':

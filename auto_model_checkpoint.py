@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import tempfile
 import zipfile
 
@@ -38,6 +39,13 @@ _MODEL_ARRAY_NAMES = (
 # later import stages from accidentally accepting a malformed or unexpectedly
 # large archive while remaining far above realistic Auto model history sizes.
 _MAX_UNCOMPRESSED_PACKAGE_BYTES = 256 * 1024 * 1024
+
+# Import is intentionally an explicit, local handoff: an operator places one
+# previously exported package in this inbox before completing the new run's
+# reagent sheet.  The original is retained in the inbox and a copy is kept in
+# the new run's lineage archive for reproducibility.
+IMPORT_INBOX_DIRECTORY_NAME = 'Import_Here'
+IMPORTED_ARCHIVE_DIRECTORY_NAME = 'Imported_Archives'
 
 
 class ModelCheckpointError(ValueError):
@@ -269,6 +277,173 @@ def _unique_checkpoint_path(checkpoint_directory, checkpoint_stem):
         if not os.path.exists(candidate_path):
             return candidate_path
         suffix += 1
+
+
+def get_model_checkpoint_import_inbox(checkpoint_directory):
+    '''Returns and creates the dedicated one-package import inbox.'''
+    inbox_directory = os.path.join(
+        os.fspath(checkpoint_directory),
+        IMPORT_INBOX_DIRECTORY_NAME
+    )
+    os.makedirs(inbox_directory, exist_ok=True)
+    return inbox_directory
+
+
+def prepare_model_checkpoint_import(checkpoint_directory):
+    '''Validates and archives exactly one operator-supplied package.
+
+    The input archive is never moved or modified.  A second immutable copy is
+    stored under the new run's ``Imported_Archives`` directory, giving later
+    reports and audits a durable record of the exact imported source.
+
+    returns:
+        dict:
+            Validated checkpoint payload plus source and archive paths.
+    '''
+    checkpoint_directory = os.fspath(checkpoint_directory)
+    inbox_directory = get_model_checkpoint_import_inbox(checkpoint_directory)
+
+    candidate_paths = sorted(
+        os.path.join(inbox_directory, entry_name)
+        for entry_name in os.listdir(inbox_directory)
+        if (
+            entry_name.lower().endswith('.zip')
+            and os.path.isfile(os.path.join(inbox_directory, entry_name))
+        )
+    )
+
+    if len(candidate_paths) != 1:
+        raise ModelCheckpointError(
+            'Checkpoint import requires exactly one .zip package in {!r}. '
+            'Found {}.'.format(inbox_directory, len(candidate_paths))
+        )
+
+    return prepare_model_checkpoint_import_from_path(
+        checkpoint_directory=checkpoint_directory,
+        source_path=candidate_paths[0],
+        import_method='manual_inbox',
+        source_metadata={
+            'import_inbox_path': os.path.abspath(inbox_directory)
+        }
+    )
+
+
+def prepare_model_checkpoint_import_from_path(
+    checkpoint_directory,
+    source_path,
+    import_method,
+    source_metadata=None
+):
+    '''Validates and archives one explicitly selected checkpoint package.
+
+    This is the shared safe boundary for both supported import routes: a
+    package placed in this run's manual inbox and a package selected from a
+    previous ``Protocol_Outputs`` run.  The source archive is never modified;
+    the new run receives an immutable copy before any model reconstruction is
+    attempted.
+    '''
+    checkpoint_directory = os.fspath(checkpoint_directory)
+    source_path = os.path.abspath(os.fspath(source_path))
+    import_method = str(import_method).strip()
+
+    if not import_method:
+        raise ModelCheckpointError('Checkpoint import method must be recorded.')
+
+    if not source_path.lower().endswith('.zip') or not os.path.isfile(source_path):
+        raise ModelCheckpointError(
+            'Selected checkpoint package is not a readable .zip file: {!r}. '
+            .format(source_path)
+        )
+
+    checkpoint = read_model_checkpoint(source_path)
+
+    archive_directory = os.path.join(
+        checkpoint_directory,
+        IMPORTED_ARCHIVE_DIRECTORY_NAME
+    )
+    os.makedirs(archive_directory, exist_ok=True)
+    source_stem = os.path.splitext(os.path.basename(source_path))[0]
+    archive_stem = re.sub(r'[^A-Za-z0-9_-]+', '_', source_stem).strip('_')
+    if not archive_stem:
+        archive_stem = 'checkpoint'
+    archive_path = _unique_checkpoint_path(
+        archive_directory,
+        'imported_{}'.format(_safe_checkpoint_stem(archive_stem))
+    )
+
+    try:
+        shutil.copy2(source_path, archive_path)
+    except OSError as exc:
+        raise ModelCheckpointError(
+            'Validated checkpoint could not be archived in the new run: {}.'
+            .format(exc)
+        ) from exc
+
+    checkpoint['source_checkpoint_path'] = os.path.abspath(source_path)
+    checkpoint['archived_checkpoint_path'] = os.path.abspath(archive_path)
+    checkpoint['import_method'] = import_method
+    checkpoint['import_source_metadata'] = _json_safe(
+        source_metadata if source_metadata is not None else {}
+    )
+    return checkpoint
+
+
+def write_model_checkpoint_import_provenance(checkpoint_directory, provenance):
+    '''Writes one immutable JSON record describing a successful model import.
+
+    A separate plain-JSON provenance file keeps the imported archive, its
+    selection route, and reconstruction counts inspectable without unpacking
+    the checkpoint.  It deliberately uses the same strict JSON rules as the
+    package and never overwrites an earlier record.
+    '''
+    checkpoint_directory = os.fspath(checkpoint_directory)
+    os.makedirs(checkpoint_directory, exist_ok=True)
+    payload = _json_bytes(provenance)
+
+    base_path = os.path.join(
+        checkpoint_directory,
+        'import_provenance.json'
+    )
+    if not os.path.exists(base_path):
+        destination_path = base_path
+    else:
+        suffix = 1
+        while True:
+            candidate_path = os.path.join(
+                checkpoint_directory,
+                'import_provenance_{:03d}.json'.format(suffix)
+            )
+            if not os.path.exists(candidate_path):
+                destination_path = candidate_path
+                break
+            suffix += 1
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='wb',
+            prefix='.auto_model_checkpoint_import_',
+            suffix='.tmp',
+            dir=checkpoint_directory,
+            delete=False
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            temporary_file.write(payload)
+
+        os.replace(temporary_path, destination_path)
+    except OSError as exc:
+        if temporary_path is not None and os.path.exists(temporary_path):
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+        raise ModelCheckpointError(
+            'Checkpoint import provenance could not be written: {}.'.format(
+                exc
+            )
+        ) from exc
+
+    return os.path.abspath(destination_path)
 
 
 def write_model_checkpoint(

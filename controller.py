@@ -66,6 +66,10 @@ from optimizers import OptimizationModel
 from exceptions import ConversionError
 from auto_model_checkpoint import (
     ModelCheckpointError,
+    get_model_checkpoint_import_inbox,
+    prepare_model_checkpoint_import,
+    prepare_model_checkpoint_import_from_path,
+    write_model_checkpoint_import_provenance,
     write_model_checkpoint
 )
 
@@ -300,6 +304,12 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         if not no_sim:
             auto.run_simulation(no_pr=no_pr)
 
+        # The ordinary dry preflight uses DummyMLModel and can mutate legacy
+        # controller bookkeeping.  Rebuild imported scientific state only
+        # after that simulation returns, immediately before capacity checks
+        # and real execution, so no dummy observation can pollute lineage.
+        auto._restore_imported_auto_model_checkpoint(model)
+
         if input('would you like to run on robot and pr? [yn] ').lower() == 'y':
             auto._check_auto_well_capacity(model)
             auto._check_auto_pipette_tip_capacity(model)
@@ -429,6 +439,7 @@ class Controller(ABC):
             self.rxn_df = self._load_rxn_df(input_data) #products init here
             self.tot_vols = self._get_tot_vols(input_data) #NOTE we're moving more and more info
             #to the controller. It may make sense to build a class at some point
+            self._prepare_auto_model_checkpoint_import_before_reagent_sheet()
             self._query_reagents(wks_key, credentials)
             raw_reagent_df = self._download_reagent_data(wks_key, credentials)#will be replaced soon
             #with a parsed reagent_df. This is exactly as is pulled from gsheets
@@ -445,6 +456,15 @@ class Controller(ABC):
             traceback.print_exc()
             self._stop_terminal_output_capture()
             raise
+
+    def _prepare_auto_model_checkpoint_import_before_reagent_sheet(self):
+        '''Provides an optional subclass hook before reagent-sheet completion.
+
+        Ordinary protocol execution has no checkpoint-import workflow.  Auto
+        mode overrides this hook so an operator can validate a package before
+        entering fresh source-container locations and masses.
+        '''
+        return None
 
     def _start_terminal_output_capture(self):
         '''
@@ -822,7 +842,10 @@ class Controller(ABC):
         )
         
         local_paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
-        if self.robo_params.get('auto_model_checkpoint_mode', 'off') == 'save':
+        if self.robo_params.get(
+            'auto_model_checkpoint_mode',
+            'off'
+        ) in ('save', 'import'):
             local_paths.append(self.model_checkpoint_path)
 
         for path in local_paths:
@@ -1361,9 +1384,9 @@ class Controller(ABC):
             f"{self.robo_params['auto_spectral_response_policy']}"
         )
 
-        # Model checkpoint export is opt-in so older spreadsheets retain their
-        # exact output behavior.  Import is intentionally added in a later
-        # stage after its compatibility and warm-start path are implemented.
+        # Checkpoint use is opt-in so older spreadsheets retain their exact
+        # output behavior.  Import has a separate validation/reconstruction
+        # path and is never treated as a filename Header parameter.
         checkpoint_mode_value = str(
             header_dict.get(
                 'auto_model_checkpoint_mode',
@@ -1389,13 +1412,16 @@ class Controller(ABC):
             'enabled': 'save',
             'true': 'save',
             'yes': 'save',
-            '1': 'save'
+            '1': 'save',
+            'import': 'import',
+            'load': 'import',
+            'resume': 'import'
         }
 
         if checkpoint_mode_value not in checkpoint_mode_aliases:
             raise ValueError(
                 "Header value auto_model_checkpoint_mode must be one of: "
-                "off or save. Received: "
+                "off, save, or import. Received: "
                 f"{checkpoint_mode_value!r}."
             )
 
@@ -1407,6 +1433,11 @@ class Controller(ABC):
             print(
                 "<<controller>> Auto model checkpoints: save after seed, "
                 "each completed batch, and finalization"
+            )
+        elif self.robo_params['auto_model_checkpoint_mode'] == 'import':
+            print(
+                "<<controller>> Auto model checkpoint import requested; "
+                "a package must be validated before the reagent sheet"
             )
 
         self.robo_params['max_iterations'] = int(
@@ -4735,7 +4766,7 @@ class AutoContr(Controller):
             self.robo_params.get(
                 'auto_model_checkpoint_mode',
                 'off'
-            ) == 'save'
+            ) in ('save', 'import')
             and bool(
                 getattr(model, '_auto_model_checkpoint_eligible', False)
             )
@@ -4750,6 +4781,622 @@ class AutoContr(Controller):
         )
         os.makedirs(checkpoint_directory, exist_ok=True)
         return checkpoint_directory
+
+    def _get_auto_model_checkpoint_output_root(self):
+        '''Returns the direct parent containing named Protocol_Outputs runs.'''
+        return os.path.realpath(
+            os.path.dirname(os.path.abspath(self.out_path))
+        )
+
+    @staticmethod
+    def _list_existing_auto_model_checkpoint_files(checkpoint_directory):
+        '''Lists only canonical checkpoint ZIPs directly inside one run.
+
+        Deliberately ignoring inbox/archive subdirectories prevents an import
+        selection from accidentally following a previous run's own lineage
+        copy rather than a checkpoint that run exported.
+        '''
+        if not os.path.isdir(checkpoint_directory):
+            return []
+
+        filename_pattern = re.compile(
+            r'^model_(?:after_seed|after_batch_[0-9]+|final)(?:_[0-9]{3})?'
+            r'\.zip$',
+            re.IGNORECASE
+        )
+        return sorted(
+            entry_name
+            for entry_name in os.listdir(checkpoint_directory)
+            if (
+                filename_pattern.fullmatch(entry_name) is not None
+                and os.path.isfile(
+                    os.path.join(checkpoint_directory, entry_name)
+                )
+            )
+        )
+
+    def _resolve_auto_model_checkpoint_existing_source(
+        self,
+        source_run_folder,
+        checkpoint_selector
+    ):
+        '''Resolves one explicit prior-run checkpoint without path traversal.
+
+        The operator can select only a direct named child of the local
+        Protocol_Outputs root and only a canonical checkpoint directly inside
+        that run's Model_Checkpoints directory.  This preserves a convenient
+        ``RTG_020`` workflow without treating arbitrary filesystem paths as
+        valid checkpoint sources.
+        '''
+        source_run_folder = str(source_run_folder).strip()
+        checkpoint_selector = str(checkpoint_selector).strip()
+        output_root = self._get_auto_model_checkpoint_output_root()
+        current_run_folder = os.path.basename(os.path.abspath(self.out_path))
+
+        if (
+            not source_run_folder
+            or source_run_folder in ('.', '..')
+            or os.path.basename(source_run_folder) != source_run_folder
+        ):
+            raise ModelCheckpointError(
+                'Existing-run import requires one exact output folder name, '
+                'not a path.'
+            )
+
+        if source_run_folder == current_run_folder:
+            raise ModelCheckpointError(
+                'An Auto run cannot import a checkpoint from its own output '
+                'folder.'
+            )
+
+        source_run_directory = os.path.realpath(
+            os.path.join(output_root, source_run_folder)
+        )
+        try:
+            source_is_direct_child = (
+                os.path.commonpath([output_root, source_run_directory])
+                == output_root
+            )
+        except ValueError:
+            source_is_direct_child = False
+
+        if not source_is_direct_child or not os.path.isdir(source_run_directory):
+            raise ModelCheckpointError(
+                'No prior output run named {!r} exists directly under {!r}. '
+                .format(source_run_folder, output_root)
+            )
+
+        source_checkpoint_directory = os.path.join(
+            source_run_directory,
+            'Model_Checkpoints'
+        )
+        available_filenames = self._list_existing_auto_model_checkpoint_files(
+            source_checkpoint_directory
+        )
+        if not available_filenames:
+            raise ModelCheckpointError(
+                'Prior output run {!r} has no canonical checkpoint packages '
+                'in {!r}.'.format(
+                    source_run_folder,
+                    source_checkpoint_directory
+                )
+            )
+
+        normalized_selector = checkpoint_selector.lower()
+        if normalized_selector == 'final':
+            matched_filenames = [
+                filename
+                for filename in available_filenames
+                if re.fullmatch(r'model_final(?:_[0-9]{3})?\.zip', filename,
+                                re.IGNORECASE)
+            ]
+        elif normalized_selector in ('seed', 'after_seed'):
+            matched_filenames = [
+                filename
+                for filename in available_filenames
+                if re.fullmatch(
+                    r'model_after_seed(?:_[0-9]{3})?\.zip',
+                    filename,
+                    re.IGNORECASE
+                )
+            ]
+        else:
+            batch_match = re.fullmatch(
+                r'(?:batch\s+|after_batch_?)([0-9]+)',
+                normalized_selector
+            )
+            if batch_match is not None:
+                batch_number = int(batch_match.group(1))
+                matched_filenames = [
+                    filename
+                    for filename in available_filenames
+                    if re.fullmatch(
+                        r'model_after_batch_{:03d}(?:_[0-9]{{3}})?\.zip'.format(
+                            batch_number
+                        ),
+                        filename,
+                        re.IGNORECASE
+                    )
+                ]
+            elif checkpoint_selector in available_filenames:
+                matched_filenames = [checkpoint_selector]
+            else:
+                raise ModelCheckpointError(
+                    'Checkpoint selector {!r} is not available in run {!r}. '
+                    'Use final, seed, batch N, or one exact listed filename.'
+                    .format(checkpoint_selector, source_run_folder)
+                )
+
+        if len(matched_filenames) != 1:
+            raise ModelCheckpointError(
+                'Checkpoint selector {!r} matched {} packages in run {!r}. '
+                'Choose one exact filename from: {}.'.format(
+                    checkpoint_selector,
+                    len(matched_filenames),
+                    source_run_folder,
+                    ', '.join(matched_filenames or available_filenames)
+                )
+            )
+
+        selected_filename = matched_filenames[0]
+        return {
+            'source_path': os.path.join(
+                source_checkpoint_directory,
+                selected_filename
+            ),
+            'import_method': 'existing_output_run',
+            'source_metadata': {
+                'source_run_folder': source_run_folder,
+                'source_run_directory': source_run_directory,
+                'source_checkpoint_filename': selected_filename,
+                'source_selector': checkpoint_selector
+            },
+            'available_filenames': available_filenames
+        }
+
+    def _select_auto_model_checkpoint_import_source(self):
+        '''Prompts for either the retained inbox or a checked prior run.
+
+        Both choices return the same prepared payload: checksum-validated and
+        copied into the new run before spreadsheet reagent entry continues.
+        '''
+        checkpoint_directory = self._get_auto_model_checkpoint_directory()
+        selection = input(
+            '<<controller>> import checkpoint source: enter `manual` for '
+            'Import_Here, or `run` to select a prior Protocol_Outputs run: '
+        ).strip().lower()
+
+        if selection in ('', 'manual', 'inbox', '1'):
+            inbox_directory = get_model_checkpoint_import_inbox(
+                checkpoint_directory
+            )
+            print(
+                '<<controller>> Auto checkpoint import: copy exactly one '
+                '.zip package into {} and press Enter to validate it before '
+                'completing the reagent sheet.'.format(inbox_directory)
+            )
+            input('<<controller>> press Enter after the import package is ready ')
+            return prepare_model_checkpoint_import(checkpoint_directory)
+
+        if selection not in ('run', 'existing', 'existing_run', '2'):
+            raise ModelCheckpointError(
+                'Checkpoint import source must be `manual` or `run`.'
+            )
+
+        source_run_folder = input(
+            '<<controller>> enter the exact prior output folder name '
+            '(for example RTG_020): '
+        ).strip()
+        source_checkpoint_directory = os.path.join(
+            self._get_auto_model_checkpoint_output_root(),
+            source_run_folder,
+            'Model_Checkpoints'
+        )
+        available_filenames = self._list_existing_auto_model_checkpoint_files(
+            source_checkpoint_directory
+        )
+        if available_filenames:
+            print(
+                '<<controller>> available checkpoint packages: {}'.format(
+                    ', '.join(available_filenames)
+                )
+            )
+        checkpoint_selector = input(
+            '<<controller>> select `final`, `seed`, `batch N`, or an exact '
+            'listed filename: '
+        ).strip()
+        source = self._resolve_auto_model_checkpoint_existing_source(
+            source_run_folder,
+            checkpoint_selector
+        )
+        return prepare_model_checkpoint_import_from_path(
+            checkpoint_directory=checkpoint_directory,
+            source_path=source['source_path'],
+            import_method=source['import_method'],
+            source_metadata=source['source_metadata']
+        )
+
+    @staticmethod
+    def _checkpoint_float_values_match(left, right):
+        '''Compares two required checkpoint numeric values conservatively.'''
+        try:
+            left_value = float(left)
+            right_value = float(right)
+        except (TypeError, ValueError):
+            return False
+
+        return (
+            math.isfinite(left_value)
+            and math.isfinite(right_value)
+            and math.isclose(
+                left_value,
+                right_value,
+                rel_tol=1e-9,
+                abs_tol=1e-12
+            )
+        )
+
+    def _validate_auto_model_checkpoint_compatibility(
+        self,
+        checkpoint,
+        expected_context,
+        phase_label
+    ):
+        '''Fails closed when a saved model describes different chemistry.
+
+        A normalized GP coordinate has meaning only for the same variable
+        reagent order, concentration bounds, fixed recipe context, and
+        spectral routing policy.  This comparison deliberately rejects an
+        uncertain or partial match rather than silently reinterpreting old
+        observations in a new design space.
+        '''
+        manifest = checkpoint['manifest']
+        chemical_context = manifest.get('chemical_context', {})
+        input_context = manifest.get('input_coordinate_system', {})
+        mismatches = []
+
+        expected_reagents = list(expected_context['variable_reagents'])
+        saved_reagents = list(manifest.get('variable_reagents', []))
+        if saved_reagents != expected_reagents:
+            mismatches.append(
+                'variable reagent order differs: checkpoint={} current={}'
+                .format(saved_reagents, expected_reagents)
+            )
+
+        expected_total_volume = expected_context.get(
+            'total_reaction_volume_uL'
+        )
+        if expected_total_volume is not None and not self._checkpoint_float_values_match(
+            chemical_context.get('total_reaction_volume_uL'),
+            expected_total_volume
+        ):
+            mismatches.append(
+                'total reaction volume differs: checkpoint={} current={}'
+                .format(
+                    chemical_context.get('total_reaction_volume_uL'),
+                    expected_total_volume
+                )
+            )
+
+        expected_fixed_volumes = expected_context.get(
+            'fixed_reagent_volumes_uL'
+        )
+        if expected_fixed_volumes is not None:
+            saved_fixed_volumes = chemical_context.get(
+                'fixed_reagent_volumes_uL'
+            )
+            if set(saved_fixed_volumes or {}) != set(expected_fixed_volumes):
+                mismatches.append(
+                    'fixed reagent identities differ: checkpoint={} current={}'
+                    .format(
+                        sorted((saved_fixed_volumes or {}).keys()),
+                        sorted(expected_fixed_volumes.keys())
+                    )
+                )
+            else:
+                for reagent_name, expected_volume in expected_fixed_volumes.items():
+                    if not self._checkpoint_float_values_match(
+                        saved_fixed_volumes.get(reagent_name),
+                        expected_volume
+                    ):
+                        mismatches.append(
+                            'fixed reagent volume differs for {}: '
+                            'checkpoint={} current={}'.format(
+                                reagent_name,
+                                saved_fixed_volumes.get(reagent_name),
+                                expected_volume
+                            )
+                        )
+
+        expected_policy = expected_context.get('spectral_response_policy')
+        if (
+            expected_policy is not None
+            and manifest.get('spectral_response_policy') != expected_policy
+        ):
+            mismatches.append(
+                'spectral-response policy differs: checkpoint={} current={}'
+                .format(
+                    manifest.get('spectral_response_policy'),
+                    expected_policy
+                )
+            )
+
+        expected_minimums = expected_context.get('minimum_concentrations_mM')
+        expected_maximums = expected_context.get('maximum_concentrations_mM')
+        for description, saved_values, expected_values in (
+            (
+                'minimum concentration bounds',
+                input_context.get('minimum_concentrations_mM'),
+                expected_minimums
+            ),
+            (
+                'maximum concentration bounds',
+                input_context.get('maximum_concentrations_mM'),
+                expected_maximums
+            )
+        ):
+            if expected_values is None:
+                continue
+
+            if not isinstance(saved_values, list) or len(saved_values) != len(
+                expected_values
+            ):
+                mismatches.append(
+                    '{} differ: checkpoint={} current={}'.format(
+                        description,
+                        saved_values,
+                        expected_values
+                    )
+                )
+                continue
+
+            for index, (saved_value, expected_value) in enumerate(
+                zip(saved_values, expected_values)
+            ):
+                if not self._checkpoint_float_values_match(
+                    saved_value,
+                    expected_value
+                ):
+                    mismatches.append(
+                        '{} differ for {}: checkpoint={} current={}'.format(
+                            description,
+                            expected_reagents[index],
+                            saved_value,
+                            expected_value
+                        )
+                    )
+
+        expected_fixed_stocks = expected_context.get(
+            'fixed_reagent_stock_concentrations_mM'
+        )
+        if expected_fixed_stocks is not None:
+            saved_fixed_stocks = chemical_context.get(
+                'fixed_reagent_stock_concentrations_mM'
+            )
+            if set(saved_fixed_stocks or {}) != set(expected_fixed_stocks):
+                mismatches.append(
+                    'fixed reagent stock concentrations differ in identity'
+                )
+            else:
+                for reagent_name, expected_stock in expected_fixed_stocks.items():
+                    if not self._checkpoint_float_values_match(
+                        saved_fixed_stocks.get(reagent_name),
+                        expected_stock
+                    ):
+                        mismatches.append(
+                            'fixed reagent stock concentration differs for {}: '
+                            'checkpoint={} current={}'.format(
+                                reagent_name,
+                                saved_fixed_stocks.get(reagent_name),
+                                expected_stock
+                            )
+                        )
+
+        if mismatches:
+            raise ModelCheckpointError(
+                'Auto model checkpoint is incompatible during {}: {}.'
+                .format(phase_label, '; '.join(mismatches))
+            )
+
+    def _prepare_auto_model_checkpoint_import_before_reagent_sheet(self):
+        '''Validates one selected import package before reagent-sheet entry.'''
+        if self.robo_params.get('auto_model_checkpoint_mode') != 'import':
+            return None
+
+        try:
+            checkpoint = self._select_auto_model_checkpoint_import_source()
+            variable_reagents = [
+                str(reagent_name)
+                for reagent_name in self.get_variable_reagents()
+            ]
+            template_context = {
+                'variable_reagents': variable_reagents,
+                'total_reaction_volume_uL': self.tot_vols.get('Template'),
+                'fixed_reagent_volumes_uL': self._get_fixed_reagent_volumes(),
+                'spectral_response_policy': self.robo_params.get(
+                    'auto_spectral_response_policy',
+                    'audit_only'
+                )
+            }
+            self._validate_auto_model_checkpoint_compatibility(
+                checkpoint,
+                template_context,
+                'template preflight'
+            )
+        except (ModelCheckpointError, OSError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                'Auto model checkpoint import was not accepted before the '
+                'reagent sheet: {}. Correct the package or spreadsheet '
+                'compatibility and restart the Auto run.'.format(exc)
+            ) from exc
+
+        self._pending_auto_model_checkpoint = checkpoint
+        print(
+            '<<controller>> Auto checkpoint package validated from {} and '
+            'archived in this run: {}'.format(
+                checkpoint.get('import_method', 'unknown source'),
+                checkpoint['archived_checkpoint_path']
+            )
+        )
+        return checkpoint
+
+    def _restore_imported_auto_model_checkpoint(self, model):
+        '''Rebuilds a fresh model from an accepted portable checkpoint.
+
+        This intentionally calls normal model-construction methods with the
+        saved cumulative arrays.  No old live GPy/GPyOpt object is reused.
+        ``max_iterations`` remains the number of *new* optimizer batches for
+        this run; the saved optimizer iteration count is lineage metadata,
+        not a carry-over stop counter.
+        '''
+        if self.robo_params.get('auto_model_checkpoint_mode') != 'import':
+            return False
+
+        checkpoint = getattr(self, '_pending_auto_model_checkpoint', None)
+        if checkpoint is None:
+            raise RuntimeError(
+                'Auto model checkpoint import was requested but no package '
+                'was validated before the reagent sheet.'
+            )
+
+        fixed_stocks = {
+            str(reagent_name): self._get_variable_reagent_stock_conc(
+                str(reagent_name)
+            )
+            for reagent_name in self.fixed_reagents
+        }
+        current_context = {
+            'variable_reagents': [
+                str(reagent_name)
+                for reagent_name in self.variable_reagents
+            ],
+            'total_reaction_volume_uL': model.total_volume,
+            'fixed_reagent_volumes_uL': self._get_fixed_reagent_volumes(),
+            'fixed_reagent_stock_concentrations_mM': fixed_stocks,
+            'minimum_concentrations_mM': list(model.min_conc),
+            'maximum_concentrations_mM': list(model.max_conc),
+            'spectral_response_policy': self.robo_params.get(
+                'auto_spectral_response_policy',
+                'audit_only'
+            )
+        }
+
+        try:
+            self._validate_auto_model_checkpoint_compatibility(
+                checkpoint,
+                current_context,
+                'post-reagent-sheet reconstruction'
+            )
+
+            arrays = checkpoint['model_arrays']
+            model.initialize_optimizer(
+                arrays['gp_training_X'],
+                arrays['gp_training_Y']
+            )
+
+            if arrays['usable_spectrum_X'].shape[0] > 0:
+                model.update_usable_spectrum_model(
+                    arrays['usable_spectrum_X'],
+                    arrays['usable_spectrum_Y']
+                )
+        except (ModelCheckpointError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                'Auto model checkpoint import could not rebuild a fresh '
+                'model: {}. No robot execution has started.'.format(exc)
+            ) from exc
+
+        self.auto_model_performance_rows = copy.deepcopy(
+            checkpoint['condition_history']
+        )
+        # Raw well-level exports describe only physical wells run in this new
+        # continuation.  The portable checkpoint intentionally preserves the
+        # condition-level audit history, not mutable prior-run experiment CSV
+        # rows; clearing any DummyML preflight residue prevents it from being
+        # misrepresented as new experimental data.
+        self.experiment_data = pd.DataFrame(
+            columns=[
+                str(reagent_name)
+                for reagent_name in self.variable_reagents
+            ] + ['Experiment_result']
+        )
+        prior_condition_numbers = [
+            row.get('condition_number')
+            for row in self.auto_model_performance_rows
+            if isinstance(row, dict)
+            and isinstance(row.get('condition_number'), int)
+        ]
+        self.auto_condition_counter = max(
+            prior_condition_numbers,
+            default=-1
+        ) + 1
+        self.imported_auto_model_checkpoint = {
+            'source_checkpoint_path': checkpoint['source_checkpoint_path'],
+            'archived_checkpoint_path': checkpoint['archived_checkpoint_path'],
+            'source_run_id': checkpoint['manifest']['run_id'],
+            'source_checkpoint_stage': checkpoint['manifest']['checkpoint_stage'],
+            'import_method': checkpoint.get('import_method', 'manual_inbox'),
+            'source_metadata': copy.deepcopy(
+                checkpoint.get('import_source_metadata', {})
+            )
+        }
+        model.curr_iter = 0
+        model.quit = False
+        model._auto_model_checkpoint_imported = True
+        model._auto_model_checkpoint_eligible = True
+
+        self._synchronize_target_ei_incumbent_from_performance(model)
+
+        try:
+            provenance_path = write_model_checkpoint_import_provenance(
+                self._get_auto_model_checkpoint_directory(),
+                {
+                    'created_utc': datetime.datetime.utcnow().replace(
+                        microsecond=0
+                    ).isoformat() + 'Z',
+                    'import_method': self.imported_auto_model_checkpoint[
+                        'import_method'
+                    ],
+                    'source_checkpoint_path': checkpoint['source_checkpoint_path'],
+                    'archived_checkpoint_path': checkpoint[
+                        'archived_checkpoint_path'
+                    ],
+                    'source_run_id': checkpoint['manifest']['run_id'],
+                    'source_checkpoint_stage': checkpoint['manifest'][
+                        'checkpoint_stage'
+                    ],
+                    'source_metadata': checkpoint.get(
+                        'import_source_metadata', {}
+                    ),
+                    'gp_training_observations': int(
+                        arrays['gp_training_X'].shape[0]
+                    ),
+                    'usable_spectrum_observations': int(
+                        arrays['usable_spectrum_X'].shape[0]
+                    ),
+                    'template_preflight_passed': True,
+                    'post_reagent_compatibility_passed': True,
+                    'seed_design_skipped': True
+                }
+            )
+        except ModelCheckpointError as exc:
+            raise RuntimeError(
+                'Auto model checkpoint import was rebuilt but its required '
+                'provenance record could not be written: {}. No robot '
+                'execution has started.'.format(exc)
+            ) from exc
+
+        self.imported_auto_model_checkpoint['provenance_path'] = (
+            provenance_path
+        )
+
+        print(
+            '<<controller>> rebuilt fresh Auto GP from imported checkpoint '
+            '({} GP observations; {} usable-spectrum observations).'.format(
+                arrays['gp_training_X'].shape[0],
+                arrays['usable_spectrum_X'].shape[0]
+            )
+        )
+        return True
 
     def _build_auto_model_checkpoint_manifest(self, model, checkpoint_stage):
         '''Builds portable, non-secret provenance for one checkpoint package.'''
@@ -4783,7 +5430,10 @@ class AutoContr(Controller):
                 getattr(self, 'rxn_sheet_name', None)
                 or os.path.basename(str(self.out_path))
             ),
-            'checkpoint_mode': 'save',
+            'checkpoint_mode': self.robo_params.get(
+                'auto_model_checkpoint_mode',
+                'save'
+            ),
             'variable_reagents': [
                 str(reagent_name)
                 for reagent_name in self.variable_reagents
@@ -13207,6 +13857,72 @@ class AutoContr(Controller):
                     'experiment, after confirming no other wells were used.'
                 )
         lines.append('')
+
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        )
+        lines.append('## Model Checkpoint Lineage')
+        lines.append('')
+        if not imported_checkpoint:
+            lines.append(
+                'This run started from a newly measured initial seed design; '
+                'no prior Auto model checkpoint was imported.'
+            )
+        else:
+            source_metadata = imported_checkpoint.get('source_metadata', {})
+            source_run_folder = source_metadata.get(
+                'source_run_folder',
+                'manual checkpoint package'
+            )
+            source_filename = source_metadata.get(
+                'source_checkpoint_filename',
+                os.path.basename(
+                    str(imported_checkpoint.get('source_checkpoint_path', ''))
+                )
+            )
+            lines.append(
+                'This run resumed from a checksum-validated portable Auto '
+                'model checkpoint. A fresh GP was rebuilt from the saved '
+                'numeric history, and this run did not repeat an initial seed '
+                'design.'
+            )
+            lines.append('')
+            lines.append(
+                '- Import route: `{}`.'.format(
+                    imported_checkpoint.get('import_method', 'manual_inbox')
+                )
+            )
+            lines.append(
+                '- Source run/package: `{}` / `{}`.'.format(
+                    source_run_folder,
+                    source_filename
+                )
+            )
+            lines.append(
+                '- Source checkpoint identity: run `{}`, stage `{}`.'.format(
+                    imported_checkpoint.get('source_run_id', 'not recorded'),
+                    imported_checkpoint.get(
+                        'source_checkpoint_stage',
+                        'not recorded'
+                    )
+                )
+            )
+            lines.append(
+                '- Immutable lineage archive: `{}`.'.format(
+                    imported_checkpoint.get(
+                        'archived_checkpoint_path',
+                        'not recorded'
+                    )
+                )
+            )
+            lines.append(
+                '- Import provenance record: `{}`.'.format(
+                    imported_checkpoint.get('provenance_path', 'not recorded')
+                )
+            )
+        lines.append('')
         lines.append('## Auto Settings')
         lines.append('')
         lines.append('### Target and stopping rule')
@@ -19514,6 +20230,17 @@ class AutoContr(Controller):
 
         self.well_count = 0 #used internally for unique wellnames
         self.create_connection(simulate, no_pr, port)
+        # An imported checkpoint already contains a fitted cumulative GP.  It
+        # must continue directly with new optimizer-selected batches instead
+        # of spending wells on a second seed design.
+        if getattr(model, '_auto_model_checkpoint_imported', False):
+            print(
+                '<<controller>> continuing Auto from imported model; '
+                'skipping a new initial seed design'
+            )
+            self._run_imported_auto_continuation(model, normalize)
+            return
+
         # Begin optimization
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
@@ -19744,6 +20471,13 @@ class AutoContr(Controller):
         self.batch_num += 1
 
         # Enter iterative while loop now until max_iters is hit or close to the target
+        self._run_auto_optimizer_batches(model, normalize)
+
+        self._finalize_auto_run(model)
+        return
+
+    def _run_auto_optimizer_batches(self, model, normalize):
+        '''Runs the shared post-model-initialization Auto batch loop.'''
         while not model.quit:
 
             # Portfolio members are selected from the same fitted GP snapshot.
@@ -19960,6 +20694,17 @@ class AutoContr(Controller):
 
             self.batch_num += 1    
             
+    def _run_imported_auto_continuation(self, model, normalize):
+        '''Runs a new Auto continuation from an already rebuilt model.'''
+        # Imported observations remain model history and report provenance,
+        # but target stopping is evaluated only after a new physical batch in
+        # this run.  This prevents a prior run from silently cancelling a new
+        # requested experimental validation.
+        self._run_auto_optimizer_batches(model, normalize)
+        self._finalize_auto_run(model)
+
+    def _finalize_auto_run(self, model):
+        '''Exports final Auto artifacts after seed or imported continuation.'''
         # Save the row-per-well experiment data used for raw output and model
         # audit. This remains separate from the condition-level Auto
         # performance log.
@@ -20004,7 +20749,7 @@ class AutoContr(Controller):
             self._refresh_auto_run_status_section_in_report()
 
         return
-    
+
     def duplicate_list_elements(self, list1, factor):
         """Duplicates the elements of a list by a factor.
 
@@ -20203,6 +20948,9 @@ class AutoContr(Controller):
             initial_data * num_duplicates
             + max_iterations * model.batch_size * num_duplicates
 
+        Imported-model continuations omit the new seed batch because their
+        GP has already been rebuilt from the validated cumulative history.
+
         params:
             OptimizationModel model:
                 The Auto optimization model. Used for batch_size.
@@ -20212,7 +20960,11 @@ class AutoContr(Controller):
             - Prints the number of wells available from the selected starting well.
             - Raises an error before the run begins if there are not enough wells.
         '''
-        initial_data = int(self.getModelInfo()["initial_data"])
+        initial_data = (
+            0
+            if getattr(model, '_auto_model_checkpoint_imported', False)
+            else int(self.getModelInfo()["initial_data"])
+        )
         max_iterations = int(self.getModelInfo()["max_iterations"])
         batch_size = int(model.batch_size)
 
@@ -20356,8 +21108,14 @@ class AutoContr(Controller):
         '''
         max_iterations = int(self.getModelInfo()["max_iterations"])
 
-        # One initial seed batch plus up to max_iterations model-suggested batches.
-        total_batches = 1 + max_iterations
+        # A fresh run has one seed batch plus its optimizer batches.  An
+        # imported continuation starts from an existing fitted model and
+        # therefore needs tips only for newly executed optimizer batches.
+        total_batches = (
+            max_iterations
+            if getattr(model, '_auto_model_checkpoint_imported', False)
+            else 1 + max_iterations
+        )
 
         non_water_reagent_groups = self._count_non_water_reagent_groups_for_tip_estimate()
 

@@ -18,6 +18,7 @@ import unittest
 from auto_model_checkpoint import (
     ModelCheckpointError,
     read_model_checkpoint,
+    write_model_checkpoint_import_provenance,
     write_model_checkpoint
 )
 
@@ -1103,7 +1104,6 @@ class AcquisitionRoutingTests(unittest.TestCase):
             and isinstance(node.func, ast.Attribute)
             and node.func.attr in {
                 'initialize_optimizer',
-                'update_experiment_data',
                 '_synchronize_target_ei_incumbent_from_performance'
             }
         )
@@ -1113,11 +1113,6 @@ class AcquisitionRoutingTests(unittest.TestCase):
             for line_number, method_name in model_lifecycle_calls
             if method_name == 'initialize_optimizer'
         ]
-        update_lines = [
-            line_number
-            for line_number, method_name in model_lifecycle_calls
-            if method_name == 'update_experiment_data'
-        ]
         synchronization_lines = [
             line_number
             for line_number, method_name in model_lifecycle_calls
@@ -1126,10 +1121,39 @@ class AcquisitionRoutingTests(unittest.TestCase):
         ]
 
         self.assertEqual(len(initialize_lines), 1)
-        self.assertEqual(len(update_lines), 1)
-        self.assertEqual(len(synchronization_lines), 2)
+        self.assertEqual(len(synchronization_lines), 1)
         self.assertLess(initialize_lines[0], synchronization_lines[0])
-        self.assertLess(update_lines[0], synchronization_lines[1])
+
+        batch_method = _get_auto_controller_method_node(
+            '_run_auto_optimizer_batches'
+        )
+        batch_lifecycle_calls = sorted(
+            (
+                node.lineno,
+                node.func.attr
+            )
+            for node in ast.walk(batch_method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {
+                'update_experiment_data',
+                '_synchronize_target_ei_incumbent_from_performance'
+            }
+        )
+        update_lines = [
+            line_number
+            for line_number, method_name in batch_lifecycle_calls
+            if method_name == 'update_experiment_data'
+        ]
+        batch_synchronization_lines = [
+            line_number
+            for line_number, method_name in batch_lifecycle_calls
+            if method_name == '_synchronize_target_ei_incumbent_from_performance'
+        ]
+
+        self.assertEqual(len(update_lines), 1)
+        self.assertEqual(len(batch_synchronization_lines), 1)
+        self.assertLess(update_lines[0], batch_synchronization_lines[0])
 
     def test_controller_captures_complete_selection_metadata_before_run(self):
         metadata_method = _get_auto_controller_method_node(
@@ -1252,6 +1276,9 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('balanced_exploration_weight', report_strings)
         self.assertIn('optimizer_recipe_repaired', report_strings)
         self.assertIn('## Condition-Level Results', report_strings)
+        self.assertIn('## Model Checkpoint Lineage', report_strings)
+        self.assertIn('imported_auto_model_checkpoint', report_strings)
+        self.assertIn('provenance_path', report_strings)
 
 
 class ExperimentDataExportTests(unittest.TestCase):
@@ -1766,8 +1793,15 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             'save'
         )
 
-        with self.assertRaisesRegex(ValueError, 'off or save'):
-            self._parse_header(auto_model_checkpoint_mode='import')
+        self.assertEqual(
+            self._parse_header(
+                auto_model_checkpoint_mode='resume'
+            )['auto_model_checkpoint_mode'],
+            'import'
+        )
+
+        with self.assertRaisesRegex(ValueError, 'off, save, or import'):
+            self._parse_header(auto_model_checkpoint_mode='unsupported')
 
     def test_header_spectral_response_policy_is_optional_and_normalized(self):
         self.assertEqual(
@@ -2917,7 +2951,9 @@ class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
                 self.assertEqual(exports, [])
 
     def test_run_prepares_and_validates_proposal_before_any_robot_sample_work(self):
-        run_method = _get_auto_controller_method_node('_run')
+        run_method = _get_auto_controller_method_node(
+            '_run_auto_optimizer_batches'
+        )
         call_lines = {}
 
         for node in ast.walk(run_method):
@@ -2936,9 +2972,9 @@ class OptimizerRecipeHandoffSafetyTests(unittest.TestCase):
         iterative_prepare_line = call_lines[
             '_prepare_auto_optimizer_recipe_for_execution'
         ][0]
-        iterative_duplicate_line = call_lines['duplicate_list_elements'][1]
-        iterative_well_line = call_lines['_generate_wellname'][1]
-        iterative_create_line = call_lines['_create_samples'][1]
+        iterative_duplicate_line = call_lines['duplicate_list_elements'][0]
+        iterative_well_line = call_lines['_generate_wellname'][0]
+        iterative_create_line = call_lines['_create_samples'][0]
 
         self.assertLess(iterative_prepare_line, iterative_duplicate_line)
         self.assertLess(iterative_prepare_line, iterative_well_line)
@@ -4659,13 +4695,22 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             [
                 '_auto_model_checkpoint_saving_enabled',
                 '_get_auto_model_checkpoint_directory',
+                '_get_auto_model_checkpoint_output_root',
+                '_list_existing_auto_model_checkpoint_files',
+                '_resolve_auto_model_checkpoint_existing_source',
+                '_checkpoint_float_values_match',
+                '_validate_auto_model_checkpoint_compatibility',
                 '_build_auto_model_checkpoint_manifest',
                 '_build_auto_model_checkpoint_arrays',
-                '_save_auto_model_checkpoint'
+                '_save_auto_model_checkpoint',
+                '_restore_imported_auto_model_checkpoint'
             ],
             extra_namespace={
                 'datetime': datetime,
                 'ModelCheckpointError': ModelCheckpointError,
+                'write_model_checkpoint_import_provenance': (
+                    write_model_checkpoint_import_provenance
+                ),
                 'write_model_checkpoint': write_model_checkpoint
             }
         )
@@ -4769,6 +4814,171 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             self.assertFalse(
                 Path(temporary_directory, 'model_after_seed.zip').exists()
             )
+
+    def test_import_rebuilds_fresh_history_and_resets_new_run_counter(self):
+        with TemporaryDirectory() as temporary_directory:
+            controller, source_model = self._controller_and_model(
+                temporary_directory
+            )
+            source_path = write_model_checkpoint(
+                temporary_directory,
+                'model_final',
+                controller._build_auto_model_checkpoint_manifest(
+                    source_model,
+                    'final'
+                ),
+                controller._build_auto_model_checkpoint_arrays(source_model),
+                controller.auto_model_performance_rows
+            )
+            checkpoint = read_model_checkpoint(source_path)
+            checkpoint['source_checkpoint_path'] = source_path
+            checkpoint['archived_checkpoint_path'] = source_path
+
+            controller.robo_params['auto_model_checkpoint_mode'] = 'import'
+            controller._pending_auto_model_checkpoint = checkpoint
+            controller.experiment_data = pd.DataFrame({
+                'reagent_a': [0.9],
+                'reagent_b': [0.9],
+                'Experiment_result': [0.9]
+            })
+            controller._synchronize_target_ei_incumbent_from_performance = (
+                lambda model: None
+            )
+
+            restored_model = SimpleNamespace(
+                min_conc=[0.0, 0.0],
+                max_conc=[1.0, 1.0],
+                total_volume=200.0,
+                acquisition_modes=['balanced'],
+                curr_iter=9,
+                quit=True
+            )
+
+            def initialize_optimizer(X, Y):
+                restored_model.optimizer = SimpleNamespace(
+                    X=np.array(X, copy=True),
+                    Y=np.array(Y, copy=True)
+                )
+
+            restored_model.initialize_optimizer = initialize_optimizer
+            restored_model.update_usable_spectrum_model = (
+                lambda X, Y: setattr(
+                    restored_model,
+                    'restored_usable_history',
+                    (np.array(X, copy=True), np.array(Y, copy=True))
+                )
+            )
+
+            self.assertTrue(
+                controller._restore_imported_auto_model_checkpoint(
+                    restored_model
+                )
+            )
+            np.testing.assert_allclose(
+                restored_model.optimizer.X,
+                source_model.optimizer.X
+            )
+            np.testing.assert_allclose(
+                restored_model.optimizer.Y,
+                source_model.optimizer.Y
+            )
+            self.assertEqual(restored_model.curr_iter, 0)
+            self.assertFalse(restored_model.quit)
+            self.assertTrue(restored_model._auto_model_checkpoint_imported)
+            self.assertTrue(
+                controller._auto_model_checkpoint_saving_enabled(
+                    restored_model
+                )
+            )
+            self.assertEqual(controller.auto_condition_counter, 1)
+            self.assertTrue(controller.experiment_data.empty)
+
+    def test_import_rejects_changed_normalized_bounds(self):
+        with TemporaryDirectory() as temporary_directory:
+            controller, source_model = self._controller_and_model(
+                temporary_directory
+            )
+            checkpoint_path = write_model_checkpoint(
+                temporary_directory,
+                'model_final',
+                controller._build_auto_model_checkpoint_manifest(
+                    source_model,
+                    'final'
+                ),
+                controller._build_auto_model_checkpoint_arrays(source_model),
+                controller.auto_model_performance_rows
+            )
+            checkpoint = read_model_checkpoint(checkpoint_path)
+            checkpoint['source_checkpoint_path'] = checkpoint_path
+            checkpoint['archived_checkpoint_path'] = checkpoint_path
+
+            controller.robo_params['auto_model_checkpoint_mode'] = 'import'
+            controller._pending_auto_model_checkpoint = checkpoint
+            changed_bounds_model = SimpleNamespace(
+                min_conc=[0.0, 0.0],
+                max_conc=[0.8, 1.0],
+                total_volume=200.0
+            )
+
+            with self.assertRaisesRegex(RuntimeError, 'maximum concentration'):
+                controller._restore_imported_auto_model_checkpoint(
+                    changed_bounds_model
+                )
+
+    def test_existing_run_import_selects_only_canonical_direct_checkpoint(self):
+        with TemporaryDirectory() as temporary_directory:
+            output_root = Path(temporary_directory) / 'Protocol_Outputs'
+            prior_checkpoint_directory = (
+                output_root / 'RTG_020' / 'Model_Checkpoints'
+            )
+            current_run_directory = output_root / 'RTG_021'
+            prior_checkpoint_directory.mkdir(parents=True)
+            current_run_directory.mkdir()
+            source_path = write_model_checkpoint(
+                prior_checkpoint_directory,
+                'model_final',
+                {
+                    'checkpoint_stage': 'final',
+                    'run_id': 'RTG_020',
+                    'variable_reagents': ['reagent_a', 'reagent_b'],
+                    'input_coordinate_system': {'name': 'normalized'}
+                },
+                {
+                    'gp_training_X': np.asarray([[0.1, 0.2]]),
+                    'gp_training_Y': np.asarray([[0.5]]),
+                    'usable_spectrum_X': np.empty((0, 2)),
+                    'usable_spectrum_Y': np.empty((0, 1))
+                },
+                []
+            )
+            Path(prior_checkpoint_directory, 'not_a_checkpoint.zip').touch()
+
+            controller = self.Controller()
+            controller.out_path = str(current_run_directory)
+            resolved = controller._resolve_auto_model_checkpoint_existing_source(
+                'RTG_020',
+                'final'
+            )
+
+            self.assertEqual(
+                Path(resolved['source_path']).resolve(),
+                Path(source_path).resolve()
+            )
+            self.assertEqual(resolved['import_method'], 'existing_output_run')
+            self.assertEqual(
+                resolved['available_filenames'],
+                ['model_final.zip']
+            )
+            with self.assertRaisesRegex(ModelCheckpointError, 'folder name'):
+                controller._resolve_auto_model_checkpoint_existing_source(
+                    '../RTG_020',
+                    'final'
+                )
+            with self.assertRaisesRegex(ModelCheckpointError, 'own output'):
+                controller._resolve_auto_model_checkpoint_existing_source(
+                    'RTG_021',
+                    'final'
+                )
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):
