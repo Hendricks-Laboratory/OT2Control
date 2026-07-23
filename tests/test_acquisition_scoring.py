@@ -2,6 +2,7 @@ import ast
 import copy
 from collections import defaultdict
 from contextlib import redirect_stdout
+import datetime
 import io
 import json
 import math
@@ -13,6 +14,12 @@ import re
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+
+from auto_model_checkpoint import (
+    ModelCheckpointError,
+    read_model_checkpoint,
+    write_model_checkpoint
+)
 
 try:
     import GPy
@@ -1639,7 +1646,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         auto_source_reserve_volume_uL=None,
         pi_legacy_tare_offset_g=None,
         true_zero_reagents=None,
-        auto_spectral_response_policy=None
+        auto_spectral_response_policy=None,
+        auto_model_checkpoint_mode=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1712,6 +1720,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(auto_spectral_response_policy)
             ])
 
+        if auto_model_checkpoint_mode is not None:
+            header.append([
+                'auto_model_checkpoint_mode',
+                str(auto_model_checkpoint_mode)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1734,8 +1748,26 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             parsed['auto_spectral_response_policy'],
             'audit_only'
         )
+        self.assertEqual(parsed['auto_model_checkpoint_mode'], 'off')
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
+
+    def test_header_checkpoint_save_mode_is_optional_and_normalized(self):
+        self.assertEqual(
+            self._parse_header(
+                auto_model_checkpoint_mode='SAVE'
+            )['auto_model_checkpoint_mode'],
+            'save'
+        )
+        self.assertEqual(
+            self._parse_header(
+                auto_model_checkpoint_mode='on'
+            )['auto_model_checkpoint_mode'],
+            'save'
+        )
+
+        with self.assertRaisesRegex(ValueError, 'off or save'):
+            self._parse_header(auto_model_checkpoint_mode='import')
 
     def test_header_spectral_response_policy_is_optional_and_normalized(self):
         self.assertEqual(
@@ -4616,6 +4648,127 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         self.assertEqual(first_panel['feasibility_mask'].shape, (21, 21))
         self.assertTrue(first_panel['feasibility_mask'][0, 0])
         self.assertFalse(first_panel['feasibility_mask'][-1, -1])
+
+
+class AutoModelCheckpointControllerTests(unittest.TestCase):
+    '''Confirms save mode writes model state only for the real Auto model.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods(
+            [
+                '_auto_model_checkpoint_saving_enabled',
+                '_get_auto_model_checkpoint_directory',
+                '_build_auto_model_checkpoint_manifest',
+                '_build_auto_model_checkpoint_arrays',
+                '_save_auto_model_checkpoint'
+            ],
+            extra_namespace={
+                'datetime': datetime,
+                'ModelCheckpointError': ModelCheckpointError,
+                'write_model_checkpoint': write_model_checkpoint
+            }
+        )
+
+    def _controller_and_model(self, checkpoint_directory, eligible=True):
+        controller = self.Controller()
+        controller.robo_params = {
+            'auto_model_checkpoint_mode': 'save',
+            'auto_spectral_response_policy': 'audit_only'
+        }
+        controller.model_checkpoint_path = checkpoint_directory
+        controller.out_path = checkpoint_directory
+        controller.rxn_sheet_name = 'DEBUGRTG_checkpoint_controller_test'
+        controller.variable_reagents = ['reagent_a', 'reagent_b']
+        controller.fixed_reagents = ['fixed_reagent']
+        controller.auto_model_performance_rows = [
+            {
+                'condition_number': 0,
+                'actual_lambda_mean_qc_nm': 625.0
+            }
+        ]
+        controller.auto_model_checkpoint_paths = []
+        controller.batch_num = 1
+        controller._get_fixed_reagent_volumes = lambda: {
+            'fixed_reagent': 25.0
+        }
+        controller._get_variable_reagent_stock_conc = lambda _: 10.0
+
+        model = SimpleNamespace(
+            _auto_model_checkpoint_eligible=eligible,
+            optimizer=SimpleNamespace(
+                X=np.asarray([[0.1, 0.2], [0.7, 0.8]]),
+                Y=np.asarray([[0.4], [0.6]])
+            ),
+            usable_spectrum_X=np.asarray([[0.1, 0.2]]),
+            usable_spectrum_Y=np.asarray([[1.0]]),
+            min_conc=[0.0, 0.0],
+            max_conc=[1.0, 1.0],
+            total_volume=200.0,
+            target_value=625.0,
+            acquisition_mode='balanced',
+            acquisition_modes=['balanced'],
+            portfolio_min_distance=0.05,
+            balanced_exploration_weight=1.0,
+            curr_iter=1
+        )
+        return controller, model
+
+    def test_save_mode_exports_rebuildable_seed_batch_and_final_packages(self):
+        with TemporaryDirectory() as temporary_directory:
+            controller, model = self._controller_and_model(
+                temporary_directory
+            )
+
+            seed_path = controller._save_auto_model_checkpoint(
+                model,
+                'after_seed'
+            )
+            batch_path = controller._save_auto_model_checkpoint(
+                model,
+                'after_batch'
+            )
+            final_path = controller._save_auto_model_checkpoint(
+                model,
+                'final'
+            )
+
+            self.assertEqual(len(controller.auto_model_checkpoint_paths), 3)
+            self.assertTrue(seed_path.endswith('model_after_seed.zip'))
+            self.assertTrue(batch_path.endswith('model_after_batch_001.zip'))
+            self.assertTrue(final_path.endswith('model_final.zip'))
+
+            restored = read_model_checkpoint(final_path)
+            self.assertEqual(
+                restored['manifest']['checkpoint_stage'],
+                'final'
+            )
+            np.testing.assert_allclose(
+                restored['model_arrays']['gp_training_X'],
+                model.optimizer.X
+            )
+            np.testing.assert_allclose(
+                restored['model_arrays']['gp_training_Y'],
+                model.optimizer.Y
+            )
+
+    def test_dummy_preflight_model_cannot_create_checkpoint_files(self):
+        with TemporaryDirectory() as temporary_directory:
+            controller, dummy_model = self._controller_and_model(
+                temporary_directory,
+                eligible=False
+            )
+
+            self.assertIsNone(
+                controller._save_auto_model_checkpoint(
+                    dummy_model,
+                    'after_seed'
+                )
+            )
+            self.assertEqual(controller.auto_model_checkpoint_paths, [])
+            self.assertFalse(
+                Path(temporary_directory, 'model_after_seed.zip').exists()
+            )
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):

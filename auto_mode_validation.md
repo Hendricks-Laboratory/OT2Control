@@ -105,6 +105,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
 | Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
+| Portable Auto model checkpoint packages (`save` mode) | Implemented, import pending | Hardware-free JSON/NumPy archive round-trip, integrity, Header, and save-boundary tests |
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
 | Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
 | Configured target-stop, acquisition, and portfolio report provenance | Implemented | Hardware-free report regression test with an early-stop condition and physical replicate-well locations |
@@ -221,6 +222,7 @@ retain the stated legacy defaults when their Header row is absent.
 | `portfolio_min_distance` | Portfolio diversity radius in normalized design space. Friendly values include `none` = `0.00`, `modest` = `0.05`, `strong` = `0.10`, and `very_strong` = `0.15`; finite numeric input from `0` through `1` is also accepted. It is inactive when `acquisition_modes` is off. |
 | `auto_plot_profile` | `standard`, `final_only`, or `off`; missing defaults to `standard`. It controls automatic diagnostic/final plots, not model fitting, acquisition, QC, or execution. |
 | `auto_terminal_verbosity` | `essential`, `standard`, or `diagnostic`; missing defaults to `standard`. `off` means essential safety/scientific output, not silence; `limited` maps to standard; `all` maps to diagnostic. Persistent CSV/report audit output is unaffected. |
+| `auto_model_checkpoint_mode` | `off` (legacy default) or `save`. `save` exports immutable JSON/NumPy model packages after the seed GP fit, after every completed optimizer batch, and at finalization to `Model_Checkpoints/`. It never serializes live GPy/GPyOpt objects or robot state. The interactive `import` workflow remains a later stage. |
 | `auto_source_volume_check` | `off` (legacy default) or `required`. `required` performs a fail-closed aggregate source-inventory preflight before each batch. |
 | `auto_source_reserve_volume_uL` | Nonnegative additional source reserve beyond the robot's dead-volume calculation; defaults to `0`. It matters only when source-volume checking is required. |
 | `pi_legacy_tare_offset_g` | Nonnegative payload-only compatibility offset for a deployed Raspberry Pi that still uses the old tare constants; defaults to `0`. Do not enable after the Pi has the corrected constants. |

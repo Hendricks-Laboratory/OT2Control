@@ -64,6 +64,10 @@ from ot2_robot import launch_eve_server
 from df_utils import make_unique, df_popout, wslpath, error_exit
 from optimizers import OptimizationModel
 from exceptions import ConversionError
+from auto_model_checkpoint import (
+    ModelCheckpointError,
+    write_model_checkpoint
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -273,6 +277,11 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
             'portfolio_min_distance',
             0.05
         )
+
+        # Only the real Auto model constructed here is eligible to create
+        # scientific checkpoint packages.  The ordinary preflight simulation
+        # below uses DummyMLModel and must never create model lineage files.
+        model._auto_model_checkpoint_eligible = True
 
         if (
             model.acquisition_mode
@@ -807,9 +816,15 @@ class Controller(ABC):
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
         self.debug_path = os.path.join(self.out_path, 'Debug')
         self.plot_path = os.path.join(self.out_path, 'Plots')
+        self.model_checkpoint_path = os.path.join(
+            self.out_path,
+            'Model_Checkpoints'
+        )
         
-       
         local_paths = [self.out_path, self.eve_files_path, self.debug_path, self.plot_path]
+        if self.robo_params.get('auto_model_checkpoint_mode', 'off') == 'save':
+            local_paths.append(self.model_checkpoint_path)
+
         for path in local_paths:
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -1345,6 +1360,54 @@ class Controller(ABC):
             "<<controller>> Auto spectral-response policy: "
             f"{self.robo_params['auto_spectral_response_policy']}"
         )
+
+        # Model checkpoint export is opt-in so older spreadsheets retain their
+        # exact output behavior.  Import is intentionally added in a later
+        # stage after its compatibility and warm-start path are implemented.
+        checkpoint_mode_value = str(
+            header_dict.get(
+                'auto_model_checkpoint_mode',
+                'off'
+            )
+        ).strip().lower()
+
+        checkpoint_mode_value = (
+            checkpoint_mode_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        checkpoint_mode_aliases = {
+            '': 'off',
+            'off': 'off',
+            'none': 'off',
+            'disabled': 'off',
+            'false': 'off',
+            '0': 'off',
+            'save': 'save',
+            'on': 'save',
+            'enabled': 'save',
+            'true': 'save',
+            'yes': 'save',
+            '1': 'save'
+        }
+
+        if checkpoint_mode_value not in checkpoint_mode_aliases:
+            raise ValueError(
+                "Header value auto_model_checkpoint_mode must be one of: "
+                "off or save. Received: "
+                f"{checkpoint_mode_value!r}."
+            )
+
+        self.robo_params['auto_model_checkpoint_mode'] = (
+            checkpoint_mode_aliases[checkpoint_mode_value]
+        )
+
+        if self.robo_params['auto_model_checkpoint_mode'] == 'save':
+            print(
+                "<<controller>> Auto model checkpoints: save after seed, "
+                "each completed batch, and finalization"
+            )
 
         self.robo_params['max_iterations'] = int(
             header_dict['max_iterations']
@@ -4658,6 +4721,226 @@ class AutoContr(Controller):
         # which remains row-per-well for raw output and model training.
         self.auto_model_performance_rows = []
         self.auto_condition_counter = 0
+        self.auto_model_checkpoint_paths = []
+
+    def _auto_model_checkpoint_saving_enabled(self, model):
+        '''Returns whether one real Auto model may write checkpoints.
+
+        The normal Auto launcher performs a preflight simulation with a
+        ``DummyMLModel`` before the real model is used for protocol execution.
+        Checkpoints must represent only the scientifically configured real
+        model, so the launcher marks that model explicitly as eligible.
+        '''
+        return (
+            self.robo_params.get(
+                'auto_model_checkpoint_mode',
+                'off'
+            ) == 'save'
+            and bool(
+                getattr(model, '_auto_model_checkpoint_eligible', False)
+            )
+        )
+
+    def _get_auto_model_checkpoint_directory(self):
+        '''Returns and creates this run's dedicated checkpoint directory.'''
+        checkpoint_directory = getattr(
+            self,
+            'model_checkpoint_path',
+            os.path.join(self.out_path, 'Model_Checkpoints')
+        )
+        os.makedirs(checkpoint_directory, exist_ok=True)
+        return checkpoint_directory
+
+    def _build_auto_model_checkpoint_manifest(self, model, checkpoint_stage):
+        '''Builds portable, non-secret provenance for one checkpoint package.'''
+        try:
+            fixed_reagent_volumes = self._get_fixed_reagent_volumes()
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to build Auto model checkpoint because fixed-reagent "
+                f"volumes could not be resolved: {exc}"
+            ) from exc
+
+        response_normalization = {
+            'minimum_nm': 300.0,
+            'maximum_nm': 900.0,
+            'formula': 'normalized_lambda = (lambda_nm - 300) / 600'
+        }
+
+        fixed_reagent_stock_concentrations = {
+            str(reagent_name): self._get_variable_reagent_stock_conc(
+                str(reagent_name)
+            )
+            for reagent_name in getattr(self, 'fixed_reagents', [])
+        }
+
+        return {
+            'checkpoint_stage': str(checkpoint_stage),
+            'created_utc': datetime.datetime.now(
+                datetime.timezone.utc
+            ).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'run_id': str(
+                getattr(self, 'rxn_sheet_name', None)
+                or os.path.basename(str(self.out_path))
+            ),
+            'checkpoint_mode': 'save',
+            'variable_reagents': [
+                str(reagent_name)
+                for reagent_name in self.variable_reagents
+            ],
+            'input_coordinate_system': {
+                'name': 'normalized_final_reaction_concentration',
+                'lower_bound': 0.0,
+                'upper_bound': 1.0,
+                'minimum_concentrations_mM': list(
+                    getattr(model, 'min_conc', None)
+                    if getattr(model, 'min_conc', None) is not None
+                    else []
+                ),
+                'maximum_concentrations_mM': list(
+                    getattr(model, 'max_conc', None)
+                    if getattr(model, 'max_conc', None) is not None
+                    else []
+                )
+            },
+            'response_coordinate_system': response_normalization,
+            'chemical_context': {
+                'total_reaction_volume_uL': getattr(
+                    model,
+                    'total_volume',
+                    None
+                ),
+                'fixed_reagent_volumes_uL': fixed_reagent_volumes,
+                'fixed_reagent_stock_concentrations_mM': (
+                    fixed_reagent_stock_concentrations
+                )
+            },
+            'spectral_response_policy': self.robo_params.get(
+                'auto_spectral_response_policy',
+                'audit_only'
+            ),
+            'target_lambda_max_nm': getattr(model, 'target_value', None),
+            'acquisition_mode': getattr(
+                model,
+                'acquisition_mode',
+                None
+            ),
+            'acquisition_modes': list(
+                getattr(model, 'acquisition_modes', [])
+            ),
+            'portfolio_min_distance': getattr(
+                model,
+                'portfolio_min_distance',
+                None
+            ),
+            'balanced_exploration_weight': getattr(
+                model,
+                'balanced_exploration_weight',
+                None
+            ),
+            'optimizer_iteration_count': int(
+                getattr(model, 'curr_iter', 0)
+            ),
+            'controller_batch_number': int(
+                getattr(self, 'batch_num', 0)
+            )
+        }
+
+    def _build_auto_model_checkpoint_arrays(self, model):
+        '''Copies the numeric state needed to rebuild the Auto model later.'''
+        optimizer = getattr(model, 'optimizer', None)
+        if optimizer is None:
+            raise RuntimeError(
+                'Cannot save an Auto model checkpoint before the primary GP '
+                'optimizer has been initialized.'
+            )
+
+        primary_x = getattr(optimizer, 'X', None)
+        primary_y = getattr(optimizer, 'Y', None)
+        if primary_x is None or primary_y is None:
+            raise RuntimeError(
+                'Cannot save an Auto model checkpoint because the primary GP '
+                'training history is unavailable.'
+            )
+
+        dimension = len(self.variable_reagents)
+        usable_x = getattr(model, 'usable_spectrum_X', None)
+        usable_y = getattr(model, 'usable_spectrum_Y', None)
+
+        if usable_x is None:
+            usable_x = np.empty((0, dimension), dtype=float)
+        if usable_y is None:
+            usable_y = np.empty((0, 1), dtype=float)
+
+        return {
+            'gp_training_X': np.array(primary_x, dtype=float, copy=True),
+            'gp_training_Y': np.array(primary_y, dtype=float, copy=True),
+            'usable_spectrum_X': np.array(usable_x, dtype=float, copy=True),
+            'usable_spectrum_Y': np.array(usable_y, dtype=float, copy=True)
+        }
+
+    def _save_auto_model_checkpoint(self, model, checkpoint_stage):
+        '''Writes one mandatory safe-boundary checkpoint when save mode is on.
+
+        Checkpoint persistence is requested explicitly by the spreadsheet's
+        ``save`` mode.  A failure therefore stops before a later batch can be
+        executed from an unrecorded model state; it is not silently downgraded
+        to a nonfatal diagnostic warning.
+        '''
+        if not self._auto_model_checkpoint_saving_enabled(model):
+            return None
+
+        checkpoint_stage = str(checkpoint_stage).strip().lower()
+        if checkpoint_stage not in {
+            'after_seed',
+            'after_batch',
+            'final'
+        }:
+            raise ValueError(
+                'Auto model checkpoint stage must be after_seed, after_batch, '
+                f"or final. Received: {checkpoint_stage!r}."
+            )
+
+        if checkpoint_stage == 'after_batch':
+            checkpoint_stem = 'model_after_batch_{:03d}'.format(
+                int(getattr(self, 'batch_num', 0))
+            )
+        else:
+            checkpoint_stem = 'model_{}'.format(checkpoint_stage)
+
+        try:
+            checkpoint_path = write_model_checkpoint(
+                checkpoint_directory=(
+                    self._get_auto_model_checkpoint_directory()
+                ),
+                checkpoint_stem=checkpoint_stem,
+                manifest=self._build_auto_model_checkpoint_manifest(
+                    model,
+                    checkpoint_stage
+                ),
+                model_arrays=self._build_auto_model_checkpoint_arrays(model),
+                condition_history=copy.deepcopy(
+                    self.auto_model_performance_rows
+                )
+            )
+        except (ModelCheckpointError, OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeError(
+                'Auto model checkpoint save failed at {}: {}. The run was '
+                'stopped before another Auto batch could begin.'.format(
+                    checkpoint_stage,
+                    exc
+                )
+            ) from exc
+
+        self.auto_model_checkpoint_paths.append(checkpoint_path)
+        print(
+            '<<controller>> saved Auto model checkpoint ({}) to {}'.format(
+                checkpoint_stage,
+                checkpoint_path
+            )
+        )
+
+        return checkpoint_path
 
     def _resolve_true_zero_reagents(self):
         '''
@@ -19452,6 +19735,11 @@ class AutoContr(Controller):
         # Update data on the controller side (this function updates the df that is exported to pr_data called self.experiment_data)
         self._update_experiment_data(recipes, Y_initial)
 
+        # The seed observations, QC routing, primary GP, usable-spectrum
+        # history, and target-EI state are now synchronized.  This is the
+        # first safe boundary at which a complete model can be exported.
+        self._save_auto_model_checkpoint(model, 'after_seed')
+
         # Intial data is considered the zeroith batch 
         self.batch_num += 1
 
@@ -19663,6 +19951,13 @@ class AutoContr(Controller):
 
             # Add new denormalized data to the controller experiment_data
             self._update_experiment_data(recipes, Y_new, axis=0) 
+
+            # Save only after the completed batch has reached its final QC,
+            # model-update/no-update, classifier, target-EI, and stop-state
+            # outcome.  Censored-only batches are included because their
+            # usable-spectrum history and physical audit still changed.
+            self._save_auto_model_checkpoint(model, 'after_batch')
+
             self.batch_num += 1    
             
         # Save the row-per-well experiment data used for raw output and model
@@ -19676,6 +19971,11 @@ class AutoContr(Controller):
         # Save the row-per-condition Auto performance log used for reporting,
         # plotting, and future notebook-ready summaries.
         self._export_auto_model_performance_log()
+
+        # Preserve one predictable final package even when it contains the
+        # same fitted state as the final completed-batch checkpoint.  The
+        # explicit final artifact is useful for later warm-start selection.
+        self._save_auto_model_checkpoint(model, 'final')
 
         # Generate the final output suite only after both core CSV exports are
         # complete. The coordinator applies the selected Auto plot profile,
