@@ -997,6 +997,24 @@ class Controller(ABC):
         measured mass in the controller. Older worksheets default to 0 g.
         Do not enable this setting after the Raspberry Pi receives corrected
         tare constants, or its liquid-volume estimate would be double-corrected.
+
+        Spectral-response handling is controlled by the optional
+        auto_spectral_response_policy setting:
+
+            audit_only:
+                Preserves legacy behavior. Scan-boundary maxima are recorded
+                as audit warnings but remain eligible for lambda-max QC and
+                primary-GP training.
+
+            boundary_aware:
+                Treats only exact 300 nm and 1000 nm scan-boundary maxima as
+                censored observations. They remain in the raw audit record,
+                but are excluded from exact lambda-max QC, training, target
+                incumbents, and target stopping. No low-signal threshold is
+                applied in this first release.
+
+        Older spreadsheets default to audit_only so their established
+        lambda-max behavior remains unchanged.
         '''
         header_dict = {
             row[0]: row[1]
@@ -1282,6 +1300,51 @@ class Controller(ABC):
                 "<<controller>> Applying Raspberry Pi legacy tube-tare "
                 f"payload correction: -{pi_tare_offset_g:g} g"
             )
+
+        # Boundary-aware spectral routing is deliberately opt-in. The
+        # audit-only default preserves legacy treatment of finite 300/1000 nm
+        # maxima until an experiment explicitly requests censoring behavior.
+        spectral_policy_value = str(
+            header_dict.get(
+                'auto_spectral_response_policy',
+                'audit_only'
+            )
+        ).strip().lower()
+
+        spectral_policy_value = (
+            spectral_policy_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+
+        spectral_policy_aliases = {
+            '': 'audit_only',
+            'audit': 'audit_only',
+            'audit_only': 'audit_only',
+            'default': 'audit_only',
+            'legacy': 'audit_only',
+            'off': 'audit_only',
+            'boundary_aware': 'boundary_aware',
+            'boundary': 'boundary_aware',
+            'censored': 'boundary_aware',
+            'censor_boundaries': 'boundary_aware'
+        }
+
+        if spectral_policy_value not in spectral_policy_aliases:
+            raise ValueError(
+                "Header value auto_spectral_response_policy must be one of: "
+                "audit_only or boundary_aware. Received: "
+                f"{spectral_policy_value!r}."
+            )
+
+        self.robo_params['auto_spectral_response_policy'] = (
+            spectral_policy_aliases[spectral_policy_value]
+        )
+
+        print(
+            "<<controller>> Auto spectral-response policy: "
+            f"{self.robo_params['auto_spectral_response_policy']}"
+        )
 
         self.robo_params['max_iterations'] = int(
             header_dict['max_iterations']
@@ -5073,7 +5136,154 @@ class AutoContr(Controller):
             'replicate_sd_tolerance_nm': tolerance_nm
         }
 
-    def _run_lambda_replicate_qc(self, lambda_values):
+    def _classify_auto_spectral_observations(
+        self,
+        lambda_values,
+        scan_quality_by_replicate=None
+    ):
+        '''
+        Classifies extracted Auto scan maxima before lambda-max QC.
+
+        This is the sole controller authority for the first-release spectral
+        observation labels. It intentionally uses only an objective rule:
+        an extracted maximum exactly at the fixed 300 nm or 1000 nm scan
+        endpoint is censored rather than an exact interior lambda maximum.
+        No absorbance-height cutoff is inferred here.
+
+        ``audit_only`` preserves historical training behavior while emitting
+        the same labels. ``boundary_aware`` excludes censored and unknown
+        observations from the exact-lambda pathway, but keeps every raw value
+        and all classification metadata for later reliability modeling.
+
+        returns:
+            list of serializable dictionaries, one per physical replicate.
+        '''
+        lambda_values = list(lambda_values)
+
+        if scan_quality_by_replicate is None:
+            scan_quality_by_replicate = [None] * len(lambda_values)
+        else:
+            scan_quality_by_replicate = list(scan_quality_by_replicate)
+
+            if len(scan_quality_by_replicate) != len(lambda_values):
+                raise ValueError(
+                    "Auto spectral-observation classification requires one "
+                    "scan-quality record for each lambda maximum."
+                )
+
+        spectral_policy = str(
+            getattr(self, 'robo_params', {}).get(
+                'auto_spectral_response_policy',
+                'audit_only'
+            )
+        ).strip().lower()
+
+        if spectral_policy not in {'audit_only', 'boundary_aware'}:
+            raise ValueError(
+                "Auto spectral-response policy must be audit_only or "
+                "boundary_aware. Received: "
+                f"{spectral_policy!r}."
+            )
+
+        observations = []
+
+        for lambda_value, scan_quality in zip(
+            lambda_values,
+            scan_quality_by_replicate
+        ):
+            peak_wavelength_nm = self._safe_float_or_none(lambda_value)
+
+            if isinstance(scan_quality, dict):
+                recorded_peak_wavelength = self._safe_float_or_none(
+                    scan_quality.get('peak_wavelength_nm')
+                )
+
+                if recorded_peak_wavelength is not None:
+                    peak_wavelength_nm = recorded_peak_wavelength
+
+            if peak_wavelength_nm == 300.0:
+                observation_type = 'lower_scan_censored'
+                observation_reason = (
+                    'Extracted scan maximum is exactly at the 300 nm lower '
+                    'scan boundary.'
+                )
+            elif peak_wavelength_nm == 1000.0:
+                observation_type = 'upper_scan_censored'
+                observation_reason = (
+                    'Extracted scan maximum is exactly at the 1000 nm upper '
+                    'scan boundary.'
+                )
+            elif (
+                peak_wavelength_nm is not None
+                and isinstance(scan_quality, dict)
+            ):
+                observation_type = 'interior_peak'
+                observation_reason = (
+                    'Extracted scan maximum is finite and inside the fixed '
+                    '300-1000 nm scan window.'
+                )
+            else:
+                observation_type = 'unknown_scan_quality'
+                observation_reason = (
+                    'No finite, classified scan maximum was available; this '
+                    'observation is not silently labeled usable or failed.'
+                )
+
+            is_interior_peak = observation_type == 'interior_peak'
+            lambda_model_eligible = (
+                spectral_policy == 'audit_only'
+                or is_interior_peak
+            )
+
+            if lambda_model_eligible:
+                lambda_model_exclusion_reason = None
+            elif observation_type == 'lower_scan_censored':
+                lambda_model_exclusion_reason = (
+                    'Exact 300 nm lower-bound maximum is censored, not an '
+                    'exact lambda-max observation.'
+                )
+            elif observation_type == 'upper_scan_censored':
+                lambda_model_exclusion_reason = (
+                    'Exact 1000 nm upper-bound maximum is censored, not an '
+                    'exact lambda-max observation.'
+                )
+            else:
+                lambda_model_exclusion_reason = (
+                    'Scan quality is unknown, so it is not eligible for the '
+                    'exact lambda-max model under boundary_aware policy.'
+                )
+
+            observations.append({
+                'spectral_observation_type': observation_type,
+                'spectral_observation_reason': observation_reason,
+                'lambda_model_eligible': bool(lambda_model_eligible),
+                'lambda_model_exclusion_reason': (
+                    lambda_model_exclusion_reason
+                ),
+                # Stage 3 will use every objectively classified replicate,
+                # including censored observations, to learn this probability.
+                'usable_spectrum_model_eligible': (
+                    observation_type != 'unknown_scan_quality'
+                ),
+                'usable_spectrum_observed': (
+                    True if is_interior_peak else (
+                        False
+                        if observation_type in {
+                            'lower_scan_censored',
+                            'upper_scan_censored'
+                        }
+                        else None
+                    )
+                )
+            })
+
+        return observations
+
+    def _run_lambda_replicate_qc(
+        self,
+        lambda_values,
+        spectral_observations=None
+    ):
         '''
         Runs conservative replicate-level QC for Auto lambda max values.
 
@@ -5120,10 +5330,45 @@ class AutoContr(Controller):
             for value in lambda_values
         ]
 
+        if spectral_observations is None:
+            # Existing isolated callers and older integrations retain the
+            # historical finite-value pathway unless they explicitly provide
+            # classified spectral observations.
+            spectral_observations = [None] * len(raw_values)
+        else:
+            spectral_observations = list(spectral_observations)
+
+            if len(spectral_observations) != len(raw_values):
+                raise ValueError(
+                    "Auto replicate QC requires one spectral observation "
+                    "record for each lambda maximum."
+                )
+
+        spectral_excluded_indices = [
+            index
+            for index, observation in enumerate(spectral_observations)
+            if isinstance(observation, dict)
+            and not observation.get('lambda_model_eligible', True)
+        ]
+        spectral_excluded_values = [
+            raw_values[index]
+            for index in spectral_excluded_indices
+        ]
+        spectral_exclusion_reasons = [
+            spectral_observations[index].get(
+                'lambda_model_exclusion_reason'
+            )
+            for index in spectral_excluded_indices
+        ]
+
         valid_pairs = [
             (index, value)
             for index, value in enumerate(raw_values)
-            if value is not None and math.isfinite(value)
+            if (
+                value is not None
+                and math.isfinite(value)
+                and index not in spectral_excluded_indices
+            )
         ]
 
         included_indices = [index for index, value in valid_pairs]
@@ -5143,6 +5388,16 @@ class AutoContr(Controller):
                 'excluded_values': excluded_values,
                 'n_replicates_total': len(raw_values),
                 'n_replicates_valid': len(valid_pairs),
+                'n_raw_finite_replicates': sum(
+                    value is not None and math.isfinite(value)
+                    for value in raw_values
+                ),
+                'n_replicates_spectrally_excluded': len(
+                    spectral_excluded_indices
+                ),
+                'spectral_excluded_indices': spectral_excluded_indices,
+                'spectral_excluded_values': spectral_excluded_values,
+                'spectral_exclusion_reasons': spectral_exclusion_reasons,
                 'n_replicates_used': len(included_indices),
                 'n_replicates_excluded': 0,
                 'qc_status': qc_status,
@@ -5279,6 +5534,16 @@ class AutoContr(Controller):
             'excluded_values': excluded_values,
             'n_replicates_total': len(raw_values),
             'n_replicates_valid': len(valid_pairs),
+            'n_raw_finite_replicates': sum(
+                value is not None and math.isfinite(value)
+                for value in raw_values
+            ),
+            'n_replicates_spectrally_excluded': len(
+                spectral_excluded_indices
+            ),
+            'spectral_excluded_indices': spectral_excluded_indices,
+            'spectral_excluded_values': spectral_excluded_values,
+            'spectral_exclusion_reasons': spectral_exclusion_reasons,
             'n_replicates_used': len(included_values),
             'n_replicates_excluded': len(excluded_values),
             'qc_status': qc_status,
@@ -5381,7 +5646,8 @@ class AutoContr(Controller):
     def _build_auto_qc_model_training_data(
         self,
         unique_recipes,
-        lambda_max_values
+        lambda_max_values,
+        scan_quality_by_replicate=None
     ):
         '''
         Builds replicate-level model-training arrays after Auto replicate QC.
@@ -5407,6 +5673,12 @@ class AutoContr(Controller):
 
             list lambda_max_values:
                 Raw lambda max values from physical duplicate wells.
+
+            list scan_quality_by_replicate:
+                Optional classified scan-quality inputs, one per physical
+                replicate. Under boundary_aware policy, exact scan-boundary
+                maxima are retained in raw outputs but removed from the exact
+                lambda-max training pathway.
 
         returns:
             tuple:
@@ -5438,6 +5710,23 @@ class AutoContr(Controller):
                 f"{expected_lambda_count}."
             )
 
+        if scan_quality_by_replicate is None:
+            scan_quality_by_replicate = [None] * expected_lambda_count
+        else:
+            scan_quality_by_replicate = list(scan_quality_by_replicate)
+
+            if len(scan_quality_by_replicate) != expected_lambda_count:
+                raise ValueError(
+                    "Cannot build QC model training data because the number "
+                    "of scan-quality records does not match the expected "
+                    "physical replicate-well count."
+                )
+
+        spectral_observations = self._classify_auto_spectral_observations(
+            lambda_max_values,
+            scan_quality_by_replicate
+        )
+
         model_recipes = []
         model_lambda_values = []
 
@@ -5447,9 +5736,13 @@ class AutoContr(Controller):
             start_i = recipe_i * self.num_duplicates
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
+            replicate_spectral_observations = spectral_observations[
+                start_i:end_i
+            ]
 
             replicate_qc = self._run_lambda_replicate_qc(
-                replicate_lambda_values
+                replicate_lambda_values,
+                spectral_observations=replicate_spectral_observations
             )
 
             model_training_decision = (
@@ -5476,10 +5769,14 @@ class AutoContr(Controller):
                 model_lambda_values.append(float(included_value))
 
         if len(model_lambda_values) == 0:
-            raise ValueError(
-                "Auto replicate QC/model-training review removed or skipped "
-                "all lambda max values. The GP model cannot be updated without "
-                "at least one trusted observation."
+            # A fully censored batch is still preserved in raw/performance
+            # artifacts and will later train the usable-spectrum model. It
+            # simply contributes no exact lambda-max observations. Returning
+            # typed empty arrays lets the caller distinguish a seed-model
+            # initialization failure from a later no-op model update.
+            return (
+                np.empty((0, unique_recipes.shape[1]), dtype=float),
+                np.empty((0,), dtype=float)
             )
 
         if skipped_condition_count > 0:
@@ -5608,9 +5905,10 @@ class AutoContr(Controller):
 
             list scan_quality_by_replicate:
                 Optional objective diagnostics from the blank-corrected scan
-                for every physical replicate well. These are audit-only: they
-                do not alter replicate QC, GP model training, the target-EI
-                incumbent, or target stopping.
+                for every physical replicate well. Under the legacy
+                audit_only policy these remain audit-only. Under
+                boundary_aware, exact 300/1000 nm maxima are recorded as
+                censored and excluded only from the exact-lambda pathway.
 
             list replicate_wellnames:
                 Optional internal sample names, one per physical replicate
@@ -5724,6 +6022,12 @@ class AutoContr(Controller):
             end_i = start_i + self.num_duplicates
             replicate_lambda_values = lambda_max_values[start_i:end_i]
             replicate_scan_quality = scan_quality_by_replicate[start_i:end_i]
+            replicate_spectral_observations = (
+                self._classify_auto_spectral_observations(
+                    replicate_lambda_values,
+                    replicate_scan_quality
+                )
+            )
             condition_wellnames = replicate_wellnames[start_i:end_i]
             condition_well_locations = []
 
@@ -5753,16 +6057,32 @@ class AutoContr(Controller):
                 and scan_quality.get('peak_at_scan_boundary', False)
             ]
 
+            spectral_policy = str(
+                self.robo_params.get(
+                    'auto_spectral_response_policy',
+                    'audit_only'
+                )
+            )
+
             if spectral_edge_peak_indices:
                 spectral_quality_status = 'edge_peak_warning'
-                spectral_quality_reason = (
-                    f'{len(spectral_edge_peak_indices)} of '
-                    f'{self.num_duplicates} replicate scan(s) had a '
-                    'blank-corrected maximum at the 300-1000 nm scan '
-                    'boundary. This is an audit warning only; it does not '
-                    'automatically exclude data from replicate QC or GP '
-                    'model training.'
-                )
+                if spectral_policy == 'boundary_aware':
+                    spectral_quality_reason = (
+                        f'{len(spectral_edge_peak_indices)} of '
+                        f'{self.num_duplicates} replicate scan(s) had a '
+                        'blank-corrected maximum at the 300-1000 nm scan '
+                        'boundary and is censored from exact lambda-max '
+                        'QC/training under boundary_aware policy.'
+                    )
+                else:
+                    spectral_quality_reason = (
+                        f'{len(spectral_edge_peak_indices)} of '
+                        f'{self.num_duplicates} replicate scan(s) had a '
+                        'blank-corrected maximum at the 300-1000 nm scan '
+                        'boundary. This is an audit warning only; it does not '
+                        'automatically exclude data from replicate QC or GP '
+                        'model training.'
+                    )
             else:
                 spectral_quality_status = 'not_flagged'
                 spectral_quality_reason = (
@@ -5778,7 +6098,8 @@ class AutoContr(Controller):
             )
 
             replicate_qc = self._run_lambda_replicate_qc(
-                replicate_lambda_values
+                replicate_lambda_values,
+                spectral_observations=replicate_spectral_observations
             )
 
             model_training_decision = (
@@ -6064,9 +6385,54 @@ class AutoContr(Controller):
                 # discard an observation.
                 'spectral_quality_status': spectral_quality_status,
                 'spectral_quality_reason': spectral_quality_reason,
+                'auto_spectral_response_policy': spectral_policy,
                 'n_spectral_edge_peaks': len(spectral_edge_peak_indices),
                 'spectral_edge_peak_replicate_indices': (
                     spectral_edge_peak_indices
+                ),
+                'spectral_observation_types': [
+                    observation['spectral_observation_type']
+                    for observation in replicate_spectral_observations
+                ],
+                'n_interior_peak_replicates': sum(
+                    observation['spectral_observation_type']
+                    == 'interior_peak'
+                    for observation in replicate_spectral_observations
+                ),
+                'n_lower_scan_censored_replicates': sum(
+                    observation['spectral_observation_type']
+                    == 'lower_scan_censored'
+                    for observation in replicate_spectral_observations
+                ),
+                'n_upper_scan_censored_replicates': sum(
+                    observation['spectral_observation_type']
+                    == 'upper_scan_censored'
+                    for observation in replicate_spectral_observations
+                ),
+                'n_unknown_scan_quality_replicates': sum(
+                    observation['spectral_observation_type']
+                    == 'unknown_scan_quality'
+                    for observation in replicate_spectral_observations
+                ),
+                'n_lambda_model_eligible_replicates': sum(
+                    observation['lambda_model_eligible']
+                    for observation in replicate_spectral_observations
+                ),
+                'n_replicates_spectrally_excluded': (
+                    replicate_qc['n_replicates_spectrally_excluded']
+                ),
+                'n_usable_spectrum_model_eligible_replicates': sum(
+                    observation['usable_spectrum_model_eligible']
+                    for observation in replicate_spectral_observations
+                ),
+                'spectral_lambda_excluded_replicate_indices': (
+                    replicate_qc['spectral_excluded_indices']
+                ),
+                'spectral_lambda_excluded_values_nm': (
+                    replicate_qc['spectral_excluded_values']
+                ),
+                'spectral_lambda_exclusion_reasons': (
+                    replicate_qc['spectral_exclusion_reasons']
                 ),
 
                 # Explicit GP model-training decision.
@@ -6258,11 +6624,30 @@ class AutoContr(Controller):
 
                 raw_value = replicate_lambda_values[rep_i]
                 scan_quality = replicate_scan_quality[rep_i]
+                spectral_observation = replicate_spectral_observations[rep_i]
 
                 row[col_name] = self._safe_float_or_none(raw_value)
                 row[include_col_name] = (
                     rep_i in replicate_qc['included_indices']
                 )
+                row[
+                    f'actual_lambda_rep_{rep_i + 1}_'
+                    'spectral_observation_type'
+                ] = spectral_observation['spectral_observation_type']
+                row[
+                    f'actual_lambda_rep_{rep_i + 1}_'
+                    'lambda_model_eligible'
+                ] = spectral_observation['lambda_model_eligible']
+                row[
+                    f'actual_lambda_rep_{rep_i + 1}_'
+                    'lambda_model_exclusion_reason'
+                ] = spectral_observation['lambda_model_exclusion_reason']
+                row[
+                    f'actual_lambda_rep_{rep_i + 1}_'
+                    'usable_spectrum_model_eligible'
+                ] = spectral_observation[
+                    'usable_spectrum_model_eligible'
+                ]
 
                 if isinstance(scan_quality, dict):
                     row[
@@ -6288,15 +6673,25 @@ class AutoContr(Controller):
                     ] = None
 
             if spectral_edge_peak_indices:
-                print(
-                    "<<controller warning>> Auto spectral-quality warning "
-                    f"for batch {batch_number}, condition "
-                    f"{self.auto_condition_counter}: "
-                    f"boundary maximum in replicate(s) "
-                    f"{[index + 1 for index in spectral_edge_peak_indices]}; "
-                    "recorded for review without changing QC or model "
-                    "training."
-                )
+                if spectral_policy == 'boundary_aware':
+                    print(
+                        "<<controller warning>> Auto spectral boundary "
+                        f"censoring for batch {batch_number}, condition "
+                        f"{self.auto_condition_counter}: replicate(s) "
+                        f"{[index + 1 for index in spectral_edge_peak_indices]} "
+                        "were excluded from exact lambda-max QC/training; "
+                        "raw outcomes remain recorded."
+                    )
+                else:
+                    print(
+                        "<<controller warning>> Auto spectral-quality warning "
+                        f"for batch {batch_number}, condition "
+                        f"{self.auto_condition_counter}: "
+                        f"boundary maximum in replicate(s) "
+                        f"{[index + 1 for index in spectral_edge_peak_indices]}; "
+                        "recorded for review without changing QC or model "
+                        "training."
+                    )
 
             self.auto_model_performance_rows.append(row)
             self.auto_condition_counter += 1
@@ -11523,6 +11918,10 @@ class AutoContr(Controller):
             'replicate_sd_tolerance_nm',
             25.0
         )
+        spectral_response_policy = robo_params.get(
+            'auto_spectral_response_policy',
+            'audit_only'
+        )
         using_temp_ctrl = robo_params.get('using_temp_ctrl', None)
         temperature_c = robo_params.get('temp', None)
         auto_source_volume_check = robo_params.get(
@@ -11612,6 +12011,34 @@ class AutoContr(Controller):
             performance_df,
             'model_training_status',
             'used_flagged_condition'
+        )
+
+        def _sum_spectral_count(column_name):
+            if column_name not in performance_df.columns:
+                return 0
+
+            try:
+                values = self._safe_auto_report_numeric(
+                    performance_df[column_name]
+                ).fillna(0.0)
+                return int(values.sum())
+            except Exception:
+                return 0
+
+        spectral_interior_count = _sum_spectral_count(
+            'n_interior_peak_replicates'
+        )
+        spectral_lower_censored_count = _sum_spectral_count(
+            'n_lower_scan_censored_replicates'
+        )
+        spectral_upper_censored_count = _sum_spectral_count(
+            'n_upper_scan_censored_replicates'
+        )
+        spectral_unknown_count = _sum_spectral_count(
+            'n_unknown_scan_quality_replicates'
+        )
+        spectral_lambda_excluded_count = _sum_spectral_count(
+            'n_replicates_spectrally_excluded'
         )
 
         best_condition_row = None
@@ -12237,6 +12664,11 @@ class AutoContr(Controller):
             + '. The QC-cleaned condition SD must not exceed this value for '
             'a target-EI incumbent or early stop.'
         )
+        lines.append(
+            '- Spectral-response policy: `'
+            + str(spectral_response_policy)
+            + '`.'
+        )
         lines.append('')
         lines.append('### Replicate and run design')
         lines.append('')
@@ -12494,6 +12926,41 @@ class AutoContr(Controller):
         lines.append('### QC Interpretation')
         lines.append('')
         lines.append(qc_interpretation)
+        lines.append('')
+
+        lines.append('## Spectral Observation Handling')
+        lines.append('')
+        if spectral_response_policy == 'boundary_aware':
+            lines.append(
+                'Exact 300 nm and 1000 nm scan-boundary maxima are treated '
+                'as censored observations rather than exact lambda-max '
+                'measurements. Raw values remain in the performance log, but '
+                'censored observations do not enter exact-lambda QC, primary '
+                'GP training, target-EI incumbents, or early stopping. This '
+                'release applies no low-signal absorbance threshold.'
+            )
+        else:
+            lines.append(
+                'The legacy audit-only policy was active. Exact scan-boundary '
+                'maxima are counted below and retained as finite lambda-max '
+                'observations for QC and primary-GP training. This preserves '
+                'historical behavior while exposing the evidence needed for '
+                'future boundary-aware analysis.'
+            )
+        lines.append('')
+        lines.extend(
+            self._build_padded_auto_report_markdown_table(
+                headers=['Spectral observation', 'Replicate count'],
+                rows=[
+                    ['Interior peak', spectral_interior_count],
+                    ['Lower-bound censored (300 nm)', spectral_lower_censored_count],
+                    ['Upper-bound censored (1000 nm)', spectral_upper_censored_count],
+                    ['Unknown scan quality', spectral_unknown_count],
+                    ['Excluded from exact lambda model', spectral_lambda_excluded_count]
+                ],
+                alignments=['left', 'right']
+            )
+        )
         lines.append('')
 
         if (
@@ -18443,9 +18910,19 @@ class AutoContr(Controller):
         qc_initial_recipes, qc_initial_lambda_values = (
             self._build_auto_qc_model_training_data(
                 X_Initial_Denormalized,
-                Y_initial
+                Y_initial,
+                scan_quality_by_replicate=initial_scan_quality
             )
         )
+
+        if len(qc_initial_lambda_values) == 0:
+            raise ValueError(
+                "Auto seed batch contains no exact interior lambda-max "
+                "observations after boundary-aware spectral routing. Raw "
+                "scans and censored outcomes were preserved, but a primary "
+                "lambda-max GP cannot be initialized until at least one "
+                "interior peak is measured."
+            )
 
         # Normalize the QC-filtered lambda maxes to pass to the GP model.
         qc_Y_initial_normalized = normalize(
@@ -18629,63 +19106,81 @@ class AutoContr(Controller):
             qc_new_recipes, qc_new_lambda_values = (
                 self._build_auto_qc_model_training_data(
                     X_new_Denormalized,
-                    Y_new
+                    Y_new,
+                    scan_quality_by_replicate=new_scan_quality
                 )
             )
 
-            # Normalize the QC-filtered lambda maxes and recipes to pass to the
-            # GP model. Use a copy because Normalize_Denormalize_Recipes mutates
-            # its input.
-            qc_Y_new_normalized = normalize(
-                np.array(qc_new_lambda_values),
-                300,
-                900
-            ).reshape(-1, 1)
-
-            qc_X_new_normalized = self.Normalize_Denormalize_Recipes(
-                qc_new_recipes.copy(),
-                normalize_flag=True
-            )
-
-            # Update the model with only QC-included replicate observations.
-            if (
-                self.robo_params.get(
-                    'auto_terminal_verbosity',
-                    'standard'
-                )
-                != 'essential'
-            ):
+            if len(qc_new_lambda_values) == 0:
+                # Do not mutate primary-GP X/Y history when a completed batch
+                # contained no exact interior peaks. The run still accounts
+                # for the measured batch so max_iterations remains a physical
+                # batch limit rather than an unbounded retry loop.
                 print(
-                    "<<controller>> updating GP model with QC-approved "
-                    f"batch {self.batch_num} observations; please wait"
+                    "<<controller warning>> Auto batch "
+                    f"{self.batch_num} contained no exact interior lambda-max "
+                    "observations after spectral routing; primary GP history "
+                    "was left unchanged. Raw/censored outcomes remain in the "
+                    "performance log."
                 )
-            model.update_experiment_data(
-                np.vstack((model.optimizer.X, qc_X_new_normalized)),
-                np.vstack((model.optimizer.Y, qc_Y_new_normalized)),
-                qc_X_new_normalized,
-                qc_Y_new_normalized
-            )
-            if (
-                self.robo_params.get(
-                    'auto_terminal_verbosity',
-                    'standard'
+                model.curr_iter += 1
+                model.update_quit(None, None)
+            else:
+                # Normalize the QC-filtered lambda maxes and recipes to pass
+                # to the GP model. Use a copy because
+                # Normalize_Denormalize_Recipes mutates its input.
+                qc_Y_new_normalized = normalize(
+                    np.array(qc_new_lambda_values),
+                    300,
+                    900
+                ).reshape(-1, 1)
+
+                qc_X_new_normalized = self.Normalize_Denormalize_Recipes(
+                    qc_new_recipes.copy(),
+                    normalize_flag=True
                 )
-                != 'essential'
-            ):
-                print("<<controller>> GP model updated")
 
-            # Keep target EI aligned with the newly fitted GP only after its
-            # QC-filtered batch update succeeds.
-            self._synchronize_target_ei_incumbent_from_performance(model)
+                # Update the model with only QC-included replicate
+                # observations.
+                if (
+                    self.robo_params.get(
+                        'auto_terminal_verbosity',
+                        'standard'
+                    )
+                    != 'essential'
+                ):
+                    print(
+                        "<<controller>> updating GP model with QC-approved "
+                        f"batch {self.batch_num} observations; please wait"
+                    )
+                model.update_experiment_data(
+                    np.vstack((model.optimizer.X, qc_X_new_normalized)),
+                    np.vstack((model.optimizer.Y, qc_Y_new_normalized)),
+                    qc_X_new_normalized,
+                    qc_Y_new_normalized
+                )
+                if (
+                    self.robo_params.get(
+                        'auto_terminal_verbosity',
+                        'standard'
+                    )
+                    != 'essential'
+                ):
+                    print("<<controller>> GP model updated")
 
-            # The completed batch is now part of the fitted GP. The plot-suite
-            # coordinator refreshes the 2D prediction and uncertainty grids
-            # before saving heatmaps, so "After Batch N" truly includes Batch N.
-            self._generate_auto_plot_suite(
-                stage='after_model_update',
-                model=model,
-                batch_number=self.batch_num
-            )
+                # Keep target EI aligned with the newly fitted GP only after
+                # its QC-filtered batch update succeeds.
+                self._synchronize_target_ei_incumbent_from_performance(model)
+
+                # The completed batch is now part of the fitted GP. The plot
+                # coordinator refreshes full grids only after an actual model
+                # update, so an "After Batch N" plot never mislabels a stale
+                # primary-GP snapshot as including a censored-only batch.
+                self._generate_auto_plot_suite(
+                    stage='after_model_update',
+                    model=model,
+                    batch_number=self.batch_num
+                )
 
             # Override optimizer-side quit behavior with the scientifically
             # correct condition-level duplicate rule. This prevents Auto from

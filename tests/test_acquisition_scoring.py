@@ -1419,6 +1419,7 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
             '_get_auto_replicate_outlier_threshold_nm',
             '_get_auto_replicate_sd_tolerance_nm',
             '_get_auto_target_tolerance_nm',
+            '_classify_auto_spectral_observations',
             '_run_lambda_replicate_qc',
             '_get_auto_model_training_decision_from_replicate_qc',
             '_get_auto_target_eligibility_decision',
@@ -1629,7 +1630,8 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         auto_source_volume_check=None,
         auto_source_reserve_volume_uL=None,
         pi_legacy_tare_offset_g=None,
-        true_zero_reagents=None
+        true_zero_reagents=None,
+        auto_spectral_response_policy=None
     ):
         controller = self.Controller()
         controller.robo_params = {}
@@ -1696,6 +1698,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 str(true_zero_reagents)
             ])
 
+        if auto_spectral_response_policy is not None:
+            header.append([
+                'auto_spectral_response_policy',
+                str(auto_spectral_response_policy)
+            ])
+
         with redirect_stdout(io.StringIO()):
             controller._init_robo_header_params(header)
 
@@ -1714,8 +1722,34 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
         self.assertEqual(parsed['auto_source_volume_check'], 'off')
         self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.0)
+        self.assertEqual(
+            parsed['auto_spectral_response_policy'],
+            'audit_only'
+        )
         self.assertEqual(parsed['acquisition_modes'], ['exploit'])
         self.assertFalse(parsed['using_acquisition_portfolio'])
+
+    def test_header_spectral_response_policy_is_optional_and_normalized(self):
+        self.assertEqual(
+            self._parse_header(
+                auto_spectral_response_policy='Boundary Aware'
+            )['auto_spectral_response_policy'],
+            'boundary_aware'
+        )
+        self.assertEqual(
+            self._parse_header(
+                auto_spectral_response_policy='audit'
+            )['auto_spectral_response_policy'],
+            'audit_only'
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'audit_only or boundary_aware'
+        ):
+            self._parse_header(
+                auto_spectral_response_policy='low_signal'
+            )
 
     def test_header_preserves_selective_true_zero_request_for_auto_resolution(self):
         parsed = self._parse_header(
@@ -3081,10 +3115,12 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_summarize_duplicate_lambda_values',
             '_get_auto_replicate_outlier_threshold_nm',
             '_get_auto_replicate_sd_tolerance_nm',
+            '_classify_auto_spectral_observations',
             '_run_lambda_replicate_qc',
             '_get_auto_model_training_decision_from_replicate_qc',
             '_get_auto_target_eligibility_decision',
             '_summarize_auto_scan_quality',
+            '_build_auto_qc_model_training_data',
             '_append_auto_model_performance_rows',
             '_update_auto_model_performance_closest_so_far',
             '_export_auto_model_performance_log',
@@ -3865,12 +3901,111 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(row['n_spectral_edge_peaks'], 1)
         self.assertEqual(row['spectral_edge_peak_replicate_indices'], [0])
         self.assertTrue(row['use_for_model_training'])
+        self.assertEqual(row['auto_spectral_response_policy'], 'audit_only')
+        self.assertEqual(
+            row['spectral_observation_types'],
+            ['lower_scan_censored', 'interior_peak']
+        )
+        self.assertEqual(row['n_lambda_model_eligible_replicates'], 2)
+        self.assertEqual(
+            row['spectral_lambda_excluded_replicate_indices'],
+            []
+        )
         self.assertEqual(
             row['actual_lambda_rep_1_blank_corrected_peak_absorbance'],
             0.01
         )
         self.assertTrue(row['actual_lambda_rep_1_peak_at_scan_boundary'])
         self.assertFalse(row['actual_lambda_rep_2_peak_at_scan_boundary'])
+
+    def test_boundary_aware_policy_censors_endpoints_from_lambda_qc_training(self):
+        controller = self._build_exact_controller()
+        controller.num_duplicates = 3
+        controller.robo_params['num_duplicates'] = 3
+        controller.robo_params['auto_spectral_response_policy'] = (
+            'boundary_aware'
+        )
+        scan_quality = controller._summarize_auto_scan_quality(
+            [300.0, 624.0, 626.0],
+            [0.01, 0.42, 0.41]
+        )
+
+        model_recipes, model_values = (
+            controller._build_auto_qc_model_training_data(
+                np.array([[0.2, 0.2]], dtype=float),
+                [300.0, 624.0, 626.0],
+                scan_quality_by_replicate=scan_quality
+            )
+        )
+
+        self.assertEqual(model_recipes.shape, (2, 2))
+        np.testing.assert_allclose(model_values, [624.0, 626.0])
+
+        with redirect_stdout(io.StringIO()):
+            controller._append_auto_model_performance_rows(
+                unique_recipes=np.array([[0.2, 0.2]], dtype=float),
+                lambda_max_values=[300.0, 624.0, 626.0],
+                condition_type='seed',
+                batch_number=0,
+                scan_quality_by_replicate=scan_quality
+            )
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertEqual(row['actual_lambda_values_qc_nm'], [624.0, 626.0])
+        self.assertEqual(row['actual_lambda_mean_qc_nm'], 625.0)
+        self.assertEqual(row['n_replicates_spectrally_excluded'], 1)
+        self.assertEqual(
+            row['spectral_lambda_excluded_replicate_indices'],
+            [0]
+        )
+        self.assertTrue(row['use_for_model_training'])
+        self.assertTrue(row['eligible_for_target_incumbent'])
+        self.assertTrue(row['eligible_for_target_stop'])
+        self.assertFalse(
+            row['actual_lambda_rep_1_lambda_model_eligible']
+        )
+        self.assertEqual(
+            row['actual_lambda_rep_1_spectral_observation_type'],
+            'lower_scan_censored'
+        )
+
+    def test_boundary_aware_all_censored_condition_returns_no_lambda_rows(self):
+        controller = self._build_exact_controller()
+        controller.num_duplicates = 3
+        controller.robo_params['num_duplicates'] = 3
+        controller.robo_params['auto_spectral_response_policy'] = (
+            'boundary_aware'
+        )
+        scan_quality = controller._summarize_auto_scan_quality(
+            [300.0, 1000.0, 300.0],
+            [0.01, 0.01, 0.02]
+        )
+
+        model_recipes, model_values = (
+            controller._build_auto_qc_model_training_data(
+                np.array([[0.2, 0.2]], dtype=float),
+                [300.0, 1000.0, 300.0],
+                scan_quality_by_replicate=scan_quality
+            )
+        )
+
+        self.assertEqual(model_recipes.shape, (0, 2))
+        self.assertEqual(model_values.shape, (0,))
+
+        with redirect_stdout(io.StringIO()):
+            controller._append_auto_model_performance_rows(
+                unique_recipes=np.array([[0.2, 0.2]], dtype=float),
+                lambda_max_values=[300.0, 1000.0, 300.0],
+                condition_type='seed',
+                batch_number=0,
+                scan_quality_by_replicate=scan_quality
+            )
+
+        row = controller.auto_model_performance_rows[0]
+        self.assertIsNone(row['actual_lambda_mean_qc_nm'])
+        self.assertFalse(row['use_for_model_training'])
+        self.assertFalse(row['eligible_for_target_incumbent'])
+        self.assertFalse(row['eligible_for_target_stop'])
 
     def test_current_controller_completion_marker_updates_report_status(self):
         controller = self._build_exact_controller()
@@ -4007,6 +4142,8 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn('4 nm', report_text)
         self.assertIn('Replicate SD tolerance', report_text)
         self.assertIn('5 nm', report_text)
+        self.assertIn('## Spectral Observation Handling', report_text)
+        self.assertIn('legacy audit-only policy was active', report_text)
         self.assertIn('minimum normalized RMS distance', report_text)
         self.assertIn('Minimizes `−(predicted GP SD)` (nm)', report_text)
         self.assertIn(

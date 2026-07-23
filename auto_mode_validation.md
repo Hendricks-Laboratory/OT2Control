@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-22
+**Updated through:** 2026-07-23
 
 ---
 
@@ -110,7 +110,8 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Configured target-stop, acquisition, and portfolio report provenance | Implemented | Hardware-free report regression test with an early-stop condition and physical replicate-well locations |
 | Labeled raw well-level Auto export | Implemented | Hardware-free export regression test; exported columns identify final-reaction concentration in mM and measured λmax in nm without changing internal training data |
 | Reader-oriented report appendix and plate-reuse guidance | Implemented | Hardware-free report regression tests for appendix ordering, physical well span, remaining sequential capacity, and next-well recommendation |
-| Objective UV scan-quality diagnostics | Implemented, warning-only | Records blank-corrected peak height and 300/1000 nm boundary maxima; does not alter QC, GP training, target EI, or stopping |
+| Objective UV scan-quality diagnostics | Implemented, warning-only by default | Records blank-corrected peak height and 300/1000 nm boundary maxima; legacy worksheets retain warning-only behavior |
+| Boundary-aware exact-λmax routing | Implemented, opt-in foundation | `boundary_aware` excludes only exact 300/1000 nm maxima from exact-λmax QC/training and target decisions while preserving raw outcomes; separate reliability model/acquisition is deferred |
 
 ### Current acquisition semantics
 
@@ -139,6 +140,46 @@ all variable reagents are eligible when `allow_true_zero` is true, and none
 are eligible when it is false. Unknown, duplicate, fixed-reagent, or
 contradictory Header values fail before Auto execution.
 
+### Boundary-aware spectral-response foundation — July 23, 2026
+
+The optional Header `auto_spectral_response_policy` now provides an explicit,
+backward-compatible distinction between an exact interior λmax observation and
+a scan-boundary-censored outcome:
+
+| Policy | Behavior |
+|---|---|
+| `audit_only` (default) | Retains historic behavior: exact 300/1000 nm maxima remain finite λmax values for QC, primary-GP training, incumbents, and stopping, while their boundary status is audited. |
+| `boundary_aware` | Treats only an extracted maximum exactly at 300 or 1000 nm as censored. It remains in raw well/condition audit output, but is excluded from exact-λmax QC, primary-GP training, target-EI incumbents, and target stopping. No arbitrary low-signal or near-edge cutoff is used. |
+
+The controller records an immutable per-replicate observation type
+(`interior_peak`, `lower_scan_censored`, `upper_scan_censored`, or
+`unknown_scan_quality`), exact-λmax eligibility and reason, and
+future usable-spectrum-model eligibility in `auto_model_performance_log.csv`.
+The report summarizes those counts and identifies the active policy.
+
+An interior pair plus one censored replicate can train the primary λmax GP and
+can support a target decision if it passes the existing two-replicate and
+replicate-SD gates. A fully censored later optimizer batch leaves primary GP
+history unchanged but is counted as a completed physical batch, avoiding
+history corruption or an unbounded retry loop. A fully censored initial seed
+batch fails clearly because no exact λmax GP can be initialized.
+
+Validation on July 23 used `/usr/bin/python3` version 3.9.6: `py_compile`
+passed for `controller.py`, `optimizers.py`, and the focused test module;
+125 focused isolated tests and 129 total isolated tests passed. No controller
+launcher, robot, plate reader, credential workflow, or live protocol ran.
+
+The local review environment now contains `GPy 1.13.2` with its compatible
+NumPy/SciPy requirements. A hardware-free Stage 0 spike verified that
+`GPy.models.GPClassification` returns finite probabilities in `[0, 1]` when
+constructed from cumulative binary observations. Its returned variance is not
+finite in this environment and must not be used. Additionally, calling
+`set_XY()` after changing the observation count fails in GPy's EP inference
+implementation; Stage 3 must rebuild a fresh classification model from the
+complete cumulative history after each batch rather than mutate it in place.
+No separate usable-spectrum probability model, reliability maps, or
+reliability-aware acquisition behavior is yet implemented.
+
 ### Current spreadsheet Header interface
 
 Header rows are read by key, so their physical row order does not matter.
@@ -165,6 +206,7 @@ retain the stated legacy defaults when their Header row is absent.
 | `auto_source_volume_check` | `off` (legacy default) or `required`. `required` performs a fail-closed aggregate source-inventory preflight before each batch. |
 | `auto_source_reserve_volume_uL` | Nonnegative additional source reserve beyond the robot's dead-volume calculation; defaults to `0`. It matters only when source-volume checking is required. |
 | `pi_legacy_tare_offset_g` | Nonnegative payload-only compatibility offset for a deployed Raspberry Pi that still uses the old tare constants; defaults to `0`. Do not enable after the Pi has the corrected constants. |
+| `auto_spectral_response_policy` | `audit_only` (default; preserves legacy finite-boundary treatment) or `boundary_aware` (censors only exact 300/1000 nm maxima from exact-λmax routing). Aliases `audit`, `boundary`, and `censored` are accepted. |
 
 The singular and portfolio acquisition interfaces are deliberately mutually
 explicit. A new portfolio worksheet must put `off` in `acquisition_mode`; a
