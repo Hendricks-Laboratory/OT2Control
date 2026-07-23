@@ -111,7 +111,8 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Labeled raw well-level Auto export | Implemented | Hardware-free export regression test; exported columns identify final-reaction concentration in mM and measured λmax in nm without changing internal training data |
 | Reader-oriented report appendix and plate-reuse guidance | Implemented | Hardware-free report regression tests for appendix ordering, physical well span, remaining sequential capacity, and next-well recommendation |
 | Objective UV scan-quality diagnostics | Implemented, warning-only by default | Records blank-corrected peak height and 300/1000 nm boundary maxima; legacy worksheets retain warning-only behavior |
-| Boundary-aware exact-λmax routing | Implemented, opt-in foundation | `boundary_aware` excludes only exact 300/1000 nm maxima from exact-λmax QC/training and target decisions while preserving raw outcomes; separate reliability model/acquisition is deferred |
+| Boundary-aware exact-λmax routing | Implemented, opt-in | `boundary_aware` excludes only exact 300/1000 nm maxima from exact-λmax QC/training and target decisions while preserving raw outcomes |
+| Usable-spectrum probability classifier and conditional/joint maps | Implemented, observational | Cumulative binary GPy classifier learns interior versus exact-boundary outcomes; it does not yet affect acquisition or stopping |
 
 ### Current acquisition semantics
 
@@ -166,19 +167,36 @@ batch fails clearly because no exact λmax GP can be initialized.
 
 Validation on July 23 used `/usr/bin/python3` version 3.9.6: `py_compile`
 passed for `controller.py`, `optimizers.py`, and the focused test module;
-125 focused isolated tests and 129 total isolated tests passed. No controller
-launcher, robot, plate reader, credential workflow, or live protocol ran.
+130 focused isolated tests and 134 total isolated tests passed. The focused
+Stage 3 tests also verified fresh cumulative binary classifier reconstruction,
+finite probability output, binary-history validation, and controller replay of
+interior/censored replicate labels. No controller launcher, robot, plate
+reader, credential workflow, or live protocol ran.
 
 The local review environment now contains `GPy 1.13.2` with its compatible
-NumPy/SciPy requirements. A hardware-free Stage 0 spike verified that
-`GPy.models.GPClassification` returns finite probabilities in `[0, 1]` when
-constructed from cumulative binary observations. Its returned variance is not
-finite in this environment and must not be used. Additionally, calling
-`set_XY()` after changing the observation count fails in GPy's EP inference
-implementation; Stage 3 must rebuild a fresh classification model from the
-complete cumulative history after each batch rather than mutate it in place.
-No separate usable-spectrum probability model, reliability maps, or
-reliability-aware acquisition behavior is yet implemented.
+NumPy/SciPy requirements. `GPy.models.GPClassification` returns finite
+probabilities in `[0, 1]` when constructed from cumulative binary
+observations. Its returned variance is not finite in this environment and is
+therefore never used. Additionally, calling `set_XY()` after changing the
+observation count fails in GPy's EP inference implementation. Auto-RTG
+therefore rebuilds a fresh classifier from the complete cumulative assessed
+replicate history after each batch rather than mutating it in place.
+
+Under `boundary_aware`, each objectively assessed replicate contributes one
+binary outcome: `interior_peak` is usable and exact 300/1000 nm boundary
+maxima are not usable. Unknown scan quality is retained in audit output but
+does not become a guessed binary failure. The companion classifier is passive:
+it does not change masks, transfer bounds, physical feasibility, primary
+lambda-GP training, target-EI incumbents, early stopping, or acquisition.
+
+Existing conditional mean and GP-SD maps are now explicitly interpreted as
+`lambda max | interpretable spectrum`. Separate maps show
+`P(interpretable interior spectrum)` and the joint quantity
+`P(interpretable spectrum) × P(target window | interpretable spectrum)`.
+Optical reliability is never shown with the gray physical-infeasibility
+overlay, because a recipe can be physically executable yet optically
+unreliable. Reliability-aware acquisition remains a separately approved,
+future Stage 5 policy decision.
 
 ### Current spreadsheet Header interface
 

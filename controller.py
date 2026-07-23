@@ -2771,6 +2771,89 @@ class Controller(ABC):
                 uncertainty_feasibility_plot_path
             )
 
+        # Boundary-aware runs may have a second, passive classifier for the
+        # probability that a recipe produces an interpretable interior
+        # spectrum.  Keep the existing mean/uncertainty maps unchanged and
+        # emit separate maps so optical reliability is never confused with
+        # physical recipe feasibility.
+        predict_usable = getattr(
+            model,
+            'predict_usable_spectrum_probability',
+            None
+        )
+        if callable(predict_usable):
+            normalized_x, normalized_y = np.meshgrid(
+                np.linspace(0.0, 1.0, prediction_array.shape[1]),
+                np.linspace(0.0, 1.0, prediction_array.shape[0]),
+                indexing='xy'
+            )
+            normalized_recipes = np.column_stack((
+                normalized_x.ravel(order='C'),
+                normalized_y.ravel(order='C')
+            ))
+
+            try:
+                usable_probability = np.asarray(
+                    predict_usable(normalized_recipes),
+                    dtype=float
+                ).reshape(prediction_array.shape)
+                conditional_target_probability = (
+                    self._calculate_auto_target_probability(
+                        prediction_array,
+                        uncertainty_array,
+                        float(self.getModelInfo()['target']),
+                        self._get_auto_target_tolerance_nm()
+                    )
+                )
+                joint_target_success_probability = (
+                    self._calculate_auto_joint_target_success_probability(
+                        conditional_target_probability,
+                        usable_probability
+                    )
+                )
+            except Exception as reliability_error:
+                print(
+                    "<<controller warning>> skipping 2D usable-spectrum "
+                    "probability maps because classifier prediction failed: "
+                    f"{reliability_error}"
+                )
+            else:
+                generated_plot_paths.append(
+                    _save_2d_gpr_heatmap(
+                        heatmap_array=usable_probability,
+                        cmap_name='cividis',
+                        plot_title=(
+                            '2D Probability of an Interpretable Spectrum '
+                            f'After Batch {plot_batch_number}'
+                        ),
+                        colorbar_label='P(interpretable interior spectrum)',
+                        plot_filename=(
+                            'gpr_usable_spectrum_probability_batch_'
+                            f'{plot_batch_number}.png'
+                        ),
+                        plot_description='2D usable-spectrum probability plot'
+                    )
+                )
+                generated_plot_paths.append(
+                    _save_2d_gpr_heatmap(
+                        heatmap_array=joint_target_success_probability,
+                        cmap_name='magma',
+                        plot_title=(
+                            '2D Joint Probability of an Interpretable '
+                            f'Spectrum and Target Hit After Batch '
+                            f'{plot_batch_number}'
+                        ),
+                        colorbar_label=(
+                            'P(interpretable spectrum and target criterion)'
+                        ),
+                        plot_filename=(
+                            'gpr_joint_target_success_probability_batch_'
+                            f'{plot_batch_number}.png'
+                        ),
+                        plot_description='2D joint target-success probability plot'
+                    )
+                )
+
         return generated_plot_paths
     
     # below until ~end is all not used yet needs to be worked up
@@ -6195,6 +6278,14 @@ class AutoContr(Controller):
 
             volume_balance = self._get_auto_recipe_volume_balance(recipe)
             selected_mask = prediction_metadata.get('selected_mask')
+            n_usable_spectrum_model_eligible = sum(
+                observation['usable_spectrum_model_eligible']
+                for observation in replicate_spectral_observations
+            )
+            n_usable_spectrum_observed = sum(
+                observation['usable_spectrum_observed'] is True
+                for observation in replicate_spectral_observations
+            )
 
             row = {
                 'experiment_name': self.rxn_sheet_name,
@@ -6421,9 +6512,17 @@ class AutoContr(Controller):
                 'n_replicates_spectrally_excluded': (
                     replicate_qc['n_replicates_spectrally_excluded']
                 ),
-                'n_usable_spectrum_model_eligible_replicates': sum(
-                    observation['usable_spectrum_model_eligible']
-                    for observation in replicate_spectral_observations
+                'n_usable_spectrum_model_eligible_replicates': (
+                    n_usable_spectrum_model_eligible
+                ),
+                'n_usable_spectrum_observed_replicates': (
+                    n_usable_spectrum_observed
+                ),
+                'usable_spectrum_fraction_assessed': (
+                    n_usable_spectrum_observed
+                    / n_usable_spectrum_model_eligible
+                    if n_usable_spectrum_model_eligible > 0
+                    else None
                 ),
                 'spectral_lambda_excluded_replicate_indices': (
                     replicate_qc['spectral_excluded_indices']
@@ -6648,6 +6747,10 @@ class AutoContr(Controller):
                 ] = spectral_observation[
                     'usable_spectrum_model_eligible'
                 ]
+                row[
+                    f'actual_lambda_rep_{rep_i + 1}_'
+                    'usable_spectrum_observed'
+                ] = spectral_observation['usable_spectrum_observed']
 
                 if isinstance(scan_quality, dict):
                     row[
@@ -6697,6 +6800,154 @@ class AutoContr(Controller):
             self.auto_condition_counter += 1
 
         self._update_auto_model_performance_closest_so_far()
+
+    def _synchronize_auto_usable_spectrum_model_from_performance(
+        self,
+        model
+    ):
+        '''
+        Rebuilds the passive usable-spectrum classifier from logged outcomes.
+
+        Only the opt-in ``boundary_aware`` policy enables this companion
+        model.  Every objectively assessed replicate contributes one binary
+        observation: an interior peak is one and an exact scan-boundary peak
+        is zero.  Unknown scan quality is intentionally omitted rather than
+        silently converted to an unreliable result.
+
+        The primary lambda-max GP is not modified here.  This method supplies
+        a second outcome model solely for audit and maps, preserving the
+        existing physical-feasibility, acquisition, and controller stopping
+        authorities.
+
+        The optimizer intentionally receives the complete cumulative history
+        on each call.  GPy's deployed EP classifier cannot reliably grow via
+        ``set_XY`` after a row-count change, so its fresh reconstruction is
+        the required safe update path.
+
+        returns:
+            dict:
+                Audit summary of whether a classifier was fitted and the
+                cumulative counts supplied to it.
+        '''
+        spectral_policy = str(
+            getattr(self, 'robo_params', {}).get(
+                'auto_spectral_response_policy',
+                'audit_only'
+            )
+        ).strip().lower()
+
+        if spectral_policy != 'boundary_aware':
+            return {
+                'enabled': False,
+                'fitted': False,
+                'n_assessed_replicates': 0,
+                'n_usable_replicates': 0,
+                'n_censored_replicates': 0
+            }
+
+        update_method = getattr(model, 'update_usable_spectrum_model', None)
+        if not callable(update_method):
+            raise AttributeError(
+                "OptimizationModel does not provide "
+                "update_usable_spectrum_model()."
+            )
+
+        normalized_recipes = []
+        outcomes = []
+        n_dimensions = len(self.variable_reagents)
+
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            physical_recipe = []
+            for reagent_name in self.variable_reagents:
+                concentration = self._safe_float_or_none(
+                    row.get(f'{reagent_name}_concentration')
+                )
+                physical_recipe.append(concentration)
+
+            if (
+                len(physical_recipe) != n_dimensions
+                or any(value is None for value in physical_recipe)
+            ):
+                continue
+
+            normalized_recipe = self.Normalize_Denormalize_Recipes(
+                np.asarray([physical_recipe], dtype=float).copy(),
+                normalize_flag=True
+            )[0]
+
+            if not np.all(np.isfinite(normalized_recipe)):
+                continue
+
+            for replicate_index in range(self.num_duplicates):
+                prefix = f'actual_lambda_rep_{replicate_index + 1}_'
+                eligible = row.get(
+                    prefix + 'usable_spectrum_model_eligible'
+                )
+                observed = row.get(prefix + 'usable_spectrum_observed')
+
+                if not bool(eligible) or observed not in (True, False):
+                    continue
+
+                normalized_recipes.append(normalized_recipe.copy())
+                outcomes.append(1.0 if observed else 0.0)
+
+        if len(outcomes) == 0:
+            print(
+                "<<controller warning>> usable-spectrum classifier was not "
+                "updated because no objectively assessed replicate outcomes "
+                "were available."
+            )
+            return {
+                'enabled': True,
+                'fitted': False,
+                'n_assessed_replicates': 0,
+                'n_usable_replicates': 0,
+                'n_censored_replicates': 0
+            }
+
+        try:
+            update_method(
+                np.asarray(normalized_recipes, dtype=float),
+                np.asarray(outcomes, dtype=float).reshape(-1, 1)
+            )
+        except Exception as classifier_error:
+            # This companion model is intentionally observational at this
+            # stage. A numerical classifier failure must neither interrupt a
+            # physical Auto workflow nor leave stale reliability maps labeled
+            # as though they incorporated the current batch.
+            model.usable_spectrum_model = None
+            print(
+                "<<controller warning>> usable-spectrum classifier update "
+                "failed; continuing without reliability maps for this run. "
+                f"Error: {classifier_error}"
+            )
+            return {
+                'enabled': True,
+                'fitted': False,
+                'n_assessed_replicates': len(outcomes),
+                'n_usable_replicates': int(sum(outcomes)),
+                'n_censored_replicates': int(len(outcomes) - sum(outcomes))
+            }
+
+        summary = {
+            'enabled': True,
+            'fitted': True,
+            'n_assessed_replicates': len(outcomes),
+            'n_usable_replicates': int(sum(outcomes)),
+            'n_censored_replicates': int(len(outcomes) - sum(outcomes))
+        }
+
+        if self.robo_params.get('auto_terminal_verbosity', 'standard') in {
+            'standard', 'diagnostic'
+        }:
+            print(
+                "<<controller>> rebuilt usable-spectrum classifier from "
+                f"{summary['n_assessed_replicates']} assessed cumulative "
+                f"replicate(s): {summary['n_usable_replicates']} interior, "
+                f"{summary['n_censored_replicates']} boundary-censored"
+            )
+
+        return summary
     
     def _update_auto_model_performance_closest_so_far(self):
         '''
@@ -8027,6 +8278,15 @@ class AutoContr(Controller):
                         )
                     )
                     + ' nm',
+                    '- Interpretable-spectrum fraction among assessed '
+                    'replicates: '
+                    + self._format_auto_report_table_value(
+                        self._safe_auto_report_get(
+                            row,
+                            'usable_spectrum_fraction_assessed',
+                            None
+                        )
+                    ),
                     '- QC-cleaned mean and SD: '
                     + self._format_auto_report_table_value(
                         self._safe_auto_report_get(
@@ -8944,8 +9204,21 @@ class AutoContr(Controller):
                 category_parts.append('feasibility_overlays')
             category_parts.append('atlases')
             category = os.path.join(*category_parts)
+        elif filename.startswith('gpr_usable_spectrum_probability'):
+            category = os.path.join(
+                'gp_surfaces', '2d', 'usable_spectrum_probability', 'atlases'
+            )
+        elif filename.startswith('gpr_joint_target_success_probability'):
+            category = os.path.join(
+                'gp_surfaces', '2d', 'joint_target_success_probability',
+                'atlases'
+            )
         elif filename.startswith('gpr_3d_'):
-            if filename.startswith('gpr_3d_target_probability'):
+            if filename.startswith('gpr_3d_joint_target_success_probability'):
+                field_name = 'joint_target_success_probability'
+            elif filename.startswith('gpr_3d_usable_spectrum_probability'):
+                field_name = 'usable_spectrum_probability'
+            elif filename.startswith('gpr_3d_target_probability'):
                 field_name = 'target_probability'
             elif filename.startswith('gpr_3d_uncertainty'):
                 field_name = 'uncertainty'
@@ -8976,7 +9249,11 @@ class AutoContr(Controller):
         ):
             dimension_match = re.match(r'^gpr_([0-9]+)d_', filename)
             dimension_label = dimension_match.group(1) + 'd'
-            if '_target_probability_' in filename:
+            if '_joint_target_success_probability_' in filename:
+                field_name = 'joint_target_success_probability'
+            elif '_usable_spectrum_probability_' in filename:
+                field_name = 'usable_spectrum_probability'
+            elif '_target_probability_' in filename:
                 field_name = 'target_probability'
             elif '_uncertainty_' in filename:
                 field_name = 'uncertainty'
@@ -12040,6 +12317,12 @@ class AutoContr(Controller):
         spectral_lambda_excluded_count = _sum_spectral_count(
             'n_replicates_spectrally_excluded'
         )
+        spectral_usable_assessed_count = _sum_spectral_count(
+            'n_usable_spectrum_model_eligible_replicates'
+        )
+        spectral_usable_observed_count = _sum_spectral_count(
+            'n_usable_spectrum_observed_replicates'
+        )
 
         best_condition_row = None
 
@@ -12939,6 +13222,15 @@ class AutoContr(Controller):
                 'GP training, target-EI incumbents, or early stopping. This '
                 'release applies no low-signal absorbance threshold.'
             )
+            lines.append(
+                'A separate cumulative binary classifier maps the probability '
+                'of an interpretable interior spectrum. It is observational '
+                'in this release: it does not change recipe selection, '
+                'physical feasibility, primary lambda-GP training, or early '
+                'stopping. Conditional lambda and GP-SD maps therefore mean '
+                'given an interpretable spectrum; the joint map multiplies '
+                'that conditional target probability by spectrum usability.'
+            )
         else:
             lines.append(
                 'The legacy audit-only policy was active. Exact scan-boundary '
@@ -12956,6 +13248,8 @@ class AutoContr(Controller):
                     ['Lower-bound censored (300 nm)', spectral_lower_censored_count],
                     ['Upper-bound censored (1000 nm)', spectral_upper_censored_count],
                     ['Unknown scan quality', spectral_unknown_count],
+                    ['Assessed by usable-spectrum model', spectral_usable_assessed_count],
+                    ['Observed interpretable interior spectra', spectral_usable_observed_count],
                     ['Excluded from exact lambda model', spectral_lambda_excluded_count]
                 ],
                 alignments=['left', 'right']
@@ -13795,6 +14089,56 @@ class AutoContr(Controller):
 
         return np.clip(probability, 0.0, 1.0)
 
+    def _calculate_auto_joint_target_success_probability(
+        self,
+        conditional_target_probability,
+        usable_spectrum_probability
+    ):
+        '''
+        Calculates the probability of both an interpretable spectrum and a
+        lambda maximum within the configured target window.
+
+        The conditional target probability comes from the primary lambda-max
+        GP, which is trained only on exact interior observations under
+        boundary-aware policy.  The usable-spectrum probability comes from
+        the separate binary classifier.  Their product is therefore the
+        explicitly labeled joint decision map:
+
+            P(usable spectrum) * P(target window | usable spectrum)
+
+        It is a descriptive map in this release and does not alter acquisition
+        scores or controller stopping.
+        '''
+        conditional_target_probability = np.asarray(
+            conditional_target_probability,
+            dtype=float
+        )
+        usable_spectrum_probability = np.asarray(
+            usable_spectrum_probability,
+            dtype=float
+        )
+
+        if (
+            conditional_target_probability.shape
+            != usable_spectrum_probability.shape
+            or not np.all(np.isfinite(conditional_target_probability))
+            or not np.all(np.isfinite(usable_spectrum_probability))
+            or np.any(conditional_target_probability < 0.0)
+            or np.any(conditional_target_probability > 1.0)
+            or np.any(usable_spectrum_probability < 0.0)
+            or np.any(usable_spectrum_probability > 1.0)
+        ):
+            raise ValueError(
+                "Joint target-success probability requires finite "
+                "probabilities in [0, 1] with identical shapes."
+            )
+
+        return np.clip(
+            conditional_target_probability * usable_spectrum_probability,
+            0.0,
+            1.0
+        )
+
     def _build_auto_conditional_slice_panel_data(
         self,
         model,
@@ -13892,6 +14236,15 @@ class AutoContr(Controller):
             model,
             'predict_lambda_distribution_nm_batch',
             None
+        )
+        predict_usable_spectrum_probability = getattr(
+            model,
+            'predict_usable_spectrum_probability',
+            None
+        )
+        has_usable_spectrum_classifier = (
+            callable(predict_usable_spectrum_probability)
+            and getattr(model, 'usable_spectrum_model', None) is not None
         )
         balance_for_plotting = getattr(
             model,
@@ -14098,6 +14451,28 @@ class AutoContr(Controller):
                     dtype=float
                 ).reshape(x_normalized.shape)
 
+                conditional_probability = (
+                    self._calculate_auto_target_probability(
+                        predicted_mean,
+                        predicted_std,
+                        target_nm,
+                        tolerance_nm
+                    )
+                )
+                usable_spectrum_probability = None
+                joint_target_success_probability = None
+                if has_usable_spectrum_classifier:
+                    usable_spectrum_probability = np.asarray(
+                        predict_usable_spectrum_probability(recipes),
+                        dtype=float
+                    ).reshape(x_normalized.shape)
+                    joint_target_success_probability = (
+                        self._calculate_auto_joint_target_success_probability(
+                            conditional_probability,
+                            usable_spectrum_probability
+                        )
+                    )
+
                 ordinary_feasibility = _evaluate_slice_feasibility(
                     recipes,
                     x_normalized.shape
@@ -14147,11 +14522,12 @@ class AutoContr(Controller):
                     ),
                     'mean_nm': predicted_mean,
                     'std_nm': predicted_std,
-                    'probability': self._calculate_auto_target_probability(
-                        predicted_mean,
-                        predicted_std,
-                        target_nm,
-                        tolerance_nm
+                    'probability': conditional_probability,
+                    'usable_spectrum_probability': (
+                        usable_spectrum_probability
+                    ),
+                    'joint_target_success_probability': (
+                        joint_target_success_probability
                     ),
                     'feasible': ordinary_feasibility['feasible'],
                     'feasibility_x_physical': (
@@ -14267,6 +14643,15 @@ class AutoContr(Controller):
             model,
             'predict_lambda_distribution_nm_batch',
             None
+        )
+        predict_usable_spectrum_probability = getattr(
+            model,
+            'predict_usable_spectrum_probability',
+            None
+        )
+        has_usable_spectrum_classifier = (
+            callable(predict_usable_spectrum_probability)
+            and getattr(model, 'usable_spectrum_model', None) is not None
         )
         balance_for_plotting = getattr(
             model,
@@ -14476,6 +14861,25 @@ class AutoContr(Controller):
             predicted_std = np.asarray(predicted_std, dtype=float).reshape(
                 x_normalized.shape
             )
+            conditional_probability = self._calculate_auto_target_probability(
+                predicted_mean,
+                predicted_std,
+                target_nm,
+                tolerance_nm
+            )
+            usable_spectrum_probability = None
+            joint_target_success_probability = None
+            if has_usable_spectrum_classifier:
+                usable_spectrum_probability = np.asarray(
+                    predict_usable_spectrum_probability(recipes),
+                    dtype=float
+                ).reshape(x_normalized.shape)
+                joint_target_success_probability = (
+                    self._calculate_auto_joint_target_success_probability(
+                        conditional_probability,
+                        usable_spectrum_probability
+                    )
+                )
 
             ordinary_feasibility = _evaluate_slice_feasibility(
                 recipes,
@@ -14518,11 +14922,10 @@ class AutoContr(Controller):
                 ),
                 'mean_nm': predicted_mean,
                 'std_nm': predicted_std,
-                'probability': self._calculate_auto_target_probability(
-                    predicted_mean,
-                    predicted_std,
-                    target_nm,
-                    tolerance_nm
+                'probability': conditional_probability,
+                'usable_spectrum_probability': usable_spectrum_probability,
+                'joint_target_success_probability': (
+                    joint_target_success_probability
                 ),
                 'feasible': ordinary_feasibility['feasible'],
                 'feasibility_x_physical': (
@@ -14572,7 +14975,7 @@ class AutoContr(Controller):
         )
         max_std_nm = max(float(np.max(feasible_std_values)), 1.0)
 
-        field_definitions = (
+        field_definitions = [
             (
                 'mean',
                 'Predicted $\\lambda_{max}$ (nm)',
@@ -14600,7 +15003,34 @@ class AutoContr(Controller):
                     f'criterion (target ± {tolerance_nm:g} nm)'
                 )
             )
-        )
+        ]
+        if all(
+            panel.get('usable_spectrum_probability') is not None
+            for panel in panel_data
+        ):
+            field_definitions.extend([
+                (
+                    'usable_spectrum_probability',
+                    'P(interpretable interior spectrum)',
+                    lambda panel: panel['usable_spectrum_probability'],
+                    'cividis',
+                    plt.Normalize(vmin=0.0, vmax=1.0),
+                    'Probability of an interpretable interior spectrum'
+                ),
+                (
+                    'joint_target_success_probability',
+                    'P(interpretable spectrum and target criterion)',
+                    lambda panel: panel[
+                        'joint_target_success_probability'
+                    ],
+                    'magma',
+                    plt.Normalize(vmin=0.0, vmax=1.0),
+                    (
+                        'Joint probability of an interpretable spectrum and '
+                        f'target criterion (target ± {tolerance_nm:g} nm)'
+                    )
+                )
+            ])
 
         def _grid_spans_contour_level(grid, level):
             '''Returns whether a finite grid crosses one contour level.'''
@@ -15501,7 +15931,7 @@ class AutoContr(Controller):
             vmax=float(np.max(feasible_mean_values))
         )
         max_std_nm = max(float(np.max(feasible_std_values)), 1.0)
-        field_definitions = (
+        field_definitions = [
             (
                 'mean',
                 r'Predicted $\lambda_{max}$ (nm)',
@@ -15529,7 +15959,34 @@ class AutoContr(Controller):
                     f'criterion (target ± {tolerance_nm:g} nm)'
                 )
             )
-        )
+        ]
+        if all(
+            panel.get('usable_spectrum_probability') is not None
+            for panel in panel_data
+        ):
+            field_definitions.extend([
+                (
+                    'usable_spectrum_probability',
+                    'P(interpretable interior spectrum)',
+                    lambda panel: panel['usable_spectrum_probability'],
+                    'cividis',
+                    plt.Normalize(vmin=0.0, vmax=1.0),
+                    'Probability of an interpretable interior spectrum'
+                ),
+                (
+                    'joint_target_success_probability',
+                    'P(interpretable spectrum and target criterion)',
+                    lambda panel: panel[
+                        'joint_target_success_probability'
+                    ],
+                    'magma',
+                    plt.Normalize(vmin=0.0, vmax=1.0),
+                    (
+                        'Joint probability of an interpretable spectrum and '
+                        f'target criterion (target ± {tolerance_nm:g} nm)'
+                    )
+                )
+            ])
         boundary_colors = (
             '#009E73', '#CC79A7', '#E69F00', '#56B4E9',
             '#D55E00', '#0072B2', '#999999', '#000000'
@@ -18896,6 +19353,11 @@ class AutoContr(Controller):
             scan_quality_by_replicate=initial_scan_quality,
             replicate_wellnames=wellnames
         )
+
+        # Boundary-aware runs maintain a separate passive reliability model
+        # from every assessed replicate.  It never changes primary lambda-GP
+        # training or recipe selection at this implementation stage.
+        self._synchronize_auto_usable_spectrum_model_from_performance(model)
         
         self._generate_auto_plot_suite(
             stage='after_measurement',
@@ -19091,6 +19553,14 @@ class AutoContr(Controller):
                 prediction_metadata=optimizer_prediction_metadata,
                 scan_quality_by_replicate=new_scan_quality,
                 replicate_wellnames=wellnames
+            )
+
+            # Rebuild from the entire immutable performance history rather
+            # than attempting GPy classifier in-place growth.  This includes
+            # censored-only batches even when they add no exact lambda-max
+            # observations to the primary GP.
+            self._synchronize_auto_usable_spectrum_model_from_performance(
+                model
             )
 
             self._generate_auto_plot_suite(

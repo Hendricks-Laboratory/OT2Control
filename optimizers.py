@@ -339,6 +339,18 @@ class OptimizationModel():
             )
 
         self.gp_model = None
+        # The usable-spectrum classifier is deliberately independent of the
+        # primary conditional lambda-max GP.  It learns whether a physically
+        # executed recipe produced an interpretable interior spectrum, while
+        # the primary GP continues to learn lambda max only from exact
+        # eligible observations.  It is observational in this release: no
+        # acquisition score, mask, volume constraint, or stop rule reads it.
+        self.usable_spectrum_model = None
+        self.usable_spectrum_X = np.empty(
+            (0, len(self.variable_reagents)),
+            dtype=float
+        )
+        self.usable_spectrum_Y = np.empty((0, 1), dtype=float)
         self.acquisition = None
         self.optimizer = None
         self.prediction = None
@@ -351,6 +363,152 @@ class OptimizationModel():
         self._portfolio_selected_normalized_recipes = []
         self.portfolio_min_distance = 0.05
         self.acquisition_modes = [self.acquisition_mode]
+
+    def update_usable_spectrum_model(
+        self,
+        normalized_recipes,
+        usable_spectrum_outcomes
+    ):
+        '''
+        Rebuilds the cumulative binary usable-spectrum probability model.
+
+        A value of one denotes an interpretable interior spectrum; zero
+        denotes an objectively classified scan-boundary-censored spectrum.
+        Unknown scan-quality observations must be omitted by the controller,
+        rather than guessed to be failures.
+
+        GPy's expectation-propagation classifier does not safely support
+        ``set_XY`` when its observation count grows in the deployed stack.
+        Therefore this method intentionally constructs a fresh
+        ``GPClassification`` from the complete cumulative history each time.
+        This protects history integrity and makes the update atomic: model
+        attributes change only after a successful construction.
+
+        This companion model is not an optimizer feasibility model. Physical
+        feasibility remains governed exclusively by the existing mixed-mask
+        and controller-side volume pathways.
+
+        params:
+            np.ndarray normalized_recipes:
+                Complete cumulative recipe history in normalized 0--1 space.
+
+            np.ndarray usable_spectrum_outcomes:
+                Complete cumulative binary outcome history, one value per
+                row. Values must be exactly zero or one.
+
+        returns:
+            GPy.models.GPClassification:
+                Freshly fitted binary probability model.
+        '''
+        X = np.asarray(normalized_recipes, dtype=float)
+        Y = np.asarray(usable_spectrum_outcomes, dtype=float)
+
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+
+        if Y.ndim == 1:
+            Y = Y.reshape(-1, 1)
+
+        if X.ndim != 2 or X.shape[1] != self._get_dimension():
+            raise ValueError(
+                "Usable-spectrum model recipes must have one normalized "
+                "column per variable reagent."
+            )
+
+        if Y.ndim != 2 or Y.shape[1] != 1 or Y.shape[0] != X.shape[0]:
+            raise ValueError(
+                "Usable-spectrum outcomes must be one binary value for each "
+                "normalized recipe."
+            )
+
+        if X.shape[0] == 0:
+            raise ValueError(
+                "Usable-spectrum model requires at least one assessed "
+                "replicate."
+            )
+
+        if (
+            not np.all(np.isfinite(X))
+            or np.any(X < 0.0)
+            or np.any(X > 1.0)
+        ):
+            raise ValueError(
+                "Usable-spectrum model recipes must be finite normalized "
+                "values between zero and one."
+            )
+
+        if (
+            not np.all(np.isfinite(Y))
+            or not np.all(np.isin(Y, (0.0, 1.0)))
+        ):
+            raise ValueError(
+                "Usable-spectrum outcomes must be finite binary zero/one "
+                "values."
+            )
+
+        kernel = GPy.kern.RBF(
+            input_dim=self._get_dimension(),
+            variance=1.0,
+            lengthscale=1.0,
+            ARD=False
+        )
+
+        # Do not use the variance returned by GPClassification.predict(). In
+        # the deployed GPy 1.13.2 EP implementation its variance can be NaN;
+        # the predictive probability mean is the only supported output here.
+        fresh_model = GPy.models.GPClassification(X.copy(), Y.copy(), kernel)
+
+        self.usable_spectrum_model = fresh_model
+        self.usable_spectrum_X = X.copy()
+        self.usable_spectrum_Y = Y.copy()
+
+        if self.terminal_verbosity == 'diagnostic':
+            print(
+                "<<optimizer diagnostic>> rebuilt usable-spectrum "
+                f"classifier from {X.shape[0]} cumulative replicate(s)"
+            )
+
+        return self.usable_spectrum_model
+
+    def predict_usable_spectrum_probability(self, normalized_recipes):
+        '''Returns finite P(interpretable interior spectrum | recipe).
+
+        The result is a one-dimensional probability array aligned with the
+        supplied normalized recipe rows.  No classifier uncertainty is
+        returned because the deployed GPy EP variance is not reliable.
+        '''
+        if self.usable_spectrum_model is None:
+            raise ValueError(
+                "Usable-spectrum probability is unavailable because the "
+                "classifier has not been initialized."
+            )
+
+        X = np.asarray(normalized_recipes, dtype=float)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+
+        if X.ndim != 2 or X.shape[1] != self._get_dimension():
+            raise ValueError(
+                "Usable-spectrum probability requires one normalized column "
+                "per variable reagent."
+            )
+
+        if not np.all(np.isfinite(X)):
+            raise ValueError(
+                "Usable-spectrum probability requires finite normalized "
+                "recipes."
+            )
+
+        probability, _ = self.usable_spectrum_model.predict(X)
+        probability = np.asarray(probability, dtype=float).reshape(-1)
+
+        if not np.all(np.isfinite(probability)):
+            raise ValueError(
+                "Usable-spectrum classifier returned a non-finite "
+                "probability."
+            )
+
+        return np.clip(probability, 0.0, 1.0)
         
     def _minimum_pairwise_distance(self, design):
         '''

@@ -14,6 +14,14 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
+try:
+    import GPy
+except ImportError:
+    # The broader source-extraction suite intentionally remains usable in a
+    # minimal review environment. The dedicated classifier checks below run
+    # whenever the production GPy dependency is available.
+    GPy = None
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 OPTIMIZERS_PATH = REPOSITORY_ROOT / 'optimizers.py'
@@ -3955,6 +3963,10 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(row['actual_lambda_mean_qc_nm'], 625.0)
         self.assertEqual(row['n_replicates_spectrally_excluded'], 1)
         self.assertEqual(
+            row['usable_spectrum_fraction_assessed'],
+            2.0 / 3.0
+        )
+        self.assertEqual(
             row['spectral_lambda_excluded_replicate_indices'],
             [0]
         )
@@ -4376,12 +4388,14 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         ])
         cls.SliceController = _load_auto_controller_methods([
             '_get_auto_target_tolerance_nm',
-            '_calculate_auto_target_probability'
+            '_calculate_auto_target_probability',
+            '_calculate_auto_joint_target_success_probability'
         ])
         cls.GeneralSliceController = _load_auto_controller_methods([
             '_get_auto_design_bound_value',
             '_get_auto_target_tolerance_nm',
             '_calculate_auto_target_probability',
+            '_calculate_auto_joint_target_success_probability',
             '_build_auto_conditional_slice_panel_data'
         ])
 
@@ -4427,6 +4441,19 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
             stochastic_probability[0],
             stochastic_probability[1],
             places=12
+        )
+
+    def test_joint_target_success_probability_is_bounded_product(self):
+        controller = self.SliceController()
+        joint_probability = (
+            controller._calculate_auto_joint_target_success_probability(
+                np.asarray([0.2, 0.75, 1.0]),
+                np.asarray([0.5, 0.4, 0.0])
+            )
+        )
+        np.testing.assert_allclose(
+            joint_probability,
+            np.asarray([0.1, 0.3, 0.0])
         )
 
     def test_plotting_feasibility_preserves_nonexecutable_true_zero_band(self):
@@ -4664,6 +4691,161 @@ class OptimizationModelConfigurationTests(unittest.TestCase):
                         balanced_exploration_weight=invalid_weight,
                         **self._required_constructor_arguments()
                     )
+
+
+@unittest.skipIf(
+    GPy is None,
+    'GPy is not available in this review environment'
+)
+class UsableSpectrumClassifierTests(unittest.TestCase):
+    '''Exercises the cumulative, passive Stage 3 classifier in isolation.'''
+
+    @classmethod
+    def setUpClass(cls):
+        fake_gpyopt = SimpleNamespace(
+            Design_space=lambda bounds: bounds
+        )
+        cls.Model = _load_optimization_model_methods(
+            [
+                '__init__',
+                '_get_dimension',
+                'update_usable_spectrum_model',
+                'predict_usable_spectrum_probability'
+            ],
+            extra_namespace={
+                'GPy': GPy,
+                'GPyOpt': fake_gpyopt
+            }
+        )
+
+    def _build_model(self):
+        with redirect_stdout(io.StringIO()):
+            return self.Model(
+                bounds=[],
+                target_value=625.0,
+                reagent_info=None,
+                fixed_reagents=[],
+                variable_reagents=['A', 'B'],
+                initial_design_numdata=2,
+                batch_size=1,
+                max_iters=2,
+                terminal_verbosity='essential'
+            )
+
+    def test_classifier_rebuilds_from_complete_cumulative_history(self):
+        model = self._build_model()
+        first_X = np.asarray([
+            [0.0, 0.0],
+            [0.2, 0.2],
+            [0.8, 0.8],
+            [1.0, 1.0]
+        ])
+        first_Y = np.asarray([[1.0], [1.0], [0.0], [0.0]])
+        first_model = model.update_usable_spectrum_model(first_X, first_Y)
+
+        complete_X = np.vstack((first_X, [[0.4, 0.4], [0.6, 0.6]]))
+        complete_Y = np.vstack((first_Y, [[1.0], [0.0]]))
+        rebuilt_model = model.update_usable_spectrum_model(
+            complete_X,
+            complete_Y
+        )
+
+        self.assertIsNot(first_model, rebuilt_model)
+        np.testing.assert_allclose(model.usable_spectrum_X, complete_X)
+        np.testing.assert_allclose(model.usable_spectrum_Y, complete_Y)
+        probabilities = model.predict_usable_spectrum_probability(
+            np.asarray([[0.1, 0.1], [0.5, 0.5], [0.9, 0.9]])
+        )
+        self.assertTrue(np.all(np.isfinite(probabilities)))
+        self.assertTrue(np.all(probabilities >= 0.0))
+        self.assertTrue(np.all(probabilities <= 1.0))
+
+    def test_classifier_rejects_nonbinary_or_out_of_range_history(self):
+        model = self._build_model()
+
+        with self.assertRaisesRegex(ValueError, 'binary'):
+            model.update_usable_spectrum_model(
+                np.asarray([[0.2, 0.2]]),
+                np.asarray([[0.5]])
+            )
+
+        with self.assertRaisesRegex(ValueError, 'between zero and one'):
+            model.update_usable_spectrum_model(
+                np.asarray([[1.2, 0.2]]),
+                np.asarray([[1.0]])
+            )
+
+
+class UsableSpectrumControllerSynchronizationTests(unittest.TestCase):
+    '''Ensures controller audit rows preserve and replay binary outcomes.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_safe_float_or_none',
+            'Normalize_Denormalize_Recipes',
+            '_synchronize_auto_usable_spectrum_model_from_performance'
+        ])
+
+    def test_boundary_aware_policy_replays_all_assessed_replicates(self):
+        controller = self.Controller()
+        controller.variable_reagents = ['A', 'B']
+        controller.min_conc = [0.0, 0.0]
+        controller.max_conc = [1.0, 1.0]
+        controller.num_duplicates = 3
+        controller.robo_params = {
+            'auto_spectral_response_policy': 'boundary_aware',
+            'auto_terminal_verbosity': 'essential'
+        }
+        controller.auto_model_performance_rows = [{
+            'A_concentration': 0.25,
+            'B_concentration': 0.75,
+            'actual_lambda_rep_1_usable_spectrum_model_eligible': True,
+            'actual_lambda_rep_1_usable_spectrum_observed': True,
+            'actual_lambda_rep_2_usable_spectrum_model_eligible': True,
+            'actual_lambda_rep_2_usable_spectrum_observed': False,
+            'actual_lambda_rep_3_usable_spectrum_model_eligible': False,
+            'actual_lambda_rep_3_usable_spectrum_observed': None
+        }]
+        captured = {}
+        model = SimpleNamespace(
+            update_usable_spectrum_model=lambda X, Y: captured.update(
+                X=X.copy(), Y=Y.copy()
+            )
+        )
+
+        summary = controller._synchronize_auto_usable_spectrum_model_from_performance(
+            model
+        )
+
+        self.assertTrue(summary['fitted'])
+        self.assertEqual(summary['n_assessed_replicates'], 2)
+        self.assertEqual(summary['n_usable_replicates'], 1)
+        self.assertEqual(summary['n_censored_replicates'], 1)
+        np.testing.assert_allclose(
+            captured['X'],
+            np.asarray([[0.25, 0.75], [0.25, 0.75]])
+        )
+        np.testing.assert_allclose(captured['Y'], np.asarray([[1.0], [0.0]]))
+
+    def test_audit_only_policy_does_not_create_a_companion_model(self):
+        controller = self.Controller()
+        controller.variable_reagents = ['A']
+        controller.min_conc = [0.0]
+        controller.max_conc = [1.0]
+        controller.num_duplicates = 1
+        controller.robo_params = {
+            'auto_spectral_response_policy': 'audit_only'
+        }
+        controller.auto_model_performance_rows = []
+        model = SimpleNamespace()
+
+        summary = controller._synchronize_auto_usable_spectrum_model_from_performance(
+            model
+        )
+
+        self.assertFalse(summary['enabled'])
+        self.assertFalse(summary['fitted'])
 
 
 if __name__ == '__main__':
