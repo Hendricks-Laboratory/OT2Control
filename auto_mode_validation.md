@@ -106,6 +106,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
 | Portable Auto model checkpoint packages (`save` and `import` modes) | Implemented | Hardware-free JSON/NumPy archive round-trip, integrity, manual inbox and prior-run source selection, immutable lineage copy/provenance, compatibility, fresh-reconstruction, Header, and save-boundary tests |
+| Shared seed/optimizer λmax extraction | Implemented | The seed batch and every later optimizer or imported-continuation batch use one class-scoped blank-correction and scan-quality helper; isolated regression test prevents a seed-local helper scope failure |
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |
 | Current-controller completion report marker | Implemented | Saved-log regression test; a normal Auto completion is no longer reported as `Unknown` |
 | Configured target-stop, acquisition, and portfolio report provenance | Implemented | Hardware-free report regression test with an early-stop condition and physical replicate-well locations |

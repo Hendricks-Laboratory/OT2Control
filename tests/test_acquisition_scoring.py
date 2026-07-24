@@ -1324,6 +1324,47 @@ class ExperimentDataExportTests(unittest.TestCase):
         )
 
 
+class AutoLambdaMaximaExtractionTests(unittest.TestCase):
+    '''Prevents seed-only helper scope from breaking optimizer batches.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_extract_auto_lambda_maxima'
+        ])
+
+    def test_shared_lambda_extractor_handles_optimizer_style_scan_data(self):
+        controller = self.Controller()
+        controller._summarize_auto_scan_quality = (
+            lambda wavelengths, absorbances: [
+                {'wavelength_nm': wavelength, 'absorbance': absorbance}
+                for wavelength, absorbance in zip(wavelengths, absorbances)
+            ]
+        )
+        scan_data = pd.DataFrame({
+            'optimizer_well': np.zeros(701, dtype=float)
+        })
+
+        wavelengths, quality = controller._extract_auto_lambda_maxima(
+            scan_data
+        )
+
+        self.assertEqual(len(wavelengths), 1)
+        self.assertEqual(len(quality), 1)
+        self.assertIn('wavelength_nm', quality[0])
+
+    def test_seed_and_optimizer_paths_use_the_shared_class_method(self):
+        for method_name in ('_run', '_run_auto_optimizer_batches'):
+            method_node = _get_auto_controller_method_node(method_name)
+            called_attributes = {
+                node.func.attr
+                for node in ast.walk(method_node)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+            }
+            self.assertIn('_extract_auto_lambda_maxima', called_attributes)
+
+
 class TargetEiIncumbentControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
