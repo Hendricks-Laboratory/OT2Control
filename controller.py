@@ -9896,10 +9896,12 @@ class AutoContr(Controller):
         ax.grid(
             True,
             axis=grid_axis,
-            linestyle=':',
-            linewidth=0.6,
-            alpha=0.35
+            color='green',
+            linestyle='--',
+            linewidth=0.7,
+            alpha=0.6
         )
+        ax.set_axisbelow(True)
 
         for spine in ax.spines.values():
             spine.set_visible(True)
@@ -9954,6 +9956,18 @@ class AutoContr(Controller):
                 axis.pane.set_visible(True)
                 axis.pane.set_edgecolor('0.2')
                 axis.pane.set_linewidth(0.9)
+            except Exception:
+                pass
+
+            # Axes3D.grid() only toggles visibility; it does not accept
+            # Line2D-style kwargs. The grid line appearance must be set
+            # directly on each axis's private grid-style dict instead.
+            try:
+                axis._axinfo['grid'].update(
+                    color='green',
+                    linewidth=0.8,
+                    linestyle='--'
+                )
             except Exception:
                 pass
 
