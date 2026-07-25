@@ -15,3 +15,5 @@ requirements.txt
 experiment_data.csv
 .DS_Store
 CLAUDE.md
+# Local/generated Claude Code state (permissions, agent settings, caches)
+.claude/
