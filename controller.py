@@ -5240,6 +5240,54 @@ class AutoContr(Controller):
         )
         return checkpoint
 
+    @staticmethod
+    def _get_next_auto_number_after_rows(performance_rows, field_name):
+        '''Returns one past the largest integral value recorded in a field.
+
+        Imported condition history keeps the reaction and batch numbers of the
+        run that produced it.  A continuation must therefore start above those
+        values so every performance row, checkpoint filename, and
+        batch-filtered plot window stays unique and correctly ordered.
+
+        Missing, non-numeric, and boolean values are ignored rather than
+        treated as zero, so a legacy or partially populated row cannot pull the
+        continuation back on top of existing numbers.
+
+        params:
+            list performance_rows:
+                Condition-level Auto performance rows.
+
+            str field_name:
+                Integer audit field to scan, such as ``reaction_number`` or
+                ``batch_number``.
+
+        returns:
+            int:
+                Largest recorded value plus one, or 0 when no value was found.
+        '''
+        recorded_numbers = []
+
+        for row in performance_rows:
+            if not isinstance(row, dict):
+                continue
+
+            raw_value = row.get(field_name)
+
+            if raw_value is None or isinstance(raw_value, bool):
+                continue
+
+            try:
+                numeric_value = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+
+            if not np.isfinite(numeric_value):
+                continue
+
+            recorded_numbers.append(int(numeric_value))
+
+        return max(recorded_numbers, default=-1) + 1
+
     def _restore_imported_auto_model_checkpoint(self, model):
         '''Rebuilds a fresh model from an accepted portable checkpoint.
 
@@ -5319,16 +5367,46 @@ class AutoContr(Controller):
                 for reagent_name in self.variable_reagents
             ] + ['Experiment_result']
         )
-        prior_condition_numbers = [
-            row.get('condition_number')
-            for row in self.auto_model_performance_rows
-            if isinstance(row, dict)
-            and isinstance(row.get('condition_number'), int)
-        ]
-        self.auto_condition_counter = max(
-            prior_condition_numbers,
-            default=-1
-        ) + 1
+        # Imported rows describe a prior run's physical plate.  The marker is
+        # forced rather than trusted so a second-generation import cannot
+        # inherit a stale True from its own source package, and rows written
+        # before this field existed are still classified correctly.
+        imported_source_metadata = (
+            checkpoint.get('import_source_metadata') or {}
+        )
+        imported_source_run = (
+            str(imported_source_metadata.get('source_run_folder') or '').strip()
+            or str(checkpoint['manifest'].get('run_id') or '').strip()
+        )
+
+        for row in self.auto_model_performance_rows:
+            if isinstance(row, dict):
+                row['executed_in_current_run'] = False
+
+                # Preserve an existing stamp so a seed built three runs ago
+                # is still attributed to its true origin.  Only backfill rows
+                # written before the field existed, using the run this
+                # package came from, so lineage is not lost for older
+                # checkpoints or for a later third-generation import.
+                if not str(row.get('origin_run_directory') or '').strip():
+                    row['origin_run_directory'] = imported_source_run
+
+        # Continue condition and batch numbering above the imported history.
+        # Restarting at zero would emit duplicate reaction/batch keys into the
+        # performance log, checkpoint condition history, and batch-filtered
+        # plots, which silently overlays this run's conditions on the source
+        # run's.  The field name must match the key these rows actually use
+        # (``reaction_number``); an absent key would reset the counter to zero.
+        self.auto_condition_counter = self._get_next_auto_number_after_rows(
+            self.auto_model_performance_rows,
+            'reaction_number'
+        )
+        self.imported_auto_batch_start = (
+            self._get_next_auto_number_after_rows(
+                self.auto_model_performance_rows,
+                'batch_number'
+            )
+        )
         self.imported_auto_model_checkpoint = {
             'source_checkpoint_path': checkpoint['source_checkpoint_path'],
             'archived_checkpoint_path': checkpoint['archived_checkpoint_path'],
@@ -7225,6 +7303,15 @@ class AutoContr(Controller):
                 'batch_number': int(batch_number),
                 'reaction_number': int(self.auto_condition_counter),
                 'condition_type': condition_type,
+                # Separates wells this run physically executed from condition
+                # history inherited through a model-checkpoint import, whose
+                # well locations belong to another plate and must not be
+                # reported as this run's footprint.
+                'executed_in_current_run': True,
+                # Travels with the row through every later checkpoint import,
+                # so a multi-generation lineage can still name the run that
+                # actually produced this condition.
+                'origin_run_directory': self._get_auto_run_directory_name(),
                 'true_zero_eligible_reagents': (
                     self._serialize_auto_audit_value(
                         self.robo_params.get('true_zero_reagents', [])
@@ -8922,6 +9009,26 @@ class AutoContr(Controller):
         ):
             return None
 
+        # Physical-well reporting describes this run's plate only.  Condition
+        # history inherited through a model-checkpoint import carries the
+        # source run's well locations, so counting it here would report
+        # another plate's footprint and advance the same-plate reuse guidance
+        # past wells this run never touched.  An imported continuation always
+        # starts a fresh plate.  Rows predating this marker are treated as
+        # locally executed so older runs report unchanged.
+        if 'executed_in_current_run' in performance_df.columns:
+            imported_history_mask = (
+                performance_df['executed_in_current_run']
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .isin(['false', '0', 'no'])
+            )
+            performance_df = performance_df[~imported_history_mask].copy()
+
+            if performance_df.empty:
+                return None
+
         ordered_performance_df = performance_df
 
         if 'reaction_number' in performance_df.columns:
@@ -9497,6 +9604,119 @@ class AutoContr(Controller):
 
         return table_lines
     
+    def _get_auto_run_directory_name(self):
+        '''Returns this run's output-directory name as its run identity.
+
+        The Header ``data_dir`` value names the output folder, which is what
+        distinguishes two runs of the same spreadsheet.  ``experiment_name``
+        is the sheet name and is commonly identical across a save/import
+        pair, so it cannot identify a run on its own.
+        '''
+        out_path = str(getattr(self, 'out_path', '') or '').strip()
+
+        if not out_path:
+            return ''
+
+        return os.path.basename(os.path.normpath(out_path))
+
+    def _get_auto_inherited_seed_origin_run(self):
+        '''Returns the run whose seed design this run inherited, if any.
+
+        An imported continuation never performs its own seed design, so a
+        condition typed ``seed`` in such a run always came from an earlier
+        run.  Because a checkpoint may itself have been imported, the
+        originating run is read from the seed row's own
+        ``origin_run_directory`` stamp rather than from this run's immediate
+        import source: with A imported into B and B imported into C, C's
+        immediate source is B while the seed was actually built by A.
+
+        returns:
+            str or None:
+                Originating run directory name, or None when this run
+                executed its own seed design or recorded no seed condition.
+        '''
+        current_run_directory = self._get_auto_run_directory_name()
+        recorded_origins = []
+
+        for row in getattr(self, 'auto_model_performance_rows', []):
+            if not isinstance(row, dict):
+                continue
+
+            condition_type = str(
+                row.get('condition_type', '')
+            ).strip().lower()
+
+            if condition_type != 'seed':
+                continue
+
+            # Anything not explicitly marked as inherited is treated as this
+            # run's own work, so a legacy seed-bearing run keeps its original
+            # figure titles.
+            if row.get('executed_in_current_run') is not False:
+                return None
+
+            recorded_origins.append(
+                str(row.get('origin_run_directory') or '').strip()
+            )
+
+        if len(recorded_origins) == 0:
+            return None
+
+        named_origins = sorted({
+            origin_name
+            for origin_name in recorded_origins
+            if origin_name and origin_name != current_run_directory
+        })
+
+        if len(named_origins) > 0:
+            # More than one distinct origin can only appear if histories were
+            # combined; name them all rather than reporting one arbitrarily.
+            return ', '.join(named_origins)
+
+        # Rows written before the origin stamp existed carry no run name.
+        # Fall back to the immediate import source so lineage is still
+        # reported rather than silently dropped.
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        ) or {}
+        source_metadata = imported_checkpoint.get('source_metadata') or {}
+        fallback_origin = (
+            str(source_metadata.get('source_run_folder') or '').strip()
+            or str(imported_checkpoint.get('source_run_id') or '').strip()
+        )
+
+        return fallback_origin or 'a prior run'
+
+    def _get_auto_seed_design_label(self):
+        '''Returns the seed-design figure label matching this run's lineage.'''
+        origin_run = self._get_auto_inherited_seed_origin_run()
+
+        if origin_run is None:
+            return 'Initial Maximin Seed Design'
+
+        return 'Inherited Seed Design (from {})'.format(origin_run)
+
+    def _apply_auto_seed_design_label(self, plot_title):
+        '''Rewrites a default seed-design title for an inherited seed design.
+
+        Titles are declared once as the ordinary maximin wording, then routed
+        through here so an imported continuation cannot present another run's
+        seed design as its own.  The substitution is a no-op for a run that
+        built its own seed.
+        '''
+        seed_design_label = self._get_auto_seed_design_label()
+
+        if seed_design_label == 'Initial Maximin Seed Design':
+            return plot_title
+
+        return str(plot_title).replace(
+            'Initial Maximin Seed Design',
+            seed_design_label,
+            1
+        )
+
     def _format_auto_design_axis_label(self, reagent_name):
         '''
         Formats reagent-axis labels for Auto design-space plots.
@@ -12737,7 +12957,9 @@ class AutoContr(Controller):
                         'plot_df': seed_plot_df,
                         'design_columns': design_columns,
                         'plot_filename': seed_filename,
-                        'plot_title': seed_title,
+                        'plot_title': self._apply_auto_seed_design_label(
+                            seed_title
+                        ),
                         'include_best_condition': False
                     }
                 )
@@ -13029,6 +13251,17 @@ class AutoContr(Controller):
             list:
                 Markdown lines. Empty list if the plot does not exist.
         '''
+        # Keep the report's seed-design headings consistent with the figure
+        # titles, so an imported continuation does not describe another run's
+        # seed design as its own initial design.
+        if (
+            os.path.basename(str(plot_filename)).startswith(
+                'initial_maximin_seed_design_'
+            )
+            and hasattr(self, '_apply_auto_seed_design_label')
+        ):
+            title = self._apply_auto_seed_design_label(title)
+
         # Report-only test stubs intentionally bind only report methods. Use
         # their historical flat Plot directory when the path helper is absent;
         # production Auto controllers always use the categorized resolver.
@@ -20720,6 +20953,19 @@ class AutoContr(Controller):
         # but target stopping is evaluated only after a new physical batch in
         # this run.  This prevents a prior run from silently cancelling a new
         # requested experimental validation.
+        #
+        # _run() resets batch_num to zero for every protocol, and the seed
+        # path's "batch 0 is the seed" increment is skipped on this route.  A
+        # continuation must therefore resume above the imported history so new
+        # batches never reuse a source-run batch number in performance rows,
+        # checkpoint filenames, or the `batch_number <= N` plot windows.
+        self.batch_num = int(
+            getattr(
+                self,
+                'imported_auto_batch_start',
+                self.batch_num
+            )
+        )
         self._run_auto_optimizer_batches(model, normalize)
         self._finalize_auto_run(model)
 

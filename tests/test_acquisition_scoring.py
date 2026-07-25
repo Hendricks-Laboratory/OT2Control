@@ -1324,6 +1324,433 @@ class ExperimentDataExportTests(unittest.TestCase):
         )
 
 
+class ImportedContinuationNumberingTests(unittest.TestCase):
+    '''Keeps an imported continuation from reusing source-run numbering.
+
+    A resumed run inherits condition history from its source package.  If new
+    conditions restart at zero they collide with those rows, which silently
+    overlays two different chemistries on one reaction number and drops
+    conditions from batch-filtered plots.
+    '''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_get_next_auto_number_after_rows',
+            '_summarize_auto_report_physical_well_span',
+            '_get_96_well_plate_order'
+        ])
+
+    @staticmethod
+    def _imported_rows():
+        '''One seed plus a three-mode portfolio batch, as a source run logs.'''
+        wells = [
+            ['A1', 'B1', 'C1'],
+            ['D1', 'E1', 'F1'],
+            ['G1', 'H1', 'A2'],
+            ['B2', 'C2', 'D2']
+        ]
+        rows = []
+        for reaction_number, well_locations in enumerate(wells):
+            rows.append({
+                'reaction_number': reaction_number,
+                'batch_number': 0 if reaction_number == 0 else 1,
+                'condition_type': (
+                    'seed' if reaction_number == 0 else 'optimizer_selected'
+                ),
+                'executed_in_current_run': False,
+                'replicate_well_locations': json.dumps(well_locations)
+            })
+        return rows
+
+    def test_numbering_resumes_above_imported_history(self):
+        rows = self._imported_rows()
+
+        self.assertEqual(
+            self.Controller._get_next_auto_number_after_rows(
+                rows,
+                'reaction_number'
+            ),
+            4
+        )
+        self.assertEqual(
+            self.Controller._get_next_auto_number_after_rows(
+                rows,
+                'batch_number'
+            ),
+            2
+        )
+
+    def test_condition_number_key_is_not_used_for_numbering(self):
+        '''Guards the exact key-name defect that reset the counter to zero.'''
+        legacy_rows = [
+            {'condition_number': 7, 'actual_lambda_mean_qc_nm': 625.0}
+        ]
+
+        self.assertEqual(
+            self.Controller._get_next_auto_number_after_rows(
+                legacy_rows,
+                'reaction_number'
+            ),
+            0
+        )
+
+    def test_continuation_batch_never_reuses_imported_batch_numbers(self):
+        rows = self._imported_rows()
+        batch_start = self.Controller._get_next_auto_number_after_rows(
+            rows,
+            'batch_number'
+        )
+        imported_batches = {row['batch_number'] for row in rows}
+
+        self.assertNotIn(batch_start, imported_batches)
+        self.assertGreater(batch_start, max(imported_batches))
+
+    def test_no_duplicate_reaction_or_batch_keys_after_continuation(self):
+        rows = self._imported_rows()
+        reaction_number = self.Controller._get_next_auto_number_after_rows(
+            rows,
+            'reaction_number'
+        )
+        batch_number = self.Controller._get_next_auto_number_after_rows(
+            rows,
+            'batch_number'
+        )
+
+        for well_locations in [
+            ['A1', 'B1', 'C1'],
+            ['D1', 'E1', 'F1'],
+            ['G1', 'H1', 'A2']
+        ]:
+            rows.append({
+                'reaction_number': reaction_number,
+                'batch_number': batch_number,
+                'condition_type': 'optimizer_selected',
+                'executed_in_current_run': True,
+                'replicate_well_locations': json.dumps(well_locations)
+            })
+            reaction_number += 1
+
+        keys = [
+            (row['batch_number'], row['reaction_number'])
+            for row in rows
+        ]
+        self.assertEqual(len(keys), len(set(keys)))
+
+        # Every condition must survive the final `batch_number <= N` plot
+        # window, which previously dropped the imported optimizer batch.
+        retained = [
+            row for row in rows
+            if row['batch_number'] <= batch_number
+        ]
+        self.assertEqual(len(retained), len(rows))
+
+    def test_well_span_excludes_imported_history(self):
+        '''An imported continuation always starts a fresh plate.'''
+        rows = self._imported_rows()
+        for reaction_number, well_locations in enumerate(
+            [
+                ['A1', 'B1', 'C1'],
+                ['D1', 'E1', 'F1'],
+                ['G1', 'H1', 'A2']
+            ],
+            start=4
+        ):
+            rows.append({
+                'reaction_number': reaction_number,
+                'batch_number': 2,
+                'condition_type': 'optimizer_selected',
+                'executed_in_current_run': True,
+                'replicate_well_locations': json.dumps(well_locations)
+            })
+
+        controller = self.Controller()
+        span = controller._summarize_auto_report_physical_well_span(
+            pd.DataFrame(rows)
+        )
+
+        self.assertEqual(span['unique_well_count'], 9)
+        self.assertEqual(span['first_well'], 'A1')
+        self.assertEqual(span['last_well'], 'A2')
+        self.assertEqual(span['next_well'], 'B2')
+
+    def test_well_span_unchanged_for_runs_without_the_marker(self):
+        '''Legacy performance rows must report exactly as before.'''
+        rows = [
+            {
+                'reaction_number': reaction_number,
+                'batch_number': 0 if reaction_number == 0 else 1,
+                'replicate_well_locations': json.dumps(well_locations)
+            }
+            for reaction_number, well_locations in enumerate([
+                ['A1', 'B1', 'C1'],
+                ['D1', 'E1', 'F1'],
+                ['G1', 'H1', 'A2'],
+                ['B2', 'C2', 'D2']
+            ])
+        ]
+
+        controller = self.Controller()
+        span = controller._summarize_auto_report_physical_well_span(
+            pd.DataFrame(rows)
+        )
+
+        self.assertEqual(span['unique_well_count'], 12)
+        self.assertEqual(span['last_well'], 'D2')
+        self.assertEqual(span['next_well'], 'E2')
+
+    def test_continuation_entry_point_sets_batch_from_imported_start(self):
+        '''Source-level check that the continuation route advances the batch.'''
+        method_node = _get_auto_controller_method_node(
+            '_run_imported_auto_continuation'
+        )
+        assigned_targets = {
+            target.attr
+            for node in ast.walk(method_node)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Attribute)
+        }
+        referenced_names = {
+            node.value
+            for node in ast.walk(method_node)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+        }
+
+        self.assertIn('batch_num', assigned_targets)
+        self.assertIn('imported_auto_batch_start', referenced_names)
+
+
+class InheritedSeedDesignLabelTests(unittest.TestCase):
+    '''Keeps an imported run from presenting another run's seed as its own.
+
+    An imported continuation never performs a seed design, so its seed rows
+    always belong to an earlier run.  Because a checkpoint can itself have been
+    imported, the originating run must be read from the row's own stamp rather
+    than from this run's immediate import source.
+    '''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Controller = _load_auto_controller_methods([
+            '_get_auto_run_directory_name',
+            '_get_auto_inherited_seed_origin_run',
+            '_get_auto_seed_design_label',
+            '_apply_auto_seed_design_label'
+        ])
+
+    def _controller(self, rows, out_path='/runs/RTG_current', imported=None):
+        controller = self.Controller()
+        controller.out_path = out_path
+        controller.auto_model_performance_rows = rows
+        if imported is not None:
+            controller.imported_auto_model_checkpoint = imported
+        return controller
+
+    def test_local_seed_run_keeps_the_maximin_title(self):
+        controller = self._controller([
+            {
+                'condition_type': 'seed',
+                'executed_in_current_run': True,
+                'origin_run_directory': 'RTG_current'
+            }
+        ])
+
+        self.assertIsNone(controller._get_auto_inherited_seed_origin_run())
+        self.assertEqual(
+            controller._apply_auto_seed_design_label(
+                'Initial Maximin Seed Design: Pairwise Projections'
+            ),
+            'Initial Maximin Seed Design: Pairwise Projections'
+        )
+
+    def test_legacy_rows_without_the_marker_keep_the_maximin_title(self):
+        '''Runs predating the provenance fields must report unchanged.'''
+        controller = self._controller([
+            {'condition_type': 'seed', 'actual_lambda_mean_nm': 625.0}
+        ])
+
+        self.assertIsNone(controller._get_auto_inherited_seed_origin_run())
+        self.assertEqual(
+            controller._get_auto_seed_design_label(),
+            'Initial Maximin Seed Design'
+        )
+
+    def test_single_generation_import_names_the_source_run(self):
+        controller = self._controller([
+            {
+                'condition_type': 'seed',
+                'executed_in_current_run': False,
+                'origin_run_directory': 'RTG_debuggingsave2'
+            },
+            {
+                'condition_type': 'optimizer_selected',
+                'executed_in_current_run': True,
+                'origin_run_directory': 'RTG_current'
+            }
+        ])
+
+        self.assertEqual(
+            controller._get_auto_inherited_seed_origin_run(),
+            'RTG_debuggingsave2'
+        )
+        self.assertEqual(
+            controller._apply_auto_seed_design_label(
+                'Initial Maximin Seed Design: Pairwise Projections'
+            ),
+            'Inherited Seed Design (from RTG_debuggingsave2): '
+            'Pairwise Projections'
+        )
+
+    def test_multi_generation_import_names_the_originating_run(self):
+        '''A imported into B, B imported into C: the seed belongs to A.'''
+        controller = self._controller(
+            [
+                {
+                    'condition_type': 'seed',
+                    'executed_in_current_run': False,
+                    'origin_run_directory': 'RTG_generation_a'
+                },
+                {
+                    'condition_type': 'optimizer_selected',
+                    'executed_in_current_run': False,
+                    'origin_run_directory': 'RTG_generation_b'
+                }
+            ],
+            out_path='/runs/RTG_generation_c',
+            imported={
+                'source_run_id': 'shared_sheet_name',
+                'source_metadata': {
+                    'source_run_folder': 'RTG_generation_b'
+                }
+            }
+        )
+
+        # The immediate source is generation B, but the seed came from A.
+        self.assertEqual(
+            controller._get_auto_inherited_seed_origin_run(),
+            'RTG_generation_a'
+        )
+        self.assertIn(
+            'RTG_generation_a',
+            controller._get_auto_seed_design_label()
+        )
+        self.assertNotIn(
+            'RTG_generation_b',
+            controller._get_auto_seed_design_label()
+        )
+
+    def test_unstamped_imported_seed_falls_back_to_immediate_source(self):
+        '''A pre-provenance checkpoint still reports its lineage.'''
+        controller = self._controller(
+            [
+                {
+                    'condition_type': 'seed',
+                    'executed_in_current_run': False,
+                    'origin_run_directory': ''
+                }
+            ],
+            imported={
+                'source_run_id': 'DEBUGRTG_XXX_4variable',
+                'source_metadata': {
+                    'source_run_folder': 'RTG_debuggingsave2'
+                }
+            }
+        )
+
+        self.assertEqual(
+            controller._get_auto_inherited_seed_origin_run(),
+            'RTG_debuggingsave2'
+        )
+
+    def test_unstamped_manual_inbox_import_falls_back_to_run_id(self):
+        '''The manual route records no source folder, only the run id.'''
+        controller = self._controller(
+            [
+                {
+                    'condition_type': 'seed',
+                    'executed_in_current_run': False
+                }
+            ],
+            imported={
+                'source_run_id': 'DEBUGRTG_XXX_4variable',
+                'source_metadata': {'import_inbox_path': '/runs/x/Import_Here'}
+            }
+        )
+
+        self.assertEqual(
+            controller._get_auto_inherited_seed_origin_run(),
+            'DEBUGRTG_XXX_4variable'
+        )
+
+    def test_run_directory_name_comes_from_the_output_path(self):
+        controller = self._controller([], out_path='/runs/RTG_debuggingimport/')
+
+        self.assertEqual(
+            controller._get_auto_run_directory_name(),
+            'RTG_debuggingimport'
+        )
+
+    def test_missing_output_path_does_not_raise(self):
+        controller = self.Controller()
+        controller.auto_model_performance_rows = []
+
+        self.assertEqual(controller._get_auto_run_directory_name(), '')
+
+    def test_only_seed_conditions_drive_the_label(self):
+        '''Inherited optimizer rows alone must not retitle a local seed.'''
+        controller = self._controller([
+            {
+                'condition_type': 'seed',
+                'executed_in_current_run': True,
+                'origin_run_directory': 'RTG_current'
+            },
+            {
+                'condition_type': 'optimizer_selected',
+                'executed_in_current_run': False,
+                'origin_run_directory': 'RTG_other'
+            }
+        ])
+
+        self.assertIsNone(controller._get_auto_inherited_seed_origin_run())
+
+    def test_report_headings_route_through_the_seed_label(self):
+        '''Source-level check that report embedding relabels seed figures.'''
+        method_node = _get_auto_controller_method_node(
+            '_auto_report_plot_markdown_if_exists'
+        )
+        called_attributes = {
+            node.func.attr
+            for node in ast.walk(method_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+        }
+        seed_prefixes = {
+            node.value
+            for node in ast.walk(method_node)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+        }
+
+        self.assertIn('_apply_auto_seed_design_label', called_attributes)
+        self.assertIn('initial_maximin_seed_design_', seed_prefixes)
+
+    def test_seed_figure_titles_route_through_the_seed_label(self):
+        '''Source-level check that the figure titles are relabelled too.'''
+        method_node = _get_auto_controller_method_node(
+            '_plot_initial_training_designs_after_run'
+        )
+        called_attributes = {
+            node.func.attr
+            for node in ast.walk(method_node)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+        }
+
+        self.assertIn('_apply_auto_seed_design_label', called_attributes)
+
+
 class AutoLambdaMaximaExtractionTests(unittest.TestCase):
     '''Prevents seed-only helper scope from breaking optimizer batches.'''
 
@@ -1507,6 +1934,7 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
             '_get_auto_model_training_decision_from_replicate_qc',
             '_get_auto_target_eligibility_decision',
             '_append_auto_model_performance_rows',
+            '_get_auto_run_directory_name',
             '_update_auto_model_performance_closest_so_far',
             '_get_best_qc_approved_target_error_nm',
             '_update_auto_quit_from_condition_level_performance'
@@ -3239,6 +3667,7 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_summarize_auto_scan_quality',
             '_build_auto_qc_model_training_data',
             '_append_auto_model_performance_rows',
+            '_get_auto_run_directory_name',
             '_update_auto_model_performance_closest_so_far',
             '_export_auto_model_performance_log',
             'Normalize_Denormalize_Recipes',
@@ -4744,6 +5173,7 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 '_build_auto_model_checkpoint_manifest',
                 '_build_auto_model_checkpoint_arrays',
                 '_save_auto_model_checkpoint',
+                '_get_next_auto_number_after_rows',
                 '_restore_imported_auto_model_checkpoint'
             ],
             extra_namespace={
@@ -4767,9 +5197,14 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
         controller.rxn_sheet_name = 'DEBUGRTG_checkpoint_controller_test'
         controller.variable_reagents = ['reagent_a', 'reagent_b']
         controller.fixed_reagents = ['fixed_reagent']
+        # Mirror the keys production actually writes.  An earlier fixture used
+        # a 'condition_number' key that no controller path emits, which let a
+        # numbering-continuation defect pass review.
         controller.auto_model_performance_rows = [
             {
-                'condition_number': 0,
+                'reaction_number': 0,
+                'batch_number': 1,
+                'executed_in_current_run': True,
                 'actual_lambda_mean_qc_nm': 625.0
             }
         ]
@@ -4856,7 +5291,7 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 Path(temporary_directory, 'model_after_seed.zip').exists()
             )
 
-    def test_import_rebuilds_fresh_history_and_resets_new_run_counter(self):
+    def test_import_rebuilds_fresh_history_and_continues_numbering(self):
         with TemporaryDirectory() as temporary_directory:
             controller, source_model = self._controller_and_model(
                 temporary_directory
@@ -4931,7 +5366,19 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                     restored_model
                 )
             )
+            # Numbering must continue above the imported history rather than
+            # restart, so a continuation cannot emit duplicate reaction/batch
+            # keys that overlay this run's conditions on the source run's.
             self.assertEqual(controller.auto_condition_counter, 1)
+            self.assertEqual(controller.imported_auto_batch_start, 2)
+
+            # Imported rows describe the source run's plate, never this one's.
+            self.assertTrue(
+                all(
+                    row['executed_in_current_run'] is False
+                    for row in controller.auto_model_performance_rows
+                )
+            )
             self.assertTrue(controller.experiment_data.empty)
 
     def test_import_rejects_changed_normalized_bounds(self):
