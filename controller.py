@@ -10787,9 +10787,17 @@ class AutoContr(Controller):
             max(10.0, 7.0 + 0.55 * float(n_conditions))
         )
         figure, axis = plt.subplots(
-            figsize=(figure_width, 7.2),
+            figsize=(figure_width, 7.6),
             dpi=300
         )
+        # These figures use explicit title, explanatory-text, legend, and
+        # batch-label bands. Disable any environment-wide automatic layout so
+        # it cannot pull those artists back into the data panel at save.
+        set_layout_engine = getattr(figure, 'set_layout_engine', None)
+        if callable(set_layout_engine):
+            set_layout_engine('none')
+        else:
+            figure.set_tight_layout(False)
 
         for reagent_index, descriptor in enumerate(reagent_descriptors):
             bar_values = pd.to_numeric(
@@ -10872,7 +10880,7 @@ class AutoContr(Controller):
                     )
                     axis.text(
                         transition_index + 0.5,
-                        1.08,
+                        1.065,
                         'Current run',
                         transform=axis.get_xaxis_transform(),
                         ha='center',
@@ -10914,7 +10922,7 @@ class AutoContr(Controller):
         )
         figure.text(
             0.5,
-            0.925,
+            0.930,
             'Bars show executed final-reaction concentrations in mM; '
             'each cluster is one condition-level recipe.',
             ha='center',
@@ -10924,7 +10932,7 @@ class AutoContr(Controller):
         )
         figure.legend(
             loc='upper center',
-            bbox_to_anchor=(0.5, 0.885),
+            bbox_to_anchor=(0.5, 0.875),
             ncol=min(n_reagents, 4),
             frameon=False,
             fontsize=font_sizes['legend'],
@@ -10936,7 +10944,7 @@ class AutoContr(Controller):
             left=0.12,
             right=0.97,
             bottom=0.15,
-            top=0.74
+            top=0.72
         )
 
         plot_path = self._get_auto_plot_output_path(plot_filename)
@@ -12391,7 +12399,11 @@ class AutoContr(Controller):
         # a dense top row of panels. Reserve dedicated header height so those
         # elements remain visually distinct without changing the square panel
         # geometry used for the scientific projections.
-        figure_header_height = 1.55
+        # Keep the shared legend in a genuine header band rather than merely
+        # placing it above the nominal subplot slot.  ``bbox_inches='tight'``
+        # trims unused canvas at export, so this additional reserved height
+        # does not create a large white margin in the saved PNG.
+        figure_header_height = 2.05
 
         fig, axes = plt.subplots(
             n_rows,
@@ -12403,6 +12415,14 @@ class AutoContr(Controller):
             dpi=300,
             squeeze=False
         )
+        # The header band is positioned explicitly below. Prevent a global
+        # Matplotlib autolayout setting from moving shared legends into the
+        # top-row data panels at save time.
+        set_layout_engine = getattr(fig, 'set_layout_engine', None)
+        if callable(set_layout_engine):
+            set_layout_engine('none')
+        else:
+            fig.set_tight_layout(False)
 
         axes = np.asarray(
             axes
@@ -12557,7 +12577,7 @@ class AutoContr(Controller):
                 final_legend_handles,
                 final_legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.915),
+                bbox_to_anchor=(0.5, 0.905),
                 ncol=min(
                     len(final_legend_handles),
                     4
@@ -12572,7 +12592,7 @@ class AutoContr(Controller):
             # Keep the shared legend in a true header band. Pairwise axes use
             # a square box aspect and can otherwise visually encroach on a
             # legend that is merely placed above their nominal subplot slot.
-            top_margin = 0.785
+            top_margin = 0.72
 
         else:
             top_margin = 0.865
@@ -12738,10 +12758,17 @@ class AutoContr(Controller):
                     8.9,
                     len(column_names) * 1.30
                 ),
-                6.2
+                6.7
             ),
             dpi=300
         )
+        # Preserve the explicit title/legend header below when an environment
+        # enables automatic tight layout globally.
+        set_layout_engine = getattr(fig, 'set_layout_engine', None)
+        if callable(set_layout_engine):
+            set_layout_engine('none')
+        else:
+            fig.set_tight_layout(False)
 
         x_positions = np.arange(
             len(column_names)
@@ -12981,7 +13008,7 @@ class AutoContr(Controller):
                 legend_handles,
                 legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.895),
+                bbox_to_anchor=(0.5, 0.900),
                 ncol=min(
                     len(legend_handles),
                     4
@@ -12993,7 +13020,7 @@ class AutoContr(Controller):
                 columnspacing=1.0
             )
 
-            top_margin = 0.77
+            top_margin = 0.72
 
         else:
             top_margin = 0.84
@@ -17560,11 +17587,14 @@ class AutoContr(Controller):
                 # an empty-looking legend entry.
                 figure.text(
                     0.5,
-                    0.065,
+                    # Keep explanatory domain text below the axis-label
+                    # bounding box.  A bottom-aligned position is robust to
+                    # long reagent labels and ``bbox_inches='tight'`` saves.
+                    0.018,
                     'True zero disabled; axes begin at the 5 uL executable '
                     'minimum',
                     ha='center',
-                    va='center',
+                    va='bottom',
                     fontsize=font_sizes['legend'],
                     color='0.30'
                 )
@@ -18555,10 +18585,12 @@ class AutoContr(Controller):
             ):
                 figure.text(
                     0.5,
-                    0.065,
+                    # Keep explanatory domain text below the x-axis label,
+                    # including for long reagent names in standalone slices.
+                    0.018,
                     'True zero disabled; axes begin at the 5 uL executable '
                     'minimum',
-                    ha='center', va='center',
+                    ha='center', va='bottom',
                     fontsize=font_sizes['legend'], color='0.30'
                 )
             figure.text(

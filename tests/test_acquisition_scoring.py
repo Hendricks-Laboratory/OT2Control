@@ -1807,9 +1807,21 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
             method_node
         )
 
-        self.assertIn('figure_header_height = 1.55', method_source)
-        self.assertIn('bbox_to_anchor=(0.5, 0.915)', method_source)
-        self.assertIn('top_margin = 0.785', method_source)
+        self.assertIn('figure_header_height = 2.05', method_source)
+        self.assertIn('bbox_to_anchor=(0.5, 0.905)', method_source)
+        self.assertIn('top_margin = 0.72', method_source)
+
+    def test_parallel_coordinate_plots_reserve_a_dedicated_legend_header(self):
+        method_node = _get_auto_controller_method_node(
+            '_plot_initial_training_design_parallel_coordinates'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            method_node
+        )
+
+        self.assertIn('bbox_to_anchor=(0.5, 0.900)', method_source)
+        self.assertIn('top_margin = 0.72', method_source)
 
     def test_individual_slices_center_visible_axis_and_colorbar_content(self):
         method_node = _get_auto_controller_method_node(
@@ -1823,6 +1835,8 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         self.assertIn('def _center_heatmap_axes_and_colorbar(', method_source)
         self.assertIn('axis.get_tightbbox(renderer)', method_source)
         self.assertIn('include_decorations=True', method_source)
+        self.assertIn('0.018', method_source)
+        self.assertIn("va='bottom'", method_source)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):

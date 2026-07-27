@@ -177,6 +177,25 @@ class AutoRecipeConcentrationHistoryTests(unittest.TestCase):
             output_path
         )
 
+    def test_grouped_plot_reserves_explicit_header_bands(self):
+        tree = ast.parse(CONTROLLER_PATH.read_text(encoding='utf-8'))
+        auto_contr = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
+        )
+        method = next(
+            node for node in auto_contr.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == '_plot_auto_recipe_concentration_history'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(encoding='utf-8'), method
+        )
+
+        self.assertIn("getattr(figure, 'set_layout_engine', None)", method_source)
+        self.assertIn('bbox_to_anchor=(0.5, 0.875)', method_source)
+        self.assertIn('top=0.72', method_source)
+
 
 if __name__ == '__main__':
     unittest.main()
