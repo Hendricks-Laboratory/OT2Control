@@ -11727,7 +11727,7 @@ class AutoContr(Controller):
         # a dense top row of panels. Reserve dedicated header height so those
         # elements remain visually distinct without changing the square panel
         # geometry used for the scientific projections.
-        figure_header_height = 1.20
+        figure_header_height = 1.55
 
         fig, axes = plt.subplots(
             n_rows,
@@ -11893,7 +11893,7 @@ class AutoContr(Controller):
                 final_legend_handles,
                 final_legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.925),
+                bbox_to_anchor=(0.5, 0.915),
                 ncol=min(
                     len(final_legend_handles),
                     4
@@ -11905,7 +11905,10 @@ class AutoContr(Controller):
                 columnspacing=1.0
             )
 
-            top_margin = 0.820
+            # Keep the shared legend in a true header band. Pairwise axes use
+            # a square box aspect and can otherwise visually encroach on a
+            # legend that is merely placed above their nominal subplot slot.
+            top_margin = 0.785
 
         else:
             top_margin = 0.865
@@ -17277,12 +17280,56 @@ class AutoContr(Controller):
                 spine.set_color('0.2')
             self._apply_auto_design_square_box_aspect(axis)
 
-        def _center_atlas_axes_and_colorbar(axes, colorbar):
-            '''Centers a page's visible heatmaps and shared colorbar.'''
-            axes[0].figure.canvas.draw()
+        def _center_heatmap_axes_and_colorbar(
+            axes,
+            colorbar,
+            include_decorations=False
+        ):
+            '''Centers a heatmap panel group and its colorbar in the canvas.
+
+            Atlas pages use axis rectangles for a regular grid. Standalone
+            slices include a long y-axis label and colorbar label, so their
+            visible text extents are centered instead; otherwise the square
+            plotting panel appears shifted right even when its axes rectangle
+            is mathematically centered.
+            '''
+            figure = axes[0].figure
+            figure.canvas.draw()
             all_axes = list(axes) + [colorbar.ax]
-            group_left = min(axis.get_position().x0 for axis in all_axes)
-            group_right = max(axis.get_position().x1 for axis in all_axes)
+
+            if include_decorations:
+                renderer = figure.canvas.get_renderer()
+                bounding_boxes = [
+                    axis.get_tightbbox(renderer)
+                    for axis in all_axes
+                ]
+                bounding_boxes = [
+                    bounding_box
+                    for bounding_box in bounding_boxes
+                    if bounding_box is not None
+                ]
+
+                if len(bounding_boxes) == 0:
+                    return
+
+                group_left = min(
+                    bounding_box.x0
+                    for bounding_box in bounding_boxes
+                ) / figure.bbox.width
+                group_right = max(
+                    bounding_box.x1
+                    for bounding_box in bounding_boxes
+                ) / figure.bbox.width
+            else:
+                group_left = min(
+                    axis.get_position().x0
+                    for axis in all_axes
+                )
+                group_right = max(
+                    axis.get_position().x1
+                    for axis in all_axes
+                )
+
             horizontal_shift = 0.5 - (group_left + group_right) / 2.0
 
             for axis in all_axes:
@@ -17510,7 +17557,7 @@ class AutoContr(Controller):
                                      colormap, norm, title, panel,
                                      feasibility_overlay=False):
             figure, axis = plt.subplots(
-                figsize=(8.4, 7.4 if feasibility_overlay else 6.5), dpi=300
+                figsize=(8.4, 7.1 if feasibility_overlay else 6.2), dpi=300
             )
             figure.set_tight_layout(False)
             image = _draw_panel(
@@ -17544,14 +17591,19 @@ class AutoContr(Controller):
             )
             figure.text(
                 0.5,
-                0.59 if feasibility_overlay else 0.69,
+                0.65 if feasibility_overlay else 0.73,
                 'Hold: ' + _held_recipe_text(panel, compact=True),
                 ha='center', va='center',
                 fontsize=font_sizes['axis_label']
             )
             figure.subplots_adjust(
                 left=0.12, right=0.90, bottom=0.13,
-                top=0.54 if feasibility_overlay else 0.64
+                top=0.60 if feasibility_overlay else 0.68
+            )
+            _center_heatmap_axes_and_colorbar(
+                [axis],
+                colorbar,
+                include_decorations=True
             )
             output_path = self._get_auto_plot_output_path(
                 _individual_filename(field_name, panel, feasibility_overlay)
@@ -17632,7 +17684,7 @@ class AutoContr(Controller):
                 colorbar.ax.tick_params(
                     labelsize=font_sizes['tick_label'], width=0.9
                 )
-                _center_atlas_axes_and_colorbar(visible_axes, colorbar)
+                _center_heatmap_axes_and_colorbar(visible_axes, colorbar)
                 suffix = ' feasibility overlay' if feasibility_overlay else ''
                 figure.suptitle(
                     f'{n_dimensions}D {title}{suffix} '

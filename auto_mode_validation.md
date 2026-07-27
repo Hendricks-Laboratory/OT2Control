@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-24
+**Updated through:** 2026-07-27
 
 > [!NOTE]
 > **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
@@ -56,11 +56,12 @@ recent feature commit only.
 | Item | Reconciled value |
 |---|---|
 | Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
-| Active branch and commit | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
+| Initial reconciliation snapshot | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
+| Latest validated working tree | `Auto-RTG` at `5428191` plus the current uncommitted pairwise-legend and standalone-slice layout refinement |
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 174 commits |
 | Files changed in the range | `controller.py`, `optimizers.py`, `ot2_robot.py`, Auto tests, validation/governance documents, `.gitignore`, and removal of an ignored local `.DS_Store` artifact |
-| Current validation result | Python 3.9.6 compilation passed; 121 isolated hardware-free tests passed on July 21, 2026 |
+| Current validation result | Python 3.9.6 compilation passed; 170 isolated hardware-free tests passed on July 27, 2026 |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, and test code as well as the accumulated Git history. It did not
@@ -128,6 +129,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Per-row Auto run provenance (`executed_in_current_run`, `origin_run_directory`) | Implemented **[Claude Code]** in `248d95d` | Distinguishes conditions this run physically executed from inherited checkpoint history, and survives multi-generation imports; physical-well reporting is scoped to locally executed rows |
 | Inherited seed-design figure and report labeling | Implemented **[Claude Code]** in `248d95d` | An imported run titles seed figures and report headings `Inherited Seed Design (from <run>)`, naming the run that built the seed rather than the immediate import source |
 | Auto design-space gridline styling | Implemented **[Claude Code]** in `4ae04b1` | Green dashed gridlines drawn behind plotted points across every design-space dimensionality, including the 3D pane grid, which ignores ordinary Matplotlib grid keyword arguments |
+| Pairwise-legend and standalone-slice layout | Implemented | Pairwise figures reserve a dedicated title/legend header; standalone higher-dimensional slices center their visible axis-label/colorbar group and use a compact, non-overlapping annotation band. Source-level layout regression tests and synthetic Matplotlib rendering passed. |
 
 ### Current acquisition semantics
 

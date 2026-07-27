@@ -1792,6 +1792,36 @@ class AutoLambdaMaximaExtractionTests(unittest.TestCase):
             self.assertIn('_extract_auto_lambda_maxima', called_attributes)
 
 
+class AutoPlotLayoutRegressionTests(unittest.TestCase):
+    '''Keeps shared legends and standalone slices out of the data panel.'''
+
+    def test_pairwise_plots_reserve_a_dedicated_legend_header(self):
+        method_node = _get_auto_controller_method_node(
+            '_plot_initial_training_design_pairwise'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            method_node
+        )
+
+        self.assertIn('figure_header_height = 1.55', method_source)
+        self.assertIn('bbox_to_anchor=(0.5, 0.915)', method_source)
+        self.assertIn('top_margin = 0.785', method_source)
+
+    def test_individual_slices_center_visible_axis_and_colorbar_content(self):
+        method_node = _get_auto_controller_method_node(
+            'plot_higher_dimensional_GPR_conditional_slices'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            method_node
+        )
+
+        self.assertIn('def _center_heatmap_axes_and_colorbar(', method_source)
+        self.assertIn('axis.get_tightbbox(renderer)', method_source)
+        self.assertIn('include_decorations=True', method_source)
+
+
 class TargetEiIncumbentControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
