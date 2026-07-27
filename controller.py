@@ -11180,7 +11180,7 @@ class AutoContr(Controller):
 
             filename = os.path.basename(relative_path)
             batch_match = re.search(
-                r'(after_batch_\d+|final)',
+                r'(after_batch_\d+|batch_\d+|final)',
                 filename
             )
             slice_match = re.search(
@@ -15319,6 +15319,40 @@ class AutoContr(Controller):
                 title='Final Replicate Diagnostic Plot'
             )
         )
+        lines.append('### Final Recipe Concentration History')
+        lines.append('')
+        lines.append(
+            'Each bar group is one complete reaction condition, not one '
+            'replicate well. Bar heights are executed final-reaction '
+            'concentrations in mM; water is excluded because it is a top-off '
+            'transfer volume rather than a chemical concentration.'
+        )
+        lines.append('')
+        lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename='auto_recipe_concentration_history_final.png',
+                title='Final Variable-Reagent Concentration History',
+                caption=(
+                    'Shows how each Auto-variable reagent concentration '
+                    'changed across condition-level recipes on one shared '
+                    'linear mM axis.'
+                )
+            )
+        )
+        lines.extend(
+            self._auto_report_plot_markdown_if_exists(
+                plot_filename=(
+                    'auto_complete_recipe_concentration_history_final.png'
+                ),
+                title='Final Complete-Recipe Concentration History',
+                caption=(
+                    'Adds fixed chemical reagents using their recorded '
+                    'executed concentrations. This plot is omitted when '
+                    'legacy imported history lacks those per-condition '
+                    'audit fields.'
+                )
+            )
+        )
 
         if len(getattr(self, 'variable_reagents', [])) == 3:
             lines.append('### Final Conditional GP Slice Atlases')
@@ -15681,11 +15715,27 @@ class AutoContr(Controller):
             _, final_replicate_relative_path = self._resolve_auto_plot_path(
                 'lambda_replicates_final.png'
             )
+            _, final_variable_recipe_history_relative_path = (
+                self._resolve_auto_plot_path(
+                    'auto_recipe_concentration_history_final.png'
+                )
+            )
+            _, final_complete_recipe_history_relative_path = (
+                self._resolve_auto_plot_path(
+                    'auto_complete_recipe_concentration_history_final.png'
+                )
+            )
         else:
             # Preserve report-only test compatibility for historical flat
             # Plot directories.
             final_progress_relative_path = 'lambda_progress_final.png'
             final_replicate_relative_path = 'lambda_replicates_final.png'
+            final_variable_recipe_history_relative_path = (
+                'auto_recipe_concentration_history_final.png'
+            )
+            final_complete_recipe_history_relative_path = (
+                'auto_complete_recipe_concentration_history_final.png'
+            )
 
         lines.append(
             self._auto_report_file_line(
@@ -15698,6 +15748,27 @@ class AutoContr(Controller):
             self._auto_report_file_line(
                 os.path.join('Plots', final_replicate_relative_path),
                 'Final replicate-level lambda diagnostic plot'
+            )
+        )
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    final_variable_recipe_history_relative_path
+                ),
+                'Final variable-reagent concentration-history plot'
+            )
+        )
+
+        lines.append(
+            self._auto_report_file_line(
+                os.path.join(
+                    'Plots',
+                    final_complete_recipe_history_relative_path
+                ),
+                'Final complete-recipe concentration-history plot '
+                '(requires recorded fixed-reagent concentrations)'
             )
         )
 
@@ -19263,6 +19334,28 @@ class AutoContr(Controller):
                 )
             )
 
+            _run_output_step(
+                (
+                    f"variable-reagent concentration history through batch "
+                    f"{completed_batch_number}"
+                ),
+                lambda: self._plot_auto_recipe_concentration_history(
+                    completed_batch_number,
+                    include_fixed_reagents=False
+                )
+            )
+
+            _run_output_step(
+                (
+                    f"complete-recipe concentration history through batch "
+                    f"{completed_batch_number}"
+                ),
+                lambda: self._plot_auto_recipe_concentration_history(
+                    completed_batch_number,
+                    include_fixed_reagents=True
+                )
+            )
+
         elif normalized_stage == 'after_model_update':
             n_variable_reagents = len(
                 getattr(
@@ -19382,6 +19475,34 @@ class AutoContr(Controller):
                             rf'Final Auto Replicate '
                             rf'$\lambda_{{\max}}$ Values'
                         )
+                    )
+                )
+            )
+
+            _run_output_step(
+                'final variable-reagent concentration history',
+                lambda: self._plot_auto_recipe_concentration_history(
+                    completed_batch_number,
+                    include_fixed_reagents=False,
+                    plot_filename=(
+                        'auto_recipe_concentration_history_final.png'
+                    ),
+                    plot_title=(
+                        'Final Auto Variable-Reagent Concentration History'
+                    )
+                )
+            )
+
+            _run_output_step(
+                'final complete-recipe concentration history',
+                lambda: self._plot_auto_recipe_concentration_history(
+                    completed_batch_number,
+                    include_fixed_reagents=True,
+                    plot_filename=(
+                        'auto_complete_recipe_concentration_history_final.png'
+                    ),
+                    plot_title=(
+                        'Final Auto Complete Recipe Concentration History'
                     )
                 )
             )

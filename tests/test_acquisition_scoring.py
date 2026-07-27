@@ -4783,6 +4783,23 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             Path(
                 os.path.join(progress_directory, 'lambda_replicates_final.png')
             ).touch()
+            recipe_history_directory = os.path.join(
+                controller.plot_path,
+                'recipe_history'
+            )
+            os.makedirs(recipe_history_directory)
+            Path(
+                os.path.join(
+                    recipe_history_directory,
+                    'auto_recipe_concentration_history_final.png'
+                )
+            ).touch()
+            Path(
+                os.path.join(
+                    recipe_history_directory,
+                    'auto_complete_recipe_concentration_history_final.png'
+                )
+            ).touch()
 
             with redirect_stdout(io.StringIO()):
                 report_path = controller._write_auto_run_report()
@@ -4800,6 +4817,23 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         )
         self.assertIn(
             '`Plots/progress/lambda_replicates_final.png` (present)',
+            report_text
+        )
+        self.assertIn(
+            '![Final Variable-Reagent Concentration History]('
+            '../Plots/recipe_history/'
+            'auto_recipe_concentration_history_final.png)',
+            report_text
+        )
+        self.assertIn(
+            '![Final Complete-Recipe Concentration History]('
+            '../Plots/recipe_history/'
+            'auto_complete_recipe_concentration_history_final.png)',
+            report_text
+        )
+        self.assertIn(
+            '`Plots/recipe_history/'
+            'auto_recipe_concentration_history_final.png` (present)',
             report_text
         )
 

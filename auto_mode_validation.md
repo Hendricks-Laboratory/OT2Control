@@ -57,11 +57,11 @@ recent feature commit only.
 |---|---|
 | Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
 | Initial reconciliation snapshot | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
-| Latest validated working tree | `Auto-RTG` at `5428191` plus the current uncommitted pairwise-legend, standalone-slice layout, and mask-aware true-zero feasibility-overlay refinement |
+| Latest validated working tree | `Auto-RTG` at `5428191` plus the current uncommitted pairwise-legend, standalone-slice layout, mask-aware true-zero feasibility-overlay refinement, and recipe-concentration-history plotting work |
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 174 commits |
 | Files changed in the range | `controller.py`, `optimizers.py`, `ot2_robot.py`, Auto tests, validation/governance documents, `.gitignore`, and removal of an ignored local `.DS_Store` artifact |
-| Current validation result | Python 3.9.6 compilation passed; 171 isolated hardware-free tests passed on July 27, 2026 |
+| Current validation result | Python 3.9.6 compilation passed; 179 isolated hardware-free tests passed on July 27, 2026 |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, and test code as well as the accumulated Git history. It did not
@@ -112,6 +112,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Four-or-more-variable all-pair conditional GP slice atlases and standalone slices | Implemented | Synthetic four-variable pair/held-recipe, true-zero/mask feasibility, rendering/path validation, and full hardware-free test suite |
 | Dimension-aware design-space plots and portfolio trace with mode-specific markers | Implemented | Isolated plot-classification and marker/error-bar legend tests |
 | Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
+| Condition-level recipe-concentration history plots | Implemented in current working tree | Variable-only and complete-recipe grouped bar charts use executed final concentrations in mM, write under `Plots/recipe_history`, obey plot profiles, append to the plot manifest, and appear in the final report; isolated lifecycle, report, data-contract, and rendering tests |
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
 | Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
