@@ -6,7 +6,16 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-23
+**Updated through:** 2026-07-24
+
+> [!NOTE]
+> **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
+> Claude Code (Opus 5) working in this repository under the project owner's
+> direction and review. Untagged entries predate that convention or were
+> authored directly by the project owner. The tag records provenance only: a
+> tagged change passed the same Python 3.9 compilation, isolated hardware-free
+> test, and human-review gates as any other change, and no tagged change has
+> physical-run clearance on the strength of this record alone.
 
 ---
 
@@ -115,6 +124,10 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Objective UV scan-quality diagnostics | Implemented, warning-only by default | Records blank-corrected peak height and 300/1000 nm boundary maxima; legacy worksheets retain warning-only behavior |
 | Boundary-aware exact-λmax routing | Implemented, opt-in | `boundary_aware` excludes only exact 300/1000 nm maxima from exact-λmax QC/training and target decisions while preserving raw outcomes |
 | Usable-spectrum probability classifier and conditional/joint maps | Implemented, observational | Cumulative binary GPy classifier learns interior versus exact-boundary outcomes; it does not yet affect acquisition or stopping |
+| Imported-continuation reaction and batch numbering | Implemented **[Claude Code]** in `248d95d` | A resumed run continues numbering above its imported history instead of restarting at zero; isolated tests assert no duplicate batch/reaction keys and cover the exact key-name defect that caused the reset |
+| Per-row Auto run provenance (`executed_in_current_run`, `origin_run_directory`) | Implemented **[Claude Code]** in `248d95d` | Distinguishes conditions this run physically executed from inherited checkpoint history, and survives multi-generation imports; physical-well reporting is scoped to locally executed rows |
+| Inherited seed-design figure and report labeling | Implemented **[Claude Code]** in `248d95d` | An imported run titles seed figures and report headings `Inherited Seed Design (from <run>)`, naming the run that built the seed rather than the immediate import source |
+| Auto design-space gridline styling | Implemented **[Claude Code]** in `4ae04b1` | Green dashed gridlines drawn behind plotted points across every design-space dimensionality, including the 3D pane grid, which ignores ordinary Matplotlib grid keyword arguments |
 
 ### Current acquisition semantics
 
@@ -199,6 +212,151 @@ Optical reliability is never shown with the gray physical-infeasibility
 overlay, because a recipe can be physically executable yet optically
 unreliable. Reliability-aware acquisition remains a separately approved,
 future Stage 5 policy decision.
+
+### Imported-continuation numbering, run provenance, and seed labeling — July 24, 2026 **[Claude Code]**
+
+Commits `4ae04b1` (plot styling) and `248d95d` (numbering, provenance, seed
+labeling). This work began as a read-only audit of a deliberately paired debug
+run set supplied by the project owner: `RTG_debuggingsave2` ran
+`auto_model_checkpoint_mode = save`, and `RTG_debuggingimport` then resumed
+from that run's `model_final.zip` through the prior-run import route. Only
+`data_dir` and the checkpoint mode differed between the two worksheets.
+
+#### What the audit confirmed as already correct
+
+Checkpoint save/import behaved as designed. Packages were written at all three
+boundaries, contained only checksummed JSON/NumPy payloads, and the resumed run
+skipped its seed design, archived the source immutably, and wrote
+`import_provenance.json`. Cumulative GP history was preserved exactly across
+the import boundary: ten imported observations plus seven new QC-included
+replicate rows produced seventeen, with no regression to seed-plus-newest.
+Volume invariants held exactly, with water pinned near its 5 µL floor and the
+variable total capped at 195 µL. Acquisition scores reproduced their documented
+formulas to full precision.
+
+#### Defect 1 — condition counter read a key the controller never writes
+
+The import restore path computed its starting condition number from
+`row.get('condition_number')`, but performance rows use `reaction_number`. The
+lookup therefore always found nothing and reset the counter to zero instead of
+continuing above the imported history.
+
+This survived review because the corresponding test fixture invented the same
+`condition_number` key. Production and test agreed with each other and both
+disagreed with the real row schema. The fixture now mirrors the keys the
+controller actually writes, and a regression test asserts `condition_number` is
+not honored for numbering.
+
+#### Defect 2 — batch counter never advanced past the imported history
+
+`_run()` resets `batch_num` to zero for every protocol, and the seed path's
+"batch 0 is the seed" increment sits after the import early-return, so it never
+executed on the continuation route. The resumed batch was therefore labeled
+batch 0, colliding with the imported seed batch and producing
+`model_after_batch_000.zip`.
+
+Both counters now derive from a shared `_get_next_auto_number_after_rows`
+helper that ignores missing, non-numeric, and boolean values, so a partially
+populated legacy row cannot pull numbering back onto existing keys. Against the
+supplied checkpoint the condition counter continues at 4 and the first
+continuation batch is 2.
+
+#### Downstream defects repaired by the numbering fix
+
+| Artifact | Prior behavior | Current behavior |
+|---|---|---|
+| `lambda_progress_final.png` | The `batch_number <= N` window silently dropped three of seven conditions, and two more overlapped at one x-position | All seven conditions render at distinct positions |
+| `acquisition_portfolio_trace_final.png` | The inherited seed marker was overplotted by a new selection sharing its condition number | Seed and each portfolio mode occupy their own condition |
+| `auto_design_space_exploration_*.png` | Duplicate condition annotations collided and the best-condition star was drawn on two unrelated recipes | Unique annotations and exactly one best-condition marker |
+| Checkpoint and GP-surface filenames | A resumed run reused source-run batch numbers | Numbering continues across the lineage |
+
+#### Per-row run provenance
+
+Performance rows now carry two audit fields. `executed_in_current_run`
+separates conditions this run physically executed from inherited checkpoint
+history. `origin_run_directory` records the output directory of the run that
+produced the condition; the run directory is used rather than the experiment
+name because a save/import pair commonly shares one worksheet name.
+
+On import the executed marker is forced to false rather than trusted, so a
+second-generation import cannot inherit a stale true, while
+`origin_run_directory` is preserved rather than overwritten. A row lacking the
+stamp is backfilled from the immediate source. Rows written before these fields
+existed are treated as locally executed, so older runs and older checkpoint
+packages report unchanged.
+
+Physical-well reporting is now scoped to locally executed rows. Previously the
+report unioned the source run's well locations with the resumed run's, claiming
+twelve wells spanning A1 through D2 for a run that used nine wells spanning A1
+through A2, and advancing the same-plate reuse recommendation to `E2` instead
+of `B2`. An imported continuation always starts a fresh plate.
+
+#### Inherited seed-design labeling
+
+An imported run performs no seed design, yet emitted figures titled
+`Initial Maximin Seed Design` containing the source run's seed condition. Seed
+figures and their report headings now read
+`Inherited Seed Design (from <run>)`.
+
+The named run is resolved from the seed row's own `origin_run_directory` stamp
+rather than from this run's immediate import source, so a lineage of A imported
+into B imported into C still attributes the seed to A. Fallbacks cover
+pre-provenance packages (immediate source folder), the manual inbox route
+(source run id), and finally a generic label. Titles route through one helper
+for figures and one for report headings, so the default wording remains
+declared at each call site. Filenames are deliberately unchanged, because plot
+path routing and report lookups key on the
+`initial_maximin_seed_design_` prefix.
+
+#### Plot styling
+
+Design-space gridlines were previously drawn in Matplotlib's default light grey
+at 35 percent alpha and were effectively invisible. They are now green dashed
+lines drawn behind plotted data. The three-dimensional case required a separate
+mechanism: `Axes3D.grid()` only toggles visibility and silently ignores styling
+keyword arguments, so pane grid appearance is set through each axis's
+`_axinfo['grid']` entry.
+
+#### Validation
+
+Python 3.9.6 `py_compile` passed for `controller.py` and `optimizers.py`. The
+full isolated hardware-free suite passed at 168 tests, up from 150 before this
+work, including two new classes covering continuation numbering, well-span
+scoping, and inherited seed labeling across single and multi-generation
+imports.
+
+Behavior was additionally checked by extracting the real controller plotting
+and provenance methods from source and re-rendering the supplied
+`RTG_debuggingimport` artifacts under both the as-executed and corrected
+numbering, then comparing the outputs. A simulated third-generation import
+confirmed that seed attribution survives more than one hop. No controller
+launcher, robot, plate reader, credential workflow, or live protocol ran.
+
+#### Reagent-free debug-run caveat
+
+The two supplied runs were executed with no reagents loaded, which the project
+owner confirmed was intentional. Every extracted λmax in both runs is therefore
+an artifact of subtracting the hardcoded blank reference from an essentially
+non-absorbing well: raw absorbance was flat within roughly ±0.003 AU, every
+blank-corrected peak height was negative, and the reported maxima track the
+minimum of the hardcoded blank array near 683 nm together with a shallow
+secondary region near 824 nm. Replicate SD of exactly 0.0000 nm follows from
+that determinism rather than from measurement agreement.
+
+This is expected for a plumbing run and is not a defect. It is recorded here so
+these two runs are read as mechanism validation only. Their checkpoints must
+not be reused as a scientific prior, and the λmax values in their logs and
+reports carry no chemical meaning.
+
+#### Deliberately unchanged
+
+Report condition counts still describe the model's full history rather than
+this run's physical execution, and the exploration plot does not visually
+distinguish inherited from newly executed optimizer conditions. Both now have
+the provenance fields available should the project owner want them scoped.
+Scan-quality gating remains warning-only, so a condition whose spectrum carries
+no real peak can still pass QC; that remains the previously recorded deferred
+issue rather than something addressed here.
 
 ### Current spreadsheet Header interface
 
