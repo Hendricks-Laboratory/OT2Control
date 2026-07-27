@@ -2509,6 +2509,101 @@ class OptimizationModel():
             x,
             apply_true_zero_repair=False
         )
+
+    def get_candidate_feasibility_for_plotting(self, x):
+        '''
+        Returns a read-only, mask-aware feasibility classification for one
+        plotted Auto candidate.
+
+        A physical volume balance alone cannot express the complete Auto
+        search policy: an exact 0 uL transfer is physically executable, but
+        it is selectable only when that reagent is configured in
+        ``true_zero_reagents``.  Likewise, the all-off recipe is physically
+        possible but intentionally excluded from mixed-mask optimization.
+
+        This diagnostic helper preserves the raw ``0 < transfer < 5 uL``
+        interval for feasibility-overlay plots while adding those discrete
+        mask rules.  It is observational only and never repairs a candidate,
+        modifies GP history, or changes recipe selection.
+
+        params:
+            np.ndarray x:
+                One normalized recipe with one entry per variable reagent.
+
+        returns:
+            dict:
+                The physical volume-balance fields plus mask-aware flags used
+                by diagnostic plots. ``mask_feasible`` is the same executable
+                domain used by Auto selection for the displayed recipe.
+        '''
+        balance = self.get_candidate_volume_balance_for_plotting(x)
+
+        if hasattr(self, 'true_zero_reagents'):
+            true_zero_reagents = {
+                str(reagent_name)
+                for reagent_name in self.true_zero_reagents
+            }
+        elif getattr(self, 'allow_true_zero', False):
+            # Preserve the documented legacy all-variable interpretation for
+            # lightweight test doubles and older restored model objects.
+            true_zero_reagents = {
+                str(reagent_name)
+                for reagent_name in self.variable_reagents
+            }
+        else:
+            true_zero_reagents = set()
+
+        zero_transfer_by_reagent = {}
+        zero_transfer_permitted_by_reagent = {}
+        zero_transfer_not_permitted_by_reagent = {}
+
+        for reagent_name, transfer_volume in balance[
+            'variable_transfer_volumes'
+        ].items():
+            is_exact_zero = math.isclose(
+                float(transfer_volume),
+                0.0,
+                rel_tol=0,
+                abs_tol=1e-9
+            )
+            zero_is_permitted = (
+                str(reagent_name) in true_zero_reagents
+            )
+            zero_transfer_by_reagent[str(reagent_name)] = is_exact_zero
+            zero_transfer_permitted_by_reagent[str(reagent_name)] = (
+                is_exact_zero and zero_is_permitted
+            )
+            zero_transfer_not_permitted_by_reagent[str(reagent_name)] = (
+                is_exact_zero and not zero_is_permitted
+            )
+
+        all_variable_transfers_zero = all(
+            zero_transfer_by_reagent.values()
+        )
+        all_off_mask_excluded = bool(all_variable_transfers_zero)
+        disallowed_zero_transfer = any(
+            zero_transfer_not_permitted_by_reagent.values()
+        )
+
+        balance.update({
+            'true_zero_eligible_reagents': sorted(true_zero_reagents),
+            'zero_transfer_by_reagent': zero_transfer_by_reagent,
+            'zero_transfer_permitted_by_reagent': (
+                zero_transfer_permitted_by_reagent
+            ),
+            'zero_transfer_not_permitted_by_reagent': (
+                zero_transfer_not_permitted_by_reagent
+            ),
+            'all_variable_transfers_zero': bool(all_variable_transfers_zero),
+            'all_off_mask_excluded': all_off_mask_excluded,
+            'mask_feasible': bool(
+                balance['volume_feasible']
+                and not disallowed_zero_transfer
+                and not all_off_mask_excluded
+            )
+        })
+
+        return balance
     
     def _generate_feasible_starting_points(self, n_restarts):
         '''

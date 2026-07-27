@@ -1967,6 +1967,7 @@ class Controller(ABC):
         )
         concentration_grids = [x_grid, y_grid]
         transfer_volume_grids = {}
+        zero_transfer_grids = {}
         variable_transfer_infeasible = np.zeros(
             x_grid.shape,
             dtype=bool
@@ -2025,6 +2026,7 @@ class Controller(ABC):
                 rtol=0,
                 atol=volume_tolerance
             )
+            zero_transfer_grids[reagent_name] = is_exact_zero
             below_executable_minimum = (
                 transfer_volume_grid < 5.0 - volume_tolerance
             )
@@ -2057,6 +2059,12 @@ class Controller(ABC):
             (water_volume_grid > volume_tolerance)
             & (water_volume_grid < 5.0 - volume_tolerance)
         )
+        all_off_mask_excluded = np.logical_and.reduce(
+            [
+                zero_transfer_grids[reagent_name]
+                for reagent_name in reagent_names
+            ]
+        )
 
         return {
             'x_values': x_values,
@@ -2065,10 +2073,14 @@ class Controller(ABC):
                 variable_transfer_infeasible
                 | water_transfer_infeasible
                 | overflow
+                | all_off_mask_excluded
             ),
             'variable_transfer_infeasible': (
                 variable_transfer_infeasible
             ),
+            'true_zero_eligible_reagents': sorted(true_zero_reagents),
+            'zero_transfer_by_reagent': zero_transfer_grids,
+            'all_off_mask_excluded': all_off_mask_excluded,
             'water_transfer_infeasible': water_transfer_infeasible,
             'overflow': overflow,
             'water_volume_uL': water_volume_grid,
@@ -2603,6 +2615,83 @@ class Controller(ABC):
                             reagent_minimum_handle
                         )
 
+                # Exact zero is a discrete mask state, not a small positive
+                # concentration band.  When enabled for a displayed reagent,
+                # mark its axis edge without visually inflating that state
+                # into an interval. Required-ON reagents begin at their 5 uL
+                # equivalent lower bound and therefore receive no zero edge.
+                true_zero_eligible_reagents = set(
+                    feasibility_overlay.get(
+                        'true_zero_eligible_reagents',
+                        []
+                    )
+                )
+                zero_edge_specs = (
+                    (
+                        self.variable_reagents[0],
+                        feasibility_x_values,
+                        '#009E73',
+                        'vertical'
+                    ),
+                    (
+                        self.variable_reagents[1],
+                        feasibility_y_values,
+                        '#CC79A7',
+                        'horizontal'
+                    )
+                )
+                for reagent_name, axis_values, color, orientation in (
+                    zero_edge_specs
+                ):
+                    if (
+                        reagent_name not in true_zero_eligible_reagents
+                        or not np.isclose(
+                            axis_values[0],
+                            0.0,
+                            rtol=0,
+                            atol=1e-12
+                        )
+                    ):
+                        continue
+
+                    if orientation == 'vertical':
+                        ax.axvline(
+                            axis_values[0], color=color, linewidth=2.0,
+                            zorder=6, clip_on=False
+                        )
+                    else:
+                        ax.axhline(
+                            axis_values[0], color=color, linewidth=2.0,
+                            zorder=6, clip_on=False
+                        )
+
+                    zero_handle, = ax.plot(
+                        [], [], color=color, linewidth=2.0,
+                        label=(
+                            f'{reagent_name} = 0 uL permitted '
+                            '(exact edge)'
+                        )
+                    )
+                    feasibility_legend_handles.append(zero_handle)
+
+                all_off_mask_excluded = np.asarray(
+                    feasibility_overlay.get(
+                        'all_off_mask_excluded',
+                        np.zeros_like(infeasible_mask, dtype=bool)
+                    ),
+                    dtype=bool
+                )
+                show_all_off_footnote = False
+                if (
+                    all_off_mask_excluded.shape == expected_feasibility_shape
+                    and all_off_mask_excluded[0, 0]
+                ):
+                    # The ordinary infeasibility overlay already marks this
+                    # corner. Avoid a second decorative glyph that competes
+                    # with the exact-zero edge semantics; a concise footer
+                    # states the all-off exclusion instead.
+                    show_all_off_footnote = True
+
                 if (
                     target_contour_nm is not None
                     and _grid_spans_contour_level(
@@ -2653,6 +2742,25 @@ class Controller(ABC):
                     y=0.985,
                     verticalalignment='top'
                 )
+                if len(
+                    feasibility_overlay.get(
+                        'true_zero_eligible_reagents',
+                        []
+                    )
+                ) == 0:
+                    # This is explanatory figure context, not a plotted
+                    # visual key, so it belongs below the title rather than
+                    # in the feasibility legend.
+                    fig.text(
+                        0.5,
+                        0.935,
+                        'True zero disabled; axes begin at the 5 uL '
+                        'executable minimum',
+                        ha='center',
+                        va='top',
+                        fontsize=font_sizes['legend'],
+                        color='0.30'
+                    )
 
             colorbar = fig.colorbar(
                 heatmap_mesh,
@@ -2712,6 +2820,18 @@ class Controller(ABC):
                     else 0.88
                 )
             )
+
+            if feasibility_overlay is not None and show_all_off_footnote:
+                fig.text(
+                    0.5,
+                    0.045,
+                    'Exact-zero edges shown; the all-variable-off recipe is '
+                    'excluded.',
+                    ha='center',
+                    va='center',
+                    fontsize=font_sizes['legend'],
+                    color='0.30'
+                )
 
             full_plot_path = self._get_auto_plot_output_path(
                 plot_filename
@@ -7737,6 +7857,47 @@ class AutoContr(Controller):
                     )
                 )
 
+            # Fixed concentrations are immutable parts of each executed
+            # recipe, but record them condition by condition rather than
+            # rebuilding old/imported rows from the currently loaded deck.
+            # A later run may use a different stock preparation even when the
+            # reagent name is unchanged. These audit fields make the complete
+            # recipe-concentration history scientifically faithful.
+            fixed_reagent_names = list(
+                getattr(self, 'fixed_reagents', [])
+            )
+            can_record_fixed_concentrations = (
+                len(fixed_reagent_names) > 0
+                and hasattr(self, '_get_fixed_reagent_volumes')
+                and hasattr(self, '_get_variable_reagent_stock_conc')
+            )
+            fixed_reagent_volumes = (
+                self._get_fixed_reagent_volumes()
+                if can_record_fixed_concentrations
+                else {}
+            )
+            for raw_fixed_reagent_name in (
+                fixed_reagent_names
+                if can_record_fixed_concentrations
+                else []
+            ):
+                fixed_reagent_name = str(raw_fixed_reagent_name)
+                fixed_volume_uL = float(
+                    fixed_reagent_volumes[fixed_reagent_name]
+                )
+                fixed_stock_concentration = float(
+                    self._get_variable_reagent_stock_conc(
+                        fixed_reagent_name
+                    )
+                )
+                row[
+                    f'{fixed_reagent_name}_executed_concentration'
+                ] = (
+                    fixed_stock_concentration
+                    * fixed_volume_uL
+                    / float(volume_balance['total_volume'])
+                )
+
             for rep_i in range(self.num_duplicates):
                 col_name = f'actual_lambda_rep_{rep_i + 1}_nm'
                 include_col_name = f'actual_lambda_rep_{rep_i + 1}_included_in_qc'
@@ -10293,6 +10454,502 @@ class AutoContr(Controller):
 
         return performance_df, design_columns
 
+    def _get_auto_recipe_concentration_history_dataframe(
+        self,
+        include_fixed_reagents=False
+    ):
+        '''
+        Builds a read-only, condition-level dataframe for recipe-history bars.
+
+        Variable-reagent values prefer the controller-validated executed
+        physical concentration captured for a condition. Older performance
+        rows that predate that audit field fall back to the established
+        ``<reagent>_concentration`` field. Complete-recipe fixed-reagent
+        concentrations require their corresponding executed audit fields.
+        This avoids silently reconstructing an imported historical condition
+        from a stock concentration that may have changed since it ran.
+
+        This helper intentionally does not use duplicate-well data, selected
+        (pre-repair) recipes, normalized coordinates, or CSV round trips.
+        It returns one bar-group row per unique reaction condition and never
+        mutates controller state, audit rows, recipes, or model history.
+
+        params:
+            bool include_fixed_reagents:
+                When true, include template-fixed chemical reagents in
+                addition to the Auto-variable reagents. Water is deliberately
+                excluded because it is a variable top-off volume in uL rather
+                than a chemical concentration in mM.
+
+        returns:
+            tuple[pandas.DataFrame, list[dict]]:
+                Sorted condition dataframe and ordered reagent descriptors
+                with ``reagent_name`` and private plotting-column keys.
+        '''
+        try:
+            concentration_df = pd.DataFrame(
+                getattr(self, 'auto_model_performance_rows', [])
+            ).copy(deep=True)
+        except Exception:
+            concentration_df = pd.DataFrame()
+
+        if concentration_df.empty:
+            return concentration_df, []
+
+        required_columns = ['reaction_number', 'batch_number']
+        missing_required_columns = [
+            column_name
+            for column_name in required_columns
+            if column_name not in concentration_df.columns
+        ]
+
+        if missing_required_columns:
+            raise ValueError(
+                'Cannot build Auto recipe-concentration history because the '
+                'condition-level performance rows are missing required '
+                f'columns: {missing_required_columns}.'
+            )
+
+        concentration_df['reaction_number'] = pd.to_numeric(
+            concentration_df['reaction_number'],
+            errors='coerce'
+        )
+        concentration_df['batch_number'] = pd.to_numeric(
+            concentration_df['batch_number'],
+            errors='coerce'
+        )
+        concentration_df = concentration_df.dropna(
+            subset=['reaction_number', 'batch_number']
+        ).copy(deep=True)
+
+        if concentration_df.empty:
+            return concentration_df, []
+
+        if concentration_df['reaction_number'].duplicated().any():
+            duplicate_numbers = sorted(
+                concentration_df.loc[
+                    concentration_df['reaction_number'].duplicated(
+                        keep=False
+                    ),
+                    'reaction_number'
+                ].astype(int).unique().tolist()
+            )
+            raise ValueError(
+                'Cannot build Auto recipe-concentration history because '
+                'reaction numbers must identify unique conditions. Duplicate '
+                f'values: {duplicate_numbers}.'
+            )
+
+        reagent_descriptors = []
+
+        for reagent_index, raw_reagent_name in enumerate(
+            getattr(self, 'variable_reagents', [])
+        ):
+            reagent_name = str(raw_reagent_name)
+            executed_column = f'{reagent_name}_executed_concentration'
+            fallback_column = self._get_auto_design_concentration_column(
+                reagent_name
+            )
+
+            if (
+                executed_column not in concentration_df.columns
+                and fallback_column not in concentration_df.columns
+            ):
+                raise ValueError(
+                    'Cannot build Auto recipe-concentration history because '
+                    f'no executed or legacy concentration column was found '
+                    f'for variable reagent {reagent_name!r}.'
+                )
+
+            executed_values = (
+                pd.to_numeric(
+                    concentration_df[executed_column],
+                    errors='coerce'
+                )
+                if executed_column in concentration_df.columns
+                else pd.Series(
+                    float('nan'),
+                    index=concentration_df.index,
+                    dtype=float
+                )
+            )
+            fallback_values = (
+                pd.to_numeric(
+                    concentration_df[fallback_column],
+                    errors='coerce'
+                )
+                if fallback_column in concentration_df.columns
+                else pd.Series(
+                    float('nan'),
+                    index=concentration_df.index,
+                    dtype=float
+                )
+            )
+            invalid_executed_values = (
+                executed_values.notna()
+                & ~np.isfinite(executed_values.to_numpy(dtype=float))
+            )
+            if invalid_executed_values.any():
+                invalid_conditions = concentration_df.loc[
+                    invalid_executed_values,
+                    'reaction_number'
+                ].astype(int).tolist()
+                raise ValueError(
+                    'Cannot build Auto recipe-concentration history because '
+                    f'variable reagent {reagent_name!r} has nonfinite '
+                    f'executed concentration for conditions '
+                    f'{invalid_conditions}.'
+                )
+            plot_column = f'_recipe_history_{reagent_index}'
+            concentration_df[plot_column] = executed_values.where(
+                executed_values.notna(),
+                fallback_values
+            )
+
+            finite_values = np.isfinite(
+                concentration_df[plot_column].to_numpy(dtype=float)
+            )
+            if not finite_values.all():
+                missing_conditions = concentration_df.loc[
+                    ~finite_values,
+                    'reaction_number'
+                ].astype(int).tolist()
+                raise ValueError(
+                    'Cannot build Auto recipe-concentration history because '
+                    f'variable reagent {reagent_name!r} has no finite '
+                    f'executed concentration for conditions '
+                    f'{missing_conditions}.'
+                )
+
+            reagent_descriptors.append({
+                'reagent_name': reagent_name,
+                'plot_column': plot_column,
+                'is_fixed': False
+            })
+
+        if include_fixed_reagents:
+            for fixed_index, raw_reagent_name in enumerate(
+                getattr(self, 'fixed_reagents', [])
+            ):
+                reagent_name = str(raw_reagent_name)
+                executed_column = (
+                    f'{reagent_name}_executed_concentration'
+                )
+                if executed_column not in concentration_df.columns:
+                    raise ValueError(
+                        'Cannot build complete Auto recipe-concentration '
+                        f'history because fixed reagent {reagent_name!r} '
+                        'has no recorded executed concentration. This can '
+                        'occur when imported history predates this audit '
+                        'field; use the variable-only history for that '
+                        'legacy history.'
+                    )
+
+                plot_column = (
+                    f'_recipe_history_fixed_{fixed_index}'
+                )
+                concentration_df[plot_column] = pd.to_numeric(
+                    concentration_df[executed_column],
+                    errors='coerce'
+                )
+                finite_values = np.isfinite(
+                    concentration_df[plot_column].to_numpy(dtype=float)
+                )
+                if not finite_values.all():
+                    missing_conditions = concentration_df.loc[
+                        ~finite_values,
+                        'reaction_number'
+                    ].astype(int).tolist()
+                    raise ValueError(
+                        'Cannot build complete Auto recipe-concentration '
+                        f'history because fixed reagent {reagent_name!r} '
+                        'has missing or nonfinite executed concentration '
+                        f'for conditions {missing_conditions}.'
+                    )
+                reagent_descriptors.append({
+                    'reagent_name': reagent_name,
+                    'plot_column': plot_column,
+                    'is_fixed': True
+                })
+
+        if len(reagent_descriptors) == 0:
+            return concentration_df.iloc[0:0].copy(deep=True), []
+
+        concentration_df = concentration_df.sort_values(
+            'reaction_number'
+        ).copy(deep=True)
+
+        return concentration_df, reagent_descriptors
+
+    def _plot_auto_recipe_concentration_history(
+        self,
+        batch_number,
+        include_fixed_reagents=False,
+        plot_filename=None,
+        plot_title=None
+    ):
+        '''
+        Saves a grouped condition-level Auto recipe-concentration bar chart.
+
+        Every x-axis group is one complete reaction condition. Each colored
+        bar is a final-reaction concentration in mM for one chemical reagent.
+        Bars deliberately share a single linear concentration axis: the plot
+        shows literal recipe concentrations, not normalized model coordinates
+        or separately scaled reagent panels. This makes fixed-reagent
+        constancy and condition-to-condition recipe changes directly auditable.
+
+        params:
+            int batch_number:
+                Highest completed batch to include.
+
+            bool include_fixed_reagents:
+                Include fixed chemical reagents alongside Auto variables.
+
+            str plot_filename:
+                Optional output filename.
+
+            str plot_title:
+                Optional figure title.
+
+        returns:
+            str or None:
+                Saved plot path, or None when no condition-level rows exist.
+        '''
+        try:
+            completed_batch_number = int(batch_number)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                'Auto recipe-concentration history batch_number must be an '
+                f'integer. Received {batch_number!r}.'
+            )
+
+        concentration_df, reagent_descriptors = (
+            self._get_auto_recipe_concentration_history_dataframe(
+                include_fixed_reagents=include_fixed_reagents
+            )
+        )
+
+        if concentration_df.empty or len(reagent_descriptors) == 0:
+            print(
+                '<<controller warning>> skipping Auto recipe-concentration '
+                'history because no complete condition-level recipe rows '
+                'were available'
+            )
+            return None
+
+        concentration_df = concentration_df.loc[
+            concentration_df['batch_number'] <= completed_batch_number
+        ].copy(deep=True)
+
+        if concentration_df.empty:
+            print(
+                '<<controller warning>> skipping Auto recipe-concentration '
+                'history because no condition rows exist through batch '
+                f'{completed_batch_number}'
+            )
+            return None
+
+        if plot_filename is None:
+            plot_filename = (
+                'auto_complete_recipe_concentration_history_'
+                f'batch_{completed_batch_number:03d}.png'
+                if include_fixed_reagents
+                else 'auto_recipe_concentration_history_'
+                f'batch_{completed_batch_number:03d}.png'
+            )
+
+        if plot_title is None:
+            plot_title = (
+                'Auto Complete Recipe Concentration History'
+                if include_fixed_reagents
+                else 'Auto Variable-Reagent Concentration History'
+            )
+
+        font_sizes = self._get_auto_design_plot_font_sizes()
+        n_conditions = len(concentration_df)
+        n_reagents = len(reagent_descriptors)
+        condition_positions = np.arange(n_conditions, dtype=float)
+        bar_width = min(0.78 / float(n_reagents), 0.28)
+        offsets = (
+            np.arange(n_reagents, dtype=float)
+            - (float(n_reagents) - 1.0) / 2.0
+        ) * bar_width
+
+        # Okabe-Ito-derived colors remain distinguishable when printed and
+        # are held constant between the variable-only and complete-recipe
+        # figures, so a reagent never changes visual identity within a run.
+        reagent_colors = [
+            '#0072B2', '#D55E00', '#009E73', '#CC79A7',
+            '#E69F00', '#56B4E9', '#000000', '#999999'
+        ]
+        figure_width = min(
+            22.0,
+            max(10.0, 7.0 + 0.55 * float(n_conditions))
+        )
+        figure, axis = plt.subplots(
+            figsize=(figure_width, 7.2),
+            dpi=300
+        )
+
+        for reagent_index, descriptor in enumerate(reagent_descriptors):
+            bar_values = pd.to_numeric(
+                concentration_df[descriptor['plot_column']],
+                errors='coerce'
+            ).to_numpy(dtype=float)
+            if not np.isfinite(bar_values).all():
+                raise ValueError(
+                    'Auto recipe-concentration history encountered a '
+                    f'nonfinite plotted value for {descriptor["reagent_name"]!r}.'
+                )
+
+            axis.bar(
+                condition_positions + offsets[reagent_index],
+                bar_values,
+                width=bar_width * 0.92,
+                color=reagent_colors[
+                    reagent_index % len(reagent_colors)
+                ],
+                edgecolor='white',
+                linewidth=0.35,
+                # The shared y-axis already states mM. Keep the legend to
+                # reagent identities so it remains compact as dimensions grow.
+                label=str(descriptor['reagent_name']),
+                zorder=3
+            )
+
+        batch_values = concentration_df['batch_number'].astype(int).to_numpy()
+        group_start = 0
+        for row_index in range(1, n_conditions + 1):
+            at_end = row_index == n_conditions
+            batch_changed = (
+                not at_end
+                and batch_values[row_index] != batch_values[row_index - 1]
+            )
+            if not at_end and not batch_changed:
+                continue
+
+            group_end = row_index - 1
+            label = (
+                'Seed'
+                if batch_values[group_start] == 0
+                else f'Batch {batch_values[group_start]}'
+            )
+            axis.text(
+                (condition_positions[group_start]
+                 + condition_positions[group_end]) / 2.0,
+                1.01,
+                label,
+                transform=axis.get_xaxis_transform(),
+                ha='center',
+                va='bottom',
+                fontsize=font_sizes['annotation'],
+                color='0.35'
+            )
+            if not at_end:
+                axis.axvline(
+                    row_index - 0.5,
+                    color='0.80',
+                    linewidth=0.8,
+                    zorder=1
+                )
+            group_start = row_index
+
+        if 'executed_in_current_run' in concentration_df.columns:
+            current_run_values = concentration_df[
+                'executed_in_current_run'
+            ].fillna(True).astype(bool).to_numpy()
+            transition_indices = np.where(
+                current_run_values[1:] != current_run_values[:-1]
+            )[0]
+            for transition_index in transition_indices:
+                if current_run_values[transition_index + 1]:
+                    axis.axvline(
+                        transition_index + 0.5,
+                        color='0.25',
+                        linestyle='dashed',
+                        linewidth=1.0,
+                        zorder=2
+                    )
+                    axis.text(
+                        transition_index + 0.5,
+                        1.08,
+                        'Current run',
+                        transform=axis.get_xaxis_transform(),
+                        ha='center',
+                        va='bottom',
+                        fontsize=font_sizes['annotation'],
+                        color='0.25'
+                    )
+
+        axis.set_xlim(-0.6, float(n_conditions) - 0.4)
+        axis.set_ylim(bottom=0.0)
+        axis.set_xticks(condition_positions)
+        axis.set_xticklabels(
+            concentration_df['reaction_number'].astype(int).astype(str)
+        )
+        axis.set_xlabel(
+            'Reaction condition number',
+            fontsize=font_sizes['axis_label']
+        )
+        axis.set_ylabel(
+            'Final reaction concentration (mM)',
+            fontsize=font_sizes['axis_label']
+        )
+        axis.tick_params(
+            axis='both', which='both', direction='out', top=False,
+            right=False, labelsize=font_sizes['tick_label']
+        )
+        axis.grid(False)
+        axis.set_axisbelow(True)
+        for spine in axis.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.9)
+            spine.set_color('0.2')
+
+        figure.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
+        )
+        figure.text(
+            0.5,
+            0.925,
+            'Bars show executed final-reaction concentrations in mM; '
+            'each cluster is one condition-level recipe.',
+            ha='center',
+            va='top',
+            fontsize=font_sizes['legend'],
+            color='0.30'
+        )
+        figure.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.885),
+            ncol=min(n_reagents, 4),
+            frameon=False,
+            fontsize=font_sizes['legend'],
+            handlelength=1.2,
+            handletextpad=0.45,
+            columnspacing=1.0
+        )
+        figure.subplots_adjust(
+            left=0.12,
+            right=0.97,
+            bottom=0.15,
+            top=0.74
+        )
+
+        plot_path = self._get_auto_plot_output_path(plot_filename)
+        figure.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close(figure)
+
+        print(
+            '<<controller>> saved Auto recipe-concentration history to '
+            f'{plot_path}'
+        )
+
+        return plot_path
+
     def _get_auto_design_best_condition_number(self, performance_df):
         '''
         Returns the reaction_number with the smallest target_error_nm, if
@@ -10459,6 +11116,13 @@ class AutoContr(Controller):
             or filename.startswith('auto_design_space_exploration_')
         ):
             category = os.path.join('design_space')
+        elif (
+            filename.startswith('auto_recipe_concentration_history_')
+            or filename.startswith(
+                'auto_complete_recipe_concentration_history_'
+            )
+        ):
+            category = os.path.join('recipe_history')
         else:
             category = os.path.join('other')
 
@@ -15495,13 +16159,24 @@ class AutoContr(Controller):
             callable(predict_usable_spectrum_probability)
             and getattr(model, 'usable_spectrum_model', None) is not None
         )
+        feasibility_for_plotting = getattr(
+            model,
+            'get_candidate_feasibility_for_plotting',
+            None
+        )
         balance_for_plotting = getattr(
             model,
             'get_candidate_volume_balance_for_plotting',
             None
         )
 
-        if not callable(predict_batch) or not callable(balance_for_plotting):
+        if (
+            not callable(predict_batch)
+            or (
+                not callable(feasibility_for_plotting)
+                and not callable(balance_for_plotting)
+            )
+        ):
             raise AttributeError(
                 "Conditional GP slice plots require the read-only batch-"
                 "prediction and feasibility helpers supplied by "
@@ -15649,8 +16324,15 @@ class AutoContr(Controller):
             }
 
             for point_index, recipe in enumerate(recipes):
-                balance = balance_for_plotting(recipe)
-                feasible[point_index] = bool(balance['volume_feasible'])
+                if callable(feasibility_for_plotting):
+                    balance = feasibility_for_plotting(recipe)
+                else:
+                    # Support pre-feature model doubles in isolated plotting
+                    # tests while production models use the mask-aware helper.
+                    balance = balance_for_plotting(recipe)
+                feasible[point_index] = bool(
+                    balance.get('mask_feasible', balance['volume_feasible'])
+                )
                 water_volume[point_index] = float(balance['water_volume'])
 
                 for reagent_name in reagent_names:
@@ -15802,6 +16484,23 @@ class AutoContr(Controller):
                     )
                 })
 
+        configured_true_zero_reagents = getattr(
+            model,
+            'true_zero_reagents',
+            None
+        )
+        if configured_true_zero_reagents is None:
+            true_zero_eligible_reagents = (
+                set(reagent_names)
+                if getattr(model, 'allow_true_zero', False)
+                else set()
+            )
+        else:
+            true_zero_eligible_reagents = {
+                str(reagent_name)
+                for reagent_name in configured_true_zero_reagents
+            }
+
         return {
             'reagent_names': reagent_names,
             'bounds': bounds,
@@ -15812,6 +16511,9 @@ class AutoContr(Controller):
             'reference_label': reference_label,
             'observed_conditions': observed_conditions,
             'slice_half_width': slice_half_width,
+            'true_zero_eligible_reagents': sorted(
+                true_zero_eligible_reagents
+            ),
             'panel_data': panel_data
         }
 
@@ -15902,13 +16604,24 @@ class AutoContr(Controller):
             callable(predict_usable_spectrum_probability)
             and getattr(model, 'usable_spectrum_model', None) is not None
         )
+        feasibility_for_plotting = getattr(
+            model,
+            'get_candidate_feasibility_for_plotting',
+            None
+        )
         balance_for_plotting = getattr(
             model,
             'get_candidate_volume_balance_for_plotting',
             None
         )
 
-        if not callable(predict_batch) or not callable(balance_for_plotting):
+        if (
+            not callable(predict_batch)
+            or (
+                not callable(feasibility_for_plotting)
+                and not callable(balance_for_plotting)
+            )
+        ):
             raise AttributeError(
                 "3D GP slice plots require the read-only batch-prediction "
                 "and feasibility helpers supplied by OptimizationModel."
@@ -15942,6 +16655,22 @@ class AutoContr(Controller):
         target_nm = float(self.getModelInfo()['target'])
         tolerance_nm = self._get_auto_target_tolerance_nm()
         font_sizes = self._get_auto_design_plot_font_sizes()
+        configured_true_zero_reagents = getattr(
+            model,
+            'true_zero_reagents',
+            None
+        )
+        if configured_true_zero_reagents is None:
+            true_zero_eligible_reagents = (
+                set(reagent_names)
+                if getattr(model, 'allow_true_zero', False)
+                else set()
+            )
+        else:
+            true_zero_eligible_reagents = {
+                str(reagent_name)
+                for reagent_name in configured_true_zero_reagents
+            }
 
         # Prefer the best QC-approved condition because it is the most useful
         # scientific operating point.  The first complete finite observation
@@ -16069,8 +16798,13 @@ class AutoContr(Controller):
             }
 
             for point_index, recipe in enumerate(recipes):
-                balance = balance_for_plotting(recipe)
-                feasible[point_index] = bool(balance['volume_feasible'])
+                if callable(feasibility_for_plotting):
+                    balance = feasibility_for_plotting(recipe)
+                else:
+                    balance = balance_for_plotting(recipe)
+                feasible[point_index] = bool(
+                    balance.get('mask_feasible', balance['volume_feasible'])
+                )
                 water_volume[point_index] = float(balance['water_volume'])
 
                 for reagent_name in reagent_names:
@@ -16357,6 +17091,42 @@ class AutoContr(Controller):
                         zorder=4
                     )
 
+            for reagent_index, axis_values, orientation in (
+                (
+                    panel['x_index'],
+                    panel['feasibility_x_physical'],
+                    'vertical'
+                ),
+                (
+                    panel['y_index'],
+                    panel['feasibility_y_physical'],
+                    'horizontal'
+                )
+            ):
+                reagent_name = reagent_names[reagent_index]
+                if (
+                    reagent_name not in true_zero_eligible_reagents
+                    or not np.isclose(
+                        axis_values[0, 0],
+                        0.0,
+                        rtol=0,
+                        atol=1e-12
+                    )
+                ):
+                    continue
+
+                color = reagent_boundary_colors[reagent_index]
+                if orientation == 'vertical':
+                    axis.axvline(
+                        axis_values[0, 0], color=color, linewidth=2.0,
+                        zorder=6, clip_on=False
+                    )
+                else:
+                    axis.axhline(
+                        axis_values[0, 0], color=color, linewidth=2.0,
+                        zorder=6, clip_on=False
+                    )
+
             if (
                 field_name == 'mean'
                 and _grid_spans_contour_level(
@@ -16437,6 +17207,20 @@ class AutoContr(Controller):
                         label=f'{reagent_name} = 5 uL boundary'
                     )
                     legend_handles.append(reagent_minimum_handle)
+
+            if len(true_zero_eligible_reagents) > 0:
+                for reagent_index, reagent_name in enumerate(reagent_names):
+                    if reagent_name not in true_zero_eligible_reagents:
+                        continue
+                    zero_handle, = axis.plot(
+                        [], [], color=reagent_boundary_colors[reagent_index],
+                        linewidth=2.0,
+                        label=(
+                            f'{reagent_name} = 0 uL permitted '
+                            '(exact edge)'
+                        )
+                    )
+                    legend_handles.append(zero_handle)
 
             if field_name == 'mean' and any(
                 _grid_spans_contour_level(panel['mean_nm'], target_nm)
@@ -16696,6 +17480,23 @@ class AutoContr(Controller):
                 handlelength=1.5,
                 labelspacing=0.45
             )
+            if (
+                feasibility_overlay
+                and len(true_zero_eligible_reagents) == 0
+            ):
+                # This is explanatory context for the displayed domain, not
+                # a visual key.  Keep it in the footer rather than creating
+                # an empty-looking legend entry.
+                figure.text(
+                    0.5,
+                    0.065,
+                    'True zero disabled; axes begin at the 5 uL executable '
+                    'minimum',
+                    ha='center',
+                    va='center',
+                    fontsize=font_sizes['legend'],
+                    color='0.30'
+                )
             figure.subplots_adjust(
                 left=0.15,
                 right=0.85,
@@ -17037,6 +17838,17 @@ class AutoContr(Controller):
                 handlelength=1.7,
                 columnspacing=0.9
             )
+            if len(true_zero_eligible_reagents) == 0:
+                figure.text(
+                    0.5,
+                    0.065,
+                    'True zero disabled; axes begin at the 5 uL executable '
+                    'minimum',
+                    ha='center',
+                    va='center',
+                    fontsize=font_sizes['legend'],
+                    color='0.30'
+                )
             output_path = self._get_auto_plot_output_path(
                 f'gpr_3d_{field_name}_orthogonal_slices_feasibility_'
                 f'{final_suffix}.png'
@@ -17122,6 +17934,9 @@ class AutoContr(Controller):
         reference_normalized = slice_data['reference_normalized']
         observed_conditions = slice_data['observed_conditions']
         slice_half_width = slice_data['slice_half_width']
+        true_zero_eligible_reagents = set(
+            slice_data.get('true_zero_eligible_reagents', [])
+        )
         font_sizes = self._get_auto_design_plot_font_sizes()
 
         # Higher-dimensional pages must remain presentation-readable. Do not
@@ -17389,6 +18204,45 @@ class AutoContr(Controller):
                         ],
                         linewidths=1.15, linestyles='dotted', zorder=4
                     )
+
+            zero_edge_specs = (
+                (
+                    panel['x_index'],
+                    panel['feasibility_x_physical'],
+                    'vertical'
+                ),
+                (
+                    panel['y_index'],
+                    panel['feasibility_y_physical'],
+                    'horizontal'
+                )
+            )
+            for reagent_index, axis_values, orientation in zero_edge_specs:
+                reagent_name = reagent_names[reagent_index]
+                if (
+                    reagent_name not in true_zero_eligible_reagents
+                    or not np.isclose(
+                        axis_values[0, 0],
+                        0.0,
+                        rtol=0,
+                        atol=1e-12
+                    )
+                ):
+                    continue
+
+                color = boundary_colors[
+                    reagent_index % len(boundary_colors)
+                ]
+                if orientation == 'vertical':
+                    axis.axvline(
+                        axis_values[0, 0], color=color, linewidth=2.0,
+                        zorder=6, clip_on=False
+                    )
+                else:
+                    axis.axhline(
+                        axis_values[0, 0], color=color, linewidth=2.0,
+                        zorder=6, clip_on=False
+                    )
             if (
                 field_name == 'mean'
                 and _grid_spans_contour_level(panel['mean_nm'], target_nm)
@@ -17493,14 +18347,21 @@ class AutoContr(Controller):
             handles.append(reference_handle)
             return handles
 
-        def _feasibility_legend_handles(axis, field_name):
+        def _feasibility_legend_handles(
+            axis,
+            field_name,
+            legend_panels=None
+        ):
+            if legend_panels is None:
+                legend_panels = panel_data
+
             handles = [mpatches.Patch(
                 facecolor='0.70', alpha=0.55,
                 label='Excluded: overflow or non-executable transfer'
             )]
             water_grids = [
                 panel['feasibility_water_volume_uL']
-                for panel in panel_data
+                for panel in legend_panels
             ]
             if any(_grid_spans_contour_level(grid, 0.0)
                    for grid in water_grids):
@@ -17521,7 +18382,7 @@ class AutoContr(Controller):
                         panel['feasibility_transfer_volume_uL_by_reagent'][
                             reagent_name
                         ], 5.0
-                       ) for panel in panel_data):
+                       ) for panel in legend_panels):
                     handle, = axis.plot(
                         [], [],
                         color=boundary_colors[
@@ -17531,9 +18392,33 @@ class AutoContr(Controller):
                         label=f'{reagent_name} = 5 uL boundary'
                     )
                     handles.append(handle)
+            if len(true_zero_eligible_reagents) > 0:
+                visible_reagent_indices = {
+                    index
+                    for panel in legend_panels
+                    for index in (panel['x_index'], panel['y_index'])
+                }
+                for reagent_index, reagent_name in enumerate(reagent_names):
+                    if (
+                        reagent_name not in true_zero_eligible_reagents
+                        or reagent_index not in visible_reagent_indices
+                    ):
+                        continue
+                    handle, = axis.plot(
+                        [], [],
+                        color=boundary_colors[
+                            reagent_index % len(boundary_colors)
+                        ],
+                        linewidth=2.0,
+                        label=(
+                            f'{reagent_name} = 0 uL permitted '
+                            '(exact edge)'
+                        )
+                    )
+                    handles.append(handle)
             if field_name == 'mean' and any(
                     _grid_spans_contour_level(panel['mean_nm'], target_nm)
-                    for panel in panel_data):
+                    for panel in legend_panels):
                 handle, = axis.plot(
                     [], [], color='#000000', linewidth=1.1,
                     linestyle='dashdot', label=f'Target = {target_nm:.0f} nm'
@@ -17579,7 +18464,11 @@ class AutoContr(Controller):
             legend_handles = _observation_legend_handles(axis)
             if feasibility_overlay:
                 legend_handles = (
-                    _feasibility_legend_handles(axis, field_name)
+                    _feasibility_legend_handles(
+                        axis,
+                        field_name,
+                        legend_panels=[panel]
+                    )
                     + legend_handles
                 )
             figure.legend(
@@ -17589,6 +18478,18 @@ class AutoContr(Controller):
                 frameon=False, fontsize=font_sizes['legend'],
                 handlelength=1.5, handletextpad=0.45, columnspacing=0.8
             )
+            if (
+                feasibility_overlay
+                and len(true_zero_eligible_reagents) == 0
+            ):
+                figure.text(
+                    0.5,
+                    0.065,
+                    'True zero disabled; axes begin at the 5 uL executable '
+                    'minimum',
+                    ha='center', va='center',
+                    fontsize=font_sizes['legend'], color='0.30'
+                )
             figure.text(
                 0.5,
                 0.65 if feasibility_overlay else 0.73,
@@ -17708,6 +18609,18 @@ class AutoContr(Controller):
                     handlelength=(1.7 if feasibility_overlay else 1.2),
                     handletextpad=0.45, columnspacing=0.9
                 )
+                if (
+                    feasibility_overlay
+                    and len(true_zero_eligible_reagents) == 0
+                ):
+                    figure.text(
+                        0.5,
+                        0.075,
+                        'True zero disabled; axes begin at the 5 uL '
+                        'executable minimum',
+                        ha='center', va='center',
+                        fontsize=font_sizes['legend'], color='0.30'
+                    )
                 overlay_suffix = '_feasibility' if feasibility_overlay else ''
                 output_path = self._get_auto_plot_output_path(
                     f'gpr_{n_dimensions}d_{field_name}_conditional_slices'

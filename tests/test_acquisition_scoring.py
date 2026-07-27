@@ -952,7 +952,10 @@ class GprFeasibilityOverlayTests(unittest.TestCase):
         )
 
         self.assertEqual(overlay['infeasible'].shape, (3, 4))
-        self.assertFalse(overlay['infeasible'][0, 0])
+        # Both reagents at zero is physically volume-feasible but is the
+        # deliberately excluded all-off true-zero mask.
+        self.assertTrue(overlay['infeasible'][0, 0])
+        self.assertTrue(overlay['all_off_mask_excluded'][0, 0])
         self.assertTrue(overlay['variable_transfer_infeasible'][0, 1])
         self.assertTrue(overlay['variable_transfer_infeasible'][1, 0])
         self.assertTrue(overlay['water_transfer_infeasible'][0, 2])
@@ -4952,6 +4955,7 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
             '_get_variable_transfer_volumes_for_normalized_candidate',
             '_get_candidate_volume_balance',
             'get_candidate_volume_balance_for_plotting',
+            'get_candidate_feasibility_for_plotting',
             'predict_lambda_distribution_nm_batch'
         ])
         cls.SliceController = _load_auto_controller_methods([
@@ -5041,6 +5045,34 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
 
         self.assertFalse(balance['volume_feasible'])
         self.assertFalse(balance['variable_transfers_executable'])
+
+    def test_mask_aware_plotting_feasibility_respects_zero_permissions(self):
+        model = self.BatchPredictionModel()
+        model.variable_reagents = ['A', 'B']
+        model.min_conc = [0.0, 0.0]
+        model.max_conc = [1.0, 1.0]
+        model.total_volume = 100.0
+        model.fixed_reagent_volumes = {}
+        model.allow_true_zero = True
+        model.true_zero_reagents = ['A']
+        model._get_variable_reagent_stock_conc = lambda reagent_name: 1.0
+
+        allowed_zero = model.get_candidate_feasibility_for_plotting(
+            np.array([0.0, 0.10])
+        )
+        self.assertTrue(allowed_zero['mask_feasible'])
+        self.assertTrue(
+            allowed_zero['zero_transfer_permitted_by_reagent']['A']
+        )
+
+        all_off = model.get_candidate_feasibility_for_plotting(
+            np.array([0.0, 0.0])
+        )
+        self.assertFalse(all_off['mask_feasible'])
+        self.assertTrue(all_off['all_off_mask_excluded'])
+        self.assertTrue(
+            all_off['zero_transfer_not_permitted_by_reagent']['B']
+        )
 
     def test_slice_renderer_keeps_originals_and_adds_2d_style_overlays(self):
         renderer_node = _get_auto_controller_method_node(

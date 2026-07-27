@@ -58,6 +58,13 @@ class AutoPlotOrganizationTests(unittest.TestCase):
             ),
             'auto_design_space_exploration_3d.png': (
                 'design_space/auto_design_space_exploration_3d.png'
+            ),
+            'auto_recipe_concentration_history_final.png': (
+                'recipe_history/auto_recipe_concentration_history_final.png'
+            ),
+            'auto_complete_recipe_concentration_history_final.png': (
+                'recipe_history/'
+                'auto_complete_recipe_concentration_history_final.png'
             )
         }
 
