@@ -71,6 +71,7 @@ from auto_model_checkpoint import (
     prepare_model_checkpoint_import,
     prepare_model_checkpoint_import_from_path,
     read_run_context_lineage_manifest,
+    validate_run_context_lineage_manifest,
     write_model_checkpoint_import_provenance,
     write_run_context_lineage_manifest,
     write_model_checkpoint
@@ -4997,6 +4998,457 @@ class AutoContr(Controller):
         )
         return lineage_manifest, lineage_path
 
+    def _resolve_auto_run_context_source_directory(self, run_folder):
+        '''Resolves one lineage folder only within the local output root.
+
+        Lineage files record folder basenames rather than arbitrary paths.
+        Re-validating that boundary here keeps future context ingestion from
+        turning historical metadata into a filesystem traversal mechanism.
+        '''
+        run_folder = str(run_folder or '').strip()
+        output_root = self._get_auto_model_checkpoint_output_root()
+        source_directory = os.path.realpath(
+            os.path.join(output_root, run_folder)
+        )
+
+        try:
+            valid_source = (
+                bool(run_folder)
+                and os.path.basename(run_folder) == run_folder
+                and os.path.commonpath([output_root, source_directory])
+                == output_root
+                and os.path.isdir(source_directory)
+            )
+        except ValueError:
+            valid_source = False
+
+        return source_directory if valid_source else None
+
+    @staticmethod
+    def _read_auto_run_context_csv(source_path):
+        '''Reads one optional historical CSV without making it model input.'''
+        if not os.path.isfile(source_path):
+            return None, 'missing', None
+
+        try:
+            return pd.read_csv(source_path), 'available', None
+        except (OSError, UnicodeDecodeError, pd.errors.ParserError, ValueError) as exc:
+            return None, 'unreadable', str(exc)
+
+    @staticmethod
+    def _auto_run_context_true_mask(series):
+        '''Returns the conservative truth mask used by provenance exports.'''
+        return (
+            series.astype(str)
+            .str.strip()
+            .str.lower()
+            .isin(['true', '1', 'yes', 'y'])
+        )
+
+    def _select_auto_run_context_native_conditions(
+        self,
+        condition_dataframe,
+        source_entry
+    ):
+        '''Selects conditions physically originating in one lineage source.
+
+        Imported performance logs may contain all prior model history.  The
+        provenance stamp is therefore preferred.  Older root runs without a
+        parent may safely contribute their complete legacy log; an old
+        imported run without row provenance is reported as unscoped rather
+        than risking duplicated cumulative conditions.
+        '''
+        if condition_dataframe is None or condition_dataframe.empty:
+            return pd.DataFrame(), 'no_rows'
+
+        source_names = {
+            str(source_entry.get('run_id') or '').strip(),
+            str(source_entry.get('run_folder') or '').strip()
+        }
+        source_names.discard('')
+
+        if 'origin_run_directory' in condition_dataframe.columns:
+            origin_series = (
+                condition_dataframe['origin_run_directory']
+                .fillna('')
+                .astype(str)
+                .str.strip()
+            )
+            origin_mask = origin_series.isin(source_names)
+            if bool(origin_mask.any()):
+                return (
+                    condition_dataframe.loc[origin_mask].copy(),
+                    'origin_run_directory'
+                )
+
+        if 'executed_in_current_run' in condition_dataframe.columns:
+            current_mask = self._auto_run_context_true_mask(
+                condition_dataframe['executed_in_current_run']
+            )
+            if bool(current_mask.any()):
+                return (
+                    condition_dataframe.loc[current_mask].copy(),
+                    'executed_in_current_run'
+                )
+
+        if source_entry.get('parent_run_id') is None:
+            return condition_dataframe.copy(), 'legacy_root_log'
+
+        return pd.DataFrame(), 'legacy_import_scope_unverifiable'
+
+    @staticmethod
+    def _add_auto_run_context_columns(
+        dataframe,
+        run_id,
+        run_folder,
+        context_role,
+        source_kind
+    ):
+        '''Returns one context-export copy with explicit cross-run identity.'''
+        export_dataframe = dataframe.copy()
+        export_dataframe.insert(0, 'context_source_kind', source_kind)
+        export_dataframe.insert(0, 'context_role', context_role)
+        export_dataframe.insert(0, 'context_run_folder', run_folder or '')
+        export_dataframe.insert(0, 'context_run_id', run_id)
+        return export_dataframe
+
+    def _write_auto_run_context_availability(self, availability):
+        '''Writes regenerable import-context availability diagnostics safely.'''
+        context_directory = os.path.join(
+            self.out_path,
+            'Imported_Run_Context'
+        )
+        os.makedirs(context_directory, exist_ok=True)
+        output_path = os.path.join(
+            context_directory,
+            'context_availability.json'
+        )
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                prefix='.auto_run_context_availability_',
+                suffix='.tmp',
+                dir=context_directory,
+                delete=False
+            ) as temporary_file:
+                temporary_path = temporary_file.name
+                json.dump(
+                    availability,
+                    temporary_file,
+                    sort_keys=True,
+                    indent=2,
+                    ensure_ascii=False,
+                    allow_nan=False
+                )
+
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+
+        return os.path.abspath(output_path)
+
+    def _refresh_imported_auto_run_context_exports(
+        self,
+        include_current_run=False
+    ):
+        '''Exports flat imported condition/replicate context without plotting.
+
+        This importer is intentionally observational.  It reads already
+        exported CSVs from named prior output folders, writes flat snapshots
+        for later review/plotting, and never feeds any value into the GP,
+        quality-control logic, acquisition modes, or robot protocol.
+        '''
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        ) or {}
+        if not imported_checkpoint:
+            return None
+
+        context_directory = os.path.join(
+            self.out_path,
+            'Imported_Run_Context'
+        )
+        lineage_path = imported_checkpoint.get('lineage_manifest_path')
+        if not lineage_path or not os.path.isfile(lineage_path):
+            raise RuntimeError(
+                'Imported run-context lineage manifest is unavailable.'
+            )
+
+        try:
+            with open(lineage_path, 'r', encoding='utf-8') as lineage_file:
+                lineage_manifest = validate_run_context_lineage_manifest(
+                    json.load(lineage_file)
+                )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                'Imported run-context lineage manifest cannot be read: {}.'
+                .format(exc)
+            ) from exc
+
+        source_entries = lineage_manifest.get('source_runs')
+        if not isinstance(source_entries, list):
+            raise RuntimeError(
+                'Imported run-context lineage has no source_runs list.'
+            )
+
+        direct_source_run_id = str(
+            lineage_manifest.get('direct_import', {}).get(
+                'source_run_id',
+                ''
+            )
+        ).strip()
+        summary_directory = os.path.join(context_directory, 'run_summaries')
+        os.makedirs(summary_directory, exist_ok=True)
+
+        availability_sources = []
+        condition_frames = []
+        replicate_frames = []
+
+        for source_entry in source_entries:
+            run_id = str(source_entry.get('run_id') or '').strip()
+            run_folder = str(source_entry.get('run_folder') or '').strip()
+            context_role = (
+                'direct_source'
+                if run_id == direct_source_run_id
+                else 'ancestor'
+            )
+            source_directory = self._resolve_auto_run_context_source_directory(
+                run_folder
+            )
+            source_summary = {
+                'run_id': run_id,
+                'run_folder': run_folder or None,
+                'context_role': context_role,
+                'parent_run_id': source_entry.get('parent_run_id'),
+                'checkpoint_sha256': source_entry.get('checkpoint_sha256'),
+                'raw_scans': {
+                    'status': 'not_ingested_stage_2',
+                    'detail': (
+                        'Raw scan copying/indexing is intentionally deferred; '
+                        'this stage exports condition and well-level CSV '
+                        'context only.'
+                    )
+                }
+            }
+
+            if source_directory is None:
+                source_summary['resolution_status'] = 'unavailable'
+                source_summary['condition_log'] = {'status': 'not_resolved'}
+                source_summary['replicate_data'] = {'status': 'not_resolved'}
+                availability_sources.append(source_summary)
+                continue
+
+            source_summary['resolution_status'] = 'resolved'
+            condition_path = os.path.join(
+                source_directory,
+                'pr_data',
+                'auto_model_performance_log.csv'
+            )
+            replicate_path = os.path.join(
+                source_directory,
+                'pr_data',
+                'experiment_data.csv'
+            )
+            condition_dataframe, condition_status, condition_error = (
+                self._read_auto_run_context_csv(condition_path)
+            )
+            replicate_dataframe, replicate_status, replicate_error = (
+                self._read_auto_run_context_csv(replicate_path)
+            )
+
+            source_summary['condition_log'] = {
+                'status': condition_status,
+                'source_relative_path': (
+                    'pr_data/auto_model_performance_log.csv'
+                )
+            }
+            source_summary['replicate_data'] = {
+                'status': replicate_status,
+                'source_relative_path': 'pr_data/experiment_data.csv'
+            }
+            if condition_error is not None:
+                source_summary['condition_log']['error'] = condition_error
+            if replicate_error is not None:
+                source_summary['replicate_data']['error'] = replicate_error
+
+            # A resolved source always has a validated direct-child folder
+            # name. Never derive a filesystem destination from checkpoint
+            # run_id text, which is an identity rather than a path contract.
+            safe_summary_folder = run_folder
+            run_summary_path = os.path.join(
+                summary_directory,
+                safe_summary_folder
+            )
+            os.makedirs(run_summary_path, exist_ok=True)
+
+            native_conditions, condition_scope = (
+                self._select_auto_run_context_native_conditions(
+                    condition_dataframe,
+                    source_entry
+                )
+            )
+            source_summary['condition_log']['native_scope'] = condition_scope
+            source_summary['condition_log']['native_row_count'] = int(
+                len(native_conditions.index)
+            )
+            if not native_conditions.empty:
+                condition_export = self._add_auto_run_context_columns(
+                    native_conditions,
+                    run_id,
+                    run_folder,
+                    context_role,
+                    'source_output_csv'
+                )
+                condition_export.to_csv(
+                    os.path.join(run_summary_path, 'condition_history.csv'),
+                    index=False
+                )
+                condition_frames.append(condition_export)
+
+            if replicate_dataframe is not None and not replicate_dataframe.empty:
+                replicate_export = self._add_auto_run_context_columns(
+                    replicate_dataframe,
+                    run_id,
+                    run_folder,
+                    context_role,
+                    'source_output_csv'
+                )
+                replicate_export.to_csv(
+                    os.path.join(run_summary_path, 'replicate_data.csv'),
+                    index=False
+                )
+                replicate_frames.append(replicate_export)
+                source_summary['replicate_data']['native_row_count'] = int(
+                    len(replicate_dataframe.index)
+                )
+            else:
+                source_summary['replicate_data']['native_row_count'] = 0
+
+            availability_sources.append(source_summary)
+
+        current_run_id = os.path.basename(os.path.normpath(self.out_path))
+        if include_current_run:
+            current_conditions = pd.DataFrame(
+                getattr(self, 'auto_model_performance_rows', [])
+            )
+            if 'executed_in_current_run' in current_conditions.columns:
+                current_conditions = current_conditions.loc[
+                    self._auto_run_context_true_mask(
+                        current_conditions['executed_in_current_run']
+                    )
+                ].copy()
+
+            if not current_conditions.empty:
+                current_condition_export = self._add_auto_run_context_columns(
+                    current_conditions,
+                    current_run_id,
+                    current_run_id,
+                    'current_run',
+                    'current_controller_history'
+                )
+                current_summary_directory = os.path.join(
+                    summary_directory,
+                    current_run_id
+                )
+                os.makedirs(current_summary_directory, exist_ok=True)
+                current_condition_export.to_csv(
+                    os.path.join(
+                        current_summary_directory,
+                        'condition_history.csv'
+                    ),
+                    index=False
+                )
+                condition_frames.append(current_condition_export)
+
+            current_replicates = self._build_labeled_auto_experiment_data_export()
+            if not current_replicates.empty:
+                current_replicate_export = self._add_auto_run_context_columns(
+                    current_replicates,
+                    current_run_id,
+                    current_run_id,
+                    'current_run',
+                    'current_controller_export'
+                )
+                current_summary_directory = os.path.join(
+                    summary_directory,
+                    current_run_id
+                )
+                os.makedirs(current_summary_directory, exist_ok=True)
+                current_replicate_export.to_csv(
+                    os.path.join(
+                        current_summary_directory,
+                        'replicate_data.csv'
+                    ),
+                    index=False
+                )
+                replicate_frames.append(current_replicate_export)
+
+        cumulative_condition_path = os.path.join(
+            context_directory,
+            'cumulative_conditions.csv'
+        )
+        cumulative_replicate_path = os.path.join(
+            context_directory,
+            'cumulative_replicates.csv'
+        )
+        pd.concat(condition_frames, ignore_index=True, sort=False).to_csv(
+            cumulative_condition_path,
+            index=False
+        ) if condition_frames else pd.DataFrame().to_csv(
+            cumulative_condition_path,
+            index=False
+        )
+        pd.concat(replicate_frames, ignore_index=True, sort=False).to_csv(
+            cumulative_replicate_path,
+            index=False
+        ) if replicate_frames else pd.DataFrame().to_csv(
+            cumulative_replicate_path,
+            index=False
+        )
+
+        availability = {
+            'schema_version': 1,
+            'generated_utc': datetime.datetime.utcnow().replace(
+                microsecond=0
+            ).isoformat() + 'Z',
+            'include_current_run': bool(include_current_run),
+            'lineage_manifest': os.path.basename(lineage_path),
+            'manual_import_context_status': (
+                'model_only'
+                if imported_checkpoint.get('import_method') == 'manual_inbox'
+                else 'not_applicable'
+            ),
+            'cumulative_conditions_path': os.path.basename(
+                cumulative_condition_path
+            ),
+            'cumulative_condition_row_count': int(
+                sum(len(frame.index) for frame in condition_frames)
+            ),
+            'cumulative_replicates_path': os.path.basename(
+                cumulative_replicate_path
+            ),
+            'cumulative_replicate_row_count': int(
+                sum(len(frame.index) for frame in replicate_frames)
+            ),
+            'sources': availability_sources
+        }
+        availability_path = self._write_auto_run_context_availability(
+            availability
+        )
+        return {
+            'availability_path': availability_path,
+            'cumulative_condition_path': cumulative_condition_path,
+            'cumulative_replicate_path': cumulative_replicate_path,
+            'condition_row_count': availability['cumulative_condition_row_count'],
+            'replicate_row_count': availability['cumulative_replicate_row_count']
+        }
+
     @staticmethod
     def _list_existing_auto_model_checkpoint_files(checkpoint_directory):
         '''Lists only canonical checkpoint ZIPs directly inside one run.
@@ -5652,6 +6104,31 @@ class AutoContr(Controller):
                 checkpoint.get('import_method') == 'existing_output_run'
             )
         )
+        try:
+            context_exports = self._refresh_imported_auto_run_context_exports(
+                include_current_run=False
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            # Context CSVs are an import-only audit enhancement. A source
+            # output may legitimately predate these files, so do not mutate
+            # or reject the already validated GP import because an optional
+            # historical export could not be regenerated.
+            context_exports = None
+            print(
+                '<<controller warning>> imported run-context CSV exports '
+                'were not generated: {}'.format(exc)
+            )
+
+        if context_exports is not None:
+            self.imported_auto_model_checkpoint['context_availability_path'] = (
+                context_exports['availability_path']
+            )
+            self.imported_auto_model_checkpoint[
+                'context_initial_condition_row_count'
+            ] = context_exports['condition_row_count']
+            self.imported_auto_model_checkpoint[
+                'context_initial_replicate_row_count'
+            ] = context_exports['replicate_row_count']
         model.curr_iter = 0
         model.quit = False
         model._auto_model_checkpoint_imported = True
@@ -22234,6 +22711,26 @@ class AutoContr(Controller):
         # Save the row-per-condition Auto performance log used for reporting,
         # plotting, and future notebook-ready summaries.
         self._export_auto_model_performance_log()
+
+        if getattr(model, '_auto_model_checkpoint_imported', False):
+            try:
+                context_exports = (
+                    self._refresh_imported_auto_run_context_exports(
+                        include_current_run=True
+                    )
+                )
+                print(
+                    '<<controller>> refreshed imported run-context CSV '
+                    'exports ({} condition rows; {} replicate rows).'.format(
+                        context_exports['condition_row_count'],
+                        context_exports['replicate_row_count']
+                    )
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(
+                    '<<controller warning>> final imported run-context CSV '
+                    'exports were not generated: {}'.format(exc)
+                )
 
         # Preserve one predictable final package even when it contains the
         # same fitted state as the final completed-batch checkpoint.  The

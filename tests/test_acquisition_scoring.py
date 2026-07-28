@@ -11,6 +11,7 @@ import os
 import pandas as pd
 from pathlib import Path
 import re
+from tempfile import NamedTemporaryFile
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -21,6 +22,7 @@ from auto_model_checkpoint import (
     get_model_checkpoint_file_sha256,
     read_model_checkpoint,
     read_run_context_lineage_manifest,
+    validate_run_context_lineage_manifest,
     write_model_checkpoint_import_provenance,
     write_run_context_lineage_manifest,
     write_model_checkpoint
@@ -5282,6 +5284,14 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 '_get_auto_model_checkpoint_output_root',
                 '_read_imported_auto_run_context_lineage',
                 '_write_imported_auto_run_context_lineage',
+                '_resolve_auto_run_context_source_directory',
+                '_read_auto_run_context_csv',
+                '_auto_run_context_true_mask',
+                '_select_auto_run_context_native_conditions',
+                '_add_auto_run_context_columns',
+                '_write_auto_run_context_availability',
+                '_refresh_imported_auto_run_context_exports',
+                '_build_labeled_auto_experiment_data_export',
                 '_list_existing_auto_model_checkpoint_files',
                 '_resolve_auto_model_checkpoint_existing_source',
                 '_checkpoint_float_values_match',
@@ -5294,12 +5304,16 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             ],
             extra_namespace={
                 'datetime': datetime,
+                'NamedTemporaryFile': NamedTemporaryFile,
                 'ModelCheckpointError': ModelCheckpointError,
                 'build_import_run_context_lineage_manifest': (
                     build_import_run_context_lineage_manifest
                 ),
                 'read_run_context_lineage_manifest': (
                     read_run_context_lineage_manifest
+                ),
+                'validate_run_context_lineage_manifest': (
+                    validate_run_context_lineage_manifest
                 ),
                 'write_model_checkpoint_import_provenance': (
                     write_model_checkpoint_import_provenance
@@ -5631,6 +5645,150 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                     'RTG_021',
                     'final'
                 )
+
+    def test_import_context_exports_flat_native_rows_without_raw_scans(self):
+        with TemporaryDirectory() as temporary_directory:
+            output_root = Path(temporary_directory) / 'Protocol_Outputs'
+            source_a = output_root / 'RTG_020'
+            source_b = output_root / 'RTG_021'
+            current_run = output_root / 'RTG_022'
+            for run_directory in (source_a, source_b, current_run):
+                (run_directory / 'pr_data').mkdir(parents=True)
+
+            pd.DataFrame([
+                {
+                    'reaction_number': 0,
+                    'origin_run_directory': 'RTG_020',
+                    'executed_in_current_run': True
+                }
+            ]).to_csv(
+                source_a / 'pr_data' / 'auto_model_performance_log.csv',
+                index=False
+            )
+            pd.DataFrame([
+                {'lambda_max_nm': 610.0}
+            ]).to_csv(
+                source_a / 'pr_data' / 'experiment_data.csv',
+                index=False
+            )
+            # A continuation performance log contains inherited A history as
+            # well as native B history. Only B's physically native row may
+            # enter B's run summary or the flat cumulative export.
+            pd.DataFrame([
+                {
+                    'reaction_number': 0,
+                    'origin_run_directory': 'RTG_020',
+                    'executed_in_current_run': False
+                },
+                {
+                    'reaction_number': 1,
+                    'origin_run_directory': 'RTG_021',
+                    'executed_in_current_run': True
+                }
+            ]).to_csv(
+                source_b / 'pr_data' / 'auto_model_performance_log.csv',
+                index=False
+            )
+            pd.DataFrame([
+                {'lambda_max_nm': 620.0}
+            ]).to_csv(
+                source_b / 'pr_data' / 'experiment_data.csv',
+                index=False
+            )
+
+            lineage_b = build_import_run_context_lineage_manifest(
+                current_run_id='RTG_021',
+                source_run_id='RTG_020',
+                source_checkpoint_sha256='a' * 64,
+                source_checkpoint_stage='final',
+                source_checkpoint_filename='model_final.zip',
+                import_method='existing_output_run',
+                source_run_folder='RTG_020'
+            )
+            lineage_c = build_import_run_context_lineage_manifest(
+                current_run_id='RTG_022',
+                source_run_id='RTG_021',
+                source_checkpoint_sha256='b' * 64,
+                source_checkpoint_stage='final',
+                source_checkpoint_filename='model_final.zip',
+                import_method='existing_output_run',
+                source_run_folder='RTG_021',
+                inherited_manifest=lineage_b
+            )
+            lineage_path = write_run_context_lineage_manifest(
+                current_run,
+                lineage_c
+            )
+
+            controller = self.Controller()
+            controller.out_path = str(current_run)
+            controller.variable_reagents = ['reagent_a']
+            controller.imported_auto_model_checkpoint = {
+                'import_method': 'existing_output_run',
+                'lineage_manifest_path': lineage_path
+            }
+            controller.auto_model_performance_rows = [
+                {
+                    'reaction_number': 2,
+                    'origin_run_directory': 'RTG_022',
+                    'executed_in_current_run': True
+                }
+            ]
+            controller.experiment_data = pd.DataFrame({
+                'reagent_a': [0.5],
+                'Experiment_result': [630.0]
+            })
+
+            imported_exports = (
+                controller._refresh_imported_auto_run_context_exports(
+                    include_current_run=False
+                )
+            )
+            imported_conditions = pd.read_csv(
+                imported_exports['cumulative_condition_path']
+            )
+            imported_replicates = pd.read_csv(
+                imported_exports['cumulative_replicate_path']
+            )
+            self.assertEqual(imported_exports['condition_row_count'], 2)
+            self.assertEqual(imported_exports['replicate_row_count'], 2)
+            self.assertEqual(
+                list(imported_conditions['context_run_id']),
+                ['RTG_020', 'RTG_021']
+            )
+            self.assertEqual(
+                list(imported_replicates['context_run_id']),
+                ['RTG_020', 'RTG_021']
+            )
+
+            final_exports = controller._refresh_imported_auto_run_context_exports(
+                include_current_run=True
+            )
+            final_conditions = pd.read_csv(
+                final_exports['cumulative_condition_path']
+            )
+            final_replicates = pd.read_csv(
+                final_exports['cumulative_replicate_path']
+            )
+            availability = json.loads(
+                Path(final_exports['availability_path']).read_text()
+            )
+            self.assertEqual(final_exports['condition_row_count'], 3)
+            self.assertEqual(final_exports['replicate_row_count'], 3)
+            self.assertEqual(
+                list(final_conditions['context_run_id']),
+                ['RTG_020', 'RTG_021', 'RTG_022']
+            )
+            self.assertEqual(
+                list(final_replicates['context_run_id']),
+                ['RTG_020', 'RTG_021', 'RTG_022']
+            )
+            self.assertTrue(
+                all(
+                    source['raw_scans']['status'] == 'not_ingested_stage_2'
+                    for source in availability['sources']
+                )
+            )
 
 
 class OptimizationModelConfigurationTests(unittest.TestCase):
