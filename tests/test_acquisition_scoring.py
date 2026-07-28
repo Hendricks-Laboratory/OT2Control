@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from matplotlib.lines import Line2D
+from matplotlib.text import Text
 
 from auto_model_checkpoint import (
     ModelCheckpointError,
@@ -1823,9 +1824,9 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
             method_node
         )
 
-        self.assertIn('figure_header_height = 2.05', method_source)
+        self.assertIn('figure_header_height = 1.40', method_source)
         self.assertIn('bbox_to_anchor=(0.5, 0.905)', method_source)
-        self.assertIn('top_margin = 0.72', method_source)
+        self.assertIn('top_margin = 0.79', method_source)
 
     def test_parallel_coordinate_plots_reserve_a_dedicated_legend_header(self):
         method_node = _get_auto_controller_method_node(
@@ -1837,7 +1838,135 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         )
 
         self.assertIn('bbox_to_anchor=(0.5, 0.900)', method_source)
-        self.assertIn('top_margin = 0.72', method_source)
+        self.assertIn('top_margin = 0.80', method_source)
+
+    def test_design_condition_labels_avoid_overlap_without_jittering_markers(self):
+        pairwise_method = _get_auto_controller_method_node(
+            '_plot_auto_design_grouped_points_2d'
+        )
+        parallel_method = _get_auto_controller_method_node(
+            '_plot_initial_training_design_parallel_coordinates'
+        )
+        pairwise_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            pairwise_method
+        )
+        parallel_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            parallel_method
+        )
+
+        self.assertIn('candidate_offsets', pairwise_source)
+        self.assertIn('label_boxes', pairwise_source)
+        self.assertIn("textcoords='offset points'", pairwise_source)
+        self.assertIn('endpoint_labels', parallel_source)
+        self.assertIn('minimum_label_separation = 0.070', parallel_source)
+        self.assertIn("'arrowprops'", parallel_source)
+
+    def test_pairwise_label_offsets_keep_coincident_recipes_readable(self):
+        controller_class = _load_auto_controller_methods(
+            [
+                '_get_auto_design_plot_font_sizes',
+                '_plot_auto_design_grouped_points_2d'
+            ],
+            extra_namespace={'plt': plt}
+        )
+        controller = controller_class()
+        plot_dataframe = pd.DataFrame({
+            'reaction_number': [0, 1, 2, 3],
+            'condition_type': ['optimizer_selected'] * 4,
+            'reagent_x': [0.2] * 4,
+            'reagent_y': [0.3] * 4
+        })
+        figure, axis = plt.subplots(figsize=(4.0, 4.0), dpi=100)
+
+        try:
+            controller._plot_auto_design_grouped_points_2d(
+                axis,
+                plot_dataframe,
+                'reagent_x',
+                'reagent_y',
+                annotate_points=True
+            )
+            figure.canvas.draw()
+            renderer = figure.canvas.get_renderer()
+            text_boxes = [
+                Text.get_window_extent(text, renderer)
+                for text in axis.texts
+            ]
+
+            self.assertEqual(len(text_boxes), 4)
+            for first_index, first_box in enumerate(text_boxes):
+                for second_box in text_boxes[first_index + 1:]:
+                    self.assertFalse(first_box.overlaps(second_box))
+            np.testing.assert_allclose(
+                axis.collections[0].get_offsets(),
+                np.asarray([[0.2, 0.3]] * 4)
+            )
+        finally:
+            plt.close(figure)
+
+    def test_parallel_endpoint_labels_stack_without_moving_recipe_lines(self):
+        controller_class = _load_auto_controller_methods(
+            [
+                '_get_auto_design_plot_font_sizes',
+                '_plot_initial_training_design_parallel_coordinates'
+            ],
+            extra_namespace={'plt': plt}
+        )
+        controller = controller_class()
+        controller._get_auto_design_executable_bounds = (
+            lambda design_columns, reference_df: {
+                descriptor['column_name']: (0.0, 1.0)
+                for descriptor in design_columns
+            }
+        )
+        controller._get_auto_design_best_condition_number = lambda dataframe: None
+        controller._apply_auto_design_plot_lab_frame_style = (
+            lambda **kwargs: None
+        )
+        controller._save_auto_design_plot = lambda figure, filename: figure
+        design_columns = [
+            {'column_name': 'reagent_a', 'reagent_name': 'reagent_a'},
+            {'column_name': 'reagent_b', 'reagent_name': 'reagent_b'},
+            {'column_name': 'reagent_c', 'reagent_name': 'reagent_c'},
+            {'column_name': 'reagent_d', 'reagent_name': 'reagent_d'}
+        ]
+        plot_dataframe = pd.DataFrame({
+            'reaction_number': [0, 1, 2, 3],
+            'condition_type': ['optimizer_selected'] * 4,
+            'reagent_a': [0.1, 0.2, 0.3, 0.4],
+            'reagent_b': [0.2, 0.3, 0.4, 0.5],
+            'reagent_c': [0.3, 0.4, 0.5, 0.6],
+            'reagent_d': [0.0, 0.0, 0.0, 0.0]
+        })
+
+        figure = controller._plot_initial_training_design_parallel_coordinates(
+            plot_dataframe,
+            design_columns,
+            include_best_condition=False
+        )
+        try:
+            axis = figure.axes[0]
+            figure.canvas.draw()
+            renderer = figure.canvas.get_renderer()
+            text_boxes = [
+                # Annotation.get_window_extent also includes a displaced
+                # label's leader line. Compare only the rendered glyph boxes:
+                # leader lines may legitimately cross while condition labels
+                # themselves must remain readable.
+                Text.get_window_extent(text, renderer)
+                for text in axis.texts
+            ]
+
+            self.assertEqual(len(text_boxes), 4)
+            for first_index, first_box in enumerate(text_boxes):
+                for second_box in text_boxes[first_index + 1:]:
+                    self.assertFalse(first_box.overlaps(second_box))
+            for line in axis.lines[:4]:
+                self.assertEqual(line.get_ydata()[-1], 0.0)
+        finally:
+            plt.close(figure)
 
     def test_individual_slices_center_visible_axis_and_colorbar_content(self):
         method_node = _get_auto_controller_method_node(
@@ -1853,6 +1982,8 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         self.assertIn('include_decorations=True', method_source)
         self.assertIn('0.018', method_source)
         self.assertIn("va='bottom'", method_source)
+        self.assertIn('hspace=0.42', method_source)
+        self.assertIn('0.82', method_source)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):

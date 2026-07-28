@@ -12675,18 +12675,135 @@ class AutoContr(Controller):
                 legend_labels.append('Best observed condition')
 
         if annotate_points and 'reaction_number' in plot_df.columns:
+            # Pairwise projections can legitimately place distinct full-
+            # dimensional recipes at nearly identical displayed coordinates.
+            # Keep markers at their exact concentrations and move only their
+            # labels through deterministic nearby positions.  Jittering a
+            # marker would falsely suggest a different recipe.
+            label_rows = []
             for _, row in plot_df.iterrows():
                 try:
-                    ax.annotate(
-                        str(int(row['reaction_number'])),
-                        (row[x_column], row[y_column]),
-                        xytext=(4, 4),
-                        textcoords='offset points',
-                        fontsize=font_sizes['annotation'],
-                        alpha=0.8
-                    )
+                    x_value = float(row[x_column])
+                    y_value = float(row[y_column])
+                    if not (
+                        np.isfinite(x_value)
+                        and np.isfinite(y_value)
+                    ):
+                        continue
+                    label_rows.append((
+                        int(row['reaction_number']),
+                        x_value,
+                        y_value
+                    ))
                 except Exception:
                     continue
+
+            if len(label_rows) == 0:
+                return legend_handles, legend_labels
+
+            x_values = [row[1] for row in label_rows]
+            y_values = [row[2] for row in label_rows]
+            x_minimum, x_maximum = min(x_values), max(x_values)
+            y_minimum, y_maximum = min(y_values), max(y_values)
+            x_span = max(x_maximum - x_minimum, 1.0e-12)
+            y_span = max(y_maximum - y_minimum, 1.0e-12)
+            label_boxes = []
+            candidate_offsets = (
+                (0.018, 0.024), (0.018, -0.024),
+                (-0.018, 0.024), (-0.018, -0.024),
+                (0.052, 0.052), (-0.052, 0.052),
+                (0.052, -0.052), (-0.052, -0.052),
+                (0.080, 0.000), (-0.080, 0.000),
+                (0.000, 0.075), (0.000, -0.075)
+            )
+
+            for reaction_number, x_value, y_value in sorted(label_rows):
+                label_text = str(reaction_number)
+                x_normalized = (x_value - x_minimum) / x_span
+                y_normalized = (y_value - y_minimum) / y_span
+                label_width = 0.026 + (0.018 * len(label_text))
+                label_height = 0.047
+                selected_label = None
+
+                for x_offset, y_offset in candidate_offsets:
+                    label_x = x_normalized + x_offset
+                    label_y = y_normalized + y_offset
+                    horizontal_alignment = (
+                        'left' if x_offset >= 0.0 else 'right'
+                    )
+                    vertical_alignment = (
+                        'bottom' if y_offset >= 0.0 else 'top'
+                    )
+                    left = (
+                        label_x
+                        if horizontal_alignment == 'left'
+                        else label_x - label_width
+                    )
+                    bottom = (
+                        label_y
+                        if vertical_alignment == 'bottom'
+                        else label_y - label_height
+                    )
+                    right = left + label_width
+                    top = bottom + label_height
+                    if (
+                        # Text may extend a few points beyond a panel edge;
+                        # ``annotation_clip=False`` plus tight export keeps
+                        # that label visible without moving its marker.
+                        left < -0.15 or right > 1.15
+                        or bottom < -0.15 or top > 1.15
+                    ):
+                        continue
+                    if any(
+                        not (
+                            right <= existing_left
+                            or left >= existing_right
+                            or top <= existing_bottom
+                            or bottom >= existing_top
+                        )
+                        for (
+                            existing_left,
+                            existing_bottom,
+                            existing_right,
+                            existing_top
+                        ) in label_boxes
+                    ):
+                        continue
+
+                    selected_label = (
+                        x_offset * 200.0,
+                        y_offset * 200.0,
+                        horizontal_alignment,
+                        vertical_alignment,
+                        (left, bottom, right, top)
+                    )
+                    break
+
+                # Very dense projections can still exhaust the twelve safe
+                # candidates.  Omitting only the unresolved label is clearer
+                # than drawing ambiguous overlapping condition numbers.
+                if selected_label is None:
+                    continue
+
+                (
+                    label_x_offset,
+                    label_y_offset,
+                    horizontal_alignment,
+                    vertical_alignment,
+                    label_box
+                ) = selected_label
+                ax.annotate(
+                    label_text,
+                    (x_value, y_value),
+                    xytext=(label_x_offset, label_y_offset),
+                    textcoords='offset points',
+                    fontsize=font_sizes['annotation'],
+                    alpha=0.8,
+                    ha=horizontal_alignment,
+                    va=vertical_alignment,
+                    annotation_clip=False
+                )
+                label_boxes.append(label_box)
 
         return legend_handles, legend_labels
 
@@ -13670,15 +13787,10 @@ class AutoContr(Controller):
         # plotting panels.
         panel_width = 3.9
         panel_height = 3.9
-        # Four-variable pairwise matrices have a title, a shared legend, and
-        # a dense top row of panels. Reserve dedicated header height so those
-        # elements remain visually distinct without changing the square panel
-        # geometry used for the scientific projections.
-        # Keep the shared legend in a genuine header band rather than merely
-        # placing it above the nominal subplot slot.  ``bbox_inches='tight'``
-        # trims unused canvas at export, so this additional reserved height
-        # does not create a large white margin in the saved PNG.
-        figure_header_height = 2.05
+        # Keep the title and shared legend in a genuine header band without
+        # shrinking the square panels. The former larger reservation left an
+        # unhelpful internal white band in four-variable pairwise exports.
+        figure_header_height = 1.40
 
         fig, axes = plt.subplots(
             n_rows,
@@ -13867,7 +13979,7 @@ class AutoContr(Controller):
             # Keep the shared legend in a true header band. Pairwise axes use
             # a square box aspect and can otherwise visually encroach on a
             # legend that is merely placed above their nominal subplot slot.
-            top_margin = 0.72
+            top_margin = 0.79
 
         else:
             top_margin = 0.865
@@ -13877,8 +13989,8 @@ class AutoContr(Controller):
             right=0.98,
             bottom=0.075,
             top=top_margin,
-            hspace=0.50,
-            wspace=0.42
+            hspace=0.42,
+            wspace=0.36
         )
 
         return self._save_auto_design_plot(
@@ -14067,6 +14179,7 @@ class AutoContr(Controller):
         optimizer_present = False
         other_present = False
         best_present = False
+        endpoint_labels = []
 
         for row_position, (
             _,
@@ -14148,17 +14261,76 @@ class AutoContr(Controller):
                 and np.isfinite(y_values[-1])
             ):
                 try:
-                    ax.text(
-                        x_positions[-1] + 0.05,
-                        y_values[-1],
-                        str(int(row['reaction_number'])),
-                        fontsize=font_sizes['annotation'],
-                        alpha=0.75,
-                        va='center'
-                    )
+                    endpoint_labels.append({
+                        'reaction_number': int(row['reaction_number']),
+                        'y_value': float(y_values[-1])
+                    })
 
                 except Exception:
                     pass
+
+        # Recipes can share a final-axis concentration while differing at
+        # earlier dimensions. Separate only the text labels into a compact,
+        # deterministic vertical stack and retain a thin leader for any
+        # displaced label. The plotted recipe lines and markers stay exact.
+        if len(endpoint_labels) > 0:
+            endpoint_labels.sort(
+                key=lambda item: (
+                    item['y_value'],
+                    item['reaction_number']
+                )
+            )
+            # Keep labels separated by more than one rendered annotation
+            # height at the standard parallel-coordinate export size. This is
+            # deliberately a display-only normalized offset: the recipe line
+            # endpoints remain at their exact normalized concentrations.
+            minimum_label_separation = 0.070
+            label_y_values = []
+            for endpoint_label in endpoint_labels:
+                desired_y_value = endpoint_label['y_value']
+                if len(label_y_values) > 0:
+                    desired_y_value = max(
+                        desired_y_value,
+                        label_y_values[-1] + minimum_label_separation
+                    )
+                label_y_values.append(desired_y_value)
+
+            overflow = max(0.0, label_y_values[-1] - 1.03)
+            if overflow > 0.0:
+                label_y_values = [
+                    label_y_value - overflow
+                    for label_y_value in label_y_values
+                ]
+
+            for endpoint_label, label_y_value in zip(
+                endpoint_labels,
+                label_y_values
+            ):
+                displacement = (
+                    label_y_value - endpoint_label['y_value']
+                )
+                annotation_kwargs = {
+                    'fontsize': font_sizes['annotation'],
+                    'alpha': 0.78,
+                    'ha': 'left',
+                    'va': 'center',
+                    'annotation_clip': False
+                }
+                if abs(displacement) > 1.0e-9:
+                    annotation_kwargs['arrowprops'] = {
+                        'arrowstyle': '-',
+                        'color': '0.40',
+                        'linewidth': 0.55,
+                        'shrinkA': 0.0,
+                        'shrinkB': 2.0
+                    }
+                ax.annotate(
+                    str(endpoint_label['reaction_number']),
+                    (x_positions[-1], endpoint_label['y_value']),
+                    xytext=(x_positions[-1] + 0.06, label_y_value),
+                    textcoords='data',
+                    **annotation_kwargs
+                )
 
         ax.set_xticks(
             x_positions
@@ -14295,7 +14467,7 @@ class AutoContr(Controller):
                 columnspacing=1.0
             )
 
-            top_margin = 0.72
+            top_margin = 0.80
 
         else:
             top_margin = 0.84
@@ -20253,14 +20425,15 @@ class AutoContr(Controller):
                     for panel in page_panels
                 )
                 extra_held_title_lines = max(0, max_held_title_lines - 2)
-                # Preserve the established 3D atlas canvas width and print
-                # resolution. Additional pair rows increase the canvas height
-                # rather than shrinking each heatmap: every page therefore
-                # retains the readable panel scale of the validated 3D atlas.
+                # Preserve the established wide 300-DPI atlas canvas while
+                # using the available vertical space efficiently. Earlier
+                # generalized pages reserved more header and inter-row space
+                # than the title, legend, and held-recipe labels need, which
+                # made six-panel 4D atlases needlessly small.
                 figure_height = (
-                    5.8 + ((n_rows - 1) * 5.2)
-                    + (0.8 if feasibility_overlay else 0.0)
-                    + (0.35 * extra_held_title_lines)
+                    5.15 + ((n_rows - 1) * 4.55)
+                    + (0.55 if feasibility_overlay else 0.0)
+                    + (0.28 * extra_held_title_lines)
                 )
                 figure, axes = plt.subplots(
                     n_rows, n_cols,
@@ -20280,20 +20453,20 @@ class AutoContr(Controller):
                     axis.set_visible(False)
                 visible_axes = axes[:len(page_panels)]
                 figure.subplots_adjust(
-                    left=0.07,
+                    left=0.08,
                     right=0.92,
-                    bottom=0.15,
+                    bottom=0.11,
                     top=(
-                        (0.74 if feasibility_overlay else 0.76)
-                        - (0.03 * extra_held_title_lines)
+                        (0.80 if feasibility_overlay else 0.82)
+                        - (0.02 * extra_held_title_lines)
                     ),
-                    hspace=0.64,
-                    wspace=0.38
+                    hspace=0.42,
+                    wspace=0.30
                 )
                 colorbar = figure.colorbar(
                     image,
                     ax=visible_axes,
-                    shrink=0.91,
+                    shrink=0.94,
                     pad=0.02
                 )
                 colorbar.set_label(
