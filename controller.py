@@ -11569,6 +11569,664 @@ class AutoContr(Controller):
 
         return plot_path
 
+    def _get_imported_auto_context_condition_dataframe(self, scope):
+        '''Returns one flat, exported import-context condition table.
+
+        The table is read only from this run's Stage-2 snapshot rather than
+        from a source run's live output directory.  Consequently, the plots
+        are reproducible audit artifacts of this import and cannot silently
+        change if an old output folder is moved or modified later.
+
+        ``current_run`` contains only wells physically executed by this run.
+        ``cumulative_lineage`` contains every de-duplicated ancestor, direct
+        source, and current-run condition represented in that snapshot.
+        Neither scope is used for model training or recipe selection.
+        '''
+        normalized_scope = str(scope).strip().lower()
+        if normalized_scope not in {'current_run', 'cumulative_lineage'}:
+            raise ValueError(
+                'Imported Auto context scope must be current_run or '
+                f'cumulative_lineage, received {scope!r}.'
+            )
+
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        ) or {}
+        if not imported_checkpoint:
+            return pd.DataFrame()
+
+        context_path = os.path.join(
+            self.out_path,
+            'Imported_Run_Context',
+            'cumulative_conditions.csv'
+        )
+        context_dataframe, context_status, context_error = (
+            self._read_auto_run_context_csv(context_path)
+        )
+
+        if context_status != 'available' or context_dataframe is None:
+            if context_status == 'unreadable':
+                print(
+                    '<<controller warning>> skipping imported-run lineage '
+                    'plots because cumulative_conditions.csv is unreadable: '
+                    f'{context_error}'
+                )
+            return pd.DataFrame()
+
+        required_columns = {
+            'context_run_id',
+            'context_role',
+            'reaction_number'
+        }
+        missing_columns = required_columns.difference(
+            set(context_dataframe.columns)
+        )
+        if missing_columns:
+            print(
+                '<<controller warning>> skipping imported-run lineage plots '
+                'because cumulative condition context is missing required '
+                'columns: {}'.format(', '.join(sorted(missing_columns)))
+            )
+            return pd.DataFrame()
+
+        context_dataframe = context_dataframe.copy()
+        context_dataframe['_context_input_order'] = np.arange(
+            len(context_dataframe.index),
+            dtype=int
+        )
+
+        if normalized_scope == 'current_run':
+            context_dataframe = context_dataframe.loc[
+                context_dataframe['context_role'].fillna('').astype(str)
+                .str.strip().str.lower() == 'current_run'
+            ].copy()
+
+        if context_dataframe.empty:
+            return context_dataframe
+
+        # Preserve the Stage-2 flat lineage order (oldest retained source to
+        # current run) instead of sorting reused reaction numbers from
+        # independent experiments together.  A sequential plotting index is
+        # added below so x coordinates remain unique across runs.
+        context_dataframe = context_dataframe.sort_values(
+            '_context_input_order',
+            kind='stable'
+        ).copy()
+        context_dataframe['_cross_run_plot_index'] = np.arange(
+            len(context_dataframe.index),
+            dtype=float
+        )
+        context_dataframe['_cross_run_display_run'] = (
+            context_dataframe['context_run_id'].fillna('').astype(str)
+            .str.strip().replace('', 'Unknown source')
+        )
+
+        return context_dataframe
+
+    @staticmethod
+    def _get_auto_context_numeric_series(dataframe, column_names):
+        '''Returns the first usable numeric context column, or all NaNs.
+
+        Stage-2 preserves older performance logs without rewriting their
+        schema.  This small compatibility adapter recognizes the two
+        condition-mean field names used by current and earlier Auto logs,
+        while deliberately refusing to infer values from raw scans.
+        '''
+        for column_name in column_names:
+            if column_name in dataframe.columns:
+                return pd.to_numeric(
+                    dataframe[column_name],
+                    errors='coerce'
+                )
+
+        return pd.Series(
+            np.nan,
+            index=dataframe.index,
+            dtype=float
+        )
+
+    def _get_auto_context_target_lambda(self, condition_dataframe):
+        '''Returns one shared target only when the displayed rows agree.
+
+        A continuation may intentionally use a new target.  Drawing one
+        dashed line across results selected under different targets would be
+        scientifically misleading, so the caller receives ``None`` unless
+        the historical rows have one finite common target.
+        '''
+        target_values = self._get_auto_context_numeric_series(
+            condition_dataframe,
+            ['target_lambda_max_nm']
+        )
+        finite_targets = target_values[np.isfinite(target_values)]
+        if len(finite_targets.index) == 0:
+            return None
+
+        unique_targets = np.unique(
+            np.round(finite_targets.to_numpy(dtype=float), decimals=8)
+        )
+        if len(unique_targets) != 1:
+            return None
+
+        return float(unique_targets[0])
+
+    @staticmethod
+    def _get_auto_context_run_colors(condition_dataframe):
+        '''Assigns stable colorblind-friendly colors to displayed run IDs.'''
+        run_ids = list(
+            dict.fromkeys(
+                condition_dataframe['_cross_run_display_run'].tolist()
+            )
+        )
+        color_values = plt.get_cmap('tab10').colors
+        return {
+            run_id: color_values[index % len(color_values)]
+            for index, run_id in enumerate(run_ids)
+        }
+
+    def _add_auto_context_run_boundaries(self, axis, condition_dataframe):
+        '''Marks source-run transitions without overloading the x axis.'''
+        run_values = condition_dataframe[
+            '_cross_run_display_run'
+        ].tolist()
+        if len(run_values) <= 1:
+            return
+
+        for index in range(1, len(run_values)):
+            if run_values[index] != run_values[index - 1]:
+                axis.axvline(
+                    float(index) - 0.5,
+                    color='0.78',
+                    linewidth=0.8,
+                    linestyle=':',
+                    zorder=1
+                )
+
+    def _plot_auto_imported_context_lambda_progress(
+        self,
+        scope,
+        plot_filename,
+        plot_title
+    ):
+        '''Plots condition means from one imported-run context scope.
+
+        Filled circles are observed condition means with replicate SEM.
+        Hollow squares are the pre-execution GP mean with posterior SD when
+        that provenance was recorded.  Colors identify the physical run that
+        produced a condition, not its acquisition mode.
+        '''
+        condition_dataframe = self._get_imported_auto_context_condition_dataframe(
+            scope
+        )
+        if condition_dataframe.empty:
+            return None
+
+        observed_means = self._get_auto_context_numeric_series(
+            condition_dataframe,
+            ['actual_lambda_mean_nm', 'actual_lambda_mean_qc_nm']
+        )
+        observed_sems = self._get_auto_context_numeric_series(
+            condition_dataframe,
+            ['actual_lambda_sem_nm']
+        ).fillna(0.0)
+        predicted_means = self._get_auto_context_numeric_series(
+            condition_dataframe,
+            ['predicted_lambda_mean_nm']
+        )
+        predicted_stds = self._get_auto_context_numeric_series(
+            condition_dataframe,
+            ['predicted_lambda_std_nm']
+        ).fillna(0.0)
+
+        finite_observed = np.isfinite(observed_means.to_numpy(dtype=float))
+        finite_predicted = np.isfinite(predicted_means.to_numpy(dtype=float))
+        if not finite_observed.any() and not finite_predicted.any():
+            print(
+                '<<controller warning>> skipping imported-run lineage '
+                'progress plot because its condition snapshot has no finite '
+                'observed or predicted lambda-max values'
+            )
+            return None
+
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+        figure, axis = plt.subplots(figsize=(10.2, 6.0), dpi=300)
+        figure.set_tight_layout(False)
+        run_colors = self._get_auto_context_run_colors(condition_dataframe)
+
+        run_handles = []
+        observed_handle = None
+        predicted_handle = None
+        for run_id, run_color in run_colors.items():
+            run_mask = (
+                condition_dataframe['_cross_run_display_run'] == run_id
+            ).to_numpy()
+            x_values = condition_dataframe.loc[
+                run_mask,
+                '_cross_run_plot_index'
+            ].to_numpy(dtype=float)
+
+            run_observed_mask = run_mask & finite_observed
+            if run_observed_mask.any():
+                observed_handle = axis.errorbar(
+                    condition_dataframe.loc[
+                        run_observed_mask,
+                        '_cross_run_plot_index'
+                    ].to_numpy(dtype=float),
+                    observed_means.loc[run_observed_mask].to_numpy(dtype=float),
+                    yerr=observed_sems.loc[run_observed_mask].to_numpy(
+                        dtype=float
+                    ),
+                    fmt='o',
+                    color=run_color,
+                    ecolor=run_color,
+                    markerfacecolor=run_color,
+                    markeredgecolor=run_color,
+                    markersize=4.6,
+                    markeredgewidth=0.8,
+                    elinewidth=0.9,
+                    capsize=3,
+                    alpha=0.92,
+                    zorder=4
+                )
+
+            run_predicted_mask = run_mask & finite_predicted
+            if run_predicted_mask.any():
+                predicted_handle = axis.errorbar(
+                    condition_dataframe.loc[
+                        run_predicted_mask,
+                        '_cross_run_plot_index'
+                    ].to_numpy(dtype=float),
+                    predicted_means.loc[run_predicted_mask].to_numpy(
+                        dtype=float
+                    ),
+                    yerr=predicted_stds.loc[run_predicted_mask].to_numpy(
+                        dtype=float
+                    ),
+                    fmt='s',
+                    color=run_color,
+                    ecolor=run_color,
+                    markerfacecolor='none',
+                    markeredgecolor=run_color,
+                    markersize=5.2,
+                    markeredgewidth=1.1,
+                    elinewidth=0.9,
+                    capsize=3,
+                    alpha=0.85,
+                    zorder=3
+                )
+
+            if len(x_values) > 0:
+                run_handles.append(
+                    Line2D(
+                        [0], [0], marker='o', color=run_color,
+                        markerfacecolor=run_color, markersize=5,
+                        linewidth=0, label=f'Run: {run_id}'
+                    )
+                )
+
+        target_lambda = self._get_auto_context_target_lambda(
+            condition_dataframe
+        )
+        target_handle = None
+        if target_lambda is not None:
+            target_handle = axis.axhline(
+                target_lambda,
+                color='0.25',
+                linestyle='--',
+                linewidth=1.1,
+                zorder=1,
+                label=f'Target = {target_lambda:.0f} nm'
+            )
+
+        self._add_auto_context_run_boundaries(axis, condition_dataframe)
+        self._apply_auto_lambda_plot_lab_frame_style(axis)
+        axis.set_xlabel(
+            'Condition sequence within displayed scope',
+            fontsize=font_sizes['axis_label'],
+            labelpad=5
+        )
+        axis.set_ylabel(
+            r'Condition mean $\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
+        axis.set_xlim(
+            -0.5,
+            float(len(condition_dataframe.index)) - 0.5
+        )
+        axis.set_xticks(
+            condition_dataframe['_cross_run_plot_index'].to_numpy(dtype=float)
+        )
+        axis.set_xticklabels(
+            condition_dataframe['reaction_number'].astype(str).tolist()
+        )
+
+        figure.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
+        )
+        semantic_handles = []
+        if observed_handle is not None:
+            semantic_handles.append(
+                Line2D(
+                    [0], [0], marker='o', color='0.20',
+                    markerfacecolor='0.20', markersize=5, linewidth=0,
+                    label='Filled + bar: observed mean ± replicate SEM'
+                )
+            )
+        if predicted_handle is not None:
+            semantic_handles.append(
+                Line2D(
+                    [0], [0], marker='s', color='0.20',
+                    markerfacecolor='none', markersize=5, linewidth=0,
+                    label='Hollow + bar: pre-execution GP mean ± posterior SD'
+                )
+            )
+        if target_handle is not None:
+            semantic_handles.append(target_handle)
+
+        figure.legend(
+            run_handles + semantic_handles,
+            [handle.get_label() for handle in run_handles + semantic_handles],
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.925),
+            ncol=3,
+            frameon=False,
+            fontsize=font_sizes['legend'],
+            handlelength=1.2,
+            handletextpad=0.4,
+            columnspacing=0.8
+        )
+        figure.text(
+            0.5,
+            0.035,
+            (
+                'Rows are source-native Stage-2 lineage snapshots; vertical '
+                'dotted lines separate physical runs. A target line is '
+                'drawn only when every displayed row records one target.'
+                if scope == 'cumulative_lineage'
+                else (
+                    'Only wells physically executed in this imported '
+                    'continuation are shown.'
+                )
+            ),
+            ha='center',
+            va='center',
+            fontsize=font_sizes['footer'],
+            color='0.35'
+        )
+        figure.subplots_adjust(left=0.12, right=0.97, bottom=0.15, top=0.76)
+
+        plot_path = self._get_auto_plot_output_path(plot_filename)
+        figure.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close(figure)
+        print(
+            '<<controller>> saved imported-run lineage lambda progress plot '
+            f'to {plot_path}'
+        )
+        return plot_path
+
+    def _plot_auto_imported_context_lambda_replicates(
+        self,
+        scope,
+        plot_filename,
+        plot_title
+    ):
+        '''Plots QC-marked replicate values from one context condition table.'''
+        condition_dataframe = self._get_imported_auto_context_condition_dataframe(
+            scope
+        )
+        if condition_dataframe.empty:
+            return None
+
+        replicate_columns = sorted(
+            [
+                column for column in condition_dataframe.columns
+                if (
+                    column.startswith('actual_lambda_rep_')
+                    and column.endswith('_nm')
+                )
+            ],
+            key=lambda column: int(
+                column.replace('actual_lambda_rep_', '').replace('_nm', '')
+            )
+        )
+        if len(replicate_columns) == 0:
+            print(
+                '<<controller warning>> skipping imported-run lineage '
+                'replicate plot because its condition snapshot has no '
+                'replicate-value columns'
+            )
+            return None
+
+        font_sizes = self._get_auto_lambda_plot_font_sizes()
+        figure, axis = plt.subplots(figsize=(10.2, 6.0), dpi=300)
+        figure.set_tight_layout(False)
+        run_colors = self._get_auto_context_run_colors(condition_dataframe)
+        has_included = False
+        has_excluded = False
+
+        for _, row in condition_dataframe.iterrows():
+            run_id = row['_cross_run_display_run']
+            run_color = run_colors[run_id]
+            x_value = float(row['_cross_run_plot_index'])
+            for value_column in replicate_columns:
+                replicate_value = pd.to_numeric(
+                    pd.Series([row.get(value_column)]),
+                    errors='coerce'
+                ).iloc[0]
+                if not np.isfinite(replicate_value):
+                    continue
+
+                replicate_number = int(
+                    value_column.replace('actual_lambda_rep_', '').replace(
+                        '_nm', ''
+                    )
+                )
+                qc_column = (
+                    f'actual_lambda_rep_{replicate_number}_included_in_qc'
+                )
+                qc_value = row.get(qc_column, True)
+                if isinstance(qc_value, str):
+                    included_in_qc = qc_value.strip().lower() in {
+                        'true', '1', 'yes', 'y'
+                    }
+                elif qc_value is None or pd.isna(qc_value):
+                    included_in_qc = True
+                else:
+                    included_in_qc = bool(qc_value)
+
+                if included_in_qc:
+                    has_included = True
+                    axis.scatter(
+                        [x_value], [float(replicate_value)], s=28,
+                        marker='o', facecolors=run_color,
+                        edgecolors=run_color, linewidths=0.8,
+                        alpha=0.9, zorder=4
+                    )
+                else:
+                    has_excluded = True
+                    axis.scatter(
+                        [x_value], [float(replicate_value)], s=36,
+                        marker='o', facecolors='none', edgecolors='#D55E00',
+                        linewidths=1.3, alpha=0.95, zorder=5
+                    )
+
+        if not has_included and not has_excluded:
+            plt.close(figure)
+            print(
+                '<<controller warning>> skipping imported-run lineage '
+                'replicate plot because no finite replicate values were '
+                'available'
+            )
+            return None
+
+        target_lambda = self._get_auto_context_target_lambda(
+            condition_dataframe
+        )
+        target_handle = None
+        if target_lambda is not None:
+            target_handle = axis.axhline(
+                target_lambda,
+                color='0.25', linestyle='--', linewidth=1.1, zorder=1,
+                label=f'Target = {target_lambda:.0f} nm'
+            )
+
+        self._add_auto_context_run_boundaries(axis, condition_dataframe)
+        self._apply_auto_lambda_plot_lab_frame_style(axis)
+        axis.set_xlabel(
+            'Condition sequence within displayed scope',
+            fontsize=font_sizes['axis_label'],
+            labelpad=5
+        )
+        axis.set_ylabel(
+            r'Replicate $\lambda_{\max}$ (nm)',
+            fontsize=font_sizes['axis_label']
+        )
+        axis.set_xlim(
+            -0.5,
+            float(len(condition_dataframe.index)) - 0.5
+        )
+        axis.set_xticks(
+            condition_dataframe['_cross_run_plot_index'].to_numpy(dtype=float)
+        )
+        axis.set_xticklabels(
+            condition_dataframe['reaction_number'].astype(str).tolist()
+        )
+
+        figure.suptitle(
+            plot_title,
+            fontsize=font_sizes['title'],
+            fontweight='normal',
+            y=0.975
+        )
+        run_handles = [
+            Line2D(
+                [0], [0], marker='o', color=color,
+                markerfacecolor=color, markersize=5, linewidth=0,
+                label=f'Run: {run_id}'
+            )
+            for run_id, color in run_colors.items()
+        ]
+        semantic_handles = []
+        if has_included:
+            semantic_handles.append(
+                Line2D(
+                    [0], [0], marker='o', color='0.20',
+                    markerfacecolor='0.20', markersize=5, linewidth=0,
+                    label='Filled: QC-included replicate'
+                )
+            )
+        if has_excluded:
+            semantic_handles.append(
+                Line2D(
+                    [0], [0], marker='o', color='#D55E00',
+                    markerfacecolor='none', markersize=5, linewidth=0,
+                    label='Red outline: QC-excluded replicate'
+                )
+            )
+        if target_handle is not None:
+            semantic_handles.append(target_handle)
+
+        legend_handles = run_handles + semantic_handles
+        figure.legend(
+            legend_handles,
+            [handle.get_label() for handle in legend_handles],
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.925),
+            ncol=3,
+            frameon=False,
+            fontsize=font_sizes['legend'],
+            handlelength=1.2,
+            handletextpad=0.4,
+            columnspacing=0.8
+        )
+        figure.text(
+            0.5,
+            0.035,
+            (
+                'Rows are source-native Stage-2 lineage snapshots; vertical '
+                'dotted lines separate physical runs. A target line is '
+                'drawn only when every displayed row records one target.'
+                if scope == 'cumulative_lineage'
+                else (
+                    'Only wells physically executed in this imported '
+                    'continuation are shown.'
+                )
+            ),
+            ha='center', va='center', fontsize=font_sizes['footer'],
+            color='0.35'
+        )
+        figure.subplots_adjust(left=0.12, right=0.97, bottom=0.15, top=0.76)
+
+        plot_path = self._get_auto_plot_output_path(plot_filename)
+        figure.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close(figure)
+        print(
+            '<<controller>> saved imported-run lineage replicate plot to '
+            f'{plot_path}'
+        )
+        return plot_path
+
+    def _generate_imported_auto_cross_run_plot_suite(self):
+        '''Generates final, import-only current and cumulative context plots.
+
+        Standard Auto plots are intentionally untouched: they preserve their
+        established behavior and output names.  This suite is generated only
+        for a continuation with Stage-2 context CSVs and provides explicit
+        ``current_run`` and ``cumulative_lineage`` views beside them.
+        '''
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        ) or {}
+        if not imported_checkpoint:
+            return []
+
+        if imported_checkpoint.get('import_method') != 'existing_output_run':
+            print(
+                '<<controller>> imported-run lineage plots not generated: '
+                'manual checkpoint imports remain model-only.'
+            )
+            return []
+
+        plot_specs = [
+            (
+                self._plot_auto_imported_context_lambda_progress,
+                'current_run',
+                'cross_run_lambda_progress_current_run_final.png',
+                'Final Auto λmax Progress: Current Run Only'
+            ),
+            (
+                self._plot_auto_imported_context_lambda_progress,
+                'cumulative_lineage',
+                'cross_run_lambda_progress_cumulative_lineage_final.png',
+                'Final Auto λmax Progress: Imported Lineage + Current Run'
+            ),
+            (
+                self._plot_auto_imported_context_lambda_replicates,
+                'current_run',
+                'cross_run_lambda_replicates_current_run_final.png',
+                'Final Auto Replicate λmax Values: Current Run Only'
+            ),
+            (
+                self._plot_auto_imported_context_lambda_replicates,
+                'cumulative_lineage',
+                'cross_run_lambda_replicates_cumulative_lineage_final.png',
+                'Final Auto Replicate λmax Values: Imported Lineage + Current Run'
+            )
+        ]
+        output_paths = []
+        for plot_function, scope, filename, title in plot_specs:
+            plot_path = plot_function(scope, filename, title)
+            if plot_path is not None:
+                output_paths.append(plot_path)
+
+        return output_paths
+
     def _get_auto_design_best_condition_number(self, performance_df):
         '''
         Returns the reaction_number with the smallest target_error_nm, if
@@ -11635,6 +12293,12 @@ class AutoContr(Controller):
             'acquisition_portfolio_trace'
         ):
             category = os.path.join('progress')
+        elif filename.startswith('cross_run_'):
+            # Import-only lineage views are deliberately separate from the
+            # established per-run progress figures.  Keeping them in their
+            # own directory prevents a cumulative historical chart from being
+            # mistaken for a plot of only the wells physically run today.
+            category = os.path.join('cross_run_history')
         elif filename.startswith('gpr_predictions'):
             category_parts = ['gp_surfaces', '2d', 'mean']
             if 'feasibility' in filename:
@@ -20163,6 +20827,11 @@ class AutoContr(Controller):
             _run_output_step(
                 'final dimension-aware Auto design-space plots',
                 self._plot_initial_training_designs_after_run
+            )
+
+            _run_output_step(
+                'final imported-run lineage plots',
+                self._generate_imported_auto_cross_run_plot_suite
             )
 
             # Generate the report last so it can detect and embed every final

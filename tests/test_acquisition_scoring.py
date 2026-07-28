@@ -6,6 +6,9 @@ import datetime
 import io
 import json
 import math
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
@@ -15,6 +18,7 @@ from tempfile import NamedTemporaryFile
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from matplotlib.lines import Line2D
 
 from auto_model_checkpoint import (
     ModelCheckpointError,
@@ -5292,6 +5296,18 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 '_write_auto_run_context_availability',
                 '_refresh_imported_auto_run_context_exports',
                 '_build_labeled_auto_experiment_data_export',
+                '_get_imported_auto_context_condition_dataframe',
+                '_get_auto_context_numeric_series',
+                '_get_auto_context_target_lambda',
+                '_get_auto_context_run_colors',
+                '_add_auto_context_run_boundaries',
+                '_get_auto_plot_relative_path',
+                '_get_auto_plot_output_path',
+                '_apply_auto_lambda_plot_lab_frame_style',
+                '_get_auto_lambda_plot_font_sizes',
+                '_plot_auto_imported_context_lambda_progress',
+                '_plot_auto_imported_context_lambda_replicates',
+                '_generate_imported_auto_cross_run_plot_suite',
                 '_list_existing_auto_model_checkpoint_files',
                 '_resolve_auto_model_checkpoint_existing_source',
                 '_checkpoint_float_values_match',
@@ -5321,7 +5337,9 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 'write_run_context_lineage_manifest': (
                     write_run_context_lineage_manifest
                 ),
-                'write_model_checkpoint': write_model_checkpoint
+                'write_model_checkpoint': write_model_checkpoint,
+                'plt': plt,
+                'Line2D': Line2D
             }
         )
 
@@ -5788,6 +5806,90 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                     source['raw_scans']['status'] == 'not_ingested_stage_2'
                     for source in availability['sources']
                 )
+            )
+
+    def test_import_context_plot_suite_keeps_current_and_lineage_views_separate(
+        self
+    ):
+        with TemporaryDirectory() as temporary_directory:
+            output_directory = Path(temporary_directory) / 'RTG_023'
+            context_directory = output_directory / 'Imported_Run_Context'
+            context_directory.mkdir(parents=True)
+            pd.DataFrame([
+                {
+                    'context_run_id': 'RTG_020',
+                    'context_role': 'ancestor',
+                    'reaction_number': 0,
+                    'target_lambda_max_nm': 625.0,
+                    'actual_lambda_mean_nm': 610.0,
+                    'actual_lambda_sem_nm': 2.0,
+                    'predicted_lambda_mean_nm': 608.0,
+                    'predicted_lambda_std_nm': 8.0,
+                    'actual_lambda_rep_1_nm': 608.0,
+                    'actual_lambda_rep_1_included_in_qc': True
+                },
+                {
+                    'context_run_id': 'RTG_022',
+                    'context_role': 'direct_source',
+                    'reaction_number': 1,
+                    'target_lambda_max_nm': 625.0,
+                    'actual_lambda_mean_nm': 620.0,
+                    'actual_lambda_sem_nm': 1.0,
+                    'predicted_lambda_mean_nm': 619.0,
+                    'predicted_lambda_std_nm': 6.0,
+                    'actual_lambda_rep_1_nm': 619.0,
+                    'actual_lambda_rep_1_included_in_qc': False
+                },
+                {
+                    'context_run_id': 'RTG_023',
+                    'context_role': 'current_run',
+                    'reaction_number': 2,
+                    'target_lambda_max_nm': 625.0,
+                    'actual_lambda_mean_nm': 626.0,
+                    'actual_lambda_sem_nm': 1.5,
+                    'predicted_lambda_mean_nm': 624.0,
+                    'predicted_lambda_std_nm': 4.0,
+                    'actual_lambda_rep_1_nm': 625.0,
+                    'actual_lambda_rep_1_included_in_qc': True
+                }
+            ]).to_csv(
+                context_directory / 'cumulative_conditions.csv',
+                index=False
+            )
+
+            controller = self.Controller()
+            controller.out_path = str(output_directory)
+            controller.plot_path = str(output_directory / 'Plots')
+            controller.imported_auto_model_checkpoint = {
+                'import_method': 'existing_output_run'
+            }
+
+            output_paths = (
+                controller._generate_imported_auto_cross_run_plot_suite()
+            )
+
+            self.assertEqual(len(output_paths), 4)
+            self.assertTrue(all(Path(path).is_file() for path in output_paths))
+            self.assertTrue(
+                all('cross_run_history' in str(path) for path in output_paths)
+            )
+            current_dataframe = (
+                controller._get_imported_auto_context_condition_dataframe(
+                    'current_run'
+                )
+            )
+            cumulative_dataframe = (
+                controller._get_imported_auto_context_condition_dataframe(
+                    'cumulative_lineage'
+                )
+            )
+            self.assertEqual(
+                list(current_dataframe['context_run_id']),
+                ['RTG_023']
+            )
+            self.assertEqual(
+                list(cumulative_dataframe['context_run_id']),
+                ['RTG_020', 'RTG_022', 'RTG_023']
             )
 
 
