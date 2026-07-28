@@ -15260,6 +15260,134 @@ class AutoContr(Controller):
         lines.append('')
 
         return lines
+
+    def _get_imported_auto_run_context_report_summary(self):
+        '''Returns safe, report-only facts about an imported run context.
+
+        The summary reads only artifacts written inside the current output
+        directory.  It never follows a source-run path, loads a checkpoint,
+        or changes model history.  This keeps a final report useful even when
+        an older source output has since been moved or removed.
+        '''
+        imported_checkpoint = getattr(
+            self,
+            'imported_auto_model_checkpoint',
+            None
+        ) or {}
+        if not imported_checkpoint:
+            return {
+                'is_imported_run': False,
+                'context_applicable': False
+            }
+
+        import_method = str(
+            imported_checkpoint.get('import_method', 'manual_inbox')
+        )
+        context_directory = os.path.join(
+            self.out_path,
+            'Imported_Run_Context'
+        )
+        try:
+            lineage_source_run_count = int(
+                imported_checkpoint.get('lineage_source_run_count', 0) or 0
+            )
+        except (TypeError, ValueError):
+            # A report must not fail solely because an older or manually
+            # inspected provenance record has a malformed optional count.
+            lineage_source_run_count = 0
+        summary = {
+            'is_imported_run': True,
+            'import_method': import_method,
+            'context_applicable': import_method == 'existing_output_run',
+            'lineage_manifest_relative_path': os.path.join(
+                'Imported_Run_Context',
+                'lineage_manifest.json'
+            ),
+            'availability_relative_path': os.path.join(
+                'Imported_Run_Context',
+                'context_availability.json'
+            ),
+            'cumulative_conditions_relative_path': os.path.join(
+                'Imported_Run_Context',
+                'cumulative_conditions.csv'
+            ),
+            'cumulative_replicates_relative_path': os.path.join(
+                'Imported_Run_Context',
+                'cumulative_replicates.csv'
+            ),
+            'lineage_source_run_count': lineage_source_run_count,
+            'availability_status': 'not_applicable',
+            'condition_row_count': None,
+            'replicate_row_count': None,
+            'sources': []
+        }
+        if not summary['context_applicable']:
+            return summary
+
+        availability_path = os.path.join(
+            context_directory,
+            'context_availability.json'
+        )
+        if not os.path.isfile(availability_path):
+            summary['availability_status'] = 'missing'
+            return summary
+
+        try:
+            with open(availability_path, 'r', encoding='utf-8') as source:
+                availability = json.load(source)
+        except (
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError
+        ) as exc:
+            summary['availability_status'] = 'unreadable'
+            summary['availability_error'] = str(exc)
+            return summary
+
+        if not isinstance(availability, dict):
+            summary['availability_status'] = 'invalid'
+            return summary
+
+        summary['availability_status'] = 'available'
+        summary['condition_row_count'] = availability.get(
+            'cumulative_condition_row_count'
+        )
+        summary['replicate_row_count'] = availability.get(
+            'cumulative_replicate_row_count'
+        )
+        source_entries = availability.get('sources', [])
+        if not isinstance(source_entries, list):
+            source_entries = []
+
+        for source_entry in source_entries:
+            if not isinstance(source_entry, dict):
+                continue
+            condition_log = source_entry.get('condition_log') or {}
+            replicate_data = source_entry.get('replicate_data') or {}
+            raw_scans = source_entry.get('raw_scans') or {}
+            summary['sources'].append({
+                'run_id': str(source_entry.get('run_id') or 'not recorded'),
+                'context_role': str(
+                    source_entry.get('context_role') or 'not recorded'
+                ),
+                'condition_status': str(
+                    condition_log.get('status') or 'not recorded'
+                ),
+                'condition_row_count': condition_log.get(
+                    'native_row_count'
+                ),
+                'replicate_status': str(
+                    replicate_data.get('status') or 'not recorded'
+                ),
+                'replicate_row_count': replicate_data.get(
+                    'native_row_count'
+                ),
+                'raw_scan_status': str(
+                    raw_scans.get('status') or 'not recorded'
+                )
+            })
+
+        return summary
     
     def _write_auto_run_report(self):
         '''
@@ -16139,6 +16267,99 @@ class AutoContr(Controller):
                 )
             )
         lines.append('')
+
+        imported_context_summary = (
+            self._get_imported_auto_run_context_report_summary()
+        )
+        lines.append('## Imported Run Context')
+        lines.append('')
+        if not imported_context_summary['is_imported_run']:
+            lines.append(
+                'Not applicable: this run did not import an Auto model '
+                'checkpoint.'
+            )
+        elif not imported_context_summary['context_applicable']:
+            lines.append(
+                'This is a manual checkpoint import, so it remains '
+                'model-only. No prior-run CSV context, cross-run plots, or '
+                'raw scans were copied into this output.'
+            )
+        else:
+            lines.append(
+                'This existing-output import records a flat, de-duplicated '
+                'lineage of source-native conditions. The imported context is '
+                'for audit and visualization only; it does not alter the '
+                'already rebuilt GP, QC decisions, or current-run recipe '
+                'selection.'
+            )
+            lines.append('')
+            lines.append(
+                '- Lineage source runs recorded: {}.'.format(
+                    imported_context_summary['lineage_source_run_count']
+                )
+            )
+            lines.append(
+                '- Lineage manifest: `{}`.'.format(
+                    imported_context_summary['lineage_manifest_relative_path']
+                )
+            )
+            lines.append(
+                '- Context availability record: `{}` ({})'.format(
+                    imported_context_summary['availability_relative_path'],
+                    imported_context_summary['availability_status']
+                )
+            )
+
+            if (
+                imported_context_summary['availability_status']
+                == 'available'
+            ):
+                lines.append(
+                    '- Flat cumulative condition rows: {}.'.format(
+                        self._format_auto_report_value(
+                            imported_context_summary['condition_row_count']
+                        )
+                    )
+                )
+                lines.append(
+                    '- Flat cumulative replicate rows: {}.'.format(
+                        self._format_auto_report_value(
+                            imported_context_summary['replicate_row_count']
+                        )
+                    )
+                )
+                for source_summary in imported_context_summary['sources']:
+                    lines.append(
+                        '- Source `{}` ({}) — condition context: {} '
+                        '({} source-native rows); replicate data: {} '
+                        '({} rows); raw scans: {}.'.format(
+                            source_summary['run_id'],
+                            source_summary['context_role'],
+                            source_summary['condition_status'],
+                            self._format_auto_report_value(
+                                source_summary['condition_row_count']
+                            ),
+                            source_summary['replicate_status'],
+                            self._format_auto_report_value(
+                                source_summary['replicate_row_count']
+                            ),
+                            source_summary['raw_scan_status']
+                        )
+                    )
+                lines.append(
+                    '- Raw scans are intentionally not copied into the '
+                    'lineage context. Their source availability is recorded '
+                    'above; a future portable study archive may package them '
+                    'once without duplicating files across continuations.'
+                )
+            else:
+                lines.append(
+                    '- Context CSV availability could not be read from this '
+                    'output. The checkpoint import and GP reconstruction '
+                    'remain valid, but cross-run context cannot be fully '
+                    'summarized here.'
+                )
+        lines.append('')
         lines.append('## Auto Settings')
         lines.append('')
         lines.append('### Target and stopping rule')
@@ -16621,6 +16842,52 @@ class AutoContr(Controller):
                 title='Final Replicate Diagnostic Plot'
             )
         )
+        if imported_context_summary['context_applicable']:
+            lines.append('### Imported Run Context Views')
+            lines.append('')
+            lines.append(
+                'These import-only figures distinguish wells physically '
+                'executed in this continuation from the flat, source-native '
+                'history used to rebuild its starting GP. Colors identify the '
+                'physical run that produced each condition; they do not '
+                'identify acquisition modes.'
+            )
+            lines.append('')
+            for plot_filename, plot_title, plot_caption in (
+                (
+                    'cross_run_lambda_progress_current_run_final.png',
+                    'Imported Continuation λmax Progress: Current Run Only',
+                    'Shows only condition-level observations physically '
+                    'executed in this continuation, with replicate SEM and '
+                    'pre-execution GP uncertainty when recorded.'
+                ),
+                (
+                    'cross_run_lambda_progress_cumulative_lineage_final.png',
+                    'Imported Continuation λmax Progress: Cumulative Lineage',
+                    'Shows flat, de-duplicated source-native condition history '
+                    'followed by this run. Dotted dividers separate physical '
+                    'source runs.'
+                ),
+                (
+                    'cross_run_lambda_replicates_current_run_final.png',
+                    'Imported Continuation Replicates: Current Run Only',
+                    'Shows QC-included and QC-excluded replicate λmax values '
+                    'only for wells physically executed in this continuation.'
+                ),
+                (
+                    'cross_run_lambda_replicates_cumulative_lineage_final.png',
+                    'Imported Continuation Replicates: Cumulative Lineage',
+                    'Shows replicate λmax values across the source-native '
+                    'lineage. Raw spectral scans are not embedded or copied.'
+                )
+            ):
+                lines.extend(
+                    self._auto_report_plot_markdown_if_exists(
+                        plot_filename=plot_filename,
+                        title=plot_title,
+                        caption=plot_caption
+                    )
+                )
         lines.append('### Final Recipe Concentration History')
         lines.append('')
         lines.append(
@@ -17073,6 +17340,78 @@ class AutoContr(Controller):
                 '(requires recorded fixed-reagent concentrations)'
             )
         )
+
+        if imported_context_summary['context_applicable']:
+            lines.append(
+                self._auto_report_file_line(
+                    imported_context_summary[
+                        'lineage_manifest_relative_path'
+                    ],
+                    'Flat imported-run lineage manifest'
+                )
+            )
+            lines.append(
+                self._auto_report_file_line(
+                    imported_context_summary[
+                        'availability_relative_path'
+                    ],
+                    'Imported-run context availability diagnostics'
+                )
+            )
+            lines.append(
+                self._auto_report_file_line(
+                    imported_context_summary[
+                        'cumulative_conditions_relative_path'
+                    ],
+                    'Flat source-native cumulative condition history'
+                )
+            )
+            lines.append(
+                self._auto_report_file_line(
+                    imported_context_summary[
+                        'cumulative_replicates_relative_path'
+                    ],
+                    'Flat source-native cumulative replicate history'
+                )
+            )
+            for plot_filename, plot_description in (
+                (
+                    'cross_run_lambda_progress_current_run_final.png',
+                    'Imported continuation current-run-only lambda progress plot'
+                ),
+                (
+                    'cross_run_lambda_progress_cumulative_lineage_final.png',
+                    'Imported continuation cumulative-lineage lambda progress plot'
+                ),
+                (
+                    'cross_run_lambda_replicates_current_run_final.png',
+                    'Imported continuation current-run-only replicate plot'
+                ),
+                (
+                    'cross_run_lambda_replicates_cumulative_lineage_final.png',
+                    'Imported continuation cumulative-lineage replicate plot'
+                )
+            ):
+                relative_plot_path = self._get_auto_plot_relative_path(
+                    plot_filename
+                ) if hasattr(
+                    self,
+                    '_get_auto_plot_relative_path'
+                ) else plot_filename
+                lines.append(
+                    self._auto_report_file_line(
+                        os.path.join('Plots', relative_plot_path),
+                        plot_description
+                    )
+                )
+        elif imported_context_summary['is_imported_run']:
+            lines.append(
+                self._auto_report_not_applicable_file_line(
+                    os.path.join('Imported_Run_Context'),
+                    'Imported-run context and cross-run plots',
+                    'manual model-only checkpoint import'
+                )
+            )
 
         # Design-space renderers are deliberately dimension-specific.  Record
         # unavailable renderers as not applicable rather than as missing files

@@ -1290,6 +1290,12 @@ class AcquisitionRoutingTests(unittest.TestCase):
         self.assertIn('optimizer_recipe_repaired', report_strings)
         self.assertIn('## Condition-Level Results', report_strings)
         self.assertIn('## Model Checkpoint Lineage', report_strings)
+        self.assertIn('## Imported Run Context', report_strings)
+        self.assertIn('### Imported Run Context Views', report_strings)
+        self.assertIn(
+            'cross_run_lambda_progress_cumulative_lineage_final.png',
+            report_strings
+        )
         self.assertIn('imported_auto_model_checkpoint', report_strings)
         self.assertIn('provenance_path', report_strings)
 
@@ -3758,6 +3764,7 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
             '_build_auto_report_full_audit_appendix',
             '_build_padded_auto_report_markdown_table',
             '_auto_report_plot_markdown_if_exists',
+            '_get_imported_auto_run_context_report_summary',
             '_write_auto_run_report'
         ])
 
@@ -4858,6 +4865,116 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn(
             '`Plots/recipe_history/'
             'auto_recipe_concentration_history_final.png` (present)',
+            report_text
+        )
+
+    def test_existing_output_import_report_describes_context_and_cross_run_plots(self):
+        '''A continuation report must expose flat context without raw scans.'''
+        controller = self._build_exact_controller()
+        controller.imported_auto_model_checkpoint = {
+            'import_method': 'existing_output_run',
+            'lineage_source_run_count': 2,
+            'source_run_id': 'RTG_020',
+            'source_checkpoint_stage': 'final',
+            'archived_checkpoint_path': (
+                'Imported_Model_Checkpoints/RTG_020_model_final.zip'
+            ),
+            'provenance_path': (
+                'Imported_Model_Checkpoints/import_provenance.json'
+            ),
+            'source_metadata': {
+                'source_run_folder': 'RTG_020',
+                'source_checkpoint_filename': 'model_final.zip'
+            }
+        }
+
+        with TemporaryDirectory() as temp_directory:
+            controller.out_path = temp_directory
+            controller.plot_path = os.path.join(temp_directory, 'Plots')
+            context_directory = os.path.join(
+                temp_directory,
+                'Imported_Run_Context'
+            )
+            cross_run_directory = os.path.join(
+                controller.plot_path,
+                'cross_run_history'
+            )
+            os.makedirs(context_directory)
+            os.makedirs(cross_run_directory)
+
+            Path(
+                os.path.join(context_directory, 'lineage_manifest.json')
+            ).write_text('{}')
+            Path(
+                os.path.join(context_directory, 'cumulative_conditions.csv')
+            ).write_text('origin_run_directory\nRTG_020\n')
+            Path(
+                os.path.join(context_directory, 'cumulative_replicates.csv')
+            ).write_text('origin_run_directory\nRTG_020\n')
+            Path(
+                os.path.join(context_directory, 'context_availability.json')
+            ).write_text(json.dumps({
+                'cumulative_condition_row_count': 3,
+                'cumulative_replicate_row_count': 9,
+                'sources': [{
+                    'run_id': 'RTG_019',
+                    'context_role': 'ancestor',
+                    'condition_log': {
+                        'status': 'available',
+                        'native_row_count': 1
+                    },
+                    'replicate_data': {
+                        'status': 'available',
+                        'native_row_count': 3
+                    },
+                    'raw_scans': {
+                        'status': 'not_ingested_stage_2'
+                    }
+                }, {
+                    'run_id': 'RTG_020',
+                    'context_role': 'selected_source',
+                    'condition_log': {
+                        'status': 'available',
+                        'native_row_count': 2
+                    },
+                    'replicate_data': {
+                        'status': 'available',
+                        'native_row_count': 6
+                    },
+                    'raw_scans': {
+                        'status': 'not_ingested_stage_2'
+                    }
+                }]
+            }))
+
+            for filename in (
+                'cross_run_lambda_progress_current_run_final.png',
+                'cross_run_lambda_progress_cumulative_lineage_final.png',
+                'cross_run_lambda_replicates_current_run_final.png',
+                'cross_run_lambda_replicates_cumulative_lineage_final.png'
+            ):
+                Path(os.path.join(cross_run_directory, filename)).touch()
+
+            with redirect_stdout(io.StringIO()):
+                report_path = controller._write_auto_run_report()
+
+            report_text = Path(report_path).read_text()
+
+        self.assertIn('## Imported Run Context', report_text)
+        self.assertIn('Lineage source runs recorded: 2.', report_text)
+        self.assertIn('Flat cumulative condition rows: 3.', report_text)
+        self.assertIn('Flat cumulative replicate rows: 9.', report_text)
+        self.assertIn('Source `RTG_019` (ancestor)', report_text)
+        self.assertIn('Raw scans are intentionally not copied', report_text)
+        self.assertIn('### Imported Run Context Views', report_text)
+        self.assertIn(
+            'Plots/cross_run_history/'
+            'cross_run_lambda_progress_current_run_final.png',
+            report_text
+        )
+        self.assertIn(
+            'Plots/cross_run_history/'
+            'cross_run_lambda_replicates_cumulative_lineage_final.png',
             report_text
         )
 
