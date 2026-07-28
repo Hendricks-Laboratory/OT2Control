@@ -66,10 +66,13 @@ from optimizers import OptimizationModel
 from exceptions import ConversionError
 from auto_model_checkpoint import (
     ModelCheckpointError,
+    build_import_run_context_lineage_manifest,
     get_model_checkpoint_import_inbox,
     prepare_model_checkpoint_import,
     prepare_model_checkpoint_import_from_path,
+    read_run_context_lineage_manifest,
     write_model_checkpoint_import_provenance,
+    write_run_context_lineage_manifest,
     write_model_checkpoint
 )
 
@@ -4908,6 +4911,92 @@ class AutoContr(Controller):
             os.path.dirname(os.path.abspath(self.out_path))
         )
 
+    def _read_imported_auto_run_context_lineage(self, checkpoint):
+        '''Reads a verified source run's flat lineage when one is available.
+
+        Context lineage is intentionally optional for compatibility with
+        older runs.  It is only read for the bounded existing-output import
+        route; a manually supplied checkpoint remains a model-only import
+        until a later stage defines a separately supplied context bundle.
+        '''
+        if checkpoint.get('import_method') != 'existing_output_run':
+            return None
+
+        source_metadata = checkpoint.get('import_source_metadata') or {}
+        source_run_folder = str(
+            source_metadata.get('source_run_folder') or ''
+        ).strip()
+        output_root = self._get_auto_model_checkpoint_output_root()
+        source_run_directory = os.path.realpath(
+            os.path.join(output_root, source_run_folder)
+        )
+
+        try:
+            source_is_direct_child = (
+                bool(source_run_folder)
+                and os.path.basename(source_run_folder) == source_run_folder
+                and os.path.commonpath([output_root, source_run_directory])
+                == output_root
+            )
+        except ValueError:
+            source_is_direct_child = False
+
+        if (
+            not source_is_direct_child
+            or not os.path.isdir(source_run_directory)
+        ):
+            raise ModelCheckpointError(
+                'Existing-run context lineage source is not a direct output '
+                'folder: {!r}.'.format(source_run_folder)
+            )
+
+        return read_run_context_lineage_manifest(source_run_directory)
+
+    def _write_imported_auto_run_context_lineage(self, checkpoint):
+        '''Builds and persists one flat import-only source-run lineage.
+
+        This stage records identities and archive checksums only.  It does not
+        copy source CSVs or scans, generate cross-run plots, or affect the
+        imported Gaussian process.  A future continuation can therefore read
+        this manifest, append the immediate source once, and avoid nested or
+        duplicated ancestry.
+        '''
+        source_metadata = checkpoint.get('import_source_metadata') or {}
+        source_checkpoint_filename = str(
+            source_metadata.get('source_checkpoint_filename')
+            or os.path.basename(
+                str(checkpoint.get('source_checkpoint_path') or '')
+            )
+        ).strip()
+        source_run_folder = source_metadata.get('source_run_folder')
+        inherited_manifest = self._read_imported_auto_run_context_lineage(
+            checkpoint
+        )
+        current_run_id = str(
+            getattr(self, 'rxn_sheet_name', None)
+            or os.path.basename(str(self.out_path))
+        ).strip()
+
+        lineage_manifest = build_import_run_context_lineage_manifest(
+            current_run_id=current_run_id,
+            source_run_id=checkpoint['manifest']['run_id'],
+            source_checkpoint_sha256=checkpoint[
+                'source_checkpoint_sha256'
+            ],
+            source_checkpoint_stage=checkpoint['manifest'][
+                'checkpoint_stage'
+            ],
+            source_checkpoint_filename=source_checkpoint_filename,
+            import_method=checkpoint.get('import_method', 'manual_inbox'),
+            source_run_folder=source_run_folder,
+            inherited_manifest=inherited_manifest
+        )
+        lineage_path = write_run_context_lineage_manifest(
+            self.out_path,
+            lineage_manifest
+        )
+        return lineage_manifest, lineage_path
+
     @staticmethod
     def _list_existing_auto_model_checkpoint_files(checkpoint_directory):
         '''Lists only canonical checkpoint ZIPs directly inside one run.
@@ -5530,6 +5619,9 @@ class AutoContr(Controller):
         self.imported_auto_model_checkpoint = {
             'source_checkpoint_path': checkpoint['source_checkpoint_path'],
             'archived_checkpoint_path': checkpoint['archived_checkpoint_path'],
+            'source_checkpoint_sha256': checkpoint[
+                'source_checkpoint_sha256'
+            ],
             'source_run_id': checkpoint['manifest']['run_id'],
             'source_checkpoint_stage': checkpoint['manifest']['checkpoint_stage'],
             'import_method': checkpoint.get('import_method', 'manual_inbox'),
@@ -5537,6 +5629,29 @@ class AutoContr(Controller):
                 checkpoint.get('import_source_metadata', {})
             )
         }
+
+        try:
+            lineage_manifest, lineage_path = (
+                self._write_imported_auto_run_context_lineage(checkpoint)
+            )
+        except (ModelCheckpointError, OSError, ValueError) as exc:
+            raise RuntimeError(
+                'Auto model checkpoint import was rebuilt but its required '
+                'run-context lineage could not be recorded: {}. No robot '
+                'execution has started.'.format(exc)
+            ) from exc
+
+        self.imported_auto_model_checkpoint['lineage_manifest_path'] = (
+            lineage_path
+        )
+        self.imported_auto_model_checkpoint['lineage_source_run_count'] = (
+            len(lineage_manifest['source_runs'])
+        )
+        self.imported_auto_model_checkpoint['lineage_context_available'] = (
+            bool(
+                checkpoint.get('import_method') == 'existing_output_run'
+            )
+        )
         model.curr_iter = 0
         model.quit = False
         model._auto_model_checkpoint_imported = True
@@ -5558,6 +5673,9 @@ class AutoContr(Controller):
                     'archived_checkpoint_path': checkpoint[
                         'archived_checkpoint_path'
                     ],
+                    'source_checkpoint_sha256': checkpoint[
+                        'source_checkpoint_sha256'
+                    ],
                     'source_run_id': checkpoint['manifest']['run_id'],
                     'source_checkpoint_stage': checkpoint['manifest'][
                         'checkpoint_stage'
@@ -5573,7 +5691,15 @@ class AutoContr(Controller):
                     ),
                     'template_preflight_passed': True,
                     'post_reagent_compatibility_passed': True,
-                    'seed_design_skipped': True
+                    'seed_design_skipped': True,
+                    'run_context_lineage_manifest': lineage_path,
+                    'run_context_lineage_source_run_count': len(
+                        lineage_manifest['source_runs']
+                    ),
+                    'run_context_lineage_context_available': bool(
+                        checkpoint.get('import_method')
+                        == 'existing_output_run'
+                    )
                 }
             )
         except ModelCheckpointError as exc:
@@ -5592,6 +5718,14 @@ class AutoContr(Controller):
             '({} GP observations; {} usable-spectrum observations).'.format(
                 arrays['gp_training_X'].shape[0],
                 arrays['usable_spectrum_X'].shape[0]
+            )
+        )
+        print(
+            '<<controller>> recorded import-only run-context lineage '
+            '({} prior source run{}): {}'.format(
+                len(lineage_manifest['source_runs']),
+                '' if len(lineage_manifest['source_runs']) == 1 else 's',
+                lineage_path
             )
         )
         return True

@@ -12,11 +12,16 @@ import numpy as np
 
 from auto_model_checkpoint import (
     ModelCheckpointError,
+    build_import_run_context_lineage_manifest,
     get_model_checkpoint_import_inbox,
+    get_model_checkpoint_file_sha256,
     prepare_model_checkpoint_import,
     prepare_model_checkpoint_import_from_path,
     read_model_checkpoint,
+    read_run_context_lineage_manifest,
+    validate_run_context_lineage_manifest,
     write_model_checkpoint_import_provenance,
+    write_run_context_lineage_manifest,
     write_model_checkpoint
 )
 
@@ -215,9 +220,155 @@ class ModelCheckpointPackageTests(unittest.TestCase):
                 'RTG_020'
             )
             self.assertTrue(Path(prepared['archived_checkpoint_path']).is_file())
+            self.assertEqual(
+                prepared['source_checkpoint_sha256'],
+                prepared['archived_checkpoint_sha256']
+            )
+            self.assertEqual(
+                prepared['source_checkpoint_sha256'],
+                get_model_checkpoint_file_sha256(source_path)
+            )
             persisted = json.loads(Path(provenance_path).read_text())
             self.assertTrue(persisted['seed_design_skipped'])
             self.assertEqual(persisted['import_method'], 'existing_output_run')
+
+    def test_flat_lineage_appends_each_sequential_source_once(self):
+        source_a_hash = 'a' * 64
+        source_b_hash = 'b' * 64
+        source_c_hash = 'c' * 64
+
+        lineage_b = build_import_run_context_lineage_manifest(
+            current_run_id='RTG_021',
+            source_run_id='RTG_020',
+            source_checkpoint_sha256=source_a_hash,
+            source_checkpoint_stage='final',
+            source_checkpoint_filename='model_final.zip',
+            import_method='existing_output_run',
+            source_run_folder='RTG_020'
+        )
+        lineage_c = build_import_run_context_lineage_manifest(
+            current_run_id='RTG_022',
+            source_run_id='RTG_021',
+            source_checkpoint_sha256=source_b_hash,
+            source_checkpoint_stage='final',
+            source_checkpoint_filename='model_final.zip',
+            import_method='existing_output_run',
+            source_run_folder='RTG_021',
+            inherited_manifest=lineage_b
+        )
+        lineage_d = build_import_run_context_lineage_manifest(
+            current_run_id='RTG_023',
+            source_run_id='RTG_022',
+            source_checkpoint_sha256=source_c_hash,
+            source_checkpoint_stage='final',
+            source_checkpoint_filename='model_final.zip',
+            import_method='existing_output_run',
+            source_run_folder='RTG_022',
+            inherited_manifest=lineage_c
+        )
+
+        self.assertEqual(
+            [entry['run_id'] for entry in lineage_d['source_runs']],
+            ['RTG_020', 'RTG_021', 'RTG_022']
+        )
+        self.assertEqual(
+            lineage_d['source_runs'][1]['parent_run_id'],
+            'RTG_020'
+        )
+        self.assertEqual(
+            lineage_d['source_runs'][2]['parent_run_id'],
+            'RTG_021'
+        )
+
+    def test_branching_from_an_earlier_run_excludes_later_descendants(self):
+        lineage_b = build_import_run_context_lineage_manifest(
+            current_run_id='RTG_021',
+            source_run_id='RTG_020',
+            source_checkpoint_sha256='a' * 64,
+            source_checkpoint_stage='final',
+            source_checkpoint_filename='model_final.zip',
+            import_method='existing_output_run',
+            source_run_folder='RTG_020'
+        )
+        branch_lineage = build_import_run_context_lineage_manifest(
+            current_run_id='RTG_branch',
+            source_run_id='RTG_021',
+            source_checkpoint_sha256='b' * 64,
+            source_checkpoint_stage='final',
+            source_checkpoint_filename='model_final.zip',
+            import_method='existing_output_run',
+            source_run_folder='RTG_021',
+            inherited_manifest=lineage_b
+        )
+
+        self.assertEqual(
+            [entry['run_id'] for entry in branch_lineage['source_runs']],
+            ['RTG_020', 'RTG_021']
+        )
+        self.assertNotIn('RTG_022', str(branch_lineage))
+
+    def test_lineage_manifest_is_immutable_and_legacy_absence_is_supported(self):
+        with TemporaryDirectory() as temporary_directory:
+            self.assertIsNone(
+                read_run_context_lineage_manifest(temporary_directory)
+            )
+            manifest = build_import_run_context_lineage_manifest(
+                current_run_id='RTG_021',
+                source_run_id='RTG_020',
+                source_checkpoint_sha256='a' * 64,
+                source_checkpoint_stage='final',
+                source_checkpoint_filename='model_final.zip',
+                import_method='manual_inbox'
+            )
+            manifest_path = write_run_context_lineage_manifest(
+                temporary_directory,
+                manifest
+            )
+
+            self.assertTrue(Path(manifest_path).is_file())
+            self.assertEqual(
+                read_run_context_lineage_manifest(temporary_directory),
+                manifest
+            )
+            with self.assertRaisesRegex(ModelCheckpointError, 'already exists'):
+                write_run_context_lineage_manifest(
+                    temporary_directory,
+                    manifest
+                )
+
+    def test_lineage_rejects_conflicting_duplicate_run_identity(self):
+        manifest = {
+            'schema_version': 1,
+            'current_run_id': 'RTG_022',
+            'direct_import': {
+                'source_run_id': 'RTG_021',
+                'source_checkpoint_sha256': 'b' * 64,
+                'import_method': 'existing_output_run'
+            },
+            'source_runs': [
+                {
+                    'run_id': 'RTG_020',
+                    'run_folder': 'RTG_020',
+                    'checkpoint_filename': 'model_final.zip',
+                    'checkpoint_sha256': 'a' * 64,
+                    'checkpoint_stage': 'final',
+                    'import_method': 'existing_output_run',
+                    'parent_run_id': None
+                },
+                {
+                    'run_id': 'RTG_020',
+                    'run_folder': 'RTG_020',
+                    'checkpoint_filename': 'model_final.zip',
+                    'checkpoint_sha256': 'c' * 64,
+                    'checkpoint_stage': 'final',
+                    'import_method': 'existing_output_run',
+                    'parent_run_id': None
+                }
+            ]
+        }
+
+        with self.assertRaisesRegex(ModelCheckpointError, 'conflicting'):
+            validate_run_context_lineage_manifest(manifest)
 
     def test_import_rejects_missing_or_multiple_packages(self):
         with TemporaryDirectory() as temporary_directory:

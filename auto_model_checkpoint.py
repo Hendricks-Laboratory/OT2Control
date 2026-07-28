@@ -47,6 +47,16 @@ _MAX_UNCOMPRESSED_PACKAGE_BYTES = 256 * 1024 * 1024
 IMPORT_INBOX_DIRECTORY_NAME = 'Import_Here'
 IMPORTED_ARCHIVE_DIRECTORY_NAME = 'Imported_Archives'
 
+# A model checkpoint contains the numeric state required to rebuild a GP.  An
+# imported run may additionally record a *flat* lineage of the prior runs
+# whose data informed that state.  This lightweight manifest deliberately
+# contains identities and checksums only: raw scan/CSV collection and
+# cross-run plotting are later stages, not a hidden side effect of model
+# restoration.
+IMPORTED_RUN_CONTEXT_DIRECTORY_NAME = 'Imported_Run_Context'
+RUN_CONTEXT_LINEAGE_FILENAME = 'lineage_manifest.json'
+RUN_CONTEXT_LINEAGE_SCHEMA_VERSION = 1
+
 
 class ModelCheckpointError(ValueError):
     '''Raised when a checkpoint cannot be safely written or read.'''
@@ -55,6 +65,30 @@ class ModelCheckpointError(ValueError):
 def _sha256(payload):
     '''Returns the SHA-256 digest for one bytes payload.'''
     return hashlib.sha256(payload).hexdigest()
+
+
+def get_model_checkpoint_file_sha256(checkpoint_path):
+    '''Returns the SHA-256 identity of one validated checkpoint archive.
+
+    The package-internal integrity file protects its individual payloads.
+    This archive-level digest additionally gives import lineage a stable,
+    human-auditable identity without loading or serializing live model state.
+    '''
+    checkpoint_path = os.fspath(checkpoint_path)
+    digest = hashlib.sha256()
+    try:
+        with open(checkpoint_path, 'rb') as checkpoint_file:
+            while True:
+                chunk = checkpoint_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError as exc:
+        raise ModelCheckpointError(
+            'Checkpoint archive cannot be hashed: {}.'.format(exc)
+        ) from exc
+
+    return digest.hexdigest()
 
 
 def _json_safe(value):
@@ -356,6 +390,7 @@ def prepare_model_checkpoint_import_from_path(
         )
 
     checkpoint = read_model_checkpoint(source_path)
+    source_checkpoint_sha256 = get_model_checkpoint_file_sha256(source_path)
 
     archive_directory = os.path.join(
         checkpoint_directory,
@@ -379,13 +414,412 @@ def prepare_model_checkpoint_import_from_path(
             .format(exc)
         ) from exc
 
+    archived_checkpoint_sha256 = get_model_checkpoint_file_sha256(archive_path)
+    if archived_checkpoint_sha256 != source_checkpoint_sha256:
+        raise ModelCheckpointError(
+            'Archived checkpoint checksum differs from the validated source '
+            'package.'
+        )
+
     checkpoint['source_checkpoint_path'] = os.path.abspath(source_path)
     checkpoint['archived_checkpoint_path'] = os.path.abspath(archive_path)
+    checkpoint['source_checkpoint_sha256'] = source_checkpoint_sha256
+    checkpoint['archived_checkpoint_sha256'] = archived_checkpoint_sha256
     checkpoint['import_method'] = import_method
     checkpoint['import_source_metadata'] = _json_safe(
         source_metadata if source_metadata is not None else {}
     )
     return checkpoint
+
+
+def _validate_run_context_identifier(value, field_name):
+    '''Returns one non-empty lineage identifier without treating it as a path.'''
+    normalized_value = str(value).strip()
+    if not normalized_value:
+        raise ModelCheckpointError(
+            'Run-context lineage {} must be a non-empty string.'.format(
+                field_name
+            )
+        )
+    return normalized_value
+
+
+def _validate_run_context_folder_name(folder_name):
+    '''Returns an optional safe output-folder basename for one lineage row.'''
+    if folder_name is None:
+        return None
+
+    normalized_folder = str(folder_name).strip()
+    if not normalized_folder:
+        return None
+
+    if (
+        normalized_folder in ('.', '..')
+        or os.path.basename(normalized_folder) != normalized_folder
+    ):
+        raise ModelCheckpointError(
+            'Run-context lineage run_folder must be one output-folder name, '
+            'not a path.'
+        )
+    return normalized_folder
+
+
+def _validate_run_context_sha256(value):
+    '''Returns one normalized archive SHA-256 digest for lineage identity.'''
+    normalized_value = str(value).strip().lower()
+    if re.fullmatch(r'[0-9a-f]{64}', normalized_value) is None:
+        raise ModelCheckpointError(
+            'Run-context lineage checkpoint_sha256 must be a SHA-256 digest.'
+        )
+    return normalized_value
+
+
+def _normalize_run_context_entry(entry):
+    '''Validates one flat, non-path-bearing imported-run lineage entry.'''
+    if not isinstance(entry, dict):
+        raise ModelCheckpointError(
+            'Run-context lineage source_runs entries must be dictionaries.'
+        )
+
+    checkpoint_filename = str(entry.get('checkpoint_filename', '')).strip()
+    if (
+        not checkpoint_filename
+        or os.path.basename(checkpoint_filename) != checkpoint_filename
+        or not checkpoint_filename.lower().endswith('.zip')
+    ):
+        raise ModelCheckpointError(
+            'Run-context lineage checkpoint_filename must be one ZIP '
+            'basename.'
+        )
+
+    parent_run_id = entry.get('parent_run_id')
+    if parent_run_id is not None:
+        parent_run_id = _validate_run_context_identifier(
+            parent_run_id,
+            'parent_run_id'
+        )
+
+    checkpoint_stage = str(entry.get('checkpoint_stage', '')).strip()
+    import_method = str(entry.get('import_method', '')).strip()
+    if not checkpoint_stage or not import_method:
+        raise ModelCheckpointError(
+            'Run-context lineage entries must record checkpoint_stage and '
+            'import_method.'
+        )
+
+    return {
+        'run_id': _validate_run_context_identifier(
+            entry.get('run_id'),
+            'run_id'
+        ),
+        'run_folder': _validate_run_context_folder_name(
+            entry.get('run_folder')
+        ),
+        'checkpoint_filename': checkpoint_filename,
+        'checkpoint_sha256': _validate_run_context_sha256(
+            entry.get('checkpoint_sha256')
+        ),
+        'checkpoint_stage': checkpoint_stage,
+        'import_method': import_method,
+        'parent_run_id': parent_run_id
+    }
+
+
+def _deduplicate_run_context_entries(entries):
+    '''Returns flat lineage entries once, rejecting conflicting run identity.'''
+    normalized_entries = []
+    entries_by_run_id = {}
+
+    for entry in entries:
+        normalized_entry = _normalize_run_context_entry(entry)
+        run_id = normalized_entry['run_id']
+        previous_entry = entries_by_run_id.get(run_id)
+        if previous_entry is None:
+            entries_by_run_id[run_id] = normalized_entry
+            normalized_entries.append(normalized_entry)
+            continue
+
+        if (
+            previous_entry['checkpoint_sha256']
+            != normalized_entry['checkpoint_sha256']
+        ):
+            raise ModelCheckpointError(
+                'Run-context lineage contains conflicting checkpoint '
+                'identities for run {!r}.'.format(run_id)
+            )
+
+        # Identical run/checkpoint entries can occur when a legacy source was
+        # manually reconstructed.  Keep the earliest entry so the flattened
+        # lineage remains stable rather than duplicating a physical run.
+
+    return normalized_entries
+
+
+def validate_run_context_lineage_manifest(manifest):
+    '''Validates and normalizes one import-only flat lineage manifest.
+
+    A manifest lists *prior* source runs only.  It deliberately excludes the
+    run that owns the manifest; a future continuation appends that source run
+    exactly once.  This is what prevents six sequential imports from becoming
+    nested or double-counted.
+    '''
+    if not isinstance(manifest, dict):
+        raise ModelCheckpointError(
+            'Run-context lineage manifest must be a dictionary.'
+        )
+
+    if manifest.get('schema_version') != RUN_CONTEXT_LINEAGE_SCHEMA_VERSION:
+        raise ModelCheckpointError(
+            'Run-context lineage manifest has an unsupported schema version.'
+        )
+
+    source_runs = manifest.get('source_runs')
+    if not isinstance(source_runs, list):
+        raise ModelCheckpointError(
+            'Run-context lineage manifest source_runs must be a list.'
+        )
+
+    direct_import = manifest.get('direct_import')
+    if not isinstance(direct_import, dict):
+        raise ModelCheckpointError(
+            'Run-context lineage manifest must record direct_import.'
+        )
+
+    normalized_direct_import = {
+        'source_run_id': _validate_run_context_identifier(
+            direct_import.get('source_run_id'),
+            'direct_import.source_run_id'
+        ),
+        'source_checkpoint_sha256': _validate_run_context_sha256(
+            direct_import.get('source_checkpoint_sha256')
+        ),
+        'import_method': str(direct_import.get('import_method', '')).strip()
+    }
+    if not normalized_direct_import['import_method']:
+        raise ModelCheckpointError(
+            'Run-context lineage direct_import must record import_method.'
+        )
+
+    normalized_manifest = {
+        'schema_version': RUN_CONTEXT_LINEAGE_SCHEMA_VERSION,
+        'current_run_id': _validate_run_context_identifier(
+            manifest.get('current_run_id'),
+            'current_run_id'
+        ),
+        'direct_import': normalized_direct_import,
+        'source_runs': _deduplicate_run_context_entries(source_runs)
+    }
+
+    if (
+        normalized_manifest['current_run_id']
+        == normalized_direct_import['source_run_id']
+    ):
+        raise ModelCheckpointError(
+            'Run-context lineage cannot import a checkpoint from its own '
+            'run identity.'
+        )
+
+    entries_by_run_id = {
+        entry['run_id']: entry
+        for entry in normalized_manifest['source_runs']
+    }
+    direct_source_entry = entries_by_run_id.get(
+        normalized_direct_import['source_run_id']
+    )
+    if direct_source_entry is None:
+        raise ModelCheckpointError(
+            'Run-context lineage direct_import source is absent from '
+            'source_runs.'
+        )
+    if (
+        direct_source_entry['checkpoint_sha256']
+        != normalized_direct_import['source_checkpoint_sha256']
+    ):
+        raise ModelCheckpointError(
+            'Run-context lineage direct_import checksum does not match its '
+            'source_runs entry.'
+        )
+
+    for entry in normalized_manifest['source_runs']:
+        parent_run_id = entry['parent_run_id']
+        if parent_run_id is not None and parent_run_id not in entries_by_run_id:
+            raise ModelCheckpointError(
+                'Run-context lineage parent {!r} is absent from source_runs.'
+                .format(parent_run_id)
+            )
+
+    return normalized_manifest
+
+
+def get_imported_run_context_directory(run_output_directory):
+    '''Returns and creates one run's import-only context directory.'''
+    context_directory = os.path.join(
+        os.fspath(run_output_directory),
+        IMPORTED_RUN_CONTEXT_DIRECTORY_NAME
+    )
+    os.makedirs(context_directory, exist_ok=True)
+    return os.path.abspath(context_directory)
+
+
+def read_run_context_lineage_manifest(run_output_directory):
+    '''Reads an existing source run's lineage manifest, if it has one.
+
+    A missing file is expected for runs created before this optional feature
+    and is represented by ``None``.  A present but malformed file fails
+    closed rather than allowing an ambiguous history to drive later plotting.
+    '''
+    manifest_path = os.path.join(
+        os.fspath(run_output_directory),
+        IMPORTED_RUN_CONTEXT_DIRECTORY_NAME,
+        RUN_CONTEXT_LINEAGE_FILENAME
+    )
+    if not os.path.exists(manifest_path):
+        return None
+    if not os.path.isfile(manifest_path):
+        raise ModelCheckpointError(
+            'Run-context lineage manifest is not a file: {!r}.'.format(
+                manifest_path
+            )
+        )
+
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as manifest_file:
+            manifest = json.load(manifest_file)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ModelCheckpointError(
+            'Run-context lineage manifest cannot be read safely: {}.'
+            .format(exc)
+        ) from exc
+
+    return validate_run_context_lineage_manifest(manifest)
+
+
+def build_import_run_context_lineage_manifest(
+    current_run_id,
+    source_run_id,
+    source_checkpoint_sha256,
+    source_checkpoint_stage,
+    source_checkpoint_filename,
+    import_method,
+    source_run_folder=None,
+    inherited_manifest=None
+):
+    '''Builds the flat prior-run lineage for one checkpoint import.
+
+    ``inherited_manifest`` is the source run's own manifest when available.
+    Its source rows are copied, then the source run itself is appended once.
+    Manual checkpoint imports pass ``None`` and correctly become a verified
+    model-only lineage with no assumed filesystem context.
+    '''
+    current_run_id = _validate_run_context_identifier(
+        current_run_id,
+        'current_run_id'
+    )
+    source_run_id = _validate_run_context_identifier(
+        source_run_id,
+        'source_run_id'
+    )
+    source_checkpoint_sha256 = _validate_run_context_sha256(
+        source_checkpoint_sha256
+    )
+    source_checkpoint_stage = str(source_checkpoint_stage).strip()
+    import_method = str(import_method).strip()
+    source_checkpoint_filename = str(source_checkpoint_filename).strip()
+    if not source_checkpoint_stage or not import_method:
+        raise ModelCheckpointError(
+            'Run-context lineage requires checkpoint_stage and import_method.'
+        )
+    if (
+        not source_checkpoint_filename
+        or os.path.basename(source_checkpoint_filename)
+        != source_checkpoint_filename
+        or not source_checkpoint_filename.lower().endswith('.zip')
+    ):
+        raise ModelCheckpointError(
+            'Run-context lineage requires one ZIP checkpoint filename.'
+        )
+
+    inherited_source_runs = []
+    parent_run_id = None
+    if inherited_manifest is not None:
+        normalized_inherited = validate_run_context_lineage_manifest(
+            inherited_manifest
+        )
+        if normalized_inherited['current_run_id'] != source_run_id:
+            raise ModelCheckpointError(
+                'Source run-context lineage identifies {!r}, but the selected '
+                'checkpoint identifies {!r}.'.format(
+                    normalized_inherited['current_run_id'],
+                    source_run_id
+                )
+            )
+        inherited_source_runs = normalized_inherited['source_runs']
+        parent_run_id = normalized_inherited['direct_import'][
+            'source_run_id'
+        ]
+
+    source_entry = {
+        'run_id': source_run_id,
+        'run_folder': _validate_run_context_folder_name(source_run_folder),
+        'checkpoint_filename': source_checkpoint_filename,
+        'checkpoint_sha256': source_checkpoint_sha256,
+        'checkpoint_stage': source_checkpoint_stage,
+        'import_method': import_method,
+        'parent_run_id': parent_run_id
+    }
+
+    return validate_run_context_lineage_manifest({
+        'schema_version': RUN_CONTEXT_LINEAGE_SCHEMA_VERSION,
+        'current_run_id': current_run_id,
+        'direct_import': {
+            'source_run_id': source_run_id,
+            'source_checkpoint_sha256': source_checkpoint_sha256,
+            'import_method': import_method
+        },
+        'source_runs': inherited_source_runs + [source_entry]
+    })
+
+
+def write_run_context_lineage_manifest(run_output_directory, manifest):
+    '''Writes one immutable import-lineage manifest without overwriting it.'''
+    normalized_manifest = validate_run_context_lineage_manifest(manifest)
+    context_directory = get_imported_run_context_directory(run_output_directory)
+    destination_path = os.path.join(
+        context_directory,
+        RUN_CONTEXT_LINEAGE_FILENAME
+    )
+    if os.path.exists(destination_path):
+        raise ModelCheckpointError(
+            'Run-context lineage manifest already exists: {!r}.'.format(
+                destination_path
+            )
+        )
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='wb',
+            prefix='.auto_run_context_lineage_',
+            suffix='.tmp',
+            dir=context_directory,
+            delete=False
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            temporary_file.write(_json_bytes(normalized_manifest))
+
+        os.replace(temporary_path, destination_path)
+        temporary_path = None
+    except OSError as exc:
+        raise ModelCheckpointError(
+            'Run-context lineage manifest could not be written: {}.'.format(
+                exc
+            )
+        ) from exc
+    finally:
+        if temporary_path is not None and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+    return os.path.abspath(destination_path)
 
 
 def write_model_checkpoint_import_provenance(checkpoint_directory, provenance):

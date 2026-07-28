@@ -17,8 +17,12 @@ import unittest
 
 from auto_model_checkpoint import (
     ModelCheckpointError,
+    build_import_run_context_lineage_manifest,
+    get_model_checkpoint_file_sha256,
     read_model_checkpoint,
+    read_run_context_lineage_manifest,
     write_model_checkpoint_import_provenance,
+    write_run_context_lineage_manifest,
     write_model_checkpoint
 )
 
@@ -5276,6 +5280,8 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 '_auto_model_checkpoint_saving_enabled',
                 '_get_auto_model_checkpoint_directory',
                 '_get_auto_model_checkpoint_output_root',
+                '_read_imported_auto_run_context_lineage',
+                '_write_imported_auto_run_context_lineage',
                 '_list_existing_auto_model_checkpoint_files',
                 '_resolve_auto_model_checkpoint_existing_source',
                 '_checkpoint_float_values_match',
@@ -5289,8 +5295,17 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             extra_namespace={
                 'datetime': datetime,
                 'ModelCheckpointError': ModelCheckpointError,
+                'build_import_run_context_lineage_manifest': (
+                    build_import_run_context_lineage_manifest
+                ),
+                'read_run_context_lineage_manifest': (
+                    read_run_context_lineage_manifest
+                ),
                 'write_model_checkpoint_import_provenance': (
                     write_model_checkpoint_import_provenance
+                ),
+                'write_run_context_lineage_manifest': (
+                    write_run_context_lineage_manifest
                 ),
                 'write_model_checkpoint': write_model_checkpoint
             }
@@ -5419,6 +5434,24 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             checkpoint = read_model_checkpoint(source_path)
             checkpoint['source_checkpoint_path'] = source_path
             checkpoint['archived_checkpoint_path'] = source_path
+            checkpoint['source_checkpoint_sha256'] = (
+                get_model_checkpoint_file_sha256(source_path)
+            )
+
+            # A continuation writes its own immutable context under a new
+            # output directory; importing a package back into the run that
+            # produced it is intentionally rejected as self-lineage.
+            continuation_directory = os.path.join(
+                temporary_directory,
+                'DEBUGRTG_checkpoint_continuation'
+            )
+            os.makedirs(continuation_directory)
+            controller.out_path = continuation_directory
+            controller.model_checkpoint_path = os.path.join(
+                continuation_directory,
+                'Model_Checkpoints'
+            )
+            controller.rxn_sheet_name = 'DEBUGRTG_checkpoint_continuation'
 
             controller.robo_params['auto_model_checkpoint_mode'] = 'import'
             controller._pending_auto_model_checkpoint = checkpoint
@@ -5490,6 +5523,24 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
                 )
             )
             self.assertTrue(controller.experiment_data.empty)
+            self.assertEqual(
+                controller.imported_auto_model_checkpoint[
+                    'lineage_source_run_count'
+                ],
+                1
+            )
+            self.assertFalse(
+                controller.imported_auto_model_checkpoint[
+                    'lineage_context_available'
+                ]
+            )
+            self.assertTrue(
+                Path(
+                    controller.imported_auto_model_checkpoint[
+                        'lineage_manifest_path'
+                    ]
+                ).is_file()
+            )
 
     def test_import_rejects_changed_normalized_bounds(self):
         with TemporaryDirectory() as temporary_directory:
@@ -5509,6 +5560,9 @@ class AutoModelCheckpointControllerTests(unittest.TestCase):
             checkpoint = read_model_checkpoint(checkpoint_path)
             checkpoint['source_checkpoint_path'] = checkpoint_path
             checkpoint['archived_checkpoint_path'] = checkpoint_path
+            checkpoint['source_checkpoint_sha256'] = (
+                get_model_checkpoint_file_sha256(checkpoint_path)
+            )
 
             controller.robo_params['auto_model_checkpoint_mode'] = 'import'
             controller._pending_auto_model_checkpoint = checkpoint
