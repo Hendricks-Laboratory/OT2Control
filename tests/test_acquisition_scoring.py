@@ -2780,6 +2780,55 @@ class VariableReagentStockConcentrationTests(unittest.TestCase):
         )
 
 
+class OptimizerVariableReagentStockConcentrationTests(unittest.TestCase):
+    '''Regression coverage for optimizer-side backup source lookup.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Model = _load_optimization_model_methods([
+            '_get_variable_reagent_stock_conc'
+        ])
+
+    def _build_model(self, reagent_rows, reagent_index):
+        model = self.Model()
+        model.reagent_info = pd.DataFrame(
+            reagent_rows,
+            index=reagent_index
+        )
+        return model
+
+    def test_same_stock_backup_tubes_return_shared_concentration(self):
+        model = self._build_model(
+            {
+                'conc': [0.375, 0.375, 0.375],
+                'deck_pos': [2, 2, 2],
+                'loc': ['A1', 'A2', 'B1']
+            },
+            ['silver_nitrate'] * 3
+        )
+
+        self.assertEqual(
+            model._get_variable_reagent_stock_conc('silver_nitrate'),
+            0.375
+        )
+
+    def test_different_stock_backup_tubes_fail_before_recipe_calculation(self):
+        model = self._build_model(
+            {
+                'conc': [6.25, 3.125],
+                'deck_pos': [3, 3],
+                'loc': ['A1', 'A2']
+            },
+            ['sodium_borohydride', 'sodium_borohydride']
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'different stock concentrations'
+        ):
+            model._get_variable_reagent_stock_conc('sodium_borohydride')
+
+
 class SelectiveTrueZeroControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
