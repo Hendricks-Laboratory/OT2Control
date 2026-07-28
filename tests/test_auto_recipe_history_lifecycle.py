@@ -24,10 +24,21 @@ def _load_auto_plot_suite():
             and node.name == '_generate_auto_plot_suite'
         )
     )
+    imported_run_plot_suite = next(
+        node for node in auto_contr.body
+        if (
+            isinstance(node, ast.FunctionDef)
+            and node.name == '_generate_imported_auto_cross_run_plot_suite'
+        )
+    )
     module = ast.fix_missing_locations(ast.Module(
         body=[ast.ClassDef(
-            name='RecipeHistoryLifecycle',
-            bases=[], keywords=[], body=[coordinator], decorator_list=[]
+            name='RecipeHistoryLifecycle', bases=[], keywords=[],
+            # The final coordinator invokes the imported-run plot suite even
+            # for ordinary runs. Include its safe no-import early-return path
+            # in this hardware-free fixture so the lifecycle test mirrors the
+            # real AutoContr method set.
+            body=[coordinator, imported_run_plot_suite], decorator_list=[]
         )],
         type_ignores=[]
     ))

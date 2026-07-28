@@ -23436,7 +23436,7 @@ class AutoContr(Controller):
         print('<<controller>> executing batch {}'.format(self.batch_num))
 
         # Generate initial data which is a list of recipes (normalized)
-        print("<<controller>> generating maximin Latin hypercube initial design")
+        print("<<controller>> generating volume-feasible maximin initial design")
         X_initial = model.generate_initial_design()
         if (
             self.robo_params.get('auto_terminal_verbosity', 'standard')

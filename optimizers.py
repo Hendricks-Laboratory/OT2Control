@@ -618,20 +618,198 @@ class OptimizationModel():
             raise RuntimeError("Failed to generate a maximin Latin hypercube design.")
 
         return best_design
+
+    def _generate_all_on_volume_feasible_seed_pool(self, target_pool_size):
+        '''
+        Generates a physically feasible normalized candidate pool for an
+        all-ON Auto seed design.
+
+        The ordinary all-ON search space is not a rectangular hypercube:
+        variable transfers and water top-off must share one finite reaction
+        volume. Rejection sampling uniformly from normalized coordinates is
+        therefore increasingly inefficient as more variable reagents are
+        added. This helper samples directly from the executable transfer-volume
+        simplex instead.
+
+        Each variable begins at its configured lower executable transfer
+        volume (at least 5 uL), and water begins at 5 uL. A Dirichlet draw
+        distributes the remaining volume across the variable reagents and
+        water. The resulting candidates are converted back into the existing
+        normalized model coordinates before maximin subset selection.
+
+        This is intentionally used only when true-zero search is disabled.
+        True-zero mode retains its existing mask-aware rejection path because
+        its discrete ON/OFF combinations require separate mask semantics.
+
+        params:
+            int target_pool_size:
+                Number of volume-feasible normalized candidates to prepare.
+
+        returns:
+            np.ndarray:
+                Candidate matrix with shape ``target_pool_size x dimensions``.
+        '''
+        if (
+            self.min_conc is None
+            or self.max_conc is None
+            or self.total_volume is None
+            or self.fixed_reagent_volumes is None
+        ):
+            raise ValueError(
+                "Volume-feasible seed generation requires min_conc, max_conc, "
+                "total_volume, and fixed_reagent_volumes."
+            )
+
+        target_pool_size = int(target_pool_size)
+        if target_pool_size < 1:
+            raise ValueError(
+                "target_pool_size must be at least 1 for Auto seed generation."
+            )
+
+        n_dimensions = self._get_dimension()
+        if n_dimensions < 1:
+            raise ValueError(
+                "Volume-feasible seed generation requires at least one "
+                "variable reagent."
+            )
+
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(n_dimensions)
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(n_dimensions)
+        total_volume = float(self.total_volume)
+        fixed_volume_total = float(
+            sum(float(volume) for volume in self.fixed_reagent_volumes.values())
+        )
+
+        if (
+            not math.isfinite(total_volume)
+            or total_volume <= 0.0
+            or not math.isfinite(fixed_volume_total)
+            or fixed_volume_total < 0.0
+        ):
+            raise ValueError(
+                "Auto seed generation requires a positive finite reaction "
+                "volume and finite nonnegative fixed reagent volumes."
+            )
+
+        stock_concentrations = np.asarray([
+            self._get_variable_reagent_stock_conc(reagent_name)
+            for reagent_name in self.variable_reagents
+        ], dtype=float)
+
+        if (
+            not np.all(np.isfinite(stock_concentrations))
+            or np.any(stock_concentrations <= 0.0)
+        ):
+            raise ValueError(
+                "Auto seed generation requires finite positive variable "
+                "reagent stock concentrations."
+            )
+
+        concentration_spans = max_conc - min_conc
+        if (
+            not np.all(np.isfinite(min_conc))
+            or not np.all(np.isfinite(max_conc))
+            or np.any(concentration_spans <= 0.0)
+        ):
+            raise ValueError(
+                "Auto seed generation requires finite variable concentration "
+                "bounds with positive spans."
+            )
+
+        # A model bound can be more restrictive than the robot's 5 uL
+        # executable minimum. Respect whichever lower transfer is larger.
+        lower_transfer_volumes = np.maximum(
+            min_conc * total_volume / stock_concentrations,
+            5.0
+        )
+        upper_transfer_volumes = (
+            max_conc * total_volume / stock_concentrations
+        )
+
+        volume_tolerance = 1e-9
+        if np.any(
+            upper_transfer_volumes
+            < lower_transfer_volumes - volume_tolerance
+        ):
+            raise ValueError(
+                "A variable reagent's configured maximum concentration cannot "
+                "reach its executable lower transfer bound."
+            )
+
+        minimum_water_volume = 5.0
+        distributable_volume = (
+            total_volume
+            - fixed_volume_total
+            - float(lower_transfer_volumes.sum())
+            - minimum_water_volume
+        )
+
+        if distributable_volume < -volume_tolerance:
+            raise ValueError(
+                "The configured fixed volumes and executable variable-reagent "
+                "minimums leave less than the required 5 uL water top-off. "
+                "Reduce fixed or variable minimum volumes, or increase the "
+                "configured final reaction volume."
+            )
+
+        distributable_volume = max(0.0, distributable_volume)
+
+        # The direct simplex construction is valid only when an individual
+        # variable's configured upper bound can accommodate the entire free
+        # volume. This holds for controller-generated all-ON Auto bounds. A
+        # custom restrictive upper bound retains the conservative rejection
+        # path below rather than receiving a biased partial-simplex sample.
+        if np.any(
+            upper_transfer_volumes
+            < lower_transfer_volumes + distributable_volume - volume_tolerance
+        ):
+            return None
+
+        allocations = np.random.dirichlet(
+            np.ones(n_dimensions + 1),
+            size=target_pool_size
+        ) * distributable_volume
+
+        variable_transfer_volumes = (
+            lower_transfer_volumes.reshape(1, n_dimensions)
+            + allocations[:, :n_dimensions]
+        )
+        candidate_concentrations = (
+            variable_transfer_volumes
+            * stock_concentrations.reshape(1, n_dimensions)
+            / total_volume
+        )
+        candidate_pool = (
+            (candidate_concentrations - min_conc.reshape(1, n_dimensions))
+            / concentration_spans.reshape(1, n_dimensions)
+        )
+
+        if (
+            not np.all(np.isfinite(candidate_pool))
+            or np.any(candidate_pool < -volume_tolerance)
+            or np.any(candidate_pool > 1.0 + volume_tolerance)
+        ):
+            raise RuntimeError(
+                "Direct volume-feasible seed generation produced a candidate "
+                "outside the normalized Auto bounds."
+            )
+
+        return np.clip(candidate_pool, 0.0, 1.0)
     
     def generate_initial_design(self):
         '''
         Generates the initial Auto experiment design.
 
-        The design is generated in normalized 0-1 model space. Candidate points
-        are repaired according to the true-zero rule and checked against the
-        well-volume constraint before being considered for the initial design.
+        The design is returned in normalized 0-1 model space. When every
+        variable reagent is required ON, the candidate pool is sampled directly
+        from the executable transfer-volume simplex. This avoids repeatedly
+        proposing overflow recipes from the much larger rectangular normalized
+        search space. When true-zero search is enabled, the existing
+        mask-aware rejection path remains in place.
 
-        Instead of rejecting an entire Latin hypercube design when one point is
-        volume-infeasible, this method builds a large pool of feasible candidate
-        points and selects a maximin subset from that pool. This is more robust
-        when independent reagent maxima create a rectangular search space whose
-        high/high corners may physically overfill the reaction well.
+        In both paths, a maximin subset is selected from the feasible candidate
+        pool so early physical recipes are broadly distributed across the
+        executable design space.
 
         returns:
             np.ndarray:
@@ -645,49 +823,101 @@ class OptimizationModel():
         target_pool_size = max(n_points * pool_multiplier, 1000)
         max_attempts = target_pool_size * 20
 
-        feasible_points = []
+        terminal_verbosity = getattr(self, 'terminal_verbosity', 'standard')
+        feasible_points = None
         attempts = 0
 
-        while len(feasible_points) < target_pool_size and attempts < max_attempts:
-            attempts += 1
-
-            candidate = np.random.random(n_dimensions)
-            repaired_candidate = self._repair_normalized_candidate_for_true_zero(
-                candidate
-            )
-
-            # If true-zero is enabled, exclude the all-off variable-reagent
-            # condition from Auto seed recipes. The current workflow already
-            # performs blank/background subtraction, so an all-variable-off
-            # Auto recipe is usually redundant.
-            all_reagents_zero_eligible = (
-                len(
-                    getattr(
-                        self,
-                        'true_zero_reagent_indices',
-                        list(range(n_dimensions))
-                    )
-                ) == n_dimensions
-            )
-
-            if (
-                self.allow_true_zero
-                and all_reagents_zero_eligible
-                and np.allclose(
-                    repaired_candidate,
-                    0.0,
-                    rtol=0,
-                    atol=1e-9
+        if not self.allow_true_zero:
+            if terminal_verbosity != 'essential':
+                print(
+                    "<<optimizer>> generating volume-feasible maximin seed "
+                    f"pool directly: points={n_points}, dimensions={n_dimensions}, "
+                    f"target_candidates={target_pool_size}"
                 )
-            ):
-                continue
 
-            volume_balance = self._get_candidate_volume_balance(
-                repaired_candidate
+            feasible_points = self._generate_all_on_volume_feasible_seed_pool(
+                target_pool_size
             )
 
-            if volume_balance['volume_feasible']:
-                feasible_points.append(repaired_candidate)
+            if feasible_points is not None:
+                attempts = target_pool_size
+
+                if terminal_verbosity != 'essential':
+                    print(
+                        "<<optimizer>> seed candidate pool prepared: "
+                        f"{len(feasible_points)} / {target_pool_size} "
+                        "volume-feasible candidates"
+                    )
+
+        if feasible_points is None:
+            # True-zero masks and nonstandard restrictive upper bounds retain
+            # the established feasibility-filtered path. Progress is throttled
+            # to at most ten routine messages so a large seed search remains
+            # visibly active without flooding terminal output.
+            feasible_points = []
+            progress_attempt_interval = max(1000, max_attempts // 10)
+
+            if terminal_verbosity != 'essential':
+                print(
+                    "<<optimizer>> generating volume-feasible maximin seed "
+                    f"pool by feasibility filtering: points={n_points}, "
+                    f"dimensions={n_dimensions}, target_candidates="
+                    f"{target_pool_size}, max_attempts={max_attempts}"
+                )
+
+            while (
+                len(feasible_points) < target_pool_size
+                and attempts < max_attempts
+            ):
+                attempts += 1
+
+                candidate = np.random.random(n_dimensions)
+                repaired_candidate = (
+                    self._repair_normalized_candidate_for_true_zero(candidate)
+                )
+
+                # If true-zero is enabled, exclude the all-off variable-reagent
+                # condition from Auto seed recipes. The current workflow already
+                # performs blank/background subtraction, so an all-variable-off
+                # Auto recipe is usually redundant.
+                all_reagents_zero_eligible = (
+                    len(
+                        getattr(
+                            self,
+                            'true_zero_reagent_indices',
+                            list(range(n_dimensions))
+                        )
+                    ) == n_dimensions
+                )
+
+                if (
+                    self.allow_true_zero
+                    and all_reagents_zero_eligible
+                    and np.allclose(
+                        repaired_candidate,
+                        0.0,
+                        rtol=0,
+                        atol=1e-9
+                    )
+                ):
+                    continue
+
+                volume_balance = self._get_candidate_volume_balance(
+                    repaired_candidate
+                )
+
+                if volume_balance['volume_feasible']:
+                    feasible_points.append(repaired_candidate)
+
+                if (
+                    terminal_verbosity != 'essential'
+                    and attempts % progress_attempt_interval == 0
+                ):
+                    print(
+                        "<<optimizer>> seed candidate pool progress: "
+                        f"attempts={attempts}/{max_attempts}, "
+                        f"feasible={len(feasible_points)}/{target_pool_size}"
+                    )
 
         if len(feasible_points) < n_points:
             raise RuntimeError(
@@ -698,6 +928,12 @@ class OptimizationModel():
             )
 
         feasible_points = np.asarray(feasible_points, dtype=float)
+
+        if terminal_verbosity != 'essential':
+            print(
+                "<<optimizer>> selecting maximin seed subset from "
+                f"{len(feasible_points)} volume-feasible candidates"
+            )
 
         # Greedy maximin selection from the feasible pool.
         # Start with the feasible point farthest from the center to encourage
@@ -742,7 +978,22 @@ class OptimizationModel():
 
         initial_design = feasible_points[selected_indices]
 
-        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+        # Retain the established exact feasibility calculator as the final
+        # optimizer-side guard for every selected seed recipe. The direct pool
+        # construction is algebraically feasible, but this check ensures it
+        # cannot diverge from controller-mirrored volume semantics.
+        for selected_candidate in initial_design:
+            selected_volume_balance = self._get_candidate_volume_balance(
+                selected_candidate
+            )
+
+            if not selected_volume_balance['volume_feasible']:
+                raise RuntimeError(
+                    "Maximin seed selection produced a volume-infeasible "
+                    "recipe after feasibility filtering."
+                )
+
+        if terminal_verbosity != 'essential':
             print(
                 "<<optimizer>> generated volume-feasible maximin initial "
                 f"design: points={n_points}, dimensions={n_dimensions}, "
@@ -750,7 +1001,7 @@ class OptimizationModel():
                 f"{self._minimum_pairwise_distance(initial_design):.6f}"
             )
 
-        if getattr(self, 'terminal_verbosity', 'standard') == 'diagnostic':
+        if terminal_verbosity == 'diagnostic':
             print(
                 "<<optimizer diagnostic>> feasible seed candidates="
                 f"{len(feasible_points)}, generation_attempts={attempts}"

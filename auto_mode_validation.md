@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-27
+**Updated through:** 2026-07-28
 
 > [!NOTE]
 > **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
@@ -98,7 +98,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 
 | Capability | Current status | Validation scope |
 |---|---|---|
-| Maximin initial design, cumulative GP history, and post-update plot refresh | Implemented | Synthetic cumulative-history and timing regression tests; controlled debug-output review |
+| Constraint-aware volume-feasible maximin initial design, cumulative GP history, and post-update plot refresh | Implemented | All-ON seed pools are directly sampled from the executable transfer-volume simplex; true-zero and restrictive custom-bound cases retain the mask-aware feasibility-filtered path. Synthetic five-variable volume, final-guard, cumulative-history, and timing regression tests; controlled debug-output review |
 | Physical recipe constraints: overflow, water top-off, 5 uL executable-transfer bounds, mixed masks, and all-off exclusion | Implemented | Isolated feasibility, mask, and controller-handoff tests |
 | `exploit`, `explore`, `balanced`, and `target_ei` acquisition modes | Implemented | Synthetic scoring and controller/optimizer integration tests; dry-debug review |
 | Selective true-zero variable-reagent masks | Implemented | Header normalization, controller-bound/repair, mask, and feasibility-overlay regression tests |

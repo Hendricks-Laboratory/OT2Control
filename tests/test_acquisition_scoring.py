@@ -2829,6 +2829,103 @@ class OptimizerVariableReagentStockConcentrationTests(unittest.TestCase):
             model._get_variable_reagent_stock_conc('sodium_borohydride')
 
 
+class ConstraintAwareInitialSeedDesignTests(unittest.TestCase):
+    '''Exercises direct all-ON volume-feasible Auto seed generation.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Model = _load_optimization_model_methods([
+            '_get_dimension',
+            '_generate_all_on_volume_feasible_seed_pool',
+            '_minimum_pairwise_distance',
+            'generate_initial_design'
+        ])
+
+    def _build_model(self):
+        model = self.Model()
+        model.variable_reagents = [
+            'trisodium_citrate',
+            'silver_nitrate',
+            'potassium_bromide',
+            'hydrogen_peroxide',
+            'sodium_borohydride'
+        ]
+        model.total_volume = 200.0
+        model.fixed_reagent_volumes = {}
+        model.allow_true_zero = False
+        model.initial_design_numdata = 6
+        model.terminal_verbosity = 'essential'
+
+        stock_concentrations = {
+            'trisodium_citrate': 12.5,
+            'silver_nitrate': 0.375,
+            'potassium_bromide': 0.01,
+            'hydrogen_peroxide': 50.0,
+            'sodium_borohydride': 6.25
+        }
+        model.min_conc = np.asarray([
+            stock_concentrations[name] * 5.0 / model.total_volume
+            for name in model.variable_reagents
+        ])
+        model.max_conc = np.asarray([
+            stock_concentrations[name]
+            for name in model.variable_reagents
+        ])
+        model._get_variable_reagent_stock_conc = (
+            lambda reagent_name: stock_concentrations[reagent_name]
+        )
+        return model, stock_concentrations
+
+    def test_direct_pool_is_five_dimensional_and_physically_executable(self):
+        model, stock_concentrations = self._build_model()
+        np.random.seed(20260728)
+
+        candidate_pool = model._generate_all_on_volume_feasible_seed_pool(3000)
+
+        self.assertEqual(candidate_pool.shape, (3000, 5))
+        self.assertTrue(np.all(np.isfinite(candidate_pool)))
+        self.assertTrue(np.all(candidate_pool >= 0.0))
+        self.assertTrue(np.all(candidate_pool <= 1.0))
+
+        concentrations = (
+            candidate_pool * (model.max_conc - model.min_conc)
+            + model.min_conc
+        )
+        transfer_volumes = np.column_stack([
+            concentrations[:, reagent_i] * model.total_volume
+            / stock_concentrations[reagent_name]
+            for reagent_i, reagent_name in enumerate(model.variable_reagents)
+        ])
+        water_volumes = model.total_volume - transfer_volumes.sum(axis=1)
+
+        self.assertTrue(np.all(transfer_volumes >= 5.0 - 1e-9))
+        self.assertTrue(np.all(water_volumes >= 5.0 - 1e-9))
+
+    def test_all_on_generator_is_used_and_selected_recipes_keep_final_guard(self):
+        model, _ = self._build_model()
+        generated_pool_sizes = []
+        original_generator = model._generate_all_on_volume_feasible_seed_pool
+
+        def tracked_generator(target_pool_size):
+            generated_pool_sizes.append(target_pool_size)
+            return original_generator(target_pool_size)
+
+        model._generate_all_on_volume_feasible_seed_pool = tracked_generator
+        checked_recipes = []
+        model._get_candidate_volume_balance = (
+            lambda candidate: checked_recipes.append(candidate.copy()) or {
+                'volume_feasible': True
+            }
+        )
+        np.random.seed(20260728)
+
+        initial_design = model.generate_initial_design()
+
+        self.assertEqual(generated_pool_sizes, [3000])
+        self.assertEqual(initial_design.shape, (6, 5))
+        self.assertEqual(len(checked_recipes), 6)
+
+
 class SelectiveTrueZeroControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
