@@ -121,6 +121,16 @@ class AutoLiveRunStateContractTests(unittest.TestCase):
         with self.assertRaisesRegex(LiveRunStateContractError, 'Invalid lifecycle'):
             assert_valid_lifecycle_transition(created, invalid_state)
 
+    def test_same_lifecycle_event_transition_is_revisioned_and_permitted(self):
+        created = make_initial_current_state(self.RUN_ID)
+        event_state = self._next_state(
+            created,
+            LIFECYCLE_CREATED,
+            last_event_sequence=1
+        )
+
+        assert_valid_lifecycle_transition(created, event_state)
+
     def test_faulted_partial_batch_cannot_resume_execution(self):
         created = make_initial_current_state(self.RUN_ID)
         ready = self._next_state(created, LIFECYCLE_READY_FOR_BATCH)

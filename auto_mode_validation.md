@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-28
+**Updated through:** 2026-07-29
 
 > [!NOTE]
 > **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
@@ -117,6 +117,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
 | Portable Auto model checkpoint packages (`save` and `import` modes) | Implemented | Hardware-free JSON/NumPy archive round-trip, integrity, manual inbox and prior-run source selection, immutable lineage copy/provenance, compatibility, fresh reconstruction, Header, and save-boundary tests |
+| Stage 1 controller-local live-run journal | Implemented; dry debug pending | For real configured Auto models only, writes immutable parsed input/Header/runtime snapshots, a SHA-256 manifest, atomic current state, and append-only JSONL lifecycle events before connection and at normal batch/finalization boundaries. It is local-only and fail-closed; it does not add cloud synchronization, Pi state, recovery prompts, or change scientific/model behavior. Python 3.9 contract, journal durability, failure-path, and static controller-placement tests passed. |
 | Import-only run-context lineage, tabular snapshots, final cross-run plots, and reporting | Implemented | Existing-output imports flatten and checksum-identify ancestor runs without nesting; they export de-duplicated native condition and well-level replicate CSV snapshots plus source-availability diagnostics. Final import-only plots provide separate current-run-only and cumulative-lineage λmax progress and replicate views from those flat snapshots, with run identity and provenance-aware semantics. The final report describes lineage scope, source availability, condition/replicate row counts, raw-scan deferral, and links the generated cross-run figures. Manual checkpoint imports remain model-only. Raw scan ingestion remains deferred. Python 3.9 isolated lineage, branching, duplicate-conflict, legacy, tabular-history, cross-run rendering, and report tests passed. |
 | Shared seed/optimizer λmax extraction | Implemented | The seed batch and every later optimizer or imported-continuation batch use one class-scoped blank-correction and scan-quality helper; isolated regression test prevents a seed-local helper scope failure |
 | SciPy boundary-status recovery | Implemented | Deterministic optimizer recovery test |

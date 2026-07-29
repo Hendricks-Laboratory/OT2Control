@@ -40,6 +40,8 @@ import datetime
 import sys
 import traceback
 import textwrap
+import subprocess
+import uuid
 
 from bidict import bidict
 import gspread
@@ -75,6 +77,18 @@ from auto_model_checkpoint import (
     write_model_checkpoint_import_provenance,
     write_run_context_lineage_manifest,
     write_model_checkpoint
+)
+from auto_live_run_journal import (
+    AutoLiveRunJournal,
+    AutoLiveRunJournalError
+)
+from auto_live_run_state import (
+    LIFECYCLE_EXECUTING_BATCH,
+    LIFECYCLE_FINALIZED,
+    LIFECYCLE_MEASURING_BATCH,
+    LIFECYCLE_PREFLIGHTING_BATCH,
+    LIFECYCLE_PROCESSING_BATCH,
+    LIFECYCLE_READY_FOR_BATCH
 )
 
 from heatmap import plate, heat_map
@@ -4877,6 +4891,178 @@ class AutoContr(Controller):
         self.auto_model_performance_rows = []
         self.auto_condition_counter = 0
         self.auto_model_checkpoint_paths = []
+        # Created only for the real configured Auto model at _run() entry.
+        # The ordinary preflight simulation deliberately writes no live-run
+        # recovery records.
+        self.auto_live_run_journal = None
+
+    def _get_auto_live_run_state_directory(self):
+        '''Returns the dedicated local state directory for this Auto run.'''
+        return os.path.join(self.out_path, 'Run_State')
+
+    def _get_auto_live_run_git_identity(self):
+        '''Returns non-secret source identity for the immutable run manifest.'''
+        repository_directory = os.path.dirname(os.path.abspath(__file__))
+
+        def read_git_value(arguments, fallback):
+            try:
+                return subprocess.check_output(
+                    arguments,
+                    cwd=repository_directory,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                ).strip() or fallback
+            except (OSError, subprocess.CalledProcessError):
+                return fallback
+
+        return {
+            'git_branch': read_git_value(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                'unavailable'
+            ),
+            'git_commit': read_git_value(
+                ['git', 'rev-parse', 'HEAD'],
+                'unavailable'
+            )
+        }
+
+    def _get_auto_live_run_snapshot_payloads(self):
+        '''Builds immutable, JSON-safe baseline records for one Auto run.
+
+        These records describe the controller-interpreted worksheet and
+        runtime configuration at launch. They are audit data only: neither
+        recipe selection nor robot execution reads them during Stage 1.
+        '''
+        def dataframe_snapshot(dataframe):
+            return json.loads(
+                dataframe.to_json(
+                    orient='split',
+                    date_format='iso'
+                )
+            )
+
+        auto_setting_keys = (
+            'target',
+            'target_tolerance_nm',
+            'replicate_sd_tolerance_nm',
+            'replicate_outlier_threshold_nm',
+            'num_duplicates',
+            'allow_true_zero',
+            'true_zero_reagents',
+            'acquisition_mode',
+            'acquisition_modes',
+            'portfolio_min_distance',
+            'auto_spectral_response_policy',
+            'auto_source_volume_check',
+            'auto_source_reserve_volume_uL',
+            'auto_model_checkpoint_mode',
+            'auto_plot_profile'
+        )
+        auto_settings = {
+            key: self.robo_params.get(key)
+            for key in auto_setting_keys
+            if key in self.robo_params
+        }
+
+        input_snapshot = {
+            'worksheet_name': self.rxn_sheet_name,
+            'parsed_input_template': dataframe_snapshot(self.rxn_df_template)
+        }
+        header_snapshot = {
+            'worksheet_name': self.rxn_sheet_name,
+            'header_rows': copy.deepcopy(self.header_data)
+        }
+        runtime_baseline = json.loads(self._serialize_auto_audit_value({
+            'worksheet_name': self.rxn_sheet_name,
+            'variable_reagents': list(self.variable_reagents),
+            'fixed_reagents': list(self.fixed_reagents),
+            'num_duplicates': int(self.num_duplicates),
+            'template_meta': copy.deepcopy(self.template_meta),
+            'auto_settings': auto_settings,
+            'parsed_reagent_sources': dataframe_snapshot(
+                self.robo_params['reagent_df']
+            )
+        }))
+
+        return input_snapshot, header_snapshot, runtime_baseline
+
+    def _initialize_auto_live_run_journal(self, model):
+        '''Creates the Stage 1 journal only for a real configured Auto run.'''
+        if not bool(getattr(model, '_auto_model_checkpoint_eligible', False)):
+            return None
+
+        if self.auto_live_run_journal is not None:
+            return self.auto_live_run_journal
+
+        (
+            input_snapshot,
+            header_snapshot,
+            runtime_baseline
+        ) = self._get_auto_live_run_snapshot_payloads()
+        git_identity = self._get_auto_live_run_git_identity()
+        run_id = '{}-{}'.format(self.rxn_sheet_name, uuid.uuid4().hex)
+
+        try:
+            self.auto_live_run_journal = AutoLiveRunJournal.initialize(
+                run_state_directory=self._get_auto_live_run_state_directory(),
+                run_id=run_id,
+                input_snapshot=input_snapshot,
+                header_snapshot=header_snapshot,
+                runtime_baseline=runtime_baseline,
+                git_branch=git_identity['git_branch'],
+                git_commit=git_identity['git_commit']
+            )
+        except AutoLiveRunJournalError as exc:
+            raise RuntimeError(
+                'Auto live-run journal initialization failed before robot '
+                'connection: {}.'.format(exc)
+            )
+
+        print(
+            '<<controller>> initialized local Auto live-run journal at {}'.format(
+                self._get_auto_live_run_state_directory()
+            )
+        )
+        return self.auto_live_run_journal
+
+    def _record_auto_live_run_event(self, event_type, payload):
+        '''Records one non-lifecycle Auto milestone when Stage 1 is active.'''
+        journal = getattr(self, 'auto_live_run_journal', None)
+        if journal is None:
+            return None
+
+        try:
+            return journal.record_event(event_type, payload)
+        except AutoLiveRunJournalError as exc:
+            raise RuntimeError(
+                'Auto live-run journal event write failed: {}.'.format(exc)
+            )
+
+    def _record_auto_live_run_transition(
+        self,
+        lifecycle_state,
+        event_type,
+        payload,
+        active_batch_number=None
+    ):
+        '''Persists one lifecycle transition before Auto proceeds further.'''
+        journal = getattr(self, 'auto_live_run_journal', None)
+        if journal is None:
+            return None
+
+        try:
+            return journal.record_transition(
+                lifecycle_state=lifecycle_state,
+                event_type=event_type,
+                payload=payload,
+                active_batch_number=active_batch_number
+            )
+        except AutoLiveRunJournalError as exc:
+            raise RuntimeError(
+                'Auto live-run journal transition write failed: {}.'.format(
+                    exc
+                )
+            )
 
     def _auto_model_checkpoint_saving_enabled(self, model):
         '''Returns whether one real Auto model may write checkpoints.
@@ -23425,6 +23611,10 @@ class AutoContr(Controller):
         self.last_auto_source_volume_audit = []
 
         self.well_count = 0 #used internally for unique wellnames
+        # This must complete before any connection or hardware-adjacent work
+        # begins.  The journal is enabled only for the real configured model,
+        # never for launch_auto()'s preflight simulation.
+        self._initialize_auto_live_run_journal(model)
         self.create_connection(simulate, no_pr, port)
         # An imported checkpoint already contains a fitted cumulative GP.  It
         # must continue directly with new optimizer-selected batches instead
@@ -23502,6 +23692,18 @@ class AutoContr(Controller):
 
         last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
         scan_data = self._get_sample_data(wellnames, last_filename)
+
+        self._record_auto_live_run_transition(
+            LIFECYCLE_PROCESSING_BATCH,
+            'batch_measurement_completed',
+            {
+                'batch_number': int(self.batch_num),
+                'physical_well_count': int(len(wellnames)),
+                'wellnames': list(wellnames),
+                'scan_filename': str(last_filename)
+            },
+            active_batch_number=int(self.batch_num)
+        )
 
 
 
@@ -23633,6 +23835,17 @@ class AutoContr(Controller):
         # first safe boundary at which a complete model can be exported.
         self._save_auto_model_checkpoint(model, 'after_seed')
 
+        self._record_auto_live_run_transition(
+            LIFECYCLE_READY_FOR_BATCH,
+            'batch_completed',
+            {
+                'batch_number': int(self.batch_num),
+                'checkpoint_label': 'after_seed',
+                'model_quit_after_batch': bool(model.quit)
+            },
+            active_batch_number=None
+        )
+
         # Intial data is considered the zeroith batch 
         self.batch_num += 1
 
@@ -23718,6 +23931,18 @@ class AutoContr(Controller):
                     ].reset_index()
             last_filename = filenames.loc[filenames['index'].idxmax(),'scan_filename']
             scan_data = self._get_sample_data(wellnames, last_filename) 
+
+            self._record_auto_live_run_transition(
+                LIFECYCLE_PROCESSING_BATCH,
+                'batch_measurement_completed',
+                {
+                    'batch_number': int(self.batch_num),
+                    'physical_well_count': int(len(wellnames)),
+                    'wellnames': list(wellnames),
+                    'scan_filename': str(last_filename)
+                },
+                active_batch_number=int(self.batch_num)
+            )
             
             # Y_new is lambda maxes from the new recipe
             Y_new, new_scan_quality = (
@@ -23860,6 +24085,17 @@ class AutoContr(Controller):
             # usable-spectrum history and physical audit still changed.
             self._save_auto_model_checkpoint(model, 'after_batch')
 
+            self._record_auto_live_run_transition(
+                LIFECYCLE_READY_FOR_BATCH,
+                'batch_completed',
+                {
+                    'batch_number': int(self.batch_num),
+                    'checkpoint_label': 'after_batch',
+                    'model_quit_after_batch': bool(model.quit)
+                },
+                active_batch_number=None
+            )
+
             self.batch_num += 1    
             
     def _run_imported_auto_continuation(self, model, normalize):
@@ -23932,6 +24168,16 @@ class AutoContr(Controller):
             batch_number=self.batch_num - 1
         )
 
+        self._record_auto_live_run_transition(
+            LIFECYCLE_FINALIZED,
+            'run_finalized',
+            {
+                'completed_batch_count': int(self.batch_num),
+                'final_checkpoint_label': 'final'
+            },
+            active_batch_number=None
+        )
+
         print(
             "<<controller>> Auto run completed; condition-level results, "
             "recipe audits, and configured output artifacts were exported."
@@ -23996,6 +24242,28 @@ class AutoContr(Controller):
               order of recipes
         Postconditions:
         '''
+        batch_number = int(getattr(self, 'batch_num', 0))
+        batch_payload = {
+            'batch_number': batch_number,
+            'physical_well_count': int(len(wellnames)),
+            'wellnames': list(wellnames)
+        }
+
+        # Record intent before the controller enters its existing protocol
+        # construction and source-volume preflight path.  This creates a
+        # durable boundary before any hardware-adjacent command is sent, but
+        # does not alter validation or execution behavior.
+        # Some hardware-free legacy tests intentionally extract this method
+        # without the surrounding AutoContr class. Keep that minimal fixture
+        # usable while all real AutoContr instances retain the journal hook.
+        if hasattr(self, '_record_auto_live_run_transition'):
+            self._record_auto_live_run_transition(
+                LIFECYCLE_PREFLIGHTING_BATCH,
+                'batch_preflight_requested',
+                batch_payload,
+                active_batch_number=batch_number
+            )
+
         # Retain the controller-side physical recipe check before allocating
         # product wells. The subsequent source-volume preflight uses the fully
         # resolved protocol dataframe, after the robot has reported its
@@ -24068,7 +24336,28 @@ class AutoContr(Controller):
             )
         )
 
+        if hasattr(self, '_record_auto_live_run_event'):
+            self._record_auto_live_run_event(
+                'batch_preflight_validated',
+                batch_payload
+            )
+        if hasattr(self, '_record_auto_live_run_transition'):
+            self._record_auto_live_run_transition(
+                LIFECYCLE_EXECUTING_BATCH,
+                'batch_execution_started',
+                batch_payload,
+                active_batch_number=batch_number
+            )
+
         self.execute_protocol_df(model)
+
+        if hasattr(self, '_record_auto_live_run_transition'):
+            self._record_auto_live_run_transition(
+                LIFECYCLE_MEASURING_BATCH,
+                'batch_transfer_completed',
+                batch_payload,
+                active_batch_number=batch_number
+            )
 
 
 

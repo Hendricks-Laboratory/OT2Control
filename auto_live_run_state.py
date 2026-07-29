@@ -405,6 +405,14 @@ def assert_valid_lifecycle_transition(previous_state, next_state):
 
     previous_lifecycle = previous_state['lifecycle_state']
     next_lifecycle = next_state['lifecycle_state']
+
+    # A durable event may advance the state revision and event sequence
+    # without changing lifecycle phase. This is required for auditable
+    # milestones such as a successful preflight while the run remains in the
+    # preflighting phase. It does not permit execution to resume from a fault.
+    if previous_lifecycle == next_lifecycle:
+        return
+
     if next_lifecycle not in ALLOWED_LIFECYCLE_TRANSITIONS[
         previous_lifecycle
     ]:

@@ -1,6 +1,7 @@
 # Auto Live-Run Recovery and Performance Plan
 
-**Status:** approved architecture; implementation has not begun.  
+**Status:** Stages 0–1 implemented and hardware-free validated; later stages
+remain planned.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -49,6 +50,13 @@ On `Auto-RTG`, add immutable input snapshots; atomic `current_state.json` writes
 **Validation:** Python 3.9 compilation; fake-controller lifecycle tests; atomic-write/failure-path tests; verify a clean legacy run has unchanged scientific outputs.
 
 **Dry-debug checkpoint 1:** a very small normal Auto dry run. Confirm that local records match terminal events, condition numbers, selected recipes, and completed batches.
+
+**Implementation status:** implemented on `Auto-RTG`. The controller writes
+immutable parsed input/Header/runtime snapshots, a SHA-256 manifest, atomic
+current-state replacements, and append-only JSONL lifecycle events before
+connection, around each existing batch boundary, and at normal finalization.
+It fails closed if a journal write fails. It does not yet create a cloud
+workbook, queue synchronization, contact the Pi, or offer recovery actions.
 
 ### Stage 2 — optional Live workbook mirror and offline queue
 

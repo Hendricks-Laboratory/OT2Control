@@ -1,8 +1,9 @@
 # Auto Live-Run State Contract (Schema Version 1)
 
-**Status:** Stage 0 contract only. This document and its matching pure Python
-validator define future recovery records; they do not yet create files,
-contact Google Drive, communicate with the Raspberry Pi, or alter Auto runs.
+**Status:** Stages 0–1. The contract is validated by a pure Python module and
+the controller now writes local Stage 1 records at normal Auto lifecycle
+boundaries. It does not contact Google Drive, communicate with the Raspberry
+Pi, alter recipe selection, or provide a recovery action.
 
 ## Scope and authority
 
@@ -16,17 +17,20 @@ or scientific recipe selection.
 
 ## Records
 
-Stage 1 will eventually write the following records below one run directory:
+Stage 1 writes the following records below one run directory:
 
 ```text
+Run_State/input_snapshot.json      immutable parsed input-template snapshot
+Run_State/header_snapshot.json     immutable Header worksheet snapshot
+Run_State/runtime_baseline.json    immutable interpreted controller baseline
 Run_State/run_manifest.json
 Run_State/current_state.json
 Run_State/events.jsonl
-Run_State/pending_cloud_sync.jsonl
 ```
 
-`run_manifest.json` is immutable. `current_state.json` is the latest durable
-state. `events.jsonl` is append-only: one complete JSON object per line.
+`run_manifest.json` and the three snapshots are immutable.
+`current_state.json` is the latest durable state. `events.jsonl` is
+append-only: one complete JSON object per line.
 `pending_cloud_sync.jsonl` is reserved for Stage 2 and is not produced yet.
 
 All records use `schema_version: 1`. Unknown top-level fields are invalid
@@ -70,6 +74,10 @@ subsequent reagent replacement, plate replacement, or operator action.
 Every successful state change increments `revision` by exactly one. A state
 cannot change its `run_id` or decrease `last_event_sequence`.
 
+A durable event that does not change lifecycle phase still increments the
+revision and advances `last_event_sequence`; this is a same-state transition.
+It records an audited milestone but never bypasses the lifecycle matrix.
+
 ### Append-only event
 
 ```json
@@ -86,9 +94,9 @@ cannot change its `run_id` or decrease `last_event_sequence`.
 ```
 
 `sequence` starts at one and is monotonic. `payload` is always a JSON object.
-Its event-specific fields will be specified before each future action is
-implemented. Stage 0 validates record shape only; it neither accepts nor
-executes operator actions.
+Stage 1 records immutable input/header/runtime snapshots, Git branch/commit
+identity, batch preflight/execution/measurement/processing boundaries, and
+normal finalization. It neither accepts nor executes operator actions.
 
 ## Lifecycle states and allowed transitions
 
