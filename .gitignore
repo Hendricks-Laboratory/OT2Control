@@ -12,3 +12,12 @@ TODO*.txt
 Controller_Out/
 .venv
 requirements.txt
+
+# Local AI-assistant configuration and personal instructions.
+# Shared project policy belongs in the tracked AGENTS.md file instead.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.codex/
+.agents/
+AGENTS.local.md

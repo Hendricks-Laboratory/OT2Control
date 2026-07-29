@@ -6,6 +6,21 @@ The code is designed to be run from two computers. The controlling computer uses
 ProtocolExecutor object to run a protocol from googlesheets. The raspberry pi on the robot runs 
 a recieving code to take commands from the executor and runs them on the robot.
 
+## Auto runtime branch policy
+
+The protected Pi checkout at `/root/OT2Control` remains on `main` as the
+rollback baseline. Auto-specific Pi runtime support is developed on the
+separate `Auto-main` branch and deployed in the sibling
+`/root/OT2Control-Auto-main` checkout only after a reviewed controlled-debug
+approval. The laboratory computer retains responsibility for the Auto
+controller and optimizer on `Auto-RTG`; do not merge that branch wholesale
+into the Pi runtime branch.
+
+The Pi currently cannot resolve GitHub, so approved `Auto-main` updates are
+committed and pushed from the laboratory computer, then transferred to the Pi
+as verified Git bundles through the existing secure connection. `main` is
+never changed during this workflow.
+
 ## Usage Guide  
 This guide is intended for a nontechnical audience.  
 1. Create a reaction sheet in accordance the the preconditions explained in
