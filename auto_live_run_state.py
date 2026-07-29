@@ -87,6 +87,10 @@ ALLOWED_LIFECYCLE_TRANSITIONS = {
 EVENT_TYPES = frozenset({
     'run_initialized',
     'input_snapshot_created',
+    # A successful Pi compatibility assertion is durable provenance, not a
+    # batch lifecycle transition. It is recorded after the controller connects
+    # and before any recipe can be executed.
+    'auto_main_compatibility_validated',
     'batch_preflight_requested',
     'batch_preflight_validated',
     'batch_preflight_rejected',

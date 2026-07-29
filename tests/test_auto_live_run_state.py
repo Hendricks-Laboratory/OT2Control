@@ -164,6 +164,17 @@ class AutoLiveRunStateContractTests(unittest.TestCase):
         with self.assertRaisesRegex(LiveRunStateContractError, 'dictionary'):
             validate_event(event)
 
+    def test_auto_main_compatibility_event_is_accepted(self):
+        '''The live Pi contract is auditable before any batch transition.'''
+        event = self._event()
+        event['event_type'] = 'auto_main_compatibility_validated'
+        event['payload'] = {
+            'runtime_role': 'Auto-main',
+            'protocol_version': 'auto-main-state-v1'
+        }
+
+        validate_event(event)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,8 +1,12 @@
 '''Hardware-free tests for Auto setup transcript capture.'''
 
 import ast
+import contextlib
+import functools
 import io
 import os
+import sys
+import traceback
 import unittest
 
 from auto_terminal_transcript import AutoPreOutputTranscript
@@ -56,6 +60,113 @@ class AutoPreOutputTranscriptTests(unittest.TestCase):
 
 class AutoTerminalTranscriptControllerPlacementTests(unittest.TestCase):
     '''Verifies Auto setup capture begins before Header parsing and folder use.'''
+
+    @staticmethod
+    def _load_terminal_output_capture_guard():
+        '''Loads the decorator alone without importing hardware dependencies.'''
+        controller_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'controller.py'
+        )
+        with open(controller_path, 'r', encoding='utf-8') as source_file:
+            source = source_file.read()
+        module = ast.parse(source, filename=controller_path)
+        guard = next(
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'terminal_output_capture_guard'
+        )
+        namespace = {
+            'functools': functools,
+            'sys': sys,
+            'traceback': traceback
+        }
+        exec(
+            compile(
+                ast.Module(body=[guard], type_ignores=[]),
+                controller_path,
+                'exec'
+            ),
+            namespace
+        )
+        return namespace['terminal_output_capture_guard']
+
+    def test_run_guard_writes_traceback_before_capture_is_stopped(self):
+        '''A saved terminal transcript contains the root failure traceback.'''
+        guard = self._load_terminal_output_capture_guard()
+
+        class FakeController:
+            def __init__(self):
+                self.terminal_log_file_handle = object()
+                self.capture_stopped = False
+
+            def _stop_terminal_output_capture(self):
+                self.capture_stopped = True
+
+        @guard
+        def fail_run(_):
+            raise ValueError('synthetic Auto failure')
+
+        controller = FakeController()
+        captured_stderr = io.StringIO()
+        with contextlib.redirect_stderr(captured_stderr):
+            with self.assertRaisesRegex(ValueError, 'synthetic Auto failure'):
+                fail_run(controller)
+
+        self.assertTrue(controller.capture_stopped)
+        self.assertIn(
+            'unhandled Auto run traceback follows',
+            captured_stderr.getvalue()
+        )
+        self.assertIn(
+            'ValueError: synthetic Auto failure',
+            captured_stderr.getvalue()
+        )
+
+    def test_run_guard_captures_unhandled_traceback_before_closing_log(self):
+        '''The saved Auto transcript must retain a final traceback on failure.'''
+        controller_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'controller.py'
+        )
+        with open(controller_path, 'r', encoding='utf-8') as source_file:
+            source = source_file.read()
+        module = ast.parse(source, filename=controller_path)
+        guard = next(
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'terminal_output_capture_guard'
+        )
+        wrapper = next(
+            node for node in guard.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'wrapper'
+        )
+        guarded_try = next(
+            node for node in ast.walk(wrapper)
+            if isinstance(node, ast.Try)
+        )
+
+        exception_writes = [
+            node for handler in guarded_try.handlers
+            for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == 'traceback'
+            and node.func.attr == 'print_exception'
+        ]
+        self.assertEqual(1, len(exception_writes))
+        self.assertTrue(guarded_try.finalbody)
+        self.assertTrue(any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == 'stop_capture'
+            for node in ast.walk(ast.Module(
+                body=guarded_try.finalbody,
+                type_ignores=[]
+            ))
+        ))
 
     def test_auto_hooks_surround_header_parsing_and_terminal_log_creation(self):
         controller_path = os.path.join(

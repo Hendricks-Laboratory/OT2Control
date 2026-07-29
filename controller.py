@@ -152,11 +152,31 @@ class TeeTerminalOutput:
 def terminal_output_capture_guard(func):
     '''
     Ensures terminal output capture is finalized whether the run succeeds or
-    errors.
+    errors, while preserving an unhandled Auto-run traceback in the saved log.
     '''
     def wrapper(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
+
+        except Exception as error:
+            # ``_error_handler`` performs controlled connection/reader
+            # shutdown and then re-raises. Without this explicit write, the
+            # process-level traceback is emitted only after ``finally`` has
+            # restored stdout/stderr, leaving terminal_output.txt incomplete.
+            # Keep the durable transcript self-contained when capture is live
+            # while preserving the existing terminal exception behavior.
+            if getattr(self, 'terminal_log_file_handle', None) is not None:
+                print(
+                    '<<controller>> unhandled Auto run traceback follows:',
+                    file=sys.stderr
+                )
+                traceback.print_exception(
+                    type(error),
+                    error,
+                    error.__traceback__,
+                    file=sys.stderr
+                )
+            raise
 
         finally:
             stop_capture = getattr(
