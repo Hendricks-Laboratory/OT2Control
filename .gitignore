@@ -12,3 +12,11 @@ TODO*.txt
 Controller_Out/
 .venv
 requirements.txt
+
+# Local AI-assistant instructions, caches, and working state.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.codex/
+.agents/
+AGENTS.local.md
