@@ -1010,6 +1010,17 @@ class OT2Robot():
     _LABWARE_TYPES = { "96_well_plate": { "opentrons_name": "corning_96_wellplate_360ul_flat", "groups": [ "well_plate","WellPlate96" ], 'definition_path': "" }, "24_well_plate": { "opentrons_name": "corning_24_wellplate_3.4ml_flat", "groups": [ "well_plate", "WellPlate24" ], 'definition_path': "" }, "48_well_plate": { "opentrons_name": "corning_48_wellplate_1.6ml_flat", "groups": [ "well_plate", "WellPlate48" ], 'definition_path': "" }, "tip_rack_20uL": { "opentrons_name": "opentrons_96_tiprack_20ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_300uL": { "opentrons_name": "opentrons_96_tiprack_300ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tip_rack_1000uL": { "opentrons_name": "opentrons_96_tiprack_1000ul", "groups": [ "tip_rack" ], 'definition_path': "" }, "tube_holder_10": { "opentrons_name": "opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical", "groups": [ "tube_holder" ], 'definition_path': "" }, "temp_mod_24_tube": { "opentrons_name": "opentrons_24_aluminumblock_generic_2ml_screwcap", "groups": [ "tube_holder", "temp_mod" ], 'definition_path': "" }, "platereader4": { "opentrons_name": "plate_reader_4", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_4.json" }, "platereader7": { "opentrons_name": "plate_reader_7", "groups": [ "well_plate", "WellPlate96", "platereader" ], "definition_path": "LabwareDefs/plate_reader_7.json" }, "platereader": { "opentrons_name": "", "groups": [ "well_plate", "WellPlate96", "platereader" ] } }
     _PIPETTE_TYPES = {"300uL_pipette":{"opentrons_name":"p300_single_gen2"},"1000uL_pipette":{"opentrons_name":"p1000_single_gen2"},"20uL_pipette":{"opentrons_name":"p20_single_gen2"}}
 
+    # Auto controller compatibility contract.  The controller verifies these
+    # values before an Auto run proceeds, so it can stop before liquid handling
+    # when the Pi is running an incompatible Auto-main revision or calibration.
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v1'
+    TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
+    TARE_CALIBRATION_G = {
+        'tube_2ml': 1.7,
+        'tube_15ml': 7.2731,
+        'tube_50ml': 13.6950
+    }
+
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
 
     def exec_func(name, exit_code, send_ready, exec_funcs):
@@ -1621,6 +1632,34 @@ class OT2Robot():
                     cont.vol,
                     cont.aspiratible_vol))
         self.portal.send_pack('loc_resp', response)
+
+    def _build_robot_state_snapshot(self):
+        '''
+        Returns a small, JSON-serializable compatibility snapshot for the Auto
+        controller.  This is deliberately read-only: it neither initializes nor
+        moves hardware, changes volumes, consumes tips, or changes protocol
+        state.
+        '''
+        return {
+            'snapshot_schema_version': 1,
+            'runtime_role': 'Auto-main',
+            'protocol_version': self.AUTO_MAIN_PROTOCOL_VERSION,
+            'tare_calibration_id': self.TARE_CALIBRATION_ID,
+            'tare_calibration_g': dict(self.TARE_CALIBRATION_G),
+            'supported_commands': ['get_robot_state_snapshot'],
+            'simulate': bool(self.simulate),
+            'container_count': len(self.containers),
+            'pipette_count': len(self.pipettes),
+            'temperature_module_initialized': bool(self.temp_module)
+        }
+
+    @exec_func('get_robot_state_snapshot', 1, False, exec_funcs)
+    def _exec_get_robot_state_snapshot(self):
+        '''Sends the read-only Auto-main compatibility snapshot to controller.'''
+        self.portal.send_pack(
+            'robot_state_snapshot',
+            self._build_robot_state_snapshot()
+        )
 
     @exec_func('pause', 1, True, exec_funcs)
     def _exec_pause(self, pause_time):
