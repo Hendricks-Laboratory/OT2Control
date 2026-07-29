@@ -488,12 +488,12 @@ class Tube20000uL(Tube):
     DEAD_VOL = 2000
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, labware, mass=6.9731, conc=1):
+    def __init__(self, name, deck_pos, loc, labware, mass=7.2731, conc=1):
         '''
         mass is defaulted to the avg_mass so that there is nothing in the container
         '''
         density_water_25C = 0.9970479 # g/mL
-        avg_tube_mass15 = 6.9731 # grams
+        avg_tube_mass15 = 7.2731 # grams
         self.mass = mass - avg_tube_mass15 # N = 1 (in grams) 
         assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
@@ -534,9 +534,9 @@ class Tube50000uL(Tube):
     DEAD_VOL = 5000
     MIN_HEIGHT = 4
 
-    def __init__(self, name, deck_pos, loc, labware, mass=13.3950, conc=1):
+    def __init__(self, name, deck_pos, loc, labware, mass=13.6950, conc=1):
         density_water_25C = 0.9970479 # g/mL
-        avg_tube_mass50 = 13.3950 # grams
+        avg_tube_mass50 = 13.6950 # grams
         self.mass = mass - avg_tube_mass50 # N = 1 (in grams) 
         assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_25C) * 1000 # converts mL to uL
@@ -576,9 +576,9 @@ class Tube2000uL(Tube):
     DEAD_VOL = 250 #uL
     MIN_HEIGHT = 6
 
-    def __init__(self, name, deck_pos, loc, labware, mass=1.4, conc=2):
+    def __init__(self, name, deck_pos, loc, labware, mass=1.7, conc=2):
         density_water_4C = 0.9998395 # g/mL
-        avg_tube_mass2 =  1.4        # grams
+        avg_tube_mass2 =  1.7        # grams
         self.mass = mass - avg_tube_mass2 # N = 1 (in grams) 
         assert (self.mass >= -1e-9),'the mass you entered for {} is less than the mass of the tube it\'s in.'.format(name)
         vol = (self.mass / density_water_4C) * 1000 # converts mL to uL
