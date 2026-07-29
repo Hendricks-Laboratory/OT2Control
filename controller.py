@@ -90,6 +90,14 @@ from auto_live_run_state import (
     LIFECYCLE_PROCESSING_BATCH,
     LIFECYCLE_READY_FOR_BATCH
 )
+from auto_live_run_sync import (
+    AutoLiveRunSyncQueue,
+    AutoLiveRunSyncQueueError
+)
+from auto_live_run_workbook import (
+    AutoLiveRunWorkbookError,
+    AutoLiveRunWorkbookRenderer
+)
 from auto_output_directory import (
     AutoOutputDirectoryConflictError,
     resolve_auto_output_directory
@@ -4969,6 +4977,9 @@ class AutoContr(Controller):
         # The ordinary preflight simulation deliberately writes no live-run
         # recovery records.
         self.auto_live_run_journal = None
+        # Stage 2 creates these only for a real configured Auto model. They
+        # are derived monitoring artifacts and never feed back into Auto.
+        self.auto_live_run_sync_queue = None
 
     def _start_pre_output_terminal_capture(self):
         '''Starts an Auto-only Header/setup transcript before out_path exists.
@@ -5186,7 +5197,102 @@ class AutoContr(Controller):
                 self._get_auto_live_run_state_directory()
             )
         )
+        self._initialize_auto_live_run_mirror()
         return self.auto_live_run_journal
+
+    def _read_auto_live_run_json(self, filename):
+        '''Reads one journal-owned JSON record for a derived Stage 2 view.'''
+        record_path = os.path.join(
+            self._get_auto_live_run_state_directory(),
+            filename
+        )
+        with open(record_path, 'r', encoding='utf-8') as input_file:
+            return json.load(input_file)
+
+    def _read_auto_live_run_events(self):
+        '''Reads the durable event journal without changing it.'''
+        events_path = os.path.join(
+            self._get_auto_live_run_state_directory(),
+            AutoLiveRunJournal.EVENTS_FILENAME
+        )
+        with open(events_path, 'r', encoding='utf-8') as input_file:
+            return [
+                json.loads(line)
+                for line in input_file
+                if line.strip()
+            ]
+
+    def _initialize_auto_live_run_mirror(self):
+        '''Initializes the Stage 2 local Live workbook and durable queue.
+
+        The Stage 1 journal remains authoritative. A derived workbook or its
+        future remote mirror must not interrupt a healthy Auto batch solely
+        because a monitoring artifact cannot be refreshed. No Drive adapter
+        is instantiated at this stage; a later reviewed integration may replay
+        this FIFO queue through an explicitly configured adapter.
+        '''
+        if self.auto_live_run_journal is None:
+            return None
+        if self.auto_live_run_sync_queue is None:
+            try:
+                self.auto_live_run_sync_queue = AutoLiveRunSyncQueue.initialize(
+                    self._get_auto_live_run_state_directory()
+                )
+            except AutoLiveRunSyncQueueError as exc:
+                print(
+                    '<<controller warning>> Auto Live workbook queue could '
+                    'not be initialized; local journal remains authoritative: '
+                    '{}'.format(exc)
+                )
+                return None
+        return self._refresh_auto_live_run_mirror()
+
+    def _refresh_auto_live_run_mirror(self):
+        '''Rebuilds and queues the derived Live workbook after a journal event.'''
+        journal = getattr(self, 'auto_live_run_journal', None)
+        queue = getattr(self, 'auto_live_run_sync_queue', None)
+        if journal is None or queue is None:
+            return None
+
+        try:
+            render_result = AutoLiveRunWorkbookRenderer.render(
+                run_directory=self.out_path,
+                run_display_name=getattr(
+                    self,
+                    'effective_output_data_dir',
+                    self.rxn_sheet_name
+                ),
+                journal=journal,
+                manifest=self._read_auto_live_run_json(
+                    AutoLiveRunJournal.MANIFEST_FILENAME
+                ),
+                runtime_baseline=self._read_auto_live_run_json(
+                    AutoLiveRunJournal.RUNTIME_BASELINE_FILENAME
+                ),
+                events=self._read_auto_live_run_events()
+            )
+            queued_item = queue.enqueue_rendered_workbook(render_result)
+        except (
+            AutoLiveRunWorkbookError,
+            AutoLiveRunSyncQueueError,
+            OSError,
+            ValueError
+        ) as exc:
+            print(
+                '<<controller warning>> Auto Live workbook mirror was not '
+                'refreshed; local journal continues unchanged: {}'.format(exc)
+            )
+            return None
+
+        if queued_item is not None:
+            print(
+                '<<controller>> refreshed local Auto Live workbook at {}; '
+                'queued state revision {} for future mirror sync'.format(
+                    render_result['workbook_path'],
+                    queued_item['state_revision']
+                )
+            )
+        return render_result
 
     def _record_auto_live_run_event(self, event_type, payload):
         '''Records one non-lifecycle Auto milestone when Stage 1 is active.'''
@@ -5195,11 +5301,13 @@ class AutoContr(Controller):
             return None
 
         try:
-            return journal.record_event(event_type, payload)
+            event = journal.record_event(event_type, payload)
         except AutoLiveRunJournalError as exc:
             raise RuntimeError(
                 'Auto live-run journal event write failed: {}.'.format(exc)
             )
+        self._refresh_auto_live_run_mirror()
+        return event
 
     def _record_auto_live_run_transition(
         self,
@@ -5214,7 +5322,7 @@ class AutoContr(Controller):
             return None
 
         try:
-            return journal.record_transition(
+            event = journal.record_transition(
                 lifecycle_state=lifecycle_state,
                 event_type=event_type,
                 payload=payload,
@@ -5226,6 +5334,8 @@ class AutoContr(Controller):
                     exc
                 )
             )
+        self._refresh_auto_live_run_mirror()
+        return event
 
     def _auto_model_checkpoint_saving_enabled(self, model):
         '''Returns whether one real Auto model may write checkpoints.

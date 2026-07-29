@@ -79,9 +79,32 @@ discarded and normal streams are restored.
 
 Generate a local Live workbook from the journal and asynchronously mirror it to the configured Drive location when available. Add a pending-sync queue and retry logic. The run continues if ordinary cloud updates fail.
 
-**Validation:** fake Drive adapter tests for initial upload, transient failure, replay ordering, duplicate prevention, and offline local updates.
+**Implementation status (local portion):** Auto now atomically rebuilds
+`Live_Run/<effective-data-dir>_LIVE.xlsx` after each durable Stage 1 journal
+event. The derived workbook contains a status summary, current state,
+append-only event view, immutable baseline view, and a clearly inactive
+future-action sheet. Every state revision is also copied immutably into
+`Live_Run/pending_sync_snapshots/` before its queue record is appended to
+`Run_State/pending_cloud_sync.jsonl`; therefore a later status refresh cannot
+silently change the content associated with an earlier queued revision.
 
-**Dry-debug checkpoint 2:** run a small workflow with connectivity available, then disconnect the network during ordinary execution. Confirm local logging continues and the cloud mirror catches up afterward. Do not test recovery actions in this checkpoint.
+The queue has an injected-adapter replay boundary with strict FIFO ordering,
+checksum verification, duplicate-revision prevention, and stop-on-first-
+failure behavior. No Drive adapter, credential access, or remote request is
+performed by the controller yet. A concrete Drive endpoint and authentication
+mechanism require a separate explicit integration decision; until then, the
+queue is durable local audit data and normal Auto execution remains entirely
+offline-capable.
+
+**Validation:** fake-adapter tests cover initial queueing, transient failure,
+replay ordering, duplicate prevention, immutable snapshot preservation, and
+offline local updates. The standard-library XLSX package is structurally
+validated without adding a new production dependency.
+
+**Dry-debug checkpoint 2a:** run a small workflow and confirm the local Live
+workbook, snapshot queue, and journal revisions agree. The later connectivity
+loss/catch-up check occurs only after a reviewed Drive adapter is configured.
+Do not test recovery actions in either checkpoint.
 
 ### Mandatory stop — Pi `Auto-main` onboarding and divergence audit
 

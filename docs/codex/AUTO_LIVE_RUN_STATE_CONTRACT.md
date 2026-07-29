@@ -31,7 +31,12 @@ Run_State/events.jsonl
 `run_manifest.json` and the three snapshots are immutable.
 `current_state.json` is the latest durable state. `events.jsonl` is
 append-only: one complete JSON object per line.
-`pending_cloud_sync.jsonl` is reserved for Stage 2 and is not produced yet.
+Stage 2 now writes `pending_cloud_sync.jsonl` as a local FIFO queue of
+checksum-identified Live-workbook snapshots. The queue stores immutable copies
+under `Live_Run/pending_sync_snapshots/` so a later workbook refresh cannot
+alter an earlier queued revision. It is local-only until a separately reviewed
+Drive adapter is configured; its presence never requires network access during
+a normal Auto run.
 
 All records use `schema_version: 1`. Unknown top-level fields are invalid
 until a later explicit schema-version change.
@@ -142,8 +147,10 @@ cloud_sync_failed
 run_finalized
 ```
 
-Cloud events are reserved for Stage 2. Their presence in the contract does not
-make a network call valid during Stage 0 or Stage 1.
+Cloud events remain reserved for a later configured remote adapter. The local
+Stage 2 queue itself does not append those events because doing so would create
+another state revision and recursively queue a new mirror update. Its durable
+queue records remain auditable independently of remote connectivity.
 
 ## Future operator action envelope
 
