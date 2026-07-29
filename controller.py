@@ -7125,10 +7125,10 @@ class AutoContr(Controller):
             2. Only treat that pair as a reliable agreement if the pair
                distance is less than or equal to
                replicate_outlier_threshold_nm.
-            3. Compute the mean of that closest pair.
-            4. If the remaining third value is farther than
-               replicate_outlier_threshold_nm from the closest-pair mean,
-               exclude the third value.
+            3. Compare the remaining third value with each member of that
+               closest pair.
+            4. Exclude the third value only if it is farther than
+               replicate_outlier_threshold_nm from both closest-pair values.
             5. If no pair is within replicate_outlier_threshold_nm, flag the
                condition as suspicious but do not exclude automatically.
 
@@ -7246,23 +7246,26 @@ class AutoContr(Controller):
                         closest_pair = (i, j)
 
             pair_i, pair_j = closest_pair
-            pair_mean = float(
-                (
-                    valid_pairs[pair_i][1] +
-                    valid_pairs[pair_j][1]
-                ) / 2.0
-            )
-
             third_position = list(
                 set(range(3)) - set([pair_i, pair_j])
             )[0]
 
             third_index, third_value = valid_pairs[third_position]
-            third_distance = float(abs(third_value - pair_mean))
+            third_distance_to_pair_i = float(
+                abs(third_value - valid_pairs[pair_i][1])
+            )
+            third_distance_to_pair_j = float(
+                abs(third_value - valid_pairs[pair_j][1])
+            )
+            third_distance_to_closest_pair_member = min(
+                third_distance_to_pair_i,
+                third_distance_to_pair_j
+            )
 
             if (
                 closest_pair_distance <= threshold_nm
-                and third_distance > threshold_nm
+                and third_distance_to_pair_i > threshold_nm
+                and third_distance_to_pair_j > threshold_nm
             ):
                 included_indices = [
                     valid_pairs[pair_i][0],
@@ -7273,10 +7276,10 @@ class AutoContr(Controller):
                 qc_status = 'excluded_replicate'
                 qc_reason = (
                     'lambda_max_outlier: closest_pair_distance='
-                    f'{closest_pair_distance:.2f} nm; closest_pair_mean='
-                    f'{pair_mean:.2f} nm; excluded_value='
-                    f'{third_value:.2f} nm; distance='
-                    f'{third_distance:.2f} nm; threshold='
+                    f'{closest_pair_distance:.2f} nm; excluded_value='
+                    f'{third_value:.2f} nm; closest_pair_member_distance='
+                    f'{third_distance_to_closest_pair_member:.2f} nm; '
+                    f'threshold='
                     f'{threshold_nm:.2f} nm'
                 )
             elif closest_pair_distance > threshold_nm:
@@ -7290,8 +7293,10 @@ class AutoContr(Controller):
                 qc_status = 'passed'
                 qc_reason = (
                     'no_replicate_excluded: closest_pair_distance='
-                    f'{closest_pair_distance:.2f} nm; farthest_value_distance='
-                    f'{third_distance:.2f} nm; threshold='
+                    f'{closest_pair_distance:.2f} nm; '
+                    'third_value_closest_pair_member_distance='
+                    f'{third_distance_to_closest_pair_member:.2f} nm; '
+                    f'threshold='
                     f'{threshold_nm:.2f} nm'
                 )
 

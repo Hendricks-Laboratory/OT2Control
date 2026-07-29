@@ -2279,6 +2279,28 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
         self.assertEqual(row['actual_lambda_values_qc_nm'], [624.0, 626.0])
         self.assertTrue(row['eligible_for_target_incumbent'])
 
+    def test_triplicate_qc_keeps_third_value_close_to_one_pair_member(self):
+        # The third value is 70 nm from the pair mean (620 nm), which the
+        # former mean-based rule would exclude. It is exactly 50 nm from the
+        # nearer member of the closest 600/640 nm pair, so it is retained.
+        _, row = self._append_condition([600.0, 640.0, 690.0])
+
+        self.assertEqual(row['n_replicates_excluded'], 0)
+        self.assertEqual(
+            row['actual_lambda_values_qc_nm'],
+            [600.0, 640.0, 690.0]
+        )
+        self.assertEqual(row['replicate_qc_status'], 'passed')
+
+    def test_triplicate_qc_excludes_third_value_far_from_both_pair_members(self):
+        # The 691 nm value is more than the 50 nm threshold from both members
+        # of the closest 600/640 nm pair, so it remains a clear outlier.
+        _, row = self._append_condition([600.0, 640.0, 691.0])
+
+        self.assertEqual(row['n_replicates_excluded'], 1)
+        self.assertEqual(row['actual_lambda_values_qc_nm'], [600.0, 640.0])
+        self.assertEqual(row['replicate_qc_status'], 'excluded_replicate')
+
     def test_nonfinite_replicate_is_preserved_raw_but_not_treated_as_valid(self):
         _, row = self._append_condition([625.0, float('inf')])
 

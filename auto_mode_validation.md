@@ -1760,7 +1760,7 @@ Triplicate behavior:
 
 1. Find the closest pair of valid replicate lambda values.
 2. Treat that pair as agreement only if the closest-pair distance is `<= replicate_outlier_threshold_nm`.
-3. If the third value is more than the threshold away from the closest-pair mean, exclude the third value.
+3. Exclude the third value only if it is more than the threshold away from **both** members of the closest pair. A value within the threshold of either agreeing member is retained.
 4. If no tight pair exists, flag the condition as `flagged_not_excluded` and preserve all valid replicates.
 
 Examples:
@@ -1770,6 +1770,7 @@ Examples:
 | `650, 653, 980` | `excluded_replicate` | train on `650, 653` |
 | `650, 720, 790` | `flagged_not_excluded` | train on all valid replicates, but tag condition |
 | `650, 660, 670` | `passed` | train on all valid replicates |
+| `600, 640, 690` | `passed` | `690` is within 50 nm of the nearer closest-pair member (`640`), so it is retained |
 | `650, 650, 900, 900` | `flagged_not_excluded` | train on all valid replicates, no automatic exclusion |
 
 The guiding design choice was conservative data preservation. A suspicious replicate is excluded only when there is a clear internally consistent pair and one outlier. Ambiguous spread is flagged but not discarded.
