@@ -111,6 +111,29 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual('robot_state_snapshot',
                          ast.literal_eval(send_calls[0].args[0]))
 
+    def test_snapshot_packet_types_are_ghost_messages(self):
+        source_tree = ast.parse(
+            (REPO_ROOT / 'Armchair' / 'armchair.py').read_text()
+        )
+        armchair_class = next(
+            node for node in source_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'Armchair'
+        )
+        assignments = {
+            target.id: node.value
+            for node in armchair_class.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        packet_types = ast.literal_eval(assignments['PACK_TYPES'].args[0])
+        ghost_types = ast.literal_eval(assignments['GHOST_TYPES'])
+
+        self.assertEqual(b'\x11', packet_types['get_robot_state_snapshot'])
+        self.assertEqual(b'\x12', packet_types['robot_state_snapshot'])
+        self.assertIn('get_robot_state_snapshot', ghost_types)
+        self.assertIn('robot_state_snapshot', ghost_types)
+
 
 if __name__ == '__main__':
     unittest.main()
