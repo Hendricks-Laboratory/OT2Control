@@ -2455,7 +2455,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed['replicate_sd_tolerance_nm'], 25.0)
         self.assertEqual(parsed['auto_terminal_verbosity'], 'standard')
         self.assertEqual(parsed['auto_source_volume_check'], 'off')
-        self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.0)
+        self.assertNotIn('pi_legacy_tare_offset_g', parsed)
         self.assertEqual(
             parsed['auto_spectral_response_policy'],
             'audit_only'
@@ -2545,16 +2545,21 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 auto_source_reserve_volume_uL='-1'
             )
 
-    def test_pi_legacy_tare_offset_is_optional_and_payload_only(self):
-        parsed = self._parse_header(pi_legacy_tare_offset_g='0.3')
-        self.assertEqual(parsed['pi_legacy_tare_offset_g'], 0.3)
+    def test_pi_calibrated_tares_reject_legacy_offset_and_preserve_mass(self):
+        # A historical explicit zero is harmless, but a nonzero value must
+        # fail rather than double-correct the calibrated robot-side tare.
+        parsed = self._parse_header(pi_legacy_tare_offset_g='0')
+        self.assertNotIn('pi_legacy_tare_offset_g', parsed)
 
-        with self.assertRaisesRegex(ValueError, 'finite, nonnegative mass'):
-            self._parse_header(pi_legacy_tare_offset_g='-0.3')
+        for invalid_offset in ('0.3', '-0.3', 'nan', 'not_a_number'):
+            with self.subTest(invalid_offset=invalid_offset):
+                with self.assertRaisesRegex(ValueError, 'no longer supported'):
+                    self._parse_header(
+                        pi_legacy_tare_offset_g=invalid_offset
+                    )
 
         controller = self.Controller()
         controller.robo_params = {
-            'pi_legacy_tare_offset_g': 0.3,
             'reagent_df': pd.DataFrame(
                 {
                     'mass': [7.5731, 14.2950],
@@ -2568,7 +2573,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(
             list(payload['mass'].values()),
-            [7.2731, 13.9950]
+            [7.5731, 14.2950]
         )
         self.assertEqual(
             controller.robo_params['reagent_df'].loc[
@@ -5055,6 +5060,9 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn('4 nm', report_text)
         self.assertIn('Replicate SD tolerance', report_text)
         self.assertIn('5 nm', report_text)
+        self.assertIn('Pi tube tare handling', report_text)
+        self.assertIn('controller sends measured source masses unchanged', report_text)
+        self.assertNotIn('Legacy Pi tare offset', report_text)
         self.assertIn('## Spectral Observation Handling', report_text)
         self.assertIn('legacy audit-only policy was active', report_text)
         self.assertIn('minimum normalized RMS distance', report_text)

@@ -1128,13 +1128,10 @@ class Controller(ABC):
         An optional auto_source_reserve_volume_uL setting protects additional
         liquid beyond the robot's established dead-volume calculation.
 
-        The optional pi_legacy_tare_offset_g setting supports a Raspberry Pi
-        deployment whose tube tare constants are known to be lower than the
-        corrected laboratory values. A positive offset is subtracted only
-        from the mass payload sent to that legacy Pi, preserving the actual
-        measured mass in the controller. Older worksheets default to 0 g.
-        Do not enable this setting after the Raspberry Pi receives corrected
-        tare constants, or its liquid-volume estimate would be double-corrected.
+        Raspberry Pi tube tare constants are calibrated in the robot runtime.
+        The controller sends each measured tube-plus-solution mass unchanged.
+        A nonzero legacy ``pi_legacy_tare_offset_g`` Header value is rejected
+        so an older worksheet cannot double-correct the calibrated Pi.
 
         Spectral-response handling is controlled by the optional
         auto_spectral_response_policy setting:
@@ -1403,41 +1400,35 @@ class Controller(ABC):
                 f"{self.robo_params['auto_source_reserve_volume_uL']:g} uL"
             )
 
-        # Optional compatibility shim for the deployed Raspberry Pi. The Pi
-        # currently uses older tube tare values that are 0.3 g too low. A
-        # positive value makes its old calculation reproduce the corrected
-        # liquid mass, while keeping the spreadsheet/controller record as the
-        # true measured tube-plus-solution mass.
-        pi_tare_offset_value = str(
-            header_dict.get('pi_legacy_tare_offset_g', 0.0)
-        ).strip()
+        # The Pi now owns calibrated tube tare constants. Retain a narrow
+        # compatibility check for older worksheets so a historical positive
+        # controller-side offset cannot silently double-correct source mass.
+        if 'pi_legacy_tare_offset_g' in header_dict:
+            pi_tare_offset_value = str(
+                header_dict['pi_legacy_tare_offset_g']
+            ).strip()
 
-        try:
-            pi_tare_offset_g = float(pi_tare_offset_value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                "Header value pi_legacy_tare_offset_g must be a finite, "
-                "nonnegative mass in g. "
-                f"Received: {pi_tare_offset_value!r}."
-            )
+            try:
+                pi_tare_offset_g = float(pi_tare_offset_value or 0.0)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Header value pi_legacy_tare_offset_g is no longer "
+                    "supported. Remove the row because the Raspberry Pi "
+                    "uses calibrated tube tare constants. "
+                    f"Received: {pi_tare_offset_value!r}."
+                )
 
-        if (
-            not math.isfinite(pi_tare_offset_g)
-            or pi_tare_offset_g < 0.0
-        ):
-            raise ValueError(
-                "Header value pi_legacy_tare_offset_g must be a finite, "
-                "nonnegative mass in g. "
-                f"Received: {pi_tare_offset_value!r}."
-            )
-
-        self.robo_params['pi_legacy_tare_offset_g'] = pi_tare_offset_g
-
-        if pi_tare_offset_g > 0.0:
-            print(
-                "<<controller>> Applying Raspberry Pi legacy tube-tare "
-                f"payload correction: -{pi_tare_offset_g:g} g"
-            )
+            if (
+                not math.isfinite(pi_tare_offset_g)
+                or pi_tare_offset_g != 0.0
+            ):
+                raise ValueError(
+                    "Header value pi_legacy_tare_offset_g is no longer "
+                    "supported. Remove the row because the Raspberry Pi "
+                    "uses calibrated tube tare constants; a nonzero value "
+                    "would double-correct source mass. "
+                    f"Received: {pi_tare_offset_value!r}."
+                )
 
         # Boundary-aware spectral routing is deliberately opt-in. The
         # audit-only default preserves legacy treatment of finite 300/1000 nm
@@ -3449,30 +3440,15 @@ class Controller(ABC):
 
     def _get_pi_compatible_reagent_payload(self):
         '''
-        Returns a copy of reagent data adjusted only for the deployed
-        Raspberry Pi's legacy tube-tare calculation.
+        Returns a detached outbound copy of the measured reagent data.
 
-        ``reagent_info.mass`` remains the actual measured tube-plus-solution
-        mass everywhere on the controller. When a positive
-        ``pi_legacy_tare_offset_g`` is configured, the controller subtracts
-        it from each liquid-reagent mass only in this outbound payload. If the
-        Pi tare is lower than the corrected tare by the same amount, its
-        existing ``mass - legacy_tare`` calculation then yields the corrected
-        liquid mass without changing Pi code.
+        The deployed Raspberry Pi owns the calibrated tube tare constants, so
+        the controller must send each spreadsheet tube-plus-solution mass
+        unchanged. A detached copy protects controller audit records from any
+        downstream serialization changes.
         '''
         reagent_df = self.robo_params['reagent_df']
         payload_df = reagent_df.copy(deep=True)
-        tare_offset_g = float(
-            self.robo_params.get('pi_legacy_tare_offset_g', 0.0)
-        )
-
-        if tare_offset_g > 0.0:
-            measured_masses_g = pd.to_numeric(
-                payload_df['mass'],
-                errors='raise'
-            )
-            payload_df['mass'] = measured_masses_g - tare_offset_g
-
         return payload_df.reset_index().to_dict()
 
     def init_robot(self, simulate):
@@ -16078,10 +16054,6 @@ class AutoContr(Controller):
         allow_true_zero = robo_params.get('allow_true_zero', None)
         true_zero_reagents = robo_params.get('true_zero_reagents', None)
         target_tolerance_nm = robo_params.get('target_tolerance_nm', 10.0)
-        pi_legacy_tare_offset_g = robo_params.get(
-            'pi_legacy_tare_offset_g',
-            0.0
-        )
         acquisition_mode = robo_params.get('acquisition_mode', 'exploit')
         acquisition_modes = list(
             robo_params.get('acquisition_modes', [acquisition_mode])
@@ -17109,9 +17081,9 @@ class AutoContr(Controller):
             )
         )
         lines.append(
-            '- Legacy Pi tare offset: '
-            + self._format_auto_report_value(pi_legacy_tare_offset_g, 'g')
-            + '.'
+            '- Pi tube tare handling: calibrated robot-side tube tare '
+            'constants; the controller sends measured source masses '
+            'unchanged.'
         )
         lines.append('')
         lines.append('## Acquisition Strategy')

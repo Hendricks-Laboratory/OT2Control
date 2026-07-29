@@ -114,7 +114,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
 | Condition-level recipe-concentration history plots | Implemented in current working tree | Variable-only and complete-recipe grouped bar charts use executed final concentrations in mM, write under `Plots/recipe_history`, obey plot profiles, append to the plot manifest, and appear in the final report; isolated lifecycle, report, data-contract, and rendering tests |
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
-| Corrected tube-tare defaults and Raspberry Pi legacy tare compatibility offset | Implemented | Source review and Header/payload compatibility tests; physical weighing remains human-verified |
+| Calibrated robot-side tube tare defaults with controller-side legacy-offset retirement | Implemented; static/synthetic validation passed | Pi runtime owns calibrated 2 mL, 15 mL, and 50 mL tare constants. Auto rejects a nonzero historical Header offset rather than double-correcting measured source mass. Physical weighing remains human-verified. |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
 | Portable Auto model checkpoint packages (`save` and `import` modes) | Implemented | Hardware-free JSON/NumPy archive round-trip, integrity, manual inbox and prior-run source selection, immutable lineage copy/provenance, compatibility, fresh reconstruction, Header, and save-boundary tests |
 | Stage 1 controller-local live-run journal | Implemented; normal dry debug passed | Two one-well controlled dry runs produced immutable parsed input/Header/runtime snapshots, valid SHA-256 manifests, atomic finalized state, and ordered lifecycle events through batch completion and finalization. It is local-only and fail-closed; it does not add cloud synchronization, Pi state, recovery prompts, or change scientific/model behavior. Python 3.9 contract, journal durability, failure-path, and static controller-placement tests passed. |
@@ -392,7 +392,7 @@ retain the stated legacy defaults when their Header row is absent.
 | `auto_model_checkpoint_mode` | `off` (legacy default), `save`, or `import`. `save` exports immutable JSON/NumPy packages after the seed GP fit, every completed optimizer batch, and finalization to `Model_Checkpoints/`. For `import`, before completing the reagent sheet choose either `manual` (place exactly one compatible package in this run's `Model_Checkpoints/Import_Here/`) or `run` (enter an exact prior `Protocol_Outputs` folder name such as `RTG_020`, then select `final`, `seed`, `batch N`, or a listed package filename). Prior-run selection is restricted to direct output-run children and canonical checkpoint files; arbitrary paths are rejected. Auto checksum-validates and archive-copies the source, writes `import_provenance.json`, then rebuilds a fresh model from numeric cumulative history after confirming current chemistry, normalized bounds, and spectral-response policy compatibility. The imported model skips a new seed design; `max_iterations` applies to new batches only. |
 | `auto_source_volume_check` | `off` (legacy default) or `required`. `required` performs a fail-closed aggregate source-inventory preflight before each batch. |
 | `auto_source_reserve_volume_uL` | Nonnegative additional source reserve beyond the robot's dead-volume calculation; defaults to `0`. It matters only when source-volume checking is required. |
-| `pi_legacy_tare_offset_g` | Nonnegative payload-only compatibility offset for a deployed Raspberry Pi that still uses the old tare constants; defaults to `0`. Do not enable after the Pi has the corrected constants. |
+| `pi_legacy_tare_offset_g` | Retired compatibility key. Omit this row. A blank or explicit `0` is accepted as a no-op for worksheet migration; any nonzero or invalid value fails before execution because the calibrated Pi uses the measured mass unchanged. |
 | `auto_spectral_response_policy` | `audit_only` (default; preserves legacy finite-boundary treatment) or `boundary_aware` (censors only exact 300/1000 nm maxima from exact-λmax routing). Aliases `audit`, `boundary`, and `censored` are accepted. |
 
 The singular and portfolio acquisition interfaces are deliberately mutually
@@ -401,24 +401,16 @@ legacy worksheet lacking `acquisition_modes` remains singular and defaults to
 `exploit`. This prevents a spreadsheet from silently mixing two selection
 interfaces.
 
-### Tare correction and Raspberry Pi compatibility
+### Tare correction and calibrated Raspberry Pi runtime
 
-`Auto-RTG` contains two distinct +0.3 g tare mechanisms that must not be
-confused:
-
-1. `ot2_robot.py` corrects the default tare constants used by the repository's
-   2 mL, 15 mL,
-   and 50 mL tube models: 1.4 → 1.7 g, 6.9731 → 7.2731 g, and 13.3950 →
-   13.6950 g, respectively. This is the corrected baseline for a runtime that
-   actually receives the current `ot2_robot.py`.
-2. `pi_legacy_tare_offset_g` is a controller-side compatibility shim. It
-   subtracts an operator-selected positive offset only from the reagent mass
-   payload sent to a Raspberry Pi still running old, lower tube tares, while
-   preserving the real measured tube-plus-solution mass in controller records.
-
-The first change does not alter a frozen remote Pi by itself. The second is
-therefore needed only while that remote runtime remains on the old constants.
-Neither mechanism substitutes for physical tare verification.
+The robot runtime owns the calibrated tube tare constants: 1.4 → 1.7 g for
+the 2 mL class, 6.9731 → 7.2731 g for the physical 15 mL tube class, and
+13.3950 → 13.6950 g for the 50 mL class. Auto-RTG sends the measured
+tube-plus-solution masses unchanged; it no longer performs a controller-side
+payload adjustment. Historical worksheets with a nonzero
+`pi_legacy_tare_offset_g` fail clearly before execution so they cannot
+double-correct the calibrated runtime. This does not substitute for physical
+tare verification.
 
 ### Current report provenance
 
