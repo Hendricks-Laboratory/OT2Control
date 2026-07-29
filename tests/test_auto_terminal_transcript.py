@@ -63,7 +63,8 @@ class AutoTerminalTranscriptControllerPlacementTests(unittest.TestCase):
             'controller.py'
         )
         with open(controller_path, 'r', encoding='utf-8') as source_file:
-            module = ast.parse(source_file.read(), filename=controller_path)
+            source = source_file.read()
+        module = ast.parse(source, filename=controller_path)
 
         classes = {
             node.name: node
@@ -120,6 +121,15 @@ class AutoTerminalTranscriptControllerPlacementTests(unittest.TestCase):
             and node.func.attr == '_consume_pre_output_terminal_capture'
         ]
         self.assertEqual(len(consumed), 1)
+
+        start_log_source = ast.get_source_segment(
+            source,
+            start_log
+        )
+        self.assertIn('terminal transcript initialized', start_log_source)
+        self.assertIn('buffered pre-output setup transcript', start_log_source)
+        self.assertIn("'follows.\\n'", start_log_source)
+        self.assertIn('live terminal capture active', start_log_source)
 
 
 if __name__ == '__main__':

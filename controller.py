@@ -536,6 +536,15 @@ class Controller(ABC):
         )
 
         if pre_output_transcript:
+            self.terminal_log_file_handle.write(
+                '<<controller>> terminal transcript initialized: {}\n'.format(
+                    terminal_log_path
+                )
+            )
+            self.terminal_log_file_handle.write(
+                '<<controller>> buffered pre-output setup transcript '
+                'follows.\n'
+            )
             self.terminal_log_file_handle.write(pre_output_transcript)
             self.terminal_log_file_handle.flush()
 
@@ -552,10 +561,17 @@ class Controller(ABC):
             self.terminal_log_file_handle
         )
 
-        print(
-            f"<<controller>> saving terminal output to "
-            f"{terminal_log_path}"
-        )
+        if pre_output_transcript:
+            print(
+                '<<controller>> live terminal capture active: {}'.format(
+                    terminal_log_path
+                )
+            )
+        else:
+            print(
+                f"<<controller>> saving terminal output to "
+                f"{terminal_log_path}"
+            )
     
     def _stop_terminal_output_capture(self):
         '''
@@ -5014,6 +5030,10 @@ class AutoContr(Controller):
             )
 
         if output_directory['was_renamed_for_collision']:
+            # The terminal echoes interactive input, but the in-memory setup
+            # transcript does not receive that echo. Start a new line so its
+            # durable copy keeps the approval as a distinct audit record.
+            print()
             print(
                 '<<controller>> Auto output directory approved as {} '
                 '(requested {}).'.format(
