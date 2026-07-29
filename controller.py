@@ -90,6 +90,10 @@ from auto_live_run_state import (
     LIFECYCLE_PROCESSING_BATCH,
     LIFECYCLE_READY_FOR_BATCH
 )
+from auto_output_directory import (
+    AutoOutputDirectoryConflictError,
+    resolve_auto_output_directory
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -847,10 +851,24 @@ class Controller(ABC):
         
         header_dict = {row[0]:row[1] for row in header_data[1:]}
         data_dir = header_dict['data_dir']
-        self.reaction_folder_name = os.path.basename(os.path.dirname(data_dir))
-        
-        
-        self.out_path = os.path.join(local_out_path, data_dir)
+        output_directory = self._resolve_output_directory_path(
+            local_out_path,
+            data_dir
+        )
+        self.requested_output_data_dir = output_directory[
+            'requested_data_dir'
+        ]
+        self.effective_output_data_dir = output_directory[
+            'effective_data_dir'
+        ]
+        self.output_directory_was_renamed_for_collision = output_directory[
+            'was_renamed_for_collision'
+        ]
+        self.reaction_folder_name = os.path.basename(
+            os.path.dirname(self.effective_output_data_dir)
+        )
+
+        self.out_path = output_directory['output_path']
         self.eve_files_path = os.path.join(self.out_path, 'Eve_Files')
         self.debug_path = os.path.join(self.out_path, 'Debug')
         self.plot_path = os.path.join(self.out_path, 'Plots')
@@ -869,6 +887,21 @@ class Controller(ABC):
         for path in local_paths:
             if not os.path.exists(path):
                 os.makedirs(path)
+
+    def _resolve_output_directory_path(self, local_out_path, data_dir):
+        '''Returns legacy output-directory metadata without changing behavior.
+
+        AutoContr overrides this hook to reject or explicitly rename a
+        pre-existing run directory before any output artifact is created.
+        Other controller modes retain the historical directory behavior.
+        '''
+        output_path = os.path.join(local_out_path, data_dir)
+        return {
+            'requested_data_dir': data_dir,
+            'effective_data_dir': data_dir,
+            'output_path': output_path,
+            'was_renamed_for_collision': False
+        }
                 
        
 
@@ -4896,6 +4929,41 @@ class AutoContr(Controller):
         # recovery records.
         self.auto_live_run_journal = None
 
+    def _resolve_output_directory_path(self, local_out_path, data_dir):
+        '''Resolves an unused, explicitly approved Auto output directory.
+
+        This method runs during the base-controller constructor, before any
+        output subdirectory, terminal log, robot connection, or protocol work
+        is created. A collision therefore cannot blend two Auto runs.
+        '''
+        interactive_terminal = bool(
+            getattr(sys.stdin, 'isatty', lambda: False)()
+        )
+
+        try:
+            output_directory = resolve_auto_output_directory(
+                output_root=local_out_path,
+                data_dir=data_dir,
+                input_func=input,
+                interactive=interactive_terminal
+            )
+        except AutoOutputDirectoryConflictError as exc:
+            raise RuntimeError(
+                'Auto output-directory setup stopped before creating run '
+                'artifacts: {}.'.format(exc)
+            )
+
+        if output_directory['was_renamed_for_collision']:
+            print(
+                '<<controller>> Auto output directory approved as {} '
+                '(requested {}).'.format(
+                    output_directory['effective_data_dir'],
+                    output_directory['requested_data_dir']
+                )
+            )
+
+        return output_directory
+
     def _get_auto_live_run_state_directory(self):
         '''Returns the dedicated local state directory for this Auto run.'''
         return os.path.join(self.out_path, 'Run_State')
@@ -4974,6 +5042,21 @@ class AutoContr(Controller):
         }
         runtime_baseline = json.loads(self._serialize_auto_audit_value({
             'worksheet_name': self.rxn_sheet_name,
+            'requested_output_data_dir': getattr(
+                self,
+                'requested_output_data_dir',
+                None
+            ),
+            'effective_output_data_dir': getattr(
+                self,
+                'effective_output_data_dir',
+                None
+            ),
+            'output_directory_was_renamed_for_collision': bool(getattr(
+                self,
+                'output_directory_was_renamed_for_collision',
+                False
+            )),
             'variable_reagents': list(self.variable_reagents),
             'fixed_reagents': list(self.fixed_reagents),
             'num_duplicates': int(self.num_duplicates),
@@ -16532,6 +16615,28 @@ class AutoContr(Controller):
         lines.append('## Experiment Overview')
         lines.append('')
         lines.append(f'- Experiment name: `{experiment_name}`')
+        requested_output_data_dir = getattr(
+            self,
+            'requested_output_data_dir',
+            None
+        )
+        effective_output_data_dir = getattr(
+            self,
+            'effective_output_data_dir',
+            None
+        )
+        if (
+            requested_output_data_dir
+            and effective_output_data_dir
+            and requested_output_data_dir != effective_output_data_dir
+        ):
+            lines.append(
+                '- Requested output folder: `{}`; collision-approved output '
+                'folder: `{}`.'.format(
+                    requested_output_data_dir,
+                    effective_output_data_dir
+                )
+            )
         lines.append(f'- Experiment output path: `{self.out_path}`')
         lines.append(f'- Total condition-level rows: {n_conditions}')
         lines.append(f'- Seed conditions: {seed_conditions}')

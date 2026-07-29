@@ -58,6 +58,14 @@ connection, around each existing batch boundary, and at normal finalization.
 It fails closed if a journal write fails. It does not yet create a cloud
 workbook, queue synchronization, contact the Pi, or offer recovery actions.
 
+**Output-directory isolation:** before an Auto output folder is created, a
+previously used `data_dir` is detected. The controller proposes the first
+available sibling name (`<data_dir>_1`, `<data_dir>_2`, and so on) and requires
+an interactive operator to type `yes`; a noninteractive collision fails closed.
+The requested and effective names are retained in the local run-state baseline
+and final report. This prevents unrelated artifacts from being mixed into an
+older run directory while preserving the existing workbook setting.
+
 ### Stage 2 — optional Live workbook mirror and offline queue
 
 Generate a local Live workbook from the journal and asynchronously mirror it to the configured Drive location when available. Add a pending-sync queue and retry logic. The run continues if ordinary cloud updates fail.
