@@ -2332,7 +2332,6 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.AutoController = _load_auto_controller_methods([
             '_validate_auto_main_robot_state_snapshot',
-            '_wait_for_auto_main_initialization',
             '_request_auto_main_robot_state_snapshot'
         ])
 
@@ -2442,38 +2441,6 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'robot_state_snapshot'):
             controller._request_auto_main_robot_state_snapshot()
 
-    def test_initialization_acknowledgement_is_consumed_before_snapshot(self):
-        controller = self._build_controller()
-
-        class PortalStub:
-            def __init__(self, responses):
-                self.responses = list(responses)
-                self.sent = []
-
-            def send_pack(self, *args):
-                self.sent.append(args)
-
-            def recv_pack(self):
-                return self.responses.pop(0)
-
-        controller.portal = PortalStub([
-            ('ready', 0, ()),
-            ('robot_state_snapshot', 0, (self._valid_snapshot(),))
-        ])
-        controller._wait_for_auto_main_initialization()
-        with redirect_stdout(io.StringIO()):
-            result = controller._request_auto_main_robot_state_snapshot()
-
-        self.assertEqual('Auto-main', result['runtime_role'])
-        self.assertEqual(
-            [('get_robot_state_snapshot',)],
-            controller.portal.sent
-        )
-
-        controller.portal = PortalStub([('loc_resp', 0, ([],))])
-        with self.assertRaisesRegex(RuntimeError, "initialization acknowledgement"):
-            controller._wait_for_auto_main_initialization()
-
     def test_protocol_packet_names_are_ghost_response_messages(self):
         source_tree = ast.parse(
             (REPOSITORY_ROOT / 'Armchair' / 'armchair.py').read_text()
@@ -2504,7 +2471,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
         ]
-        self.assertTrue(any(
+        self.assertFalse(any(
             call.func.attr == '_wait_for_auto_main_initialization'
             for call in calls
         ))

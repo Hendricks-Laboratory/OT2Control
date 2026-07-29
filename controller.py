@@ -5075,26 +5075,6 @@ class AutoContr(Controller):
         )
         return snapshot
 
-    def _wait_for_auto_main_initialization(self):
-        '''Waits for the Pi acknowledgement of the previously sent init packet.
-
-        ``Controller.init_robot()`` has historically sent ``init``
-        asynchronously: the Pi constructs its Opentrons protocol context and
-        then returns its ordinary ``ready`` packet.  The Auto-main snapshot is
-        meaningful only after that construction completes.  Consuming this
-        acknowledgement before issuing the snapshot request keeps the two
-        response packets in their intended order and fails closed if a Pi
-        responds with an unexpected packet.
-        '''
-        pack_type, _, _ = self.portal.recv_pack()
-        if pack_type != 'ready':
-            raise RuntimeError(
-                'Auto-main compatibility check failed: expected Pi '
-                "initialization acknowledgement 'ready', received {!r}.".format(
-                    pack_type
-                )
-            )
-
     def init_robot(self, simulate):
         '''Initializes Pi state, then fail-closes on Auto-main incompatibility.'''
         super().init_robot(simulate)
@@ -5104,7 +5084,6 @@ class AutoContr(Controller):
         # it is requested only for the subsequent real connection.
         if simulate:
             return None
-        self._wait_for_auto_main_initialization()
         return self._request_auto_main_robot_state_snapshot()
 
     def _start_pre_output_terminal_capture(self):
