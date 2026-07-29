@@ -66,6 +66,15 @@ The requested and effective names are retained in the local run-state baseline
 and final report. This prevents unrelated artifacts from being mixed into an
 older run directory while preserving the existing workbook setting.
 
+**Early terminal transcript:** Auto begins a short-lived, in-memory transcript
+after the Header is downloaded and before its values are parsed. Once the
+output directory is approved and the normal terminal log can be opened, that
+transcript is prepended to `Debug/terminal_output.txt`. It therefore preserves
+Header normalization, safety warnings, and output-directory collision
+decisions without capturing credential/bootstrap output that occurs before the
+Header exists. If setup stops before the log can be opened, the transcript is
+discarded and normal streams are restored.
+
 ### Stage 2 — optional Live workbook mirror and offline queue
 
 Generate a local Live workbook from the journal and asynchronously mirror it to the configured Drive location when available. Add a pending-sync queue and retry logic. The run continues if ordinary cloud updates fail.

@@ -94,6 +94,7 @@ from auto_output_directory import (
     AutoOutputDirectoryConflictError,
     resolve_auto_output_directory
 )
+from auto_terminal_transcript import AutoPreOutputTranscript
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -452,9 +453,15 @@ class Controller(ABC):
         self.header_data = header_data
         input_data = self._download_sheet(rxn_spreadsheet,1)
         deck_data = self._download_sheet(rxn_spreadsheet, 2)
-        self._init_robo_header_params(header_data)
-        self._make_out_dirs(header_data)
-        self._start_terminal_output_capture()
+        self._start_pre_output_terminal_capture()
+
+        try:
+            self._init_robo_header_params(header_data)
+            self._make_out_dirs(header_data)
+            self._start_terminal_output_capture()
+        except Exception:
+            self._discard_pre_output_terminal_capture()
+            raise
 
         try:
             self.reaction_folder_name = None
@@ -488,6 +495,18 @@ class Controller(ABC):
         '''
         return None
 
+    def _start_pre_output_terminal_capture(self):
+        '''Provides an optional subclass hook before an output path exists.'''
+        return None
+
+    def _consume_pre_output_terminal_capture(self):
+        '''Returns any optional setup transcript before opening the run log.'''
+        return ''
+
+    def _discard_pre_output_terminal_capture(self):
+        '''Discards an optional setup transcript after an early setup failure.'''
+        return None
+
     def _start_terminal_output_capture(self):
         '''
         Starts mirroring stdout/stderr to Debug/terminal_output.txt.
@@ -497,6 +516,8 @@ class Controller(ABC):
         '''
         if self.terminal_log_file_handle is not None:
             return
+
+        pre_output_transcript = self._consume_pre_output_terminal_capture()
         
         debug_dir = getattr(self, 'debug_path', None)
 
@@ -513,6 +534,10 @@ class Controller(ABC):
             'w',
             encoding='utf-8'
         )
+
+        if pre_output_transcript:
+            self.terminal_log_file_handle.write(pre_output_transcript)
+            self.terminal_log_file_handle.flush()
 
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
@@ -4928,6 +4953,41 @@ class AutoContr(Controller):
         # The ordinary preflight simulation deliberately writes no live-run
         # recovery records.
         self.auto_live_run_journal = None
+
+    def _start_pre_output_terminal_capture(self):
+        '''Starts an Auto-only Header/setup transcript before out_path exists.
+
+        The final terminal log cannot be opened until the Header has selected
+        or collision-approved an output directory. This short-lived buffer
+        preserves the auditable setup messages in between without capturing
+        credential/bootstrap output that occurs before Header retrieval.
+        '''
+        if getattr(self, '_auto_pre_output_transcript', None) is None:
+            transcript = AutoPreOutputTranscript(sys)
+            transcript.start()
+            self._auto_pre_output_transcript = transcript
+
+    def _consume_pre_output_terminal_capture(self):
+        '''Restores streams and returns the Auto setup transcript for the log.'''
+        transcript = getattr(self, '_auto_pre_output_transcript', None)
+        if transcript is None:
+            return ''
+
+        try:
+            return transcript.consume()
+        finally:
+            self._auto_pre_output_transcript = None
+
+    def _discard_pre_output_terminal_capture(self):
+        '''Restores streams after Auto setup fails before a log can be opened.'''
+        transcript = getattr(self, '_auto_pre_output_transcript', None)
+        if transcript is None:
+            return
+
+        try:
+            transcript.discard()
+        finally:
+            self._auto_pre_output_transcript = None
 
     def _resolve_output_directory_path(self, local_out_path, data_dir):
         '''Resolves an unused, explicitly approved Auto output directory.
