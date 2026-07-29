@@ -2325,6 +2325,170 @@ class TargetDecisionEligibilityRegressionTests(unittest.TestCase):
                     controller._get_auto_replicate_sd_tolerance_nm()
 
 
+class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
+    '''Pure controller contract tests; no socket, robot, or hardware import.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_validate_auto_main_robot_state_snapshot',
+            '_request_auto_main_robot_state_snapshot'
+        ])
+
+    def _build_controller(self):
+        controller = self.AutoController()
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v1'
+        controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
+            'ot2control_tube_tares_2026_07_v1'
+        )
+        controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_G = {
+            'tube_2ml': 1.7,
+            'tube_15ml': 7.2731,
+            'tube_50ml': 13.6950
+        }
+        controller.auto_main_robot_state_snapshot = None
+        return controller
+
+    def _valid_snapshot(self):
+        return {
+            'snapshot_schema_version': 1,
+            'runtime_role': 'Auto-main',
+            'protocol_version': 'auto-main-state-v1',
+            'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
+            'tare_calibration_g': {
+                'tube_2ml': 1.7,
+                'tube_15ml': 7.2731,
+                'tube_50ml': 13.6950
+            },
+            'supported_commands': ['get_robot_state_snapshot']
+        }
+
+    def test_valid_snapshot_is_accepted_and_copied(self):
+        controller = self._build_controller()
+        snapshot = self._valid_snapshot()
+
+        accepted = controller._validate_auto_main_robot_state_snapshot(
+            snapshot
+        )
+        accepted['tare_calibration_g']['tube_2ml'] = -1
+
+        self.assertEqual(
+            1.7,
+            snapshot['tare_calibration_g']['tube_2ml']
+        )
+
+    def test_invalid_role_version_calibration_or_command_fails_closed(self):
+        controller = self._build_controller()
+        invalid_snapshots = []
+
+        wrong_role = self._valid_snapshot()
+        wrong_role['runtime_role'] = 'main'
+        invalid_snapshots.append(wrong_role)
+
+        wrong_version = self._valid_snapshot()
+        wrong_version['protocol_version'] = 'old-auto-main'
+        invalid_snapshots.append(wrong_version)
+
+        wrong_tare = self._valid_snapshot()
+        wrong_tare['tare_calibration_g']['tube_2ml'] = 1.4
+        invalid_snapshots.append(wrong_tare)
+
+        missing_command = self._valid_snapshot()
+        missing_command['supported_commands'] = []
+        invalid_snapshots.append(missing_command)
+
+        for snapshot in invalid_snapshots:
+            with self.subTest(snapshot=snapshot):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    'Auto-main compatibility check failed'
+                ):
+                    controller._validate_auto_main_robot_state_snapshot(snapshot)
+
+    def test_request_uses_snapshot_command_and_rejects_wrong_response_type(self):
+        controller = self._build_controller()
+
+        class PortalStub:
+            def __init__(self, response):
+                self.response = response
+                self.sent = []
+
+            def send_pack(self, *args):
+                self.sent.append(args)
+
+            def recv_pack(self):
+                return self.response
+
+        controller.portal = PortalStub((
+            'robot_state_snapshot',
+            0,
+            (self._valid_snapshot(),)
+        ))
+        with redirect_stdout(io.StringIO()):
+            result = controller._request_auto_main_robot_state_snapshot()
+
+        self.assertEqual(
+            [('get_robot_state_snapshot',)],
+            controller.portal.sent
+        )
+        self.assertEqual(
+            'Auto-main',
+            result['runtime_role']
+        )
+        self.assertEqual(result, controller.auto_main_robot_state_snapshot)
+
+        controller.portal = PortalStub(('loc_resp', 0, ([],)))
+        with self.assertRaisesRegex(RuntimeError, 'robot_state_snapshot'):
+            controller._request_auto_main_robot_state_snapshot()
+
+    def test_protocol_packet_names_are_ghost_response_messages(self):
+        source_tree = ast.parse(
+            (REPOSITORY_ROOT / 'Armchair' / 'armchair.py').read_text()
+        )
+        armchair_class = next(
+            node for node in source_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'Armchair'
+        )
+        assignments = {
+            target.id: node.value
+            for node in armchair_class.body
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        packet_types = ast.literal_eval(assignments['PACK_TYPES'].args[0])
+        ghost_types = ast.literal_eval(assignments['GHOST_TYPES'])
+
+        self.assertEqual(b'\x11', packet_types['get_robot_state_snapshot'])
+        self.assertEqual(b'\x12', packet_types['robot_state_snapshot'])
+        self.assertIn('get_robot_state_snapshot', ghost_types)
+        self.assertIn('robot_state_snapshot', ghost_types)
+
+    def test_compatibility_request_is_skipped_only_for_local_simulation(self):
+        method = _get_auto_controller_method_node('init_robot')
+        calls = [
+            node for node in ast.walk(method)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+        ]
+        self.assertTrue(any(
+            call.func.attr == '_request_auto_main_robot_state_snapshot'
+            for call in calls
+        ))
+        self.assertTrue(any(
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Name)
+            and node.test.id == 'simulate'
+            and any(
+                isinstance(statement, ast.Return)
+                and isinstance(statement.value, ast.Constant)
+                and statement.value.value is None
+                for statement in node.body
+            )
+            for node in ast.walk(method)
+        ))
+
+
 class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -4892,6 +4892,20 @@ class AutoContr(Controller):
     but it's only a template, so we give it a new name and use self.rxn_df to change for the current batch we're trying to make
     '''
 
+    # Versioned Pi compatibility contract for the staged live-run recovery
+    # workflow.  Auto validates this immediately after Pi initialization and
+    # fails closed before generating or executing a recipe if it is absent or
+    # mismatched. Manual controller workflows do not use this contract.
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v1'
+    AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
+        'ot2control_tube_tares_2026_07_v1'
+    )
+    AUTO_MAIN_REQUIRED_TARE_CALIBRATION_G = {
+        'tube_2ml': 1.7,
+        'tube_15ml': 7.2731,
+        'tube_50ml': 13.6950
+    }
+
     def _clean_template(self):
         '''
         There are some traces of the template column that must be removed from the rxn_df and 
@@ -4956,6 +4970,121 @@ class AutoContr(Controller):
         # Stage 2 creates these only for a real configured Auto model. They
         # are derived monitoring artifacts and never feed back into Auto.
         self.auto_live_run_sync_queue = None
+        self.auto_main_robot_state_snapshot = None
+
+    def _validate_auto_main_robot_state_snapshot(self, snapshot):
+        '''
+        Validates the Pi's read-only Auto-main compatibility record.
+
+        The checks intentionally verify only the small version/calibration
+        contract required before Auto proceeds. They do not infer source
+        inventory, plate state, or physical execution success; those belong to
+        later recovery/preflight stages.
+        '''
+        if not isinstance(snapshot, dict):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: robot state snapshot '
+                'was not a dictionary.'
+            )
+
+        if snapshot.get('snapshot_schema_version') != 1:
+            raise RuntimeError(
+                'Auto-main compatibility check failed: expected snapshot '
+                'schema version 1, received {!r}.'.format(
+                    snapshot.get('snapshot_schema_version')
+                )
+            )
+
+        if snapshot.get('runtime_role') != 'Auto-main':
+            raise RuntimeError(
+                'Auto-main compatibility check failed: expected Pi runtime '
+                "role 'Auto-main', received {!r}.".format(
+                    snapshot.get('runtime_role')
+                )
+            )
+
+        if (
+            snapshot.get('protocol_version')
+            != self.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: expected protocol '
+                'version {!r}, received {!r}.'.format(
+                    self.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION,
+                    snapshot.get('protocol_version')
+                )
+            )
+
+        if (
+            snapshot.get('tare_calibration_id')
+            != self.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: expected tare '
+                'calibration {!r}, received {!r}.'.format(
+                    self.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID,
+                    snapshot.get('tare_calibration_id')
+                )
+            )
+
+        if (
+            snapshot.get('tare_calibration_g')
+            != self.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_G
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: Pi tube tare values '
+                'do not match the approved calibration.'
+            )
+
+        if (
+            'get_robot_state_snapshot'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise get_robot_state_snapshot support.'
+            )
+
+        return copy.deepcopy(snapshot)
+
+    def _request_auto_main_robot_state_snapshot(self):
+        '''Requests and validates the Pi compatibility contract after init.'''
+        self.portal.send_pack('get_robot_state_snapshot')
+        pack_type, _, payload = self.portal.recv_pack()
+
+        if pack_type != 'robot_state_snapshot':
+            raise RuntimeError(
+                'Auto-main compatibility check failed: expected '
+                'robot_state_snapshot, received {!r}.'.format(pack_type)
+            )
+
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto-main compatibility check failed: received malformed '
+                'robot state snapshot payload.'
+            )
+
+        snapshot = self._validate_auto_main_robot_state_snapshot(payload[0])
+        self.auto_main_robot_state_snapshot = snapshot
+        print(
+            '<<controller>> Auto-main compatibility check passed: protocol '
+            '{}; tare calibration {}.'.format(
+                snapshot['protocol_version'],
+                snapshot['tare_calibration_id']
+            )
+        )
+        return snapshot
+
+    def init_robot(self, simulate):
+        '''Initializes Pi state, then fail-closes on Auto-main incompatibility.'''
+        super().init_robot(simulate)
+        # launch_auto() first performs a local preflight simulation using the
+        # lab-side source tree rather than the deployed Pi Auto-main runtime.
+        # The compatibility contract is specifically a live-Pi safety gate, so
+        # it is requested only for the subsequent real connection.
+        if simulate:
+            return None
+        return self._request_auto_main_robot_state_snapshot()
 
     def _start_pre_output_terminal_capture(self):
         '''Starts an Auto-only Header/setup transcript before out_path exists.
@@ -23883,6 +24012,11 @@ class AutoContr(Controller):
         # never for launch_auto()'s preflight simulation.
         self._initialize_auto_live_run_journal(model)
         self.create_connection(simulate, no_pr, port)
+        if self.auto_main_robot_state_snapshot is not None:
+            self._record_auto_live_run_event(
+                'auto_main_compatibility_validated',
+                copy.deepcopy(self.auto_main_robot_state_snapshot)
+            )
         # An imported checkpoint already contains a fitted cumulative GP.  It
         # must continue directly with new optimizer-selected batches instead
         # of spending wells on a second seed design.
