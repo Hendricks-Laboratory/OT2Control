@@ -1013,7 +1013,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v1'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v2'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1633,6 +1633,504 @@ class OT2Robot():
                     cont.aspiratible_vol))
         self.portal.send_pack('loc_resp', response)
 
+    @staticmethod
+    def _preflight_number(value, field_name, minimum=0.0):
+        '''Validates one finite, nonnegative transfer-plan numeric value.'''
+        if isinstance(value, bool):
+            raise ValueError('{} must be numeric.'.format(field_name))
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            raise ValueError('{} must be numeric.'.format(field_name))
+        if not math.isfinite(numeric_value) or numeric_value < minimum:
+            raise ValueError(
+                '{} must be finite and at least {}.'.format(
+                    field_name,
+                    minimum
+                )
+            )
+        return numeric_value
+
+    @staticmethod
+    def _get_preferred_pipette_arm_for_sizes(volume_uL, pipette_sizes):
+        '''Pure form of the established live transfer-pipette selection rule.'''
+        volume_uL = OT2Robot._preflight_number(
+            volume_uL,
+            'transfer volume',
+            minimum=0.0
+        )
+        if volume_uL <= 0:
+            raise ValueError('transfer volume must be greater than zero.')
+        if not isinstance(pipette_sizes, dict):
+            raise ValueError('pipette sizes must be a dictionary.')
+        if set(pipette_sizes) != {'left', 'right'}:
+            raise ValueError(
+                'transfer preflight requires left and right pipette sizes.'
+            )
+
+        normalized_sizes = {
+            arm: OT2Robot._preflight_number(
+                size,
+                '{} pipette size'.format(arm),
+                minimum=1e-12
+            )
+            for arm, size in pipette_sizes.items()
+        }
+        preferred_size = 20.0 if volume_uL < 40.0 else (
+            300.0 if volume_uL < 1000.0 else 1000.0
+        )
+        if normalized_sizes['right'] < normalized_sizes['left']:
+            larger_pipette = 'left'
+            smaller_pipette = 'right'
+        else:
+            larger_pipette = 'right'
+            smaller_pipette = 'left'
+
+        if normalized_sizes[larger_pipette] <= preferred_size + 0.0001:
+            return larger_pipette
+        return smaller_pipette
+
+    @staticmethod
+    def _count_available_tips(pipette):
+        '''Counts unused tips without changing rack or pipette state.'''
+        try:
+            tip_racks = list(pipette.tip_racks)
+        except (AttributeError, TypeError):
+            raise ValueError('pipette does not expose tip racks.')
+
+        available_tip_count = 0
+        for tip_rack in tip_racks:
+            try:
+                rack_wells = tip_rack.wells()
+            except (AttributeError, TypeError):
+                raise ValueError('tip rack does not expose wells.')
+            for well in rack_wells:
+                if not hasattr(well, 'has_tip'):
+                    raise ValueError('tip rack well does not expose has_tip.')
+                if bool(well.has_tip):
+                    available_tip_count += 1
+        return available_tip_count
+
+    def _validate_transfer_plan_preflight_request(self, request):
+        '''Validates a controller plan without consulting or changing hardware.'''
+        required_keys = {
+            'schema_version',
+            'batch_number',
+            'reserve_volume_uL',
+            'source_plan'
+        }
+        if not isinstance(request, dict) or set(request) != required_keys:
+            raise ValueError(
+                'transfer-plan request must contain exactly {}.'.format(
+                    ', '.join(sorted(required_keys))
+                )
+            )
+        if request['schema_version'] != 1:
+            raise ValueError('transfer-plan request uses an unsupported schema.')
+        if (
+            isinstance(request['batch_number'], bool)
+            or not isinstance(request['batch_number'], int)
+            or request['batch_number'] < 0
+        ):
+            raise ValueError('batch_number must be a nonnegative integer.')
+        reserve_volume_uL = self._preflight_number(
+            request['reserve_volume_uL'],
+            'reserve_volume_uL'
+        )
+        if not isinstance(request['source_plan'], list):
+            raise ValueError('source_plan must be a list.')
+
+        normalized_sources = []
+        for source_index, source_specification in enumerate(
+                request['source_plan']
+        ):
+            if (
+                not isinstance(source_specification, dict)
+                or set(source_specification) != {
+                    'source_chemical_name',
+                    'transfer_steps'
+                }
+            ):
+                raise ValueError(
+                    'source_plan entry {} has an invalid schema.'.format(
+                        source_index
+                    )
+                )
+            source_name = source_specification['source_chemical_name']
+            if not isinstance(source_name, str) or not source_name.strip():
+                raise ValueError(
+                    'source_plan entry {} has no source chemical name.'.format(
+                        source_index
+                    )
+                )
+            transfer_steps = source_specification['transfer_steps']
+            if not isinstance(transfer_steps, list) or not transfer_steps:
+                raise ValueError(
+                    'source_plan entry {} has no transfer steps.'.format(
+                        source_index
+                    )
+                )
+
+            normalized_steps = []
+            for step_index, transfer_step in enumerate(transfer_steps):
+                if (
+                    not isinstance(transfer_step, dict)
+                    or set(transfer_step) != {
+                        'destination_name',
+                        'volume_uL'
+                    }
+                ):
+                    raise ValueError(
+                        'transfer step {} for {} has an invalid schema.'.format(
+                            step_index,
+                            source_name
+                        )
+                    )
+                destination_name = transfer_step['destination_name']
+                if (
+                    not isinstance(destination_name, str)
+                    or not destination_name.strip()
+                ):
+                    raise ValueError(
+                        'transfer step {} for {} has no destination.'.format(
+                            step_index,
+                            source_name
+                        )
+                    )
+                volume_uL = self._preflight_number(
+                    transfer_step['volume_uL'],
+                    'transfer volume for {}'.format(source_name),
+                    minimum=1e-12
+                )
+                normalized_steps.append({
+                    'destination_name': destination_name,
+                    'volume_uL': volume_uL
+                })
+            normalized_sources.append({
+                'source_chemical_name': source_name,
+                'transfer_steps': normalized_steps
+            })
+
+        return {
+            'schema_version': 1,
+            'batch_number': request['batch_number'],
+            'reserve_volume_uL': reserve_volume_uL,
+            'source_plan': normalized_sources
+        }
+
+    def _get_preflight_source_containers(self, source_name):
+        '''Returns immutable descriptors for the source sequence currently live.'''
+        source_container = self.containers.get(source_name)
+        if source_container is None:
+            raise ValueError('source {} is not registered on the Pi.'.format(
+                source_name
+            ))
+
+        if hasattr(source_container, 'cont_list'):
+            containers = list(source_container.cont_list)
+            current_index = int(source_container._cont_i)
+        else:
+            containers = [source_container]
+            current_index = 0
+        if current_index < 0 or current_index >= len(containers):
+            raise ValueError(
+                'source {} has an invalid active-container index.'.format(
+                    source_name
+                )
+            )
+
+        descriptors = []
+        for container_index, container in enumerate(containers):
+            current_volume_uL = self._preflight_number(
+                getattr(container, 'vol', None),
+                'current volume for {}'.format(source_name)
+            )
+            dead_volume_uL = self._preflight_number(
+                getattr(container, 'DEAD_VOL', None),
+                'dead volume for {}'.format(source_name)
+            )
+            descriptors.append({
+                'container_index': container_index,
+                'loc': str(getattr(container, 'loc', '')),
+                'deck_pos': getattr(container, 'deck_pos', None),
+                'current_volume_uL': current_volume_uL,
+                'dead_volume_uL': dead_volume_uL
+            })
+        return descriptors, current_index
+
+    def _simulate_preflight_source(self, source_specification, reserve_volume_uL):
+        '''Simulates one source sequence using copies of volume and index state.'''
+        source_name = source_specification['source_chemical_name']
+        descriptors, active_index = self._get_preflight_source_containers(
+            source_name
+        )
+        simulated_volumes = [
+            descriptor['current_volume_uL']
+            for descriptor in descriptors
+        ]
+        allocated_volume_by_index = dict((
+            descriptor['container_index'],
+            0.0
+        ) for descriptor in descriptors)
+        allocations = []
+        deficits = []
+
+        for transfer_step in source_specification['transfer_steps']:
+            transfer_volume_uL = transfer_step['volume_uL']
+            selected_arm = self._get_preferred_pipette_arm_for_sizes(
+                transfer_volume_uL,
+                dict((arm, details['size']) for arm, details in
+                     self.pipettes.items())
+            )
+            pipette_size_uL = float(self.pipettes[selected_arm]['size'])
+            substep_count = int(
+                (transfer_volume_uL - 1e-9) // pipette_size_uL
+            ) + 1
+            substep_volume_uL = transfer_volume_uL / substep_count
+
+            for substep_number in range(substep_count):
+                while active_index < len(descriptors):
+                    available_uL = (
+                        simulated_volumes[active_index]
+                        - descriptors[active_index]['dead_volume_uL']
+                    )
+                    if available_uL + 1e-9 >= substep_volume_uL:
+                        break
+                    active_index += 1
+                if active_index >= len(descriptors):
+                    reachable_uL = sum(
+                        max(
+                            0.0,
+                            simulated_volumes[index]
+                            - descriptors[index]['dead_volume_uL']
+                        )
+                        for index in range(min(active_index, len(descriptors)),
+                                           len(descriptors))
+                    )
+                    deficits.append({
+                        'deficit_type': 'source_volume',
+                        'source_chemical_name': source_name,
+                        'destination_name': transfer_step['destination_name'],
+                        'required_substep_uL': substep_volume_uL,
+                        'reachable_aspirable_uL': reachable_uL,
+                        'message': (
+                            'No remaining same-name source can satisfy the '
+                            'next whole aspiration.'
+                        )
+                    })
+                    break
+
+                descriptor = descriptors[active_index]
+                simulated_volumes[active_index] -= substep_volume_uL
+                allocated_volume_by_index[active_index] += substep_volume_uL
+                allocations.append({
+                    'source_chemical_name': source_name,
+                    'source_container_index': descriptor['container_index'],
+                    'source_loc': descriptor['loc'],
+                    'source_deck_pos': descriptor['deck_pos'],
+                    'destination_name': transfer_step['destination_name'],
+                    'pipette_arm': selected_arm,
+                    'volume_uL': substep_volume_uL,
+                    'substep_number': substep_number + 1,
+                    'substep_count': substep_count
+                })
+            if deficits:
+                break
+
+        reachable_remaining_uL = sum(
+            max(
+                0.0,
+                simulated_volumes[index] - descriptors[index]['dead_volume_uL']
+            )
+            for index in range(min(active_index, len(descriptors)),
+                               len(descriptors))
+        )
+        if not deficits and reachable_remaining_uL + 1e-9 < reserve_volume_uL:
+            deficits.append({
+                'deficit_type': 'reserve_volume',
+                'source_chemical_name': source_name,
+                'reserve_volume_uL': reserve_volume_uL,
+                'reachable_remaining_aspirable_uL': reachable_remaining_uL,
+                'message': 'Planned use would violate the configured reserve.'
+            })
+
+        source_containers = []
+        for descriptor in descriptors:
+            container_index = descriptor['container_index']
+            source_containers.append({
+                'source_chemical_name': source_name,
+                'source_container_index': container_index,
+                'source_loc': descriptor['loc'],
+                'source_deck_pos': descriptor['deck_pos'],
+                'initial_volume_uL': descriptor['current_volume_uL'],
+                'dead_volume_uL': descriptor['dead_volume_uL'],
+                'planned_withdrawal_uL': allocated_volume_by_index[
+                    container_index
+                ],
+                'simulated_final_volume_uL': simulated_volumes[container_index]
+            })
+        return {
+            'source_containers': source_containers,
+            'allocations': allocations,
+            'deficits': deficits
+        }
+
+    def _simulate_preflight_tips(self, source_plan):
+        '''Simulates only the existing tip-cleanup rule on copied pipette state.'''
+        tip_state = {}
+        for arm, details in self.pipettes.items():
+            pipette = details.get('pipette')
+            if pipette is None:
+                raise ValueError('{} pipette is unavailable.'.format(arm))
+            tip_state[arm] = {
+                'size': self._preflight_number(
+                    details.get('size'),
+                    '{} pipette size'.format(arm),
+                    minimum=1e-12
+                ),
+                'last_used': details.get('last_used'),
+                'has_tip': bool(getattr(pipette, 'has_tip', False)),
+                'available_new_tips': self._count_available_tips(pipette),
+                'required_new_tips': 0
+            }
+        if set(tip_state) != {'left', 'right'}:
+            raise ValueError(
+                'transfer preflight requires left and right pipettes.'
+            )
+
+        deficits = []
+        for source_specification in source_plan:
+            source_name = source_specification['source_chemical_name']
+            requires_cleaning = any(
+                state['last_used'] not in ('clean', 'WaterC1.0', source_name)
+                for state in tip_state.values()
+            )
+            if requires_cleaning:
+                for arm, state in tip_state.items():
+                    if state['last_used'] not in ('clean', 'WaterC1.0'):
+                        if not state['has_tip']:
+                            deficits.append({
+                                'deficit_type': 'pipette_state',
+                                'pipette_arm': arm,
+                                'message': (
+                                    'A dirty pipette has no attached tip to '
+                                    'drop before the next source.'
+                                )
+                            })
+                        else:
+                            state['required_new_tips'] += 1
+                            state['has_tip'] = True
+                        state['last_used'] = 'clean'
+
+            for transfer_step in source_specification['transfer_steps']:
+                arm = self._get_preferred_pipette_arm_for_sizes(
+                    transfer_step['volume_uL'],
+                    dict((name, state['size']) for name, state in
+                         tip_state.items())
+                )
+                if not tip_state[arm]['has_tip']:
+                    deficits.append({
+                        'deficit_type': 'pipette_state',
+                        'pipette_arm': arm,
+                        'message': (
+                            'The selected pipette has no attached tip for a '
+                            'planned transfer.'
+                        )
+                    })
+                tip_state[arm]['last_used'] = source_name
+
+        requirements = []
+        for arm in sorted(tip_state):
+            state = tip_state[arm]
+            requirement = {
+                'pipette_arm': arm,
+                'pipette_size_uL': state['size'],
+                'initial_has_tip': bool(
+                    getattr(self.pipettes[arm]['pipette'], 'has_tip', False)
+                ),
+                'required_new_tips': state['required_new_tips'],
+                'available_new_tips': state['available_new_tips'],
+                'preflight_passed': (
+                    state['available_new_tips'] >= state['required_new_tips']
+                )
+            }
+            if not requirement['preflight_passed']:
+                deficits.append({
+                    'deficit_type': 'tip_inventory',
+                    'pipette_arm': arm,
+                    'required_new_tips': state['required_new_tips'],
+                    'available_new_tips': state['available_new_tips'],
+                    'message': 'Insufficient unused tips for this batch.'
+                })
+            requirements.append(requirement)
+        return requirements, deficits
+
+    def _build_transfer_plan_preflight(self, request):
+        '''Returns an exact non-mutating feasibility decision for one batch.'''
+        try:
+            normalized_request = self._validate_transfer_plan_preflight_request(
+                request
+            )
+        except ValueError as exc:
+            return {
+                'schema_version': 1,
+                'record_type': 'transfer_plan_preflight',
+                'batch_number': None,
+                'passed': False,
+                'source_containers': [],
+                'allocations': [],
+                'tip_requirements': [],
+                'deficits': [{
+                    'deficit_type': 'invalid_request',
+                    'message': str(exc)
+                }]
+            }
+
+        source_containers = []
+        allocations = []
+        deficits = []
+        for source_specification in normalized_request['source_plan']:
+            try:
+                source_result = self._simulate_preflight_source(
+                    source_specification,
+                    normalized_request['reserve_volume_uL']
+                )
+            except ValueError as exc:
+                deficits.append({
+                    'deficit_type': 'source_state',
+                    'source_chemical_name': source_specification[
+                        'source_chemical_name'
+                    ],
+                    'message': str(exc)
+                })
+                continue
+            source_containers.extend(source_result['source_containers'])
+            allocations.extend(source_result['allocations'])
+            deficits.extend(source_result['deficits'])
+
+        try:
+            tip_requirements, tip_deficits = self._simulate_preflight_tips(
+                normalized_request['source_plan']
+            )
+        except ValueError as exc:
+            tip_requirements = []
+            tip_deficits = [{
+                'deficit_type': 'tip_state',
+                'message': str(exc)
+            }]
+        deficits.extend(tip_deficits)
+
+        return {
+            'schema_version': 1,
+            'record_type': 'transfer_plan_preflight',
+            'batch_number': normalized_request['batch_number'],
+            'passed': len(deficits) == 0,
+            'source_containers': source_containers,
+            'allocations': allocations,
+            'tip_requirements': tip_requirements,
+            'deficits': deficits
+        }
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -1646,7 +2144,10 @@ class OT2Robot():
             'protocol_version': self.AUTO_MAIN_PROTOCOL_VERSION,
             'tare_calibration_id': self.TARE_CALIBRATION_ID,
             'tare_calibration_g': dict(self.TARE_CALIBRATION_G),
-            'supported_commands': ['get_robot_state_snapshot'],
+            'supported_commands': [
+                'get_robot_state_snapshot',
+                'preflight_transfer_plan'
+            ],
             'simulate': bool(self.simulate),
             'container_count': len(self.containers),
             'pipette_count': len(self.pipettes),
@@ -1659,6 +2160,14 @@ class OT2Robot():
         self.portal.send_pack(
             'robot_state_snapshot',
             self._build_robot_state_snapshot()
+        )
+
+    @exec_func('preflight_transfer_plan', 1, False, exec_funcs)
+    def _exec_preflight_transfer_plan(self, request):
+        '''Returns a non-mutating exact source and tip plan for one batch.'''
+        self.portal.send_pack(
+            'transfer_plan_preflight',
+            self._build_transfer_plan_preflight(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)
@@ -1755,30 +2264,11 @@ class OT2Robot():
         returns:  
             str: in ['right', 'left'] the pipette arm you're to use  
         '''
-        preffered_size = 0
-        if vol < 40.0:
-            preffered_size = 20.0
-        elif vol < 1000:
-            preffered_size = 300.0
-        else:
-            preffered_size = 1000.0
-        
-        #which pipette arm has a larger pipette?
-        larger_pipette=None
-        if self.pipettes['right']['size'] < self.pipettes['left']['size']:
-            larger_pipette = 'left'
-            smaller_pipette = 'right'
-        else:
-            larger_pipette = 'right'
-            smaller_pipette = 'left'
-
-        FUDGE_FACTOR = 0.0001
-        if self.pipettes[larger_pipette]['size'] <= preffered_size + FUDGE_FACTOR:
-            #if the larger one is small enough return it
-            return larger_pipette
-        else:
-            #if the larger one is too large return the smaller
-            return smaller_pipette
+        return self._get_preferred_pipette_arm_for_sizes(
+            vol,
+            dict((arm, details['size']) for arm, details in
+                 self.pipettes.items())
+        )
 
     def _liquid_transfer(self, src, dst, vol, arm):
         '''

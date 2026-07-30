@@ -71,7 +71,7 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
 
         self.assertEqual(1, snapshot['snapshot_schema_version'])
         self.assertEqual('Auto-main', snapshot['runtime_role'])
-        self.assertEqual('auto-main-state-v1', snapshot['protocol_version'])
+        self.assertEqual('auto-main-state-v2', snapshot['protocol_version'])
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
                          snapshot['tare_calibration_id'])
         self.assertEqual({
@@ -79,8 +79,10 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
             'tube_15ml': 7.2731,
             'tube_50ml': 13.6950
         }, snapshot['tare_calibration_g'])
-        self.assertEqual(['get_robot_state_snapshot'],
-                         snapshot['supported_commands'])
+        self.assertEqual([
+            'get_robot_state_snapshot',
+            'preflight_transfer_plan'
+        ], snapshot['supported_commands'])
         self.assertTrue(snapshot['simulate'])
         self.assertEqual(1, snapshot['container_count'])
         self.assertEqual(1, snapshot['pipette_count'])
@@ -131,8 +133,12 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
 
         self.assertEqual(b'\x11', packet_types['get_robot_state_snapshot'])
         self.assertEqual(b'\x12', packet_types['robot_state_snapshot'])
+        self.assertEqual(b'\x13', packet_types['preflight_transfer_plan'])
+        self.assertEqual(b'\x14', packet_types['transfer_plan_preflight'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
+        self.assertIn('preflight_transfer_plan', ghost_types)
+        self.assertIn('transfer_plan_preflight', ghost_types)
 
 
 if __name__ == '__main__':
