@@ -2907,6 +2907,238 @@ class OptimizationModel():
         })
 
         return balance
+
+    def get_candidate_feasibility_batch_for_plotting(
+        self,
+        x_values,
+        chunk_size=65536
+    ):
+        '''
+        Returns read-only mask-aware feasibility data for many plotted
+        normalized candidates.
+
+        Conditional GP slice renderers evaluate a regular grid and a denser
+        feasibility-overlay grid for every displayed reagent pair.  Calling
+        :meth:`get_candidate_feasibility_for_plotting` once per pixel is
+        scientifically correct but spends most of its time in Python method
+        dispatch.  This counterpart applies the same raw, unrepaired volume
+        and mask rules to bounded NumPy chunks.  It is observational only:
+        it never repairs candidates, changes GP state, updates optimizer
+        history, or changes the recipe-selection pathway.
+
+        The returned arrays deliberately retain one element per input row so
+        controller plotting code can reshape them with its established
+        ``meshgrid(indexing='xy')`` and C-order convention.
+
+        params:
+            np.ndarray x_values:
+                Nonempty N x D array of normalized recipes, where D follows
+                ``variable_reagents`` order.
+
+            int chunk_size:
+                Maximum recipes evaluated in one temporary numeric block.
+                Chunking bounds transient memory use for high-dimensional
+                dense feasibility overlays without changing classifications.
+
+        returns:
+            dict:
+                One-dimensional NumPy arrays matching the scalar plotting
+                helper's volume and mask-feasibility fields.
+        '''
+        try:
+            chunk_size = int(chunk_size)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                "Plotting feasibility batch chunk_size must be a positive "
+                "integer."
+            )
+
+        if chunk_size < 1:
+            raise ValueError(
+                "Plotting feasibility batch chunk_size must be at least 1."
+            )
+
+        n_dimensions = self._get_dimension()
+        x_values = np.asarray(x_values, dtype=float)
+
+        if x_values.ndim == 1:
+            x_values = x_values.reshape(1, -1)
+
+        if (
+            x_values.ndim != 2
+            or x_values.shape[1] != n_dimensions
+            or x_values.shape[0] == 0
+        ):
+            raise ValueError(
+                "Plotting feasibility batch requires a nonempty N x D "
+                f"normalized recipe array with D={n_dimensions}."
+            )
+
+        if not np.all(np.isfinite(x_values)):
+            raise ValueError(
+                "Plotting feasibility batch received non-finite normalized "
+                "recipes."
+            )
+
+        if (
+            self.min_conc is None
+            or self.max_conc is None
+            or self.total_volume is None
+            or self.fixed_reagent_volumes is None
+        ):
+            raise ValueError(
+                "Volume-aware optimization requires min_conc, max_conc, "
+                "total_volume, and fixed_reagent_volumes to be provided to "
+                "OptimizationModel."
+            )
+
+        reagent_names = [
+            str(reagent_name)
+            for reagent_name in self.variable_reagents
+        ]
+        min_conc = np.asarray(self.min_conc, dtype=float).reshape(
+            n_dimensions
+        )
+        max_conc = np.asarray(self.max_conc, dtype=float).reshape(
+            n_dimensions
+        )
+        stock_conc = np.asarray([
+            self._get_variable_reagent_stock_conc(reagent_name)
+            for reagent_name in reagent_names
+        ], dtype=float)
+
+        if (
+            not np.all(np.isfinite(min_conc))
+            or not np.all(np.isfinite(max_conc))
+            or not np.all(np.isfinite(stock_conc))
+            or np.any(stock_conc <= 0.0)
+        ):
+            raise ValueError(
+                "Plotting feasibility batch requires finite positive stock "
+                "concentrations and finite concentration bounds."
+            )
+
+        if hasattr(self, 'true_zero_reagents'):
+            true_zero_reagents = {
+                str(reagent_name)
+                for reagent_name in self.true_zero_reagents
+            }
+        elif getattr(self, 'allow_true_zero', False):
+            true_zero_reagents = set(reagent_names)
+        else:
+            true_zero_reagents = set()
+
+        total_volume = float(self.total_volume)
+        fixed_volume_total = float(
+            sum(float(volume) for volume in self.fixed_reagent_volumes.values())
+        )
+        n_recipes = x_values.shape[0]
+        transfer_volumes = np.empty(
+            (n_recipes, n_dimensions),
+            dtype=float
+        )
+        water_volume = np.empty(n_recipes, dtype=float)
+        variable_transfers_executable = np.empty(n_recipes, dtype=bool)
+        volume_does_not_overflow = np.empty(n_recipes, dtype=bool)
+        water_transfer_executable = np.empty(n_recipes, dtype=bool)
+        volume_feasible = np.empty(n_recipes, dtype=bool)
+        mask_feasible = np.empty(n_recipes, dtype=bool)
+        all_variable_transfers_zero = np.empty(n_recipes, dtype=bool)
+
+        volume_tol = 1e-9
+        executable_minimum_ul = 5.0 - volume_tol
+        zero_permitted = np.asarray([
+            reagent_name in true_zero_reagents
+            for reagent_name in reagent_names
+        ], dtype=bool)
+
+        for start_index in range(0, n_recipes, chunk_size):
+            end_index = min(start_index + chunk_size, n_recipes)
+            x_chunk = x_values[start_index:end_index]
+            transfer_chunk = (
+                (x_chunk * (max_conc - min_conc) + min_conc)
+                * total_volume
+                / stock_conc
+            )
+            transfer_volumes[start_index:end_index] = transfer_chunk
+
+            zero_transfer = np.isclose(
+                transfer_chunk,
+                0.0,
+                rtol=0,
+                atol=volume_tol
+            )
+            transfer_executable = (
+                zero_transfer
+                | (transfer_chunk >= executable_minimum_ul)
+            )
+            variable_transfers_executable[start_index:end_index] = np.all(
+                transfer_executable,
+                axis=1
+            )
+
+            water_chunk = (
+                total_volume
+                - fixed_volume_total
+                - np.sum(transfer_chunk, axis=1)
+            )
+            water_chunk[np.isclose(
+                water_chunk,
+                0.0,
+                rtol=0,
+                atol=volume_tol
+            )] = 0.0
+            water_volume[start_index:end_index] = water_chunk
+
+            no_overflow_chunk = water_chunk >= -volume_tol
+            water_executable_chunk = (
+                np.isclose(
+                    water_chunk,
+                    0.0,
+                    rtol=0,
+                    atol=volume_tol
+                )
+                | (water_chunk >= executable_minimum_ul)
+            )
+            volume_does_not_overflow[start_index:end_index] = (
+                no_overflow_chunk
+            )
+            water_transfer_executable[start_index:end_index] = (
+                water_executable_chunk
+            )
+            volume_feasible_chunk = (
+                np.all(transfer_executable, axis=1)
+                & no_overflow_chunk
+                & water_executable_chunk
+            )
+            volume_feasible[start_index:end_index] = volume_feasible_chunk
+
+            all_zero_chunk = np.all(zero_transfer, axis=1)
+            all_variable_transfers_zero[start_index:end_index] = all_zero_chunk
+            disallowed_zero_chunk = np.any(
+                zero_transfer & ~zero_permitted,
+                axis=1
+            )
+            mask_feasible[start_index:end_index] = (
+                volume_feasible_chunk
+                & ~disallowed_zero_chunk
+                & ~all_zero_chunk
+            )
+
+        return {
+            'water_volume': water_volume,
+            'variable_transfer_volumes': {
+                reagent_name: transfer_volumes[:, reagent_index]
+                for reagent_index, reagent_name in enumerate(reagent_names)
+            },
+            'variable_transfers_executable': variable_transfers_executable,
+            'volume_does_not_overflow': volume_does_not_overflow,
+            'water_transfer_executable': water_transfer_executable,
+            'volume_feasible': volume_feasible,
+            'all_variable_transfers_zero': all_variable_transfers_zero,
+            'all_off_mask_excluded': all_variable_transfers_zero.copy(),
+            'mask_feasible': mask_feasible
+        }
     
     def _generate_feasible_starting_points(self, n_restarts):
         '''

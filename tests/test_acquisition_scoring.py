@@ -5799,6 +5799,7 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
             '_get_candidate_volume_balance',
             'get_candidate_volume_balance_for_plotting',
             'get_candidate_feasibility_for_plotting',
+            'get_candidate_feasibility_batch_for_plotting',
             'predict_lambda_distribution_nm_batch'
         ])
         cls.SliceController = _load_auto_controller_methods([
@@ -5915,6 +5916,78 @@ class ThreeVariableSliceSupportTests(unittest.TestCase):
         self.assertTrue(all_off['all_off_mask_excluded'])
         self.assertTrue(
             all_off['zero_transfer_not_permitted_by_reagent']['B']
+        )
+
+    def test_batched_plotting_feasibility_matches_scalar_mask_rules(self):
+        '''Dense slice masks must retain scalar rules from 2D through 5D.'''
+        for n_dimensions in range(2, 6):
+            model = self.BatchPredictionModel()
+            model.variable_reagents = [
+                f'R{index}'
+                for index in range(n_dimensions)
+            ]
+            model.min_conc = [0.0] * n_dimensions
+            model.max_conc = [0.5] * n_dimensions
+            model.total_volume = 100.0
+            model.fixed_reagent_volumes = {'fixed': 10.0}
+            model.allow_true_zero = True
+            model.true_zero_reagents = ['R0']
+            model._get_variable_reagent_stock_conc = (
+                lambda reagent_name: 1.0
+            )
+
+            recipes = np.asarray([
+                [0.00] + [0.20] * (n_dimensions - 1),
+                [0.05] + [0.20] * (n_dimensions - 1),
+                [0.00] * n_dimensions,
+                [0.50] * n_dimensions
+            ], dtype=float)
+
+            batch = model.get_candidate_feasibility_batch_for_plotting(
+                recipes,
+                chunk_size=2
+            )
+
+            for row_index, recipe in enumerate(recipes):
+                scalar = model.get_candidate_feasibility_for_plotting(recipe)
+                self.assertEqual(
+                    bool(batch['mask_feasible'][row_index]),
+                    scalar['mask_feasible']
+                )
+                self.assertEqual(
+                    bool(batch['volume_feasible'][row_index]),
+                    scalar['volume_feasible']
+                )
+                self.assertEqual(
+                    bool(batch['all_off_mask_excluded'][row_index]),
+                    scalar['all_off_mask_excluded']
+                )
+                self.assertAlmostEqual(
+                    float(batch['water_volume'][row_index]),
+                    scalar['water_volume']
+                )
+                for reagent_name in model.variable_reagents:
+                    self.assertAlmostEqual(
+                        float(batch['variable_transfer_volumes'][
+                            reagent_name
+                        ][row_index]),
+                        scalar['variable_transfer_volumes'][reagent_name]
+                    )
+
+    def test_generalized_slice_renderer_prefers_batched_feasibility(self):
+        '''Production slices must select the vectorized helper when present.'''
+        renderer_node = _get_auto_controller_method_node(
+            '_build_auto_conditional_slice_panel_data'
+        )
+        renderer_source = ast.unparse(renderer_node)
+
+        self.assertIn(
+            "'get_candidate_feasibility_batch_for_plotting'",
+            renderer_source
+        )
+        self.assertIn(
+            'batch_balance = feasibility_batch_for_plotting(recipes)',
+            renderer_source
         )
 
     def test_slice_renderer_keeps_originals_and_adds_2d_style_overlays(self):

@@ -223,6 +223,25 @@ overlay, because a recipe can be physically executable yet optically
 unreliable. Reliability-aware acquisition remains a separately approved,
 future Stage 5 policy decision.
 
+### Vectorized conditional-slice feasibility — July 30, 2026
+
+High-dimensional conditional slices retain their established GP prediction
+grids and scalar physical rules, but the plotting path now evaluates raw
+recipe feasibility in chunk-bounded NumPy batches rather than calling the
+scalar helper once per plotted point. The batch implementation preserves the
+0-or-at-least-5 uL variable-transfer rule, selected true-zero eligibility,
+all-variable-off exclusion, water top-off executability, and overflow
+rejection. It is read-only and affects no robot transfer, optimizer selection,
+model history, QC decision, or plot-grid definition.
+
+Synthetic 2D through 5D tests compare batched outputs with the established
+scalar evaluator for permitted zeros, disallowed/non-executable transfers,
+all-off recipes, overflow, per-reagent transfer volumes, water balance, and
+final mask feasibility. The controller prefers the batch helper when supplied
+by `OptimizationModel` and retains its scalar fallback for legacy isolated
+test doubles. Pair-level worker processes and detailed timing/progress
+messages remain a separate, not-yet-implemented Stage 5 Part 2.
+
 ### Imported-continuation numbering, run provenance, and seed labeling — July 24, 2026 **[Claude Code]**
 
 Commits `4ae04b1` (plot styling) and `248d95d` (numbering, provenance, seed

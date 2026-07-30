@@ -18843,6 +18843,11 @@ class AutoContr(Controller):
             'get_candidate_feasibility_for_plotting',
             None
         )
+        feasibility_batch_for_plotting = getattr(
+            model,
+            'get_candidate_feasibility_batch_for_plotting',
+            None
+        )
         balance_for_plotting = getattr(
             model,
             'get_candidate_volume_balance_for_plotting',
@@ -18991,6 +18996,32 @@ class AutoContr(Controller):
 
         def _evaluate_slice_feasibility(recipes, grid_shape):
             '''Evaluates raw full-recipe feasibility without repairing zero.'''
+            if callable(feasibility_batch_for_plotting):
+                batch_balance = feasibility_batch_for_plotting(recipes)
+                return {
+                    'feasible': np.asarray(
+                        batch_balance.get(
+                            'mask_feasible',
+                            batch_balance['volume_feasible']
+                        ),
+                        dtype=bool
+                    ).reshape(grid_shape),
+                    'water_volume_uL': np.asarray(
+                        batch_balance['water_volume'],
+                        dtype=float
+                    ).reshape(grid_shape),
+                    'transfer_volume_uL_by_reagent': {
+                        reagent_name: np.asarray(
+                            batch_balance['variable_transfer_volumes'][
+                                reagent_name
+                            ],
+                            dtype=float
+                        ).reshape(grid_shape)
+                        for reagent_name in reagent_names
+                    }
+                }
+
+            # Preserve the scalar route for lightweight legacy test doubles.
             feasible = np.zeros(recipes.shape[0], dtype=bool)
             water_volume = np.full(recipes.shape[0], np.nan, dtype=float)
             transfer_volume_by_reagent = {

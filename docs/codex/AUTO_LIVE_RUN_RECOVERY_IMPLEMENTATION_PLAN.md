@@ -1,8 +1,10 @@
 # Auto Live-Run Recovery and Performance Plan
 
 **Status:** Stages 0–4 implemented and hardware-free validated. Stages 1–4
-have passed their respective controlled dry-debug checkpoints. Stage 5 is the
-next implementation stage.
+have passed their respective controlled dry-debug checkpoints. Stage 5 Part 1
+(vectorized feasibility evaluation) is implemented and synthetically
+validated; Stage 5 Part 2 (progress reporting and bounded pair-level workers)
+remains next.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -180,6 +182,22 @@ actions remain later stages.
 Profile the existing high-dimensional slice path using saved data. The current implementation processes each displayed reagent pair serially, including GP prediction, feasibility evaluation, and plot production. This was adequate for 2D/3D but creates an unacceptable pause for 5D and above (for example, ten displayed pairs). Replace scalar per-grid-point feasibility loops with a vectorized implementation whose results are proven identical to the established physical rules. Keep GP prediction batched. Add clear progress messages for panel preparation and rendering.
 
 After correctness is established, parallelize independent numerical panel preparation with a bounded worker pool, then keep Matplotlib rendering and output writes deterministic and controlled. Leave one or two CPU cores free for the operating system, controller, and robot communication; do not parallelize model mutation, hardware commands, or shared state writes. The resulting figures must be scientifically identical to serial output, apart from timing.
+
+**Part 1 implementation status:** The optimizer now exposes a read-only,
+chunk-bounded batched feasibility evaluator. It applies the established raw
+plotting rules—per-reagent 0-or-at-least-5 uL transfers, selected true-zero
+permissions, all-off exclusion, water executability, and overflow—to an N x D
+recipe array without calling the scalar Python helper once per grid point.
+Conditional slices prefer this vectorized helper while preserving the scalar
+fallback for lightweight legacy test doubles. Synthetic 2D through 5D tests
+compare its physical transfers, water balance, volume feasibility, and
+mask-feasibility outcome against the authoritative scalar helper. This Part
+does not add workers, alter grid density, change plots, or require a Pi update.
+
+**Part 2 scope:** Add concise pair/preparation/render timing messages and,
+only after profiling the vectorized serial path, a bounded worker pool for
+independent numerical panel preparation. Matplotlib, file writes, model state,
+and all hardware communication remain single-process.
 
 Add an `auto_conditional_slice_profile` policy only if needed after profiling:
 
