@@ -1385,6 +1385,28 @@ class OT2Robot():
             #get the opentrons tip rack objects corresponding to the deck positions that
             #have tip racks
             tip_racks = [self.protocol.loaded_labwares[deck_pos] for deck_pos in tip_rows['deck_pos']]
+            # ``starting_tip`` tells the Opentrons API where to take the
+            # initial tip, but it does not mark earlier, physically empty
+            # wells as unavailable in the API's ``has_tip`` state.  Keep the
+            # spreadsheet-declared usable suffix for each rack so the
+            # non-mutating Auto batch preflight can use the same capacity
+            # convention as the controller-side deck check.
+            configured_tip_wells = []
+            tip_well_order = self._standard_96_tip_well_order()
+            for _, tip_row in tip_rows.iterrows():
+                first_usable = str(tip_row['first_usable']).strip().upper()
+                if first_usable not in tip_well_order:
+                    raise ValueError(
+                        'Invalid first usable tip {} for {}. Expected a '
+                        'standard 96-tip-rack position from A1 through H12.'
+                        .format(first_usable, tip_row['name'])
+                    )
+                tip_rack = self.protocol.loaded_labwares[tip_row['deck_pos']]
+                first_tip_index = tip_well_order.index(first_usable)
+                configured_tip_wells.extend(
+                    tip_rack.well(well_name)
+                    for well_name in tip_well_order[first_tip_index:]
+                )
             #load the pipette
             pipette = self.protocol.load_instrument(opentrons_name,arm_pos,tip_racks=tip_racks)
             #get the row with the largest lexographic starting tip e.g. (B1 > A0)
@@ -1397,11 +1419,25 @@ class OT2Robot():
             pipette.starting_tip = used_rack.well(used_rack_row['first_usable'])
             pipette.pick_up_tip()
             #update self.pipettes
-            self.pipettes[arm_pos] = {'size':float(pipette_size),'last_used':'clean','pipette':pipette}
+            self.pipettes[arm_pos] = {
+                'size': float(pipette_size),
+                'last_used': 'clean',
+                'pipette': pipette,
+                'configured_tip_wells': configured_tip_wells
+            }
             print("init info:")
             print(self.pipettes[arm_pos])
             print(self.pipettes[arm_pos]['pipette'].tip_racks)
         return
+
+    @staticmethod
+    def _standard_96_tip_well_order():
+        '''Returns the spreadsheet/controller order for standard 96-tip racks.'''
+        return [
+            '{}{}'.format(row, column)
+            for column in range(1, 13)
+            for row in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+        ]
 
     def _lexo_argmax(self, s):
         '''
@@ -1702,8 +1738,19 @@ class OT2Robot():
         return smaller_pipette
 
     @staticmethod
-    def _count_available_tips(pipette):
-        '''Counts unused tips without changing rack or pipette state.'''
+    def _count_available_tips(pipette, configured_tip_wells=None):
+        '''Counts configured unused tips without changing rack or pipette state.'''
+        if configured_tip_wells is not None:
+            available_tip_count = 0
+            for well in configured_tip_wells:
+                if not hasattr(well, 'has_tip'):
+                    raise ValueError(
+                        'configured tip rack well does not expose has_tip.'
+                    )
+                if bool(well.has_tip):
+                    available_tip_count += 1
+            return available_tip_count
+
         try:
             tip_racks = list(pipette.tip_racks)
         except (AttributeError, TypeError):
@@ -2022,7 +2069,10 @@ class OT2Robot():
                 ),
                 'last_used': details.get('last_used'),
                 'has_tip': bool(getattr(pipette, 'has_tip', False)),
-                'available_new_tips': self._count_available_tips(pipette),
+                'available_new_tips': self._count_available_tips(
+                    pipette,
+                    details.get('configured_tip_wells')
+                ),
                 'required_new_tips': 0
             }
         if set(tip_state) != {'left', 'right'}:

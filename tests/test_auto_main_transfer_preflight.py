@@ -234,6 +234,36 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             robot.pipettes['right']['last_used']
         ))
 
+    def test_tip_preflight_honors_configured_rack_suffix(self):
+        '''A rack declared to begin at H12 has no replacement tips after H12.'''
+        robot = self._build_robot(right_tip_count=95)
+        right_pipette = robot.pipettes['right']['pipette']
+
+        # The one configured H12 tip is already attached after initialization.
+        # Other logical rack wells may still say has_tip=True, but were
+        # declared physically unavailable by first_usable=H12.
+        robot.pipettes['right']['configured_tip_wells'] = [
+            _WellStub(has_tip=False)
+        ]
+        before = (right_pipette.has_tip, robot.pipettes['right']['last_used'])
+
+        result = robot._build_transfer_plan_preflight(self._request())
+
+        right_requirement = next(
+            requirement for requirement in result['tip_requirements']
+            if requirement['pipette_arm'] == 'right'
+        )
+        self.assertFalse(result['passed'])
+        self.assertEqual(0, right_requirement['available_new_tips'])
+        self.assertGreater(right_requirement['required_new_tips'], 0)
+        self.assertIn('tip_inventory', [
+            deficit['deficit_type'] for deficit in result['deficits']
+        ])
+        self.assertEqual(before, (
+            right_pipette.has_tip,
+            robot.pipettes['right']['last_used']
+        ))
+
     def test_reserve_boundary_is_rejected(self):
         robot = self._build_robot()
         request = self._request()
