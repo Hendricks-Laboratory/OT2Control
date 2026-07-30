@@ -242,6 +242,16 @@ by `OptimizationModel` and retains its scalar fallback for legacy isolated
 test doubles. Pair-level worker processes and detailed timing/progress
 messages remain a separate, not-yet-implemented Stage 5 Part 2.
 
+The controlled five-variable `DEBUGRTG_STAGE5_part1` dry run completed both
+the after-model-update and final conditional-slice suites without a traceback;
+the terminal recorded 60 generated conditional-slice artifacts per suite. Its
+observed plotting interval was approximately 40 seconds. A presentation-only
+follow-up makes standalone slice headers responsive to the wrapped main title,
+two-column legend height, and wrapped `Hold:` provenance annotation, so long
+held-reagent lists cannot be cut off at the export edge. The same follow-up
+compacts the pairwise design-space title/legend band without moving any plotted
+recipe coordinates or changing GP, feasibility, or execution behavior.
+
 ### Imported-continuation numbering, run provenance, and seed labeling — July 24, 2026 **[Claude Code]**
 
 Commits `4ae04b1` (plot styling) and `248d95d` (numbering, provenance, seed

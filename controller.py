@@ -14565,9 +14565,10 @@ class AutoContr(Controller):
         panel_width = 3.9
         panel_height = 3.9
         # Keep the title and shared legend in a genuine header band without
-        # shrinking the square panels. The former larger reservation left an
-        # unhelpful internal white band in four-variable pairwise exports.
-        figure_header_height = 1.40
+        # shrinking the square panels. A compact header matches the conditional
+        # GP atlases more closely while retaining clear separation between the
+        # legend and the top row of square projection panels.
+        figure_header_height = 1.20
 
         fig, axes = plt.subplots(
             n_rows,
@@ -14733,7 +14734,10 @@ class AutoContr(Controller):
             display_title,
             fontsize=font_sizes['title'],
             fontweight='normal',
-            y=0.980
+            # Keep the established legend-to-panel spacing fixed. Lower only
+            # the title within the header so the title and legend read as one
+            # coherent annotation band.
+            y=0.955
         )
 
         if len(final_legend_handles) > 0:
@@ -14741,7 +14745,9 @@ class AutoContr(Controller):
                 final_legend_handles,
                 final_legend_labels,
                 loc='upper center',
-                bbox_to_anchor=(0.5, 0.905),
+                # Lower the shared key slightly within the fixed header band.
+                # The title and plotting panels deliberately remain fixed.
+                bbox_to_anchor=(0.5, 0.895),
                 ncol=min(
                     len(final_legend_handles),
                     4
@@ -14756,6 +14762,9 @@ class AutoContr(Controller):
             # Keep the shared legend in a true header band. Pairwise axes use
             # a square box aspect and can otherwise visually encroach on a
             # legend that is merely placed above their nominal subplot slot.
+            # Preserve the established legend-to-panel spacing. Only the
+            # legend itself is moved within the header to tighten its
+            # relationship to the figure title.
             top_margin = 0.79
 
         else:
@@ -14766,8 +14775,8 @@ class AutoContr(Controller):
             right=0.98,
             bottom=0.075,
             top=top_margin,
-            hspace=0.42,
-            wspace=0.36
+            hspace=0.38,
+            wspace=0.34
         )
 
         return self._save_auto_design_plot(
@@ -21154,8 +21163,31 @@ class AutoContr(Controller):
         def _render_individual_slice(field_name, colorbar_label, value_getter,
                                      colormap, norm, title, panel,
                                      feasibility_overlay=False):
+            # A standalone slice can have a multi-line field title, a shared
+            # legend, and a held-recipe provenance list. Lay out those three
+            # header components together rather than assigning fixed vertical
+            # positions that can crop a long title or annotation. The main
+            # title, legend content, scientific grid, and model values remain
+            # unchanged; this is presentation-only layout handling.
+            standalone_title_lines = textwrap.wrap(
+                f'{title}: {reagent_names[panel["x_index"]]} vs '
+                f'{reagent_names[panel["y_index"]]}',
+                width=48
+            )
+            standalone_title = '\n'.join(standalone_title_lines)
+            standalone_title_line_count = max(
+                1,
+                len(standalone_title_lines)
+            )
+            held_recipe_lines = textwrap.wrap(
+                'Hold: ' + _held_recipe_text(panel, compact=True),
+                width=62
+            )
+            held_recipe_annotation = '\n'.join(held_recipe_lines)
+            held_recipe_line_count = max(1, len(held_recipe_lines))
             figure, axis = plt.subplots(
-                figsize=(8.4, 7.1 if feasibility_overlay else 6.2), dpi=300
+                figsize=(8.4, 7.1 if feasibility_overlay else 6.2),
+                dpi=300
             )
             figure.set_tight_layout(False)
             image = _draw_panel(
@@ -21167,13 +21199,6 @@ class AutoContr(Controller):
                                        pad=0.05)
             colorbar.set_label(colorbar_label, fontsize=font_sizes['axis_label'])
             colorbar.ax.tick_params(labelsize=font_sizes['tick_label'], width=0.9)
-            figure.suptitle(
-                '\n'.join(textwrap.wrap(
-                    f'{title}: {reagent_names[panel["x_index"]]} vs '
-                    f'{reagent_names[panel["y_index"]]}', width=52
-                )),
-                fontsize=font_sizes['title'], fontweight='normal', y=0.97
-            )
             legend_handles = _observation_legend_handles(axis)
             if feasibility_overlay:
                 legend_handles = (
@@ -21184,10 +21209,58 @@ class AutoContr(Controller):
                     )
                     + legend_handles
                 )
+
+            # The shared legend uses two columns. Its number of rows is part
+            # of the header geometry, particularly for feasibility overlays
+            # that have several physical-boundary entries.
+            legend_row_count = max(
+                1,
+                int(np.ceil(len(legend_handles) / 2.0))
+            )
+            title_band_bottom = (
+                0.975
+                - (0.045 * standalone_title_line_count)
+            )
+            legend_band_top = title_band_bottom - 0.018
+            legend_band_bottom = (
+                legend_band_top
+                - (0.034 * legend_row_count)
+            )
+            held_recipe_band_top = legend_band_bottom - 0.035
+            held_recipe_band_bottom = (
+                held_recipe_band_top
+                - (0.035 * held_recipe_line_count)
+            )
+            axes_top = max(
+                0.49,
+                held_recipe_band_bottom - 0.025
+            )
+            extra_annotation_lines = (
+                max(0, standalone_title_line_count - 2)
+                + max(0, legend_row_count - 1)
+                + max(0, held_recipe_line_count - 1)
+            )
+            # Preserve the physical size of the square data panel as header
+            # annotations gain lines. Increasing only the header fraction
+            # would make a high-dimensional slice less readable despite its
+            # larger provenance annotation.
+            figure.set_size_inches(
+                8.4,
+                (7.1 if feasibility_overlay else 6.2)
+                + (0.45 * extra_annotation_lines),
+                forward=True
+            )
+            figure.suptitle(
+                standalone_title,
+                fontsize=font_sizes['title'], fontweight='normal',
+                y=0.975, verticalalignment='top'
+            )
             figure.legend(
                 legend_handles,
                 [handle.get_label() for handle in legend_handles],
-                loc='upper center', bbox_to_anchor=(0.5, 0.88), ncol=2,
+                loc='upper center',
+                bbox_to_anchor=(0.5, legend_band_top),
+                ncol=2,
                 frameon=False, fontsize=font_sizes['legend'],
                 handlelength=1.5, handletextpad=0.45, columnspacing=0.8
             )
@@ -21207,14 +21280,14 @@ class AutoContr(Controller):
                 )
             figure.text(
                 0.5,
-                0.65 if feasibility_overlay else 0.73,
-                'Hold: ' + _held_recipe_text(panel, compact=True),
-                ha='center', va='center',
+                held_recipe_band_top,
+                held_recipe_annotation,
+                ha='center', va='top',
                 fontsize=font_sizes['axis_label']
             )
             figure.subplots_adjust(
                 left=0.12, right=0.90, bottom=0.13,
-                top=0.60 if feasibility_overlay else 0.68
+                top=axes_top
             )
             _center_heatmap_axes_and_colorbar(
                 [axis],

@@ -1824,9 +1824,25 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
             method_node
         )
 
-        self.assertIn('figure_header_height = 1.40', method_source)
-        self.assertIn('bbox_to_anchor=(0.5, 0.905)', method_source)
+        self.assertIn('figure_header_height = 1.20', method_source)
+        self.assertIn('bbox_to_anchor=(0.5, 0.895)', method_source)
+        self.assertIn('y=0.955', method_source)
         self.assertIn('top_margin = 0.79', method_source)
+
+    def test_standalone_conditional_slices_wrap_held_recipe_provenance(self):
+        method_node = _get_auto_controller_method_node(
+            'plot_higher_dimensional_GPR_conditional_slices'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            method_node
+        )
+
+        self.assertIn('held_recipe_lines = textwrap.wrap(', method_source)
+        self.assertIn('held_recipe_annotation', method_source)
+        self.assertIn('standalone_title_lines = textwrap.wrap(', method_source)
+        self.assertIn('legend_row_count', method_source)
+        self.assertIn('axes_top = max(', method_source)
 
     def test_parallel_coordinate_plots_reserve_a_dedicated_legend_header(self):
         method_node = _get_auto_controller_method_node(
