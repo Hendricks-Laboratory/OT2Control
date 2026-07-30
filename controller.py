@@ -4916,7 +4916,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v1'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v2'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5065,6 +5065,15 @@ class AutoContr(Controller):
                 'advertise get_robot_state_snapshot support.'
             )
 
+        if (
+            'preflight_transfer_plan'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise preflight_transfer_plan.'
+            )
+
         return copy.deepcopy(snapshot)
 
     def _request_auto_main_robot_state_snapshot(self):
@@ -5094,6 +5103,185 @@ class AutoContr(Controller):
             )
         )
         return snapshot
+
+    def _get_auto_batch_pi_transfer_plan(self, rxn_df):
+        '''Builds the exact ordered transfer payload for Pi-side preflight.
+
+        Unlike the controller's aggregate source audit, this keeps each
+        source row and destination transfer separate.  The Pi can therefore
+        simulate the same whole-aspiration backup-switching rule that its
+        live transfer handler applies, without moving liquid or changing
+        tip/source state.
+        '''
+        if not isinstance(rxn_df, pd.DataFrame):
+            raise ValueError(
+                'Auto Pi transfer-plan preflight requires a constructed '
+                'protocol dataframe.'
+            )
+
+        source_plan = []
+        transfer_rows = rxn_df.loc[rxn_df['op'] == 'transfer']
+
+        for _, transfer_row in transfer_rows.iterrows():
+            source_name = transfer_row.get('chemical_name')
+            if pd.isna(source_name) or not str(source_name).strip():
+                raise ValueError(
+                    'Auto Pi transfer-plan preflight found a transfer row '
+                    'without a resolved chemical_name source.'
+                )
+
+            product_volumes = pd.to_numeric(
+                transfer_row[self._products],
+                errors='coerce'
+            ).fillna(0.0)
+            if (product_volumes < -1e-9).any():
+                raise ValueError(
+                    'Auto Pi transfer-plan preflight found a negative '
+                    'transfer volume for source {}.'.format(source_name)
+                )
+
+            transfer_steps = []
+            for destination_name, transfer_volume in product_volumes.items():
+                if transfer_volume > 1e-9:
+                    transfer_steps.append({
+                        'destination_name': str(destination_name),
+                        'volume_uL': self._round_transfer_volume(
+                            float(transfer_volume)
+                        )
+                    })
+            if transfer_steps:
+                source_plan.append({
+                    'source_chemical_name': str(source_name),
+                    'transfer_steps': transfer_steps
+                })
+        return source_plan
+
+    def _build_auto_pi_transfer_plan_preflight_request(self, rxn_df):
+        '''Returns the versioned, non-mutating next-batch Pi request.'''
+        return {
+            'schema_version': 1,
+            'batch_number': int(getattr(self, 'batch_num', 0)),
+            'reserve_volume_uL': float(
+                self.robo_params.get('auto_source_reserve_volume_uL', 0.0)
+            ),
+            'source_plan': self._get_auto_batch_pi_transfer_plan(rxn_df)
+        }
+
+    def _validate_auto_main_transfer_plan_preflight(self, result, request):
+        '''Validates the Pi's exact preflight result before execution begins.'''
+        required_keys = {
+            'schema_version',
+            'record_type',
+            'batch_number',
+            'passed',
+            'source_containers',
+            'allocations',
+            'tip_requirements',
+            'deficits'
+        }
+        if not isinstance(result, dict) or set(result) != required_keys:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned an invalid schema.'
+            )
+        if result['schema_version'] != 1:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned an unsupported '
+                'schema version.'
+            )
+        if result['record_type'] != 'transfer_plan_preflight':
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned an invalid record '
+                'type.'
+            )
+        if result['batch_number'] != request['batch_number']:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned a result for a '
+                'different batch.'
+            )
+        if not isinstance(result['passed'], bool):
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned a non-boolean '
+                'decision.'
+            )
+        for field_name in (
+            'source_containers',
+            'allocations',
+            'tip_requirements',
+            'deficits'
+        ):
+            if not isinstance(result[field_name], list):
+                raise RuntimeError(
+                    'Auto Pi transfer-plan preflight returned invalid {} '
+                    'data.'.format(field_name)
+                )
+        if result['passed'] and result['deficits']:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight approved a plan while '
+                'reporting deficits.'
+            )
+        if not result['passed'] and not result['deficits']:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight rejected a plan without a '
+                'structured deficit.'
+            )
+        return copy.deepcopy(result)
+
+    def _request_auto_main_transfer_plan_preflight(self, request):
+        '''Requests Pi authority for an exact next-batch transfer plan.'''
+        self.portal.send_pack('preflight_transfer_plan', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'transfer_plan_preflight':
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight expected '
+                'transfer_plan_preflight, received {!r}.'.format(pack_type)
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight received a malformed '
+                'payload.'
+            )
+        return self._validate_auto_main_transfer_plan_preflight(
+            payload[0],
+            request
+        )
+
+    def _preflight_auto_next_batch_on_pi(self, rxn_df, context_label):
+        '''Fail-closes on an exact Pi source/tip preflight when protection is on.'''
+        if (
+            self.robo_params.get('auto_source_volume_check', 'off')
+            != 'required'
+        ):
+            return None
+
+        request = self._build_auto_pi_transfer_plan_preflight_request(rxn_df)
+        result = self._request_auto_main_transfer_plan_preflight(request)
+        if not result['passed']:
+            deficit_messages = []
+            for deficit in result['deficits']:
+                if isinstance(deficit, dict):
+                    deficit_messages.append(str(
+                        deficit.get('message', deficit)
+                    ))
+                else:
+                    deficit_messages.append(str(deficit))
+            raise ValueError(
+                'Auto Pi exact next-batch preflight rejected {} before '
+                'liquid handling:\n{}'.format(
+                    context_label,
+                    '\n'.join(deficit_messages)
+                )
+            )
+
+        print(
+            '<<controller>> Auto Pi exact next-batch preflight passed for '
+            '{}: source allocation and tip inventory are sufficient.'.format(
+                context_label
+            )
+        )
+        return {
+            'request': request,
+            'result': result
+        }
 
     def init_robot(self, simulate):
         '''Initializes Pi state, then fail-closes on Auto-main incompatibility.'''
@@ -24749,12 +24937,34 @@ class AutoContr(Controller):
 
                 self._handle_conversion_err(e)
 
-        self._preflight_auto_source_volumes(
-            self.rxn_df,
-            context_label=(
-                f"Auto batch {getattr(self, 'batch_num', 'unknown')} "
-                f"({len(wellnames)} physical wells)"
+        preflight_context_label = (
+            f"Auto batch {getattr(self, 'batch_num', 'unknown')} "
+            f"({len(wellnames)} physical wells)"
+        )
+        try:
+            aggregate_source_audit = self._preflight_auto_source_volumes(
+                self.rxn_df,
+                context_label=preflight_context_label
             )
+            pi_transfer_plan_preflight = self._preflight_auto_next_batch_on_pi(
+                self.rxn_df,
+                context_label=preflight_context_label
+            )
+        except (RuntimeError, ValueError) as exc:
+            rejection_payload = copy.deepcopy(batch_payload)
+            rejection_payload['preflight_error'] = str(exc)
+            if hasattr(self, '_record_auto_live_run_event'):
+                self._record_auto_live_run_event(
+                    'batch_preflight_rejected',
+                    rejection_payload
+                )
+            raise
+
+        batch_payload['aggregate_source_volume_audit'] = (
+            copy.deepcopy(aggregate_source_audit)
+        )
+        batch_payload['pi_transfer_plan_preflight'] = copy.deepcopy(
+            pi_transfer_plan_preflight
         )
 
         if hasattr(self, '_record_auto_live_run_event'):

@@ -2337,7 +2337,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v1'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v2'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2353,14 +2353,17 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v1',
+            'protocol_version': 'auto-main-state-v2',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
                 'tube_15ml': 7.2731,
                 'tube_50ml': 13.6950
             },
-            'supported_commands': ['get_robot_state_snapshot']
+            'supported_commands': [
+                'get_robot_state_snapshot',
+                'preflight_transfer_plan'
+            ]
         }
 
     def test_valid_snapshot_is_accepted_and_copied(self):
@@ -2461,8 +2464,12 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
 
         self.assertEqual(b'\x11', packet_types['get_robot_state_snapshot'])
         self.assertEqual(b'\x12', packet_types['robot_state_snapshot'])
+        self.assertEqual(b'\x13', packet_types['preflight_transfer_plan'])
+        self.assertEqual(b'\x14', packet_types['transfer_plan_preflight'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
+        self.assertIn('preflight_transfer_plan', ghost_types)
+        self.assertIn('transfer_plan_preflight', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')
@@ -2490,6 +2497,167 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 for statement in node.body
             )
             for node in ast.walk(method)
+        ))
+
+
+class AutoMainTransferPlanPreflightTests(unittest.TestCase):
+    '''Pure controller tests for the Stage 4 Pi resource authority.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_get_auto_batch_pi_transfer_plan',
+            '_build_auto_pi_transfer_plan_preflight_request',
+            '_validate_auto_main_transfer_plan_preflight',
+            '_request_auto_main_transfer_plan_preflight',
+            '_preflight_auto_next_batch_on_pi'
+        ])
+
+    def _build_controller(self):
+        controller = self.AutoController()
+        controller.batch_num = 4
+        controller._products = ['autowell0C1.0', 'autowell1C1.0']
+        controller._round_transfer_volume = lambda volume: float(volume)
+        controller.robo_params = {
+            'auto_source_volume_check': 'required',
+            'auto_source_reserve_volume_uL': 5.0
+        }
+        return controller
+
+    def _build_protocol_dataframe(self):
+        return pd.DataFrame([
+            {
+                'op': 'transfer',
+                'chemical_name': 'reagent_aC1.0',
+                'autowell0C1.0': 20.0,
+                'autowell1C1.0': 0.0
+            },
+            {
+                'op': 'transfer',
+                'chemical_name': 'WaterC1.0',
+                'autowell0C1.0': 70.0,
+                'autowell1C1.0': 70.0
+            }
+        ])
+
+    @staticmethod
+    def _passed_result(batch_number):
+        return {
+            'schema_version': 1,
+            'record_type': 'transfer_plan_preflight',
+            'batch_number': batch_number,
+            'passed': True,
+            'source_containers': [],
+            'allocations': [],
+            'tip_requirements': [],
+            'deficits': []
+        }
+
+    def test_request_preserves_ordered_nonzero_transfer_steps(self):
+        controller = self._build_controller()
+
+        request = controller._build_auto_pi_transfer_plan_preflight_request(
+            self._build_protocol_dataframe()
+        )
+
+        self.assertEqual(1, request['schema_version'])
+        self.assertEqual(4, request['batch_number'])
+        self.assertEqual(5.0, request['reserve_volume_uL'])
+        self.assertEqual([
+            {
+                'source_chemical_name': 'reagent_aC1.0',
+                'transfer_steps': [{
+                    'destination_name': 'autowell0C1.0',
+                    'volume_uL': 20.0
+                }]
+            },
+            {
+                'source_chemical_name': 'WaterC1.0',
+                'transfer_steps': [
+                    {
+                        'destination_name': 'autowell0C1.0',
+                        'volume_uL': 70.0
+                    },
+                    {
+                        'destination_name': 'autowell1C1.0',
+                        'volume_uL': 70.0
+                    }
+                ]
+            }
+        ], request['source_plan'])
+
+    def test_passed_pi_result_is_required_before_execution(self):
+        controller = self._build_controller()
+
+        class PortalStub:
+            def __init__(self, response):
+                self.response = response
+                self.sent = []
+
+            def send_pack(self, *args):
+                self.sent.append(args)
+
+            def recv_pack(self):
+                return self.response
+
+        protocol_dataframe = self._build_protocol_dataframe()
+        request = controller._build_auto_pi_transfer_plan_preflight_request(
+            protocol_dataframe
+        )
+        controller.portal = PortalStub((
+            'transfer_plan_preflight',
+            0,
+            (self._passed_result(request['batch_number']),)
+        ))
+
+        with redirect_stdout(io.StringIO()):
+            audit = controller._preflight_auto_next_batch_on_pi(
+                protocol_dataframe,
+                'batch 4'
+            )
+
+        self.assertEqual(
+            [('preflight_transfer_plan', request)],
+            controller.portal.sent
+        )
+        self.assertEqual(request, audit['request'])
+        self.assertTrue(audit['result']['passed'])
+
+    def test_pi_deficit_blocks_before_execution(self):
+        controller = self._build_controller()
+        protocol_dataframe = self._build_protocol_dataframe()
+        request = controller._build_auto_pi_transfer_plan_preflight_request(
+            protocol_dataframe
+        )
+        rejected = self._passed_result(request['batch_number'])
+        rejected['passed'] = False
+        rejected['deficits'] = [{
+            'deficit_type': 'source_volume',
+            'message': 'No remaining same-name source can satisfy the next whole aspiration.'
+        }]
+        controller._request_auto_main_transfer_plan_preflight = (
+            lambda unused_request: rejected
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            'rejected batch 4 before liquid handling'
+        ):
+            controller._preflight_auto_next_batch_on_pi(
+                protocol_dataframe,
+                'batch 4'
+            )
+
+    def test_legacy_off_setting_skips_pi_request(self):
+        controller = self._build_controller()
+        controller.robo_params['auto_source_volume_check'] = 'off'
+        controller._request_auto_main_transfer_plan_preflight = (
+            lambda unused_request: self.fail('Pi request should not be sent')
+        )
+
+        self.assertIsNone(controller._preflight_auto_next_batch_on_pi(
+            self._build_protocol_dataframe(),
+            'legacy batch'
         ))
 
 
@@ -3354,6 +3522,9 @@ class AutoSourceVolumePreflightTests(unittest.TestCase):
             lambda recipes, context_label: None
         )
         controller._preflight_auto_source_volumes = lambda rxn_df, context_label: []
+        controller._preflight_auto_next_batch_on_pi = (
+            lambda rxn_df, context_label: None
+        )
         controller.template_meta = {
             'labware': 'test_labware',
             'cont': 'A1',

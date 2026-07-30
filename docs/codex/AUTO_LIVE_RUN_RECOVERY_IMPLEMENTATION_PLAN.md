@@ -1,7 +1,8 @@
 # Auto Live-Run Recovery and Performance Plan
 
-**Status:** Stages 0–1 implemented and hardware-free validated; later stages
-remain planned.
+**Status:** Stages 0–4 implemented and hardware-free validated. Stages 1–3
+have also passed their respective controlled dry-debug checkpoints; Stage 4
+awaits its deliberately depleted-source and depleted-tip dry-debug checkpoint.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -140,13 +141,36 @@ Create the separate Pi `Auto-main` checkout. Correct Pi tube tare constants ther
 
 **Dry-debug checkpoint 3:** a supervised, non-transfer connection check against the Pi confirms the state snapshot and tare version are reported and recorded correctly.
 
+**Implementation status:** implemented on `Auto-RTG` and the separately
+deployed Pi `Auto-main` branch. The controller requires a versioned,
+read-only robot-state snapshot before Auto execution proceeds, and records the
+accepted compatibility metadata in its durable local state. The Pi `main`
+checkout remains outside this feature's deployment path. The Stage 3
+handshake was confirmed by a controlled dry debug; it does not yet alter
+transfers, source allocation, or recovery behavior.
+
 ### Stage 4 — exact next-batch resource preflight
 
 Keep the controller's existing aggregate source-volume check as an early audit. Add Pi-side `preflight_transfer_plan` as the physical authority for the next batch: it simulates individual sources, dead volumes, predeclared same-reagent backups, and required pipette tips. It returns either an exact feasible plan or a structured deficit before transfers begin.
 
-**Validation:** scalar/vector equivalence tests; backup-switch cases; insufficient-source, insufficient-tip, and reserve-boundary cases; no state mutation during failed preflight.
+**Validation:** equivalence with the established whole-aspiration backup and
+pipette-selection rules; backup-switch cases; insufficient-source,
+insufficient-tip, and reserve-boundary cases; no state mutation during failed
+preflight.
 
 **Dry-debug checkpoint 4:** use several same-name source containers and a deliberately insufficient primary container. Verify the plan chooses the valid backup before any liquid handling. Separately induce an insufficient-tip case.
+
+**Implementation status:** implemented on `Auto-RTG` and `Auto-main`, pending
+the controlled Stage 4 dry-debug checkpoint. Immediately before an Auto batch
+whose `auto_source_volume_check` is `required`, the controller keeps its
+existing aggregate inventory audit and also sends the exact planned source and
+destination transfer sequence to the Pi. The Pi simulates its current
+per-container usable volumes, declared same-name backup order, transfer-size
+dependent pipette selection, and fresh-tip availability without mutating robot
+state. It returns a versioned feasible allocation or structured deficit; the
+controller fails closed before the batch is marked executable. This stage
+does not pause, replace sources, switch wellplates, or retry a rejected batch;
+those operator-recovery actions remain later stages.
 
 ### Stage 5 — conditional-slice performance and progress reporting
 
