@@ -20,6 +20,8 @@ from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
 from collections import namedtuple
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import as_completed
 import copy
 import socket
 import json
@@ -42,6 +44,7 @@ import traceback
 import textwrap
 import subprocess
 import uuid
+from types import SimpleNamespace
 
 from bidict import bidict
 import gspread
@@ -148,6 +151,63 @@ class TeeTerminalOutput:
     def isatty(self):
 
         return self.stream.isatty()
+
+
+def _render_auto_conditional_slice_worker(task):
+    '''Renders one precomputed conditional-slice artifact in a child process.
+
+    The controller constructs the complete read-only slice-data snapshot before
+    starting workers. Consequently this function never receives the live GP,
+    robot client, controller instance, or other execution-state object. It
+    restores only the immutable NumPy/pure-Python panel arrays needed by the
+    established renderer, then writes exactly one requested atlas page or
+    standalone slice.
+
+    This boundary is intentionally process-based rather than thread-based:
+    Matplotlib figure construction is not thread-safe, while independent Agg
+    renderers are safe in separate Python processes.
+    '''
+    snapshot_path = task['slice_data_snapshot_path']
+
+    with open(snapshot_path, 'rb') as snapshot_file:
+        slice_data = dill.load(snapshot_file)
+
+    worker_controller = AutoContr.__new__(AutoContr)
+    worker_controller.robo_params = {
+        # Parent-only progress reporting keeps one live status line and a
+        # concise transcript instead of interleaved child-process output.
+        'auto_terminal_verbosity': 'off'
+    }
+    worker_controller.auto_model_performance_rows = []
+    worker_controller.plot_path = task['plot_path']
+    worker_controller.batch_num = task.get('batch_number', 0)
+
+    worker_model = SimpleNamespace(
+        variable_reagents=list(slice_data['reagent_names'])
+    )
+    rendered_paths = (
+        worker_controller.plot_higher_dimensional_GPR_conditional_slices(
+            model=worker_model,
+            batch_number=task.get('batch_number'),
+            final_snapshot=bool(task.get('final_snapshot', False)),
+            grid_size=int(task.get('grid_size', 100)),
+            _precomputed_slice_data=slice_data,
+            _render_selection=task['render_selection'],
+            _suppress_progress=True,
+            _parallel_rendering=False
+        )
+    )
+
+    if len(rendered_paths) != 1:
+        raise RuntimeError(
+            "Conditional-slice worker expected one artifact but rendered "
+            f"{len(rendered_paths)}."
+        )
+
+    return {
+        'render_order': int(task['render_order']),
+        'plot_path': rendered_paths[0]
+    }
 
 def terminal_output_capture_guard(func):
     '''
@@ -20596,7 +20656,11 @@ class AutoContr(Controller):
         model,
         batch_number=None,
         final_snapshot=False,
-        grid_size=100
+        grid_size=100,
+        _precomputed_slice_data=None,
+        _render_selection=None,
+        _suppress_progress=False,
+        _parallel_rendering=True
     ):
         '''
         Saves conditional 2D GP heatmaps for every pair of reagents in a
@@ -20611,6 +20675,11 @@ class AutoContr(Controller):
         Atlases are paginated at six panels per page so higher-dimensional
         figures remain readable. Each pair is also exported as a standalone
         poster-ready conditional slice. This method is observational only.
+
+        The underscore-prefixed arguments are private renderer controls used
+        by the bounded process pool. Ordinary controller callers use the
+        defaults; worker processes receive only parent-built immutable panel
+        arrays and one render-plan selection.
         '''
         terminal_verbosity = str(
             getattr(self, 'robo_params', {}).get(
@@ -20618,7 +20687,10 @@ class AutoContr(Controller):
                 'standard'
             )
         ).strip().lower()
-        show_progress = terminal_verbosity in {'standard', 'diagnostic'}
+        show_progress = (
+            not _suppress_progress
+            and terminal_verbosity in {'standard', 'diagnostic'}
+        )
         configured_dimensions = len(
             getattr(model, 'variable_reagents', [])
         )
@@ -20633,10 +20705,15 @@ class AutoContr(Controller):
                 "wait"
             )
 
-        slice_data = self._build_auto_conditional_slice_panel_data(
-            model=model,
-            grid_size=grid_size
-        )
+        if _precomputed_slice_data is None:
+            slice_data = self._build_auto_conditional_slice_panel_data(
+                model=model,
+                grid_size=grid_size
+            )
+        else:
+            # Rendering workers intentionally never refit or query the live
+            # GP. They use this immutable parent-built snapshot verbatim.
+            slice_data = _precomputed_slice_data
         reagent_names = slice_data['reagent_names']
         n_dimensions = len(reagent_names)
 
@@ -21306,14 +21383,231 @@ class AutoContr(Controller):
             panel_data[start_index:start_index + max_panels_per_page]
             for start_index in range(0, len(panel_data), max_panels_per_page)
         ]
-        all_field_definitions = list(field_definitions) + [
-            definition for definition in field_definitions[:2]
+        all_field_definitions = [
+            (definition, False)
+            for definition in field_definitions
+        ] + [
+            (definition, True)
+            for definition in field_definitions[:2]
         ]
 
-        for field_index, definition in enumerate(all_field_definitions, start=1):
+        def _build_render_plan():
+            '''Returns the serial artifact order without constructing figures.'''
+            render_plan = []
+
+            for definition, feasibility_overlay in all_field_definitions:
+                field_name = definition[0]
+
+                for page_index in range(1, len(panel_pages) + 1):
+                    render_plan.append({
+                        'field_name': field_name,
+                        'feasibility_overlay': feasibility_overlay,
+                        'artifact_kind': 'atlas',
+                        'page_index': page_index
+                    })
+
+                for panel_index in range(len(panel_data)):
+                    render_plan.append({
+                        'field_name': field_name,
+                        'feasibility_overlay': feasibility_overlay,
+                        'artifact_kind': 'individual',
+                        'panel_index': panel_index
+                    })
+
+            return render_plan
+
+        # A high-dimensional suite contains independent atlas-page and
+        # standalone-slice outputs. The prediction, uncertainty, probability,
+        # and physical-feasibility arrays are already complete at this point,
+        # so rendering can run independently without sharing a live GP or
+        # execution object with child processes.
+        can_parallel_render = (
+            _parallel_rendering
+            and _precomputed_slice_data is None
+            and _render_selection is None
+            and getattr(self, 'plot_path', None) is not None
+        )
+
+        if can_parallel_render:
+            render_plan = _build_render_plan()
+            available_cpu_count = os.cpu_count() or 1
+            worker_count = min(
+                4,
+                max(1, available_cpu_count - 1),
+                len(render_plan)
+            )
+
+            if worker_count > 1 and len(render_plan) > 1:
+                suite_start_time = time.monotonic()
+                milestone_interval = max(10, len(render_plan) // 4)
+                snapshot_file = NamedTemporaryFile(
+                    mode='wb',
+                    suffix='.auto_conditional_slice_snapshot',
+                    delete=False
+                )
+                snapshot_path = snapshot_file.name
+
+                try:
+                    # One shared temporary snapshot avoids serializing the
+                    # complete panel set once per task. It contains only
+                    # precomputed read-only plotting arrays and metadata.
+                    dill.dump(slice_data, snapshot_file)
+                    snapshot_file.close()
+
+                    if show_progress:
+                        print(
+                            "<<controller>> rendering "
+                            f"{len(render_plan)} conditional-slice artifacts "
+                            f"with {worker_count} worker processes"
+                        )
+
+                    rendered_paths_by_order = {}
+                    completed_count = 0
+                    worker_error = None
+
+                    with ProcessPoolExecutor(
+                        max_workers=worker_count
+                    ) as executor:
+                        futures = {
+                            executor.submit(
+                                _render_auto_conditional_slice_worker,
+                                {
+                                    'render_order': render_order,
+                                    'render_selection': render_selection,
+                                    'slice_data_snapshot_path': snapshot_path,
+                                    'plot_path': self.plot_path,
+                                    'batch_number': batch_number,
+                                    'final_snapshot': final_snapshot,
+                                    'grid_size': grid_size
+                                }
+                            ): render_order
+                            for render_order, render_selection in enumerate(
+                                render_plan
+                            )
+                        }
+
+                        for future in as_completed(futures):
+                            try:
+                                worker_result = future.result()
+                            except Exception as error:
+                                worker_error = error
+
+                                for outstanding_future in futures:
+                                    outstanding_future.cancel()
+
+                                break
+
+                            render_order = worker_result['render_order']
+                            rendered_paths_by_order[render_order] = (
+                                worker_result['plot_path']
+                            )
+                            completed_count += 1
+
+                            if show_progress:
+                                elapsed_seconds = int(
+                                    time.monotonic() - suite_start_time
+                                )
+                                sys.stdout.write(
+                                    '\r<<controller>> conditional slices: '
+                                    f'{completed_count}/{len(render_plan)} '
+                                    f'complete | elapsed {elapsed_seconds} s'
+                                )
+                                sys.stdout.flush()
+
+                                if (
+                                    completed_count < len(render_plan)
+                                    and completed_count % milestone_interval
+                                    == 0
+                                ):
+                                    print(
+                                        '\n<<controller>> conditional-slice '
+                                        'rendering milestone: '
+                                        f'{completed_count}/{len(render_plan)} '
+                                        'artifacts complete'
+                                    )
+
+                    if worker_error is not None:
+                        raise RuntimeError(
+                            "Conditional-slice rendering failed after "
+                            f"{completed_count}/{len(render_plan)} artifacts. "
+                            "Generated artifacts were retained for audit."
+                        ) from worker_error
+
+                    generated_plot_paths = [
+                        rendered_paths_by_order[render_order]
+                        for render_order in range(len(render_plan))
+                    ]
+
+                    if show_progress:
+                        elapsed_seconds = int(
+                            time.monotonic() - suite_start_time
+                        )
+                        sys.stdout.write(
+                            '\r<<controller>> conditional slices: '
+                            f'{len(render_plan)}/{len(render_plan)} complete '
+                            f'| elapsed {elapsed_seconds} s\n'
+                        )
+                        print(
+                            "<<controller>> conditional-slice rendering "
+                            f"complete: {len(generated_plot_paths)} artifacts "
+                            f"in {elapsed_seconds} s"
+                        )
+
+                    return generated_plot_paths
+
+                finally:
+                    try:
+                        snapshot_file.close()
+                    except Exception:
+                        pass
+
+                    if os.path.exists(snapshot_path):
+                        os.remove(snapshot_path)
+
+        if _render_selection is not None:
+            selected_field_name = _render_selection.get('field_name')
+            selected_feasibility_overlay = bool(
+                _render_selection.get('feasibility_overlay', False)
+            )
+            selected_artifact_kind = _render_selection.get('artifact_kind')
+            selected_page_index = _render_selection.get('page_index')
+            selected_panel_index = _render_selection.get('panel_index')
+
+            all_field_definitions = [
+                (definition, feasibility_overlay)
+                for definition, feasibility_overlay in all_field_definitions
+                if (
+                    definition[0] == selected_field_name
+                    and feasibility_overlay
+                    == selected_feasibility_overlay
+                )
+            ]
+
+            if (
+                len(all_field_definitions) != 1
+                or selected_artifact_kind not in {
+                    'atlas', 'individual'
+                }
+            ):
+                raise ValueError(
+                    "Invalid conditional-slice worker render selection."
+                )
+        else:
+            selected_artifact_kind = None
+            selected_page_index = None
+            selected_panel_index = None
+
+        for definition, feasibility_overlay in all_field_definitions:
             field_name, colorbar_label, value_getter, colormap, norm, title = definition
-            feasibility_overlay = field_index > len(field_definitions)
             for page_index, page_panels in enumerate(panel_pages, start=1):
+                if (
+                    selected_artifact_kind == 'individual'
+                    or (
+                        selected_artifact_kind == 'atlas'
+                        and page_index != selected_page_index
+                    )
+                ):
+                    continue
                 n_cols = min(3, len(page_panels))
                 n_rows = int(np.ceil(len(page_panels) / float(n_cols)))
                 max_held_title_lines = max(
@@ -21419,7 +21713,15 @@ class AutoContr(Controller):
                 plt.close(figure)
                 generated_plot_paths.append(output_path)
 
-            for panel in panel_data:
+            for panel_index, panel in enumerate(panel_data):
+                if (
+                    selected_artifact_kind == 'atlas'
+                    or (
+                        selected_artifact_kind == 'individual'
+                        and panel_index != selected_panel_index
+                    )
+                ):
+                    continue
                 generated_plot_paths.append(_render_individual_slice(
                     field_name, colorbar_label, value_getter, colormap, norm,
                     title, panel, feasibility_overlay=feasibility_overlay

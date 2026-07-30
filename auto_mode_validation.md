@@ -239,8 +239,29 @@ scalar evaluator for permitted zeros, disallowed/non-executable transfers,
 all-off recipes, overflow, per-reagent transfer volumes, water balance, and
 final mask feasibility. The controller prefers the batch helper when supplied
 by `OptimizationModel` and retains its scalar fallback for legacy isolated
-test doubles. Pair-level worker processes and detailed timing/progress
-messages remain a separate, not-yet-implemented Stage 5 Part 2.
+test doubles.
+
+### Bounded conditional-slice rendering — Stage 5 Part 2 (pending controlled debug)
+
+After the complete read-only panel snapshot has been built in the parent
+controller, each higher-dimensional atlas page and standalone conditional
+slice is now an independent bounded process-pool task. Workers load only the
+precomputed NumPy/pure-Python panel snapshot and one render-plan selection;
+they never receive, refit, or query the live GP, robot client, or controller
+execution state. The pool is capped at four workers and leaves one detected
+CPU available, avoiding unbounded CPU and memory pressure on the lab PC.
+
+The parent preserves the original deterministic artifact order, shared field
+color limits, filenames, folders, overlays, and reference markers. It reports
+one carriage-return live terminal status line (`completed/total | elapsed`),
+with saved-transcript milestones rather than one line per artifact. A worker
+failure cancels queued work, raises a clear error identifying completed work,
+and retains already-written artifacts for audit; it does not silently return a
+partial suite. Source-level and synthetic orchestration tests confirm that the
+parent submits each planned artifact once, restores serial output ordering, and
+that child workers use the immutable snapshot with parallel rendering disabled
+to prevent recursion. A controlled 5D dry debug remains required to validate
+the actual process-spawn environment and quantify the wall-clock improvement.
 
 The controlled five-variable `DEBUGRTG_STAGE5_part1` dry run completed both
 the after-model-update and final conditional-slice suites without a traceback;

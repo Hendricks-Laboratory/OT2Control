@@ -6997,5 +6997,121 @@ class UsableSpectrumControllerSynchronizationTests(unittest.TestCase):
         self.assertFalse(summary['fitted'])
 
 
+class ConditionalSliceParallelRenderTests(unittest.TestCase):
+    '''Exercises parent-side bounded render orchestration without hardware.'''
+
+    def test_parallel_render_plan_preserves_serial_artifact_order(self):
+        class FakeFuture:
+            def __init__(self, value):
+                self.value = value
+
+            def result(self):
+                return self.value
+
+            def cancel(self):
+                return False
+
+        class FakeExecutor:
+            def __init__(self, max_workers):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback_value):
+                return False
+
+            def submit(self, function, task):
+                return FakeFuture(function(task))
+
+        class FakeDill:
+            @staticmethod
+            def dump(value, file_handle):
+                file_handle.write(b'precomputed slice snapshot')
+
+        def fake_worker(task):
+            return {
+                'render_order': task['render_order'],
+                'plot_path': (
+                    f"artifact_{task['render_order']:02d}.png"
+                )
+            }
+
+        controller_class = _load_auto_controller_methods(
+            ['plot_higher_dimensional_GPR_conditional_slices'],
+            extra_namespace={
+                'plt': plt,
+                'textwrap': __import__('textwrap'),
+                'NamedTemporaryFile': NamedTemporaryFile,
+                'dill': FakeDill,
+                'ProcessPoolExecutor': FakeExecutor,
+                'as_completed': lambda futures: list(futures),
+                'time': SimpleNamespace(monotonic=lambda: 0.0),
+                'sys': SimpleNamespace(stdout=io.StringIO()),
+                '_render_auto_conditional_slice_worker': fake_worker
+            }
+        )
+        controller = controller_class()
+        controller.robo_params = {'auto_terminal_verbosity': 'off'}
+        controller.plot_path = os.getcwd()
+        controller._get_auto_design_plot_font_sizes = lambda: {
+            'title': 15.0,
+            'axis_label': 13.0,
+            'tick_label': 11.0,
+            'legend': 10.0,
+            'annotation': 9.0,
+            'compact_axis_label': 11.0,
+            'compact_tick_label': 10.0
+        }
+        controller._build_auto_conditional_slice_panel_data = (
+            lambda model, grid_size: {
+                'reagent_names': ['a', 'b', 'c', 'd'],
+                'panel_data': [
+                    {
+                        'mean_nm': np.asarray([[625.0]]),
+                        'std_nm': np.asarray([[2.0]]),
+                        'probability': np.asarray([[0.5]]),
+                        'feasible': np.asarray([[True]])
+                    }
+                ],
+                'target_nm': 625.0,
+                'tolerance_nm': 10.0,
+                'reference_recipe': np.zeros(4),
+                'reference_label': 'synthetic',
+                'reference_normalized': np.zeros(4),
+                'observed_conditions': [],
+                'slice_half_width': 0.01,
+                'true_zero_eligible_reagents': []
+            }
+        )
+
+        paths = controller.plot_higher_dimensional_GPR_conditional_slices(
+            model=SimpleNamespace(variable_reagents=['a', 'b', 'c', 'd'])
+        )
+
+        # Three base fields plus mean/uncertainty overlays each create one
+        # atlas and one standalone slice for this single-panel synthetic case.
+        self.assertEqual(len(paths), 10)
+        self.assertEqual(
+            paths,
+            [f'artifact_{index:02d}.png' for index in range(10)]
+        )
+
+    def test_worker_receives_only_precomputed_snapshot_and_one_selection(self):
+        source = CONTROLLER_PATH.read_text()
+        worker_start = source.index(
+            'def _render_auto_conditional_slice_worker(task):'
+        )
+        worker_end = source.index(
+            '\ndef terminal_output_capture_guard', worker_start
+        )
+        worker_source = source[worker_start:worker_end]
+
+        self.assertIn("'slice_data_snapshot_path'", worker_source)
+        self.assertIn('_precomputed_slice_data=slice_data', worker_source)
+        self.assertIn("_parallel_rendering=False", worker_source)
+        self.assertNotIn('predict_lambda_distribution_nm', worker_source)
+
+
 if __name__ == '__main__':
     unittest.main()
