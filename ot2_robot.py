@@ -1024,7 +1024,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v2'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v3'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1106,6 +1106,10 @@ class OT2Robot():
         reagent_df = pd.DataFrame(reagent_df).set_index('index')
         dry_containers_df = pd.DataFrame(dry_containers_df).set_index('index')
         self.containers = {}
+        # Monotonically increases only after an operator-confirmed source
+        # inventory refresh.  The controller uses this to reject stale
+        # acknowledgements before retrying an unchanged Auto batch.
+        self.source_inventory_revision = 0
         self.pipettes = {}
         self.temp_module = None #will be overwritten if used
         self.my_ip = my_ip
@@ -2213,6 +2217,271 @@ class OT2Robot():
             'deficits': deficits
         }
 
+    def _get_source_container_for_mass_refresh(
+            self,
+            source_name,
+            source_container_index,
+            source_loc,
+            source_deck_pos
+    ):
+        '''Returns one registered physical tube after strict identity checks.
+
+        A Stage-6 refill is intentionally limited to the same pre-existing
+        source container.  This helper prevents an operator response from
+        changing reagent identity, deck mapping, or backup-source order.
+        '''
+        descriptors, _ = self._get_preflight_source_containers(source_name)
+        matching_descriptors = [
+            descriptor
+            for descriptor in descriptors
+            if descriptor['container_index'] == source_container_index
+        ]
+        if len(matching_descriptors) != 1:
+            raise ValueError('source container index is not registered.')
+
+        descriptor = matching_descriptors[0]
+        if (
+            descriptor['loc'] != source_loc
+            or descriptor['deck_pos'] != source_deck_pos
+        ):
+            raise ValueError(
+                'source location does not match the registered container.'
+            )
+
+        source = self.containers[source_name]
+        if hasattr(source, 'cont_list'):
+            return source.cont_list[source_container_index]
+        if source_container_index != 0:
+            raise ValueError('single-container source index must be zero.')
+        return source
+
+    def _get_source_mass_refresh_specification(self, container):
+        '''Returns the fixed tare and density for a supported physical tube.'''
+        tube_specifications = {
+            'Tube2000uL': {
+                'tare_key': 'tube_2ml',
+                'density_g_per_mL': 0.9998395
+            },
+            'Tube20000uL': {
+                'tare_key': 'tube_15ml',
+                'density_g_per_mL': 0.9970479
+            },
+            'Tube50000uL': {
+                'tare_key': 'tube_50ml',
+                'density_g_per_mL': 0.9970479
+            }
+        }
+        specification = tube_specifications.get(
+            container.__class__.__name__
+        )
+        if specification is None:
+            raise ValueError(
+                'same-container refill is supported only for calibrated tubes.'
+            )
+        return {
+            'tare_g': self.TARE_CALIBRATION_G[specification['tare_key']],
+            'density_g_per_mL': specification['density_g_per_mL']
+        }
+
+    def _validate_source_mass_refresh_request(self, request):
+        '''Validates an operator-confirmed, same-container mass refresh.'''
+        required_keys = {
+            'schema_version',
+            'action_id',
+            'expected_source_inventory_revision',
+            'source_chemical_name',
+            'source_container_index',
+            'source_loc',
+            'source_deck_pos',
+            'measured_total_mass_g'
+        }
+        if not isinstance(request, dict) or set(request) != required_keys:
+            raise ValueError(
+                'source-mass refresh request must contain exactly {}.'.format(
+                    ', '.join(sorted(required_keys))
+                )
+            )
+        if request['schema_version'] != 1:
+            raise ValueError('source-mass refresh uses an unsupported schema.')
+        if not isinstance(request['action_id'], str) or not request[
+                'action_id'].strip():
+            raise ValueError('source-mass refresh requires an action id.')
+        if (
+            isinstance(request['expected_source_inventory_revision'], bool)
+            or not isinstance(
+                request['expected_source_inventory_revision'],
+                int
+            )
+            or request['expected_source_inventory_revision'] < 0
+        ):
+            raise ValueError(
+                'expected source-inventory revision must be a nonnegative integer.'
+            )
+        if (
+            not isinstance(request['source_chemical_name'], str)
+            or not request['source_chemical_name'].strip()
+        ):
+            raise ValueError('source-mass refresh requires a source name.')
+        if (
+            isinstance(request['source_container_index'], bool)
+            or not isinstance(request['source_container_index'], int)
+            or request['source_container_index'] < 0
+        ):
+            raise ValueError(
+                'source-mass refresh requires a nonnegative container index.'
+            )
+        if not isinstance(request['source_loc'], str) or not request[
+                'source_loc'].strip():
+            raise ValueError('source-mass refresh requires a source location.')
+        if (
+            isinstance(request['source_deck_pos'], bool)
+            or not isinstance(request['source_deck_pos'], int)
+            or request['source_deck_pos'] < 1
+        ):
+            raise ValueError(
+                'source-mass refresh requires a positive deck position.'
+            )
+        measured_total_mass_g = self._preflight_number(
+            request['measured_total_mass_g'],
+            'measured total mass',
+            minimum=0.0
+        )
+        return {
+            'schema_version': 1,
+            'action_id': request['action_id'].strip(),
+            'expected_source_inventory_revision': request[
+                'expected_source_inventory_revision'
+            ],
+            'source_chemical_name': request['source_chemical_name'].strip(),
+            'source_container_index': request['source_container_index'],
+            'source_loc': request['source_loc'].strip(),
+            'source_deck_pos': request['source_deck_pos'],
+            'measured_total_mass_g': measured_total_mass_g
+        }
+
+    def _build_source_group_mass_refresh_summary(
+            self,
+            source_name,
+            selected_container_index
+    ):
+        '''Returns current, controller-compatible inventory after a refresh.'''
+        descriptors, active_index = self._get_preflight_source_containers(
+            source_name
+        )
+        if (
+            selected_container_index < 0
+            or selected_container_index >= len(descriptors)
+        ):
+            raise ValueError('selected source container is not registered.')
+        source = self.containers[source_name]
+        if hasattr(source, 'cont_list'):
+            containers = list(source.cont_list)
+        else:
+            containers = [source]
+
+        active_descriptor = descriptors[active_index]
+        group_aspirable_volume_uL = sum(
+            max(
+                0.0,
+                self._preflight_number(
+                    getattr(container, 'vol', None),
+                    'current volume for {}'.format(source_name)
+                ) - self._preflight_number(
+                    getattr(container, 'DEAD_VOL', None),
+                    'dead volume for {}'.format(source_name)
+                )
+            )
+            for container in containers[active_index:]
+        )
+        selected_descriptor = descriptors[selected_container_index]
+        return {
+            'source_chemical_name': source_name,
+            'source_container_index': selected_container_index,
+            'source_loc': selected_descriptor['loc'],
+            'source_deck_pos': selected_descriptor['deck_pos'],
+            'current_volume_uL': selected_descriptor['current_volume_uL'],
+            'dead_volume_uL': selected_descriptor['dead_volume_uL'],
+            'source_group_current_volume_uL': active_descriptor[
+                'current_volume_uL'
+            ],
+            'source_group_aspirable_volume_uL': group_aspirable_volume_uL,
+            'source_group_active_container_index': active_index,
+            'source_group_current_loc': active_descriptor['loc'],
+            'source_group_current_deck_pos': active_descriptor['deck_pos']
+        }
+
+    def _build_source_container_mass_refresh(self, request):
+        '''Applies one validated same-container refill, or returns a rejection.
+
+        This method never changes source identity, deck mapping, concentration,
+        or backup order.  It only refreshes the liquid mass/volume for the
+        explicitly identified physical tube after the operator has refilled and
+        weighed that same tube outside the robot workflow.
+        '''
+        response = {
+            'schema_version': 1,
+            'record_type': 'source_container_mass_refresh',
+            'action_id': None,
+            'accepted': False,
+            'message': '',
+            'source_inventory_revision': int(
+                getattr(self, 'source_inventory_revision', 0)
+            ),
+            'source_container': None
+        }
+        try:
+            normalized_request = self._validate_source_mass_refresh_request(
+                request
+            )
+            response['action_id'] = normalized_request['action_id']
+            if normalized_request['expected_source_inventory_revision'] != \
+                    self.source_inventory_revision:
+                raise ValueError(
+                    'source inventory changed; retry preflight before refill.'
+                )
+            container = self._get_source_container_for_mass_refresh(
+                normalized_request['source_chemical_name'],
+                normalized_request['source_container_index'],
+                normalized_request['source_loc'],
+                normalized_request['source_deck_pos']
+            )
+            specification = self._get_source_mass_refresh_specification(
+                container
+            )
+            liquid_mass_g = normalized_request['measured_total_mass_g'] - \
+                specification['tare_g']
+            if liquid_mass_g < -1e-9:
+                raise ValueError(
+                    'measured mass is below the calibrated empty-tube tare.'
+                )
+            liquid_mass_g = max(0.0, liquid_mass_g)
+            refreshed_volume_uL = (
+                liquid_mass_g / specification['density_g_per_mL'] * 1000.0
+            )
+            if refreshed_volume_uL > float(container.MAX_VOL) + 1e-9:
+                raise ValueError(
+                    'measured mass exceeds the registered tube capacity.'
+                )
+
+            # All validations above complete before changing the live source
+            # inventory used by subsequent transfer-plan preflights.
+            container.mass = liquid_mass_g
+            container.vol = refreshed_volume_uL
+            container._update_height()
+            self.source_inventory_revision += 1
+            response['accepted'] = True
+            response['message'] = 'same-container source inventory refreshed.'
+            response['source_inventory_revision'] = \
+                self.source_inventory_revision
+            response['source_container'] = \
+                self._build_source_group_mass_refresh_summary(
+                    normalized_request['source_chemical_name'],
+                    normalized_request['source_container_index']
+                )
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+        return response
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -2228,8 +2497,12 @@ class OT2Robot():
             'tare_calibration_g': dict(self.TARE_CALIBRATION_G),
             'supported_commands': [
                 'get_robot_state_snapshot',
-                'preflight_transfer_plan'
+                'preflight_transfer_plan',
+                'refresh_source_container_mass'
             ],
+            'source_inventory_revision': int(
+                getattr(self, 'source_inventory_revision', 0)
+            ),
             'simulate': bool(self.simulate),
             'container_count': len(self.containers),
             'pipette_count': len(self.pipettes),
@@ -2250,6 +2523,14 @@ class OT2Robot():
         self.portal.send_pack(
             'transfer_plan_preflight',
             self._build_transfer_plan_preflight(request)
+        )
+
+    @exec_func('refresh_source_container_mass', 1, False, exec_funcs)
+    def _exec_refresh_source_container_mass(self, request):
+        '''Acknowledges one human-supervised, same-container source refill.'''
+        self.portal.send_pack(
+            'source_container_mass_refreshed',
+            self._build_source_container_mass_refresh(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)
