@@ -2016,6 +2016,8 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         self.assertIn("va='bottom'", method_source)
         self.assertIn('hspace=atlas_row_spacing', method_source)
         self.assertIn('0.82', method_source)
+        self.assertIn('0.022', method_source)
+        self.assertIn("va='bottom'", method_source)
 
 
 class TargetEiIncumbentControllerTests(unittest.TestCase):

@@ -21702,10 +21702,13 @@ class AutoContr(Controller):
                 ):
                     figure.text(
                         0.5,
-                        0.075,
+                        # This is a page-level domain note, not an axis
+                        # annotation. Keep it below the lower row's x-axis
+                        # labels so it cannot obscure a reagent name.
+                        0.022,
                         'True zero disabled; axes begin at the 5 uL '
                         'executable minimum',
-                        ha='center', va='center',
+                        ha='center', va='bottom',
                         fontsize=font_sizes['legend'], color='0.30'
                     )
                 overlay_suffix = '_feasibility' if feasibility_overlay else ''
