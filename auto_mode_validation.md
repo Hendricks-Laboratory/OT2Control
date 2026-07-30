@@ -120,7 +120,8 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 1 controller-local live-run journal | Implemented; normal dry debug passed | Two one-well controlled dry runs produced immutable parsed input/Header/runtime snapshots, valid SHA-256 manifests, atomic finalized state, and ordered lifecycle events through batch completion and finalization. It is local-only and fail-closed; it does not add cloud synchronization, Pi state, recovery prompts, or change scientific/model behavior. Python 3.9 contract, journal durability, failure-path, and static controller-placement tests passed. |
 | Stage 2 local Live workbook and offline sync queue | Implemented; hardware-free validation passed | Every durable Stage 1 revision now atomically refreshes `Live_Run/<effective-data-dir>_LIVE.xlsx`, then preserves a checksum-identified per-revision snapshot before adding it to `Run_State/pending_cloud_sync.jsonl`. The queue supports strict FIFO replay through an injected adapter, stops on the first failure, and preserves unsynchronized order. No Drive adapter, credential access, or remote request is configured yet, so normal Auto execution remains offline-capable; a controlled local-workbook dry debug is still required before a later, separately approved Drive integration. |
 | Stage 3 Pi `Auto-main` compatibility snapshot | Implemented; controlled dry debug passed | The separately deployed `Auto-main` Pi branch reports a versioned, read-only state snapshot before Auto execution begins. The controller validates the protocol/tare-calibration contract, records the accepted snapshot in durable run state, and rejects incompatible deployments. This does not modify the protected Pi `main` checkout or change transfer behavior. |
-| Stage 4 exact Pi next-batch resource preflight | Implemented; hardware-free and controlled dry-debug validation passed | With `auto_source_volume_check=required`, the controller retains its aggregate source audit and sends the exact next-batch transfer plan to `Auto-main`. The Pi non-mutatively simulates current per-container usable volume, same-name backup selection, pipette-size-dependent transfer steps, and fresh-tip availability. A structured deficit rejects the batch before execution; a passed allocation is journaled. Controlled dry tests confirmed a valid backup allocation, insufficient-source rejection, and an `H12` one-tip rack rejection before liquid transfer. Isolated backup-switch, source/reserve, insufficient-tip, malformed-payload, no-mutation, configured-tip-suffix, and controller fail-closed tests passed. Stage 4 does not yet provide an operator pause or source/tip replacement workflow. |
+| Stage 4 exact Pi next-batch resource preflight | Implemented; hardware-free and controlled dry-debug validation passed | With `auto_source_volume_check=required`, the controller retains its aggregate source audit and sends the exact next-batch transfer plan to `Auto-main`. The Pi non-mutatively simulates current per-container usable volume, same-name backup selection, pipette-size-dependent transfer steps, and fresh-tip availability. A structured deficit rejects the batch before execution; a passed allocation is journaled. Controlled dry tests confirmed a valid backup allocation, insufficient-source rejection, and an `H12` one-tip rack rejection before liquid transfer. Isolated backup-switch, source/reserve, insufficient-tip, malformed-payload, no-mutation, configured-tip-suffix, and controller fail-closed tests passed. |
+| Stage 6 same-container source-refill hold | Implemented; hardware-free validation complete | A recoverable source-volume deficit now enters a durable, operator-supervised pre-batch hold. The only inventory-changing action is `refill_same_container`: the Pi validates the exact existing source identity, stale-revision guard, calibrated tube tare, nonnegative mass, and tube capacity before updating only that tube’s inventory. The controller then refreshes its audit cache and re-runs both aggregate and exact Pi preflights on the unchanged dataframe before any transfer. `retry_preflight` performs no inventory mutation; `end_run` fails closed. New sources, concentration/deck/labware changes, tip/plate recovery, recipe regeneration, and unattended continuation remain out of scope. A controlled physical dry debug is still required. |
 | Auto output-directory collision isolation | Implemented; dry debug passed | A repeated Header `data_dir` prompted for exact `yes`, created the first unused `_N` sibling, and preserved separate output and `Run_State` records. Noninteractive collisions fail closed. The requested and effective directories are retained in the runtime baseline and final report. |
 | Auto early terminal transcript | Implemented; normal dry debug passed | Auto buffers Header parsing, safety warnings, and output-directory collision messages in memory after the Header download. Once the approved per-run `Debug/terminal_output.txt` can be opened, it prepends that transcript and continues normal live capture. The July 29 `DEBUGRTG_STAGE1_5` audit confirmed the buffered setup record and live-capture marker were present in the saved log, while the copied interactive terminal showed the expected later live-capture marker. Early setup failure restores normal streams and creates no transcript artifact. |
 | Import-only run-context lineage, tabular snapshots, final cross-run plots, and reporting | Implemented | Existing-output imports flatten and checksum-identify ancestor runs without nesting; they export de-duplicated native condition and well-level replicate CSV snapshots plus source-availability diagnostics. Final import-only plots provide separate current-run-only and cumulative-lineage λmax progress and replicate views from those flat snapshots, with run identity and provenance-aware semantics. The final report describes lineage scope, source availability, condition/replicate row counts, raw-scan deferral, and links the generated cross-run figures. Manual checkpoint imports remain model-only. Raw scan ingestion remains deferred. Python 3.9 isolated lineage, branching, duplicate-conflict, legacy, tabular-history, cross-run rendering, and report tests passed. |
@@ -707,7 +708,7 @@ cosmetic plotting.
 - decide whether `target_ei` adds practical value for the chemistry;
 - only then increase plate occupancy or iteration count.
 
-### 4. Planned safety feature: batch-boundary source replenishment workflow
+### 4. Implemented safety feature: same-container source refill at batch boundary
 
 The implemented `auto_source_volume_check=required` preflight is intentionally
 an operational gate rather than an acquisition constraint. After the optimizer
@@ -717,16 +718,17 @@ transfers against current robot-reported aggregate aspiratable inventory plus
 the configured reserve. It must continue to reject a deficient batch before
 any liquid handling begins.
 
-The next planned enhancement is a human-supervised replenishment/resume
-workflow at that safe batch boundary:
+Stage 6 now provides the narrowest safe human-supervised replenishment path at
+that boundary:
 
 1. retain the already selected, fully audited batch without re-optimizing it;
 2. present the insufficient source, available aspiratable volume, planned
    demand, reserve, and deficit in terminal output and a persistent audit file;
-3. pause before protocol execution, allowing the operator to replenish or
-   replace the affected stock, reweigh it, and verify its identity;
-4. refresh and reconcile robot-reported inventory; then either execute the
-   unchanged approved batch or fail closed if inventory remains insufficient.
+3. pause before protocol execution, allowing the operator to refill and
+   reweigh the **same registered source container**;
+4. validate the same source identity, fixed calibrated tare, physical tube
+   capacity, and a monotonic Pi inventory revision; then either execute the
+   unchanged approved batch after both preflights pass or fail closed.
 
 The controller may keep a shadow withdrawal ledger for prediction and audit,
 but a fresh robot inventory response at every batch boundary remains the
@@ -735,18 +737,17 @@ retries, manual handling, or robot-side tube switching. This feature must not
 silently alter GP acquisition scores or make a scientifically valuable recipe
 unavailable merely because a stock is temporarily low.
 
-The safe stop-before-batch behavior is computer-side and already partially
-implemented. A true in-session reweigh-and-continue path requires verifying
-that the deployed frozen Raspberry Pi runtime accepts a refreshed reagent or
-inventory payload. Until that behavior is confirmed, the conservative response
-to insufficient inventory remains an exported audit and clean stop; do not
-claim automatic backup-tube switching from the aggregate controller preflight.
+This feature is deliberately not a general recovery system: it cannot add or
+substitute a source, change concentration or mapping, reload tips, replace a
+plate, alter the recipe, or continue without an interactive operator. A
+controlled physical dry debug must confirm the deployed `Auto-main` revision
+and the complete hold/retry audit before using it in chemistry.
 
 ### Deferred, not immediate
 
 - further plot styling unless a new controlled output audit finds a readability
   defect;
-- batch-boundary replenishment/resume after a failed source-volume preflight;
+- new-source substitution, tip replacement, or plate replacement recovery;
 - higher-dimensional GP-surface visualization beyond the existing projection,
   parallel-coordinate, PCA, and three-variable conditional-slice views;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;

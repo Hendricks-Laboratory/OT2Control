@@ -112,6 +112,9 @@ EVENT_TYPES = frozenset({
 
 
 OPERATOR_ACTION_TYPES = frozenset({
+    # Stage 6: reweigh/refill only an already registered source at its
+    # existing physical identity. New sources remain a later Stage 7 action.
+    'refill_same_container',
     'replace_source',
     'register_backup_source',
     'replace_tip_rack',

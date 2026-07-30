@@ -88,6 +88,7 @@ from auto_live_run_journal import (
 from auto_live_run_state import (
     LIFECYCLE_EXECUTING_BATCH,
     LIFECYCLE_FINALIZED,
+    LIFECYCLE_HELD_FOR_OPERATOR,
     LIFECYCLE_MEASURING_BATCH,
     LIFECYCLE_PREFLIGHTING_BATCH,
     LIFECYCLE_PROCESSING_BATCH,
@@ -4976,7 +4977,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v2'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v3'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5132,6 +5133,27 @@ class AutoContr(Controller):
             raise RuntimeError(
                 'Auto-main compatibility check failed: the Pi does not '
                 'advertise preflight_transfer_plan.'
+            )
+
+        if (
+            'refresh_source_container_mass'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise refresh_source_container_mass required for '
+                'controlled pre-batch recovery.'
+            )
+
+        source_inventory_revision = snapshot.get('source_inventory_revision')
+        if (
+            isinstance(source_inventory_revision, bool)
+            or not isinstance(source_inventory_revision, int)
+            or source_inventory_revision < 0
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: source inventory '
+                'revision is invalid.'
             )
 
         return copy.deepcopy(snapshot)
@@ -5324,13 +5346,19 @@ class AutoContr(Controller):
                     ))
                 else:
                     deficit_messages.append(str(deficit))
-            raise ValueError(
+            error = ValueError(
                 'Auto Pi exact next-batch preflight rejected {} before '
                 'liquid handling:\n{}'.format(
                     context_label,
                     '\n'.join(deficit_messages)
                 )
             )
+            # Preserve the established ValueError contract while attaching
+            # the structured Pi decision for the narrow Stage-6 recovery
+            # path. Existing callers retain ordinary validation semantics.
+            error.pi_preflight_request = copy.deepcopy(request)
+            error.pi_preflight_result = copy.deepcopy(result)
+            raise error
 
         print(
             '<<controller>> Auto Pi exact next-batch preflight passed for '
@@ -5342,6 +5370,547 @@ class AutoContr(Controller):
             'request': request,
             'result': result
         }
+
+    def _validate_auto_main_source_mass_refresh(self, result, request):
+        '''Validates the Pi acknowledgement for one same-container refill.
+
+        This is intentionally narrower than the normal reagent-sheet path:
+        Stage 6 may change only the measured mass of one already registered
+        source tube.  It must not silently introduce a new source, alter a
+        concentration, or remap a deck position.
+        '''
+        required_keys = {
+            'schema_version',
+            'record_type',
+            'action_id',
+            'accepted',
+            'message',
+            'source_inventory_revision',
+            'source_container'
+        }
+        if not isinstance(result, dict) or set(result) != required_keys:
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned an invalid schema.'
+            )
+        if result['schema_version'] != 1:
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned an unsupported '
+                'schema version.'
+            )
+        if result['record_type'] != 'source_container_mass_refreshed':
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned an invalid record '
+                'type.'
+            )
+        if result['action_id'] != request['action_id']:
+            raise RuntimeError(
+                'Auto-main source-mass refresh acknowledgement does not '
+                'match the requested operator action.'
+            )
+        if not isinstance(result['accepted'], bool):
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned a non-boolean '
+                'decision.'
+            )
+        if not isinstance(result['message'], str) or not result['message']:
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned an invalid message.'
+            )
+        if (
+            isinstance(result['source_inventory_revision'], bool)
+            or not isinstance(result['source_inventory_revision'], int)
+            or result['source_inventory_revision'] < 0
+        ):
+            raise RuntimeError(
+                'Auto-main source-mass refresh returned an invalid inventory '
+                'revision.'
+            )
+
+        source_container = result['source_container']
+        if result['accepted']:
+            required_source_keys = {
+                'source_chemical_name',
+                'source_container_index',
+                'source_loc',
+                'source_deck_pos',
+                'current_volume_uL',
+                'dead_volume_uL',
+                'source_group_current_volume_uL',
+                'source_group_aspirable_volume_uL',
+                'source_group_active_container_index',
+                'source_group_current_loc',
+                'source_group_current_deck_pos'
+            }
+            if (
+                not isinstance(source_container, dict)
+                or set(source_container) != required_source_keys
+            ):
+                raise RuntimeError(
+                    'Auto-main source-mass refresh returned invalid source '
+                    'inventory data.'
+                )
+            if (
+                source_container['source_chemical_name']
+                != request['source_chemical_name']
+                or source_container['source_container_index']
+                != request['source_container_index']
+                or source_container['source_loc'] != request['source_loc']
+                or source_container['source_deck_pos']
+                != request['source_deck_pos']
+            ):
+                raise RuntimeError(
+                    'Auto-main source-mass refresh changed the requested '
+                    'source identity.'
+                )
+            if (
+                not isinstance(source_container['source_chemical_name'], str)
+                or isinstance(source_container['source_container_index'], bool)
+                or not isinstance(
+                    source_container['source_container_index'], int
+                )
+                or source_container['source_container_index'] < 0
+                or not isinstance(source_container['source_loc'], str)
+                or isinstance(source_container['source_deck_pos'], bool)
+                or not isinstance(source_container['source_deck_pos'], int)
+                or source_container['source_deck_pos'] < 1
+                or isinstance(
+                    source_container['source_group_active_container_index'],
+                    bool
+                )
+                or not isinstance(
+                    source_container['source_group_active_container_index'],
+                    int
+                )
+                or source_container['source_group_active_container_index'] < 0
+                or not isinstance(
+                    source_container['source_group_current_loc'], str
+                )
+                or isinstance(
+                    source_container['source_group_current_deck_pos'], bool
+                )
+                or not isinstance(
+                    source_container['source_group_current_deck_pos'], int
+                )
+                or source_container['source_group_current_deck_pos'] < 1
+            ):
+                raise RuntimeError(
+                    'Auto-main source-mass refresh returned invalid source '
+                    'identity metadata.'
+                )
+            for field_name in (
+                'current_volume_uL',
+                'dead_volume_uL',
+                'source_group_current_volume_uL',
+                'source_group_aspirable_volume_uL'
+            ):
+                field_value = source_container[field_name]
+                if (
+                    isinstance(field_value, bool)
+                    or not isinstance(field_value, (int, float))
+                    or not math.isfinite(float(field_value))
+                    or float(field_value) < 0.0
+                ):
+                    raise RuntimeError(
+                        'Auto-main source-mass refresh returned invalid {}.'.format(
+                            field_name
+                        )
+                    )
+        elif source_container is not None:
+            raise RuntimeError(
+                'Auto-main rejected a source-mass refresh while returning '
+                'source inventory data.'
+            )
+        return copy.deepcopy(result)
+
+    def _request_auto_main_source_mass_refresh(self, request):
+        '''Requests a Pi-side update to one existing source tube's mass only.'''
+        self.portal.send_pack('refresh_source_container_mass', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'source_container_mass_refreshed':
+            raise RuntimeError(
+                'Auto-main source-mass refresh expected '
+                'source_container_mass_refreshed, received {!r}.'.format(
+                    pack_type
+                )
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto-main source-mass refresh received a malformed payload.'
+            )
+        return self._validate_auto_main_source_mass_refresh(
+            payload[0],
+            request
+        )
+
+    @staticmethod
+    def _get_auto_recoverable_source_candidates(preflight_result):
+        '''Returns uniquely identified source tubes implicated in a rejection.'''
+        if not isinstance(preflight_result, dict):
+            return []
+
+        recoverable_source_names = set()
+        for deficit in preflight_result.get('deficits', []):
+            if (
+                isinstance(deficit, dict)
+                and deficit.get('deficit_type')
+                in ('source_volume', 'reserve_volume')
+                and isinstance(deficit.get('source_chemical_name'), str)
+            ):
+                recoverable_source_names.add(
+                    deficit['source_chemical_name']
+                )
+
+        candidates = []
+        seen = set()
+        for source_container in preflight_result.get('source_containers', []):
+            if not isinstance(source_container, dict):
+                continue
+            key = (
+                source_container.get('source_chemical_name'),
+                source_container.get('source_container_index'),
+                source_container.get('source_loc'),
+                source_container.get('source_deck_pos')
+            )
+            if (
+                key[0] not in recoverable_source_names
+                or key in seen
+                or not isinstance(key[0], str)
+                or isinstance(key[1], bool)
+                or not isinstance(key[1], int)
+                or not isinstance(key[2], str)
+                or isinstance(key[3], bool)
+                or not isinstance(key[3], int)
+            ):
+                continue
+            seen.add(key)
+            candidates.append({
+                'source_chemical_name': key[0],
+                'source_container_index': key[1],
+                'source_loc': key[2],
+                'source_deck_pos': key[3]
+            })
+        return candidates
+
+    def _get_auto_preflight_hold_input(self, prompt):
+        '''Reads a recovery response only from an interactive terminal.
+
+        The injectable callback exists solely for isolated tests.  A normal
+        noninteractive launch fails closed instead of treating an absent
+        operator as approval for a physical recovery action.
+        '''
+        input_func = getattr(self, '_auto_preflight_hold_input', None)
+        if callable(input_func):
+            return input_func(prompt)
+        if not bool(getattr(sys.stdin, 'isatty', lambda: False)()):
+            raise RuntimeError(
+                'Auto pre-batch recovery requires an interactive terminal; '
+                'the unchanged batch remains unexecuted.'
+            )
+        return input(prompt)
+
+    def _update_auto_cached_source_inventory(self, refresh_result):
+        '''Synchronizes only the controller audit cache from an accepted Pi update.'''
+        source_container = refresh_result['source_container']
+        source_name = source_container['source_chemical_name']
+        cached_entry = self._cached_reader_locs.get(source_name)
+        if cached_entry is None:
+            raise RuntimeError(
+                'Auto source-mass refresh was accepted by the Pi, but the '
+                'controller has no matching source cache entry for {}.'.format(
+                    source_name
+                )
+            )
+        self._cached_reader_locs[source_name] = self.ChemCacheEntry(
+            source_container['source_group_current_loc'],
+            source_container['source_group_current_deck_pos'],
+            source_container['source_group_current_volume_uL'],
+            source_container['source_group_aspirable_volume_uL']
+        )
+
+    def _request_auto_preflight_result_for_recovery(self, rxn_df):
+        '''Obtains a structured Pi decision after an earlier aggregate failure.'''
+        request = self._build_auto_pi_transfer_plan_preflight_request(rxn_df)
+        return request, self._request_auto_main_transfer_plan_preflight(request)
+
+    def _hold_auto_batch_for_same_container_refill(
+        self,
+        rxn_df,
+        batch_payload,
+        preflight_request,
+        preflight_result,
+        original_error
+    ):
+        '''Runs the deliberate Stage 6 same-container recovery hold.
+
+        A successful return means only that the Pi accepted a reweighed mass
+        update.  The caller must still rerun the unchanged aggregate and exact
+        preflights before it can send any liquid-handling command.
+        '''
+        candidates = self._get_auto_recoverable_source_candidates(
+            preflight_result
+        )
+        if not candidates:
+            return False
+        if getattr(self, 'auto_live_run_journal', None) is None:
+            return False
+        snapshot = getattr(self, 'auto_main_robot_state_snapshot', None)
+        if not isinstance(snapshot, dict):
+            return False
+
+        hold_action_id = uuid.uuid4().hex
+        hold_payload = copy.deepcopy(batch_payload)
+        hold_payload.update({
+            'hold_action_id': hold_action_id,
+            'hold_reason': 'pi_source_volume_preflight_rejected',
+            'preflight_error': str(original_error),
+            'pi_preflight_request': copy.deepcopy(preflight_request),
+            'pi_preflight_result': copy.deepcopy(preflight_result),
+            'permitted_actions': [
+                'refill_same_container',
+                'retry_preflight',
+                'end_run'
+            ],
+            'same_container_refill_candidates': copy.deepcopy(candidates)
+        })
+        self._record_auto_live_run_transition(
+            LIFECYCLE_HELD_FOR_OPERATOR,
+            'hold_entered',
+            hold_payload,
+            active_batch_number=batch_payload['batch_number'],
+            hold_action_id=hold_action_id
+        )
+
+        print(
+            '<<controller>> Auto batch {} is held before liquid handling. '
+            'The recipe and destination wells are unchanged.'.format(
+                batch_payload['batch_number']
+            )
+        )
+        print(
+            '<<controller>> Stage 6 permits only a same-container refill, '
+            'a no-change preflight retry, or ending the run.'
+        )
+        for candidate_index, candidate in enumerate(candidates, start=1):
+            print(
+                '<<controller>> refill option {}: {} container {} at deck '
+                '{} {}.'.format(
+                    candidate_index,
+                    candidate['source_chemical_name'],
+                    candidate['source_container_index'],
+                    candidate['source_deck_pos'],
+                    candidate['source_loc']
+                )
+            )
+
+        while True:
+            action = str(self._get_auto_preflight_hold_input(
+                'Auto recovery action [refill_same_container / '
+                'retry_preflight / end_run]: '
+            )).strip().lower()
+            requested_payload = {
+                'hold_action_id': hold_action_id,
+                'requested_action': action
+            }
+            self._record_auto_live_run_event(
+                'operator_action_requested',
+                requested_payload
+            )
+
+            if action == 'end_run':
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_FINALIZED,
+                    'operator_action_applied',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'applied_action': 'end_run',
+                        'reason': 'operator_declined_pre_batch_recovery'
+                    },
+                    active_batch_number=None
+                )
+                error = RuntimeError(
+                    'Auto run ended by operator while batch {} was held '
+                    'before liquid handling.'.format(
+                        batch_payload['batch_number']
+                    )
+                )
+                # The outer preflight loop must propagate an explicit human
+                # stop rather than treating it as a new recoverable deficit.
+                error.auto_operator_end_run = True
+                raise error
+
+            if action == 'retry_preflight':
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_PREFLIGHTING_BATCH,
+                    'operator_action_applied',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'applied_action': 'retry_preflight',
+                        'physical_change_declared': False
+                    },
+                    active_batch_number=batch_payload['batch_number']
+                )
+                return True
+
+            if action != 'refill_same_container':
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'unsupported_stage_6_action'
+                    }
+                )
+                print(
+                    '<<controller>> Invalid recovery action. No Pi state '
+                    'was changed.'
+                )
+                continue
+
+            selection_text = self._get_auto_preflight_hold_input(
+                'Select a listed same-container refill option by number: '
+            )
+            try:
+                selected_index = int(str(selection_text).strip()) - 1
+                candidate = candidates[selected_index]
+            except (TypeError, ValueError, IndexError):
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'invalid_same_container_selection'
+                    }
+                )
+                print(
+                    '<<controller>> Invalid refill selection. No Pi state '
+                    'was changed.'
+                )
+                continue
+
+            mass_text = self._get_auto_preflight_hold_input(
+                'Enter the measured total tube-plus-liquid mass in grams '
+                'for {} at deck {} {}: '.format(
+                    candidate['source_chemical_name'],
+                    candidate['source_deck_pos'],
+                    candidate['source_loc']
+                )
+            )
+            try:
+                measured_mass_g = float(str(mass_text).strip())
+            except (TypeError, ValueError):
+                measured_mass_g = float('nan')
+            if not math.isfinite(measured_mass_g) or measured_mass_g < 0.0:
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'invalid_measured_mass_g'
+                    }
+                )
+                print(
+                    '<<controller>> Enter a finite nonnegative measured '
+                    'mass. No Pi state was changed.'
+                )
+                continue
+
+            refresh_request = copy.deepcopy(candidate)
+            refresh_request.update({
+                'schema_version': 1,
+                'action_id': hold_action_id,
+                'expected_source_inventory_revision': snapshot[
+                    'source_inventory_revision'
+                ],
+                'measured_total_mass_g': measured_mass_g
+            })
+            refresh_result = self._request_auto_main_source_mass_refresh(
+                refresh_request
+            )
+            if not refresh_result['accepted']:
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'refresh_request': copy.deepcopy(refresh_request),
+                        'refresh_result': copy.deepcopy(refresh_result)
+                    }
+                )
+                print(
+                    '<<controller>> Pi rejected the same-container refill: '
+                    '{}. No batch was released.'.format(
+                        refresh_result['message']
+                    )
+                )
+                continue
+
+            self._update_auto_cached_source_inventory(refresh_result)
+            self.auto_main_robot_state_snapshot = copy.deepcopy(snapshot)
+            self.auto_main_robot_state_snapshot['source_inventory_revision'] = (
+                refresh_result['source_inventory_revision']
+            )
+            self._record_auto_live_run_event(
+                'operator_action_applied',
+                {
+                    'hold_action_id': hold_action_id,
+                    'applied_action': action,
+                    'refresh_request': copy.deepcopy(refresh_request),
+                    'refresh_result': copy.deepcopy(refresh_result)
+                }
+            )
+            self._record_auto_live_run_transition(
+                LIFECYCLE_PREFLIGHTING_BATCH,
+                'batch_preflight_requested',
+                {
+                    'batch_number': batch_payload['batch_number'],
+                    'hold_action_id': hold_action_id,
+                    'preflight_retry_reason': 'accepted_same_container_refill'
+                },
+                active_batch_number=batch_payload['batch_number']
+            )
+            print(
+                '<<controller>> Pi accepted the same-container mass update. '
+                'Rechecking the unchanged batch before liquid handling.'
+            )
+            return True
+
+    def _attempt_auto_prebatch_recovery(
+        self,
+        rxn_df,
+        batch_payload,
+        original_error
+    ):
+        '''Attempts only the approved Stage 6 recovery after a source failure.'''
+        if (
+            self.robo_params.get('auto_source_volume_check', 'off')
+            != 'required'
+        ):
+            return False
+
+        if (
+            hasattr(original_error, 'pi_preflight_request')
+            and hasattr(original_error, 'pi_preflight_result')
+        ):
+            preflight_request = original_error.pi_preflight_request
+            preflight_result = original_error.pi_preflight_result
+        else:
+            try:
+                (
+                    preflight_request,
+                    preflight_result
+                ) = self._request_auto_preflight_result_for_recovery(rxn_df)
+            except (RuntimeError, ValueError):
+                return False
+            if preflight_result.get('passed'):
+                return False
+
+        return self._hold_auto_batch_for_same_container_refill(
+            rxn_df,
+            batch_payload,
+            preflight_request,
+            preflight_result,
+            original_error
+        )
 
     def init_robot(self, simulate):
         '''Initializes Pi state, then fail-closes on Auto-main incompatibility.'''
@@ -5687,7 +6256,9 @@ class AutoContr(Controller):
         lifecycle_state,
         event_type,
         payload,
-        active_batch_number=None
+        active_batch_number=None,
+        hold_action_id=None,
+        fault_id=None
     ):
         '''Persists one lifecycle transition before Auto proceeds further.'''
         journal = getattr(self, 'auto_live_run_journal', None)
@@ -5699,7 +6270,9 @@ class AutoContr(Controller):
                 lifecycle_state=lifecycle_state,
                 event_type=event_type,
                 payload=payload,
-                active_batch_number=active_batch_number
+                active_batch_number=active_batch_number,
+                hold_action_id=hold_action_id,
+                fault_id=fault_id
             )
         except AutoLiveRunJournalError as exc:
             raise RuntimeError(
@@ -25354,24 +25927,49 @@ class AutoContr(Controller):
             f"Auto batch {getattr(self, 'batch_num', 'unknown')} "
             f"({len(wellnames)} physical wells)"
         )
-        try:
-            aggregate_source_audit = self._preflight_auto_source_volumes(
-                self.rxn_df,
-                context_label=preflight_context_label
-            )
-            pi_transfer_plan_preflight = self._preflight_auto_next_batch_on_pi(
-                self.rxn_df,
-                context_label=preflight_context_label
-            )
-        except (RuntimeError, ValueError) as exc:
-            rejection_payload = copy.deepcopy(batch_payload)
-            rejection_payload['preflight_error'] = str(exc)
-            if hasattr(self, '_record_auto_live_run_event'):
-                self._record_auto_live_run_event(
-                    'batch_preflight_rejected',
-                    rejection_payload
+        preflight_retry_after_hold = False
+        while True:
+            try:
+                aggregate_source_audit = self._preflight_auto_source_volumes(
+                    self.rxn_df,
+                    context_label=preflight_context_label
                 )
-            raise
+                pi_transfer_plan_preflight = (
+                    self._preflight_auto_next_batch_on_pi(
+                        self.rxn_df,
+                        context_label=preflight_context_label
+                    )
+                )
+                break
+            except (RuntimeError, ValueError) as exc:
+                if getattr(exc, 'auto_operator_end_run', False):
+                    raise
+                recovered = False
+                if hasattr(self, '_attempt_auto_prebatch_recovery'):
+                    recovered = self._attempt_auto_prebatch_recovery(
+                        self.rxn_df,
+                        batch_payload,
+                        exc
+                    )
+                if recovered:
+                    # A successful Stage 6 action changes only one existing
+                    # Pi inventory record. Re-run both guards against the
+                    # unchanged constructed dataframe. If a different source
+                    # remains deficient, enter a new durable hold rather than
+                    # executing a partially revalidated batch.
+                    preflight_retry_after_hold = True
+                    continue
+
+                rejection_payload = copy.deepcopy(batch_payload)
+                rejection_payload['preflight_error'] = str(exc)
+                if preflight_retry_after_hold:
+                    rejection_payload['preflight_retry_after_hold'] = True
+                if hasattr(self, '_record_auto_live_run_event'):
+                    self._record_auto_live_run_event(
+                        'batch_preflight_rejected',
+                        rejection_payload
+                    )
+                raise
 
         batch_payload['aggregate_source_volume_audit'] = (
             copy.deepcopy(aggregate_source_audit)

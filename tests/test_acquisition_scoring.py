@@ -1,6 +1,6 @@
 import ast
 import copy
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from contextlib import redirect_stdout
 import datetime
 import io
@@ -14,6 +14,8 @@ import os
 import pandas as pd
 from pathlib import Path
 import re
+import sys
+import uuid
 from tempfile import NamedTemporaryFile
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -2371,7 +2373,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v2'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v3'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2387,7 +2389,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v2',
+            'protocol_version': 'auto-main-state-v3',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
@@ -2396,8 +2398,10 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             },
             'supported_commands': [
                 'get_robot_state_snapshot',
-                'preflight_transfer_plan'
-            ]
+                'preflight_transfer_plan',
+                'refresh_source_container_mass'
+            ],
+            'source_inventory_revision': 0
         }
 
     def test_valid_snapshot_is_accepted_and_copied(self):
@@ -2500,10 +2504,14 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertEqual(b'\x12', packet_types['robot_state_snapshot'])
         self.assertEqual(b'\x13', packet_types['preflight_transfer_plan'])
         self.assertEqual(b'\x14', packet_types['transfer_plan_preflight'])
+        self.assertEqual(b'\x15', packet_types['refresh_source_container_mass'])
+        self.assertEqual(b'\x16', packet_types['source_container_mass_refreshed'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
         self.assertIn('transfer_plan_preflight', ghost_types)
+        self.assertIn('refresh_source_container_mass', ghost_types)
+        self.assertIn('source_container_mass_refreshed', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')
@@ -2693,6 +2701,191 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
             self._build_protocol_dataframe(),
             'legacy batch'
         ))
+
+
+class AutoMainSameContainerRecoveryTests(unittest.TestCase):
+    '''Isolated Stage-6 recovery contract tests; no hardware import.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods(
+            [
+                '_validate_auto_main_source_mass_refresh',
+                '_get_auto_recoverable_source_candidates',
+                '_get_auto_preflight_hold_input',
+                '_update_auto_cached_source_inventory',
+                '_hold_auto_batch_for_same_container_refill'
+            ],
+            extra_namespace={
+                'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
+                'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch',
+                'LIFECYCLE_FINALIZED': 'finalized',
+                'sys': sys,
+                'uuid': uuid
+            }
+        )
+
+    @staticmethod
+    def _candidate_result():
+        return {
+            'schema_version': 1,
+            'record_type': 'transfer_plan_preflight',
+            'batch_number': 2,
+            'passed': False,
+            'source_containers': [{
+                'source_chemical_name': 'reagent_aC1.0',
+                'source_container_index': 0,
+                'source_loc': 'A1',
+                'source_deck_pos': 3,
+                'current_volume_uL': 260.0,
+                'dead_volume_uL': 250.0
+            }],
+            'allocations': [],
+            'tip_requirements': [],
+            'deficits': [{
+                'deficit_type': 'source_volume',
+                'source_chemical_name': 'reagent_aC1.0',
+                'message': 'source is below the required usable volume'
+            }]
+        }
+
+    @staticmethod
+    def _accepted_refresh_result(action_id):
+        return {
+            'schema_version': 1,
+            'record_type': 'source_container_mass_refreshed',
+            'action_id': action_id,
+            'accepted': True,
+            'message': 'same-container source inventory refreshed.',
+            'source_inventory_revision': 1,
+            'source_container': {
+                'source_chemical_name': 'reagent_aC1.0',
+                'source_container_index': 0,
+                'source_loc': 'A1',
+                'source_deck_pos': 3,
+                'current_volume_uL': 900.0,
+                'dead_volume_uL': 250.0,
+                'source_group_current_volume_uL': 900.0,
+                'source_group_aspirable_volume_uL': 650.0,
+                'source_group_active_container_index': 0,
+                'source_group_current_loc': 'A1',
+                'source_group_current_deck_pos': 3
+            }
+        }
+
+    def _build_controller(self, input_values):
+        controller = self.AutoController()
+        controller.ChemCacheEntry = namedtuple(
+            'ChemCacheEntry', ['loc', 'deck_pos', 'vol', 'aspirable_vol']
+        )
+        controller._cached_reader_locs = {
+            'reagent_aC1.0': controller.ChemCacheEntry('A1', 3, 260.0, 10.0)
+        }
+        controller.robo_params = {'auto_source_volume_check': 'required'}
+        controller.auto_live_run_journal = object()
+        controller.auto_main_robot_state_snapshot = {
+            'source_inventory_revision': 0
+        }
+        responses = iter(input_values)
+        controller._auto_preflight_hold_input = lambda unused_prompt: next(
+            responses
+        )
+        controller.transitions = []
+        controller.events = []
+        controller._record_auto_live_run_transition = (
+            lambda *args, **kwargs: controller.transitions.append((args, kwargs))
+        )
+        controller._record_auto_live_run_event = (
+            lambda *args, **kwargs: controller.events.append((args, kwargs))
+        )
+        return controller
+
+    def test_recoverable_candidates_limit_actions_to_source_deficits(self):
+        candidates = self.AutoController._get_auto_recoverable_source_candidates(
+            self._candidate_result()
+        )
+        self.assertEqual([{
+            'source_chemical_name': 'reagent_aC1.0',
+            'source_container_index': 0,
+            'source_loc': 'A1',
+            'source_deck_pos': 3
+        }], candidates)
+
+    def test_same_container_refill_updates_cache_then_requires_retry(self):
+        controller = self._build_controller([
+            'refill_same_container', '1', '2.599'
+        ])
+        requested = []
+
+        def refresh(request):
+            requested.append(copy.deepcopy(request))
+            return controller._validate_auto_main_source_mass_refresh(
+                self._accepted_refresh_result(request['action_id']), request
+            )
+        controller._request_auto_main_source_mass_refresh = refresh
+        batch_payload = {'batch_number': 2, 'physical_wells': ['A1']}
+
+        with redirect_stdout(io.StringIO()):
+            recovered = controller._hold_auto_batch_for_same_container_refill(
+                pd.DataFrame(),
+                batch_payload,
+                {'batch_number': 2},
+                self._candidate_result(),
+                ValueError('insufficient source')
+            )
+
+        self.assertTrue(recovered)
+        self.assertEqual(1, len(requested))
+        self.assertEqual('reagent_aC1.0', requested[0]['source_chemical_name'])
+        self.assertEqual(0, requested[0]['source_container_index'])
+        self.assertEqual(0, requested[0]['expected_source_inventory_revision'])
+        self.assertEqual(1, controller.auto_main_robot_state_snapshot[
+            'source_inventory_revision'
+        ])
+        self.assertEqual(650.0, controller._cached_reader_locs[
+            'reagent_aC1.0'
+        ].aspirable_vol)
+        self.assertEqual(
+            'preflighting_batch', controller.transitions[-1][0][0]
+        )
+
+    def test_rejected_refresh_cannot_change_source_identity(self):
+        controller = self._build_controller([])
+        request = {
+            'action_id': 'action-1',
+            'source_chemical_name': 'reagent_aC1.0',
+            'source_container_index': 0,
+            'source_loc': 'A1',
+            'source_deck_pos': 3
+        }
+        response = self._accepted_refresh_result('action-1')
+        response['source_container']['source_loc'] = 'B1'
+
+        with self.assertRaisesRegex(RuntimeError, 'source identity'):
+            controller._validate_auto_main_source_mass_refresh(response, request)
+
+    def test_operator_end_run_does_not_approve_or_mutate_a_batch(self):
+        controller = self._build_controller(['end_run'])
+        controller._request_auto_main_source_mass_refresh = lambda request: (
+            self.fail('end_run must not send a source update')
+        )
+
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'ended by operator') as context:
+                controller._hold_auto_batch_for_same_container_refill(
+                    pd.DataFrame(),
+                    {'batch_number': 2, 'physical_wells': ['A1']},
+                    {'batch_number': 2},
+                    self._candidate_result(),
+                    ValueError('insufficient source')
+                )
+
+        self.assertTrue(getattr(
+            context.exception,
+            'auto_operator_end_run',
+            False
+        ))
+        self.assertEqual('finalized', controller.transitions[-1][0][0])
 
 
 class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
