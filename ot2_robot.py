@@ -1841,6 +1841,27 @@ class OT2Robot():
 
         descriptors = []
         for container_index, container in enumerate(containers):
+            # Container deck positions can originate as NumPy integer scalars
+            # when the reagent worksheet is parsed.  The preflight response is
+            # an audit protocol payload, so normalize this metadata at the Pi
+            # boundary rather than allowing a NumPy scalar into the
+            # controller's JSON-only durable journal.
+            raw_deck_pos = getattr(container, 'deck_pos', None)
+            try:
+                numeric_deck_pos = self._preflight_number(
+                    raw_deck_pos,
+                    'deck position for {}'.format(source_name),
+                    minimum=1.0
+                )
+            except ValueError:
+                raise ValueError(
+                    'deck position for {} is invalid.'.format(source_name)
+                )
+            if not numeric_deck_pos.is_integer():
+                raise ValueError(
+                    'deck position for {} is invalid.'.format(source_name)
+                )
+            deck_pos = int(numeric_deck_pos)
             current_volume_uL = self._preflight_number(
                 getattr(container, 'vol', None),
                 'current volume for {}'.format(source_name)
@@ -1852,7 +1873,7 @@ class OT2Robot():
             descriptors.append({
                 'container_index': container_index,
                 'loc': str(getattr(container, 'loc', '')),
-                'deck_pos': getattr(container, 'deck_pos', None),
+                'deck_pos': deck_pos,
                 'current_volume_uL': current_volume_uL,
                 'dead_volume_uL': dead_volume_uL
             })

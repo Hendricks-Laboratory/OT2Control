@@ -2,9 +2,12 @@
 
 import ast
 import copy
+import json
 import math
 import pathlib
 import unittest
+
+import numpy as np
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -110,10 +113,12 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
         }
         robot.containers = {
             'reagent_aC1.0': _MultiContainerStub([
-                _ContainerStub('A1', 3, 258.0, 250.0),
-                _ContainerStub('A2', 3, 400.0, 250.0)
+                _ContainerStub('A1', np.int64(3), 258.0, 250.0),
+                _ContainerStub('A2', np.int64(3), 400.0, 250.0)
             ]),
-            'reagent_bC1.0': _ContainerStub('B1', 3, 400.0, 250.0)
+            'reagent_bC1.0': _ContainerStub(
+                'B1', np.int64(3), 400.0, 250.0
+            )
         }
         return robot
 
@@ -159,6 +164,18 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             backup.vol,
             robot.containers['reagent_aC1.0']._cont_i
         ))
+
+    def test_preflight_result_is_json_serializable_with_numpy_deck_position(self):
+        robot = self._build_robot()
+
+        result = robot._build_transfer_plan_preflight(self._request())
+
+        self.assertTrue(result['passed'])
+        self.assertIsInstance(
+            result['source_containers'][0]['source_deck_pos'],
+            int
+        )
+        json.dumps(result, sort_keys=True)
 
     def test_tip_shortage_is_rejected_without_mutating_tip_state(self):
         robot = self._build_robot(right_tip_count=0)
