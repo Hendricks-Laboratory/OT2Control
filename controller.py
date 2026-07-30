@@ -21619,12 +21619,16 @@ class AutoContr(Controller):
                 )
                 extra_held_title_lines = max(0, max_held_title_lines - 2)
                 # Preserve the established wide 300-DPI atlas canvas while
-                # using the available vertical space efficiently. Earlier
-                # generalized pages reserved more header and inter-row space
-                # than the title, legend, and held-recipe labels need, which
-                # made six-panel 4D atlases needlessly small.
+                # reserving a dedicated annotation band between rows.  Each
+                # panel title identifies the reagents held constant for that
+                # conditional slice and can span several lines.  The added
+                # row height offsets the larger ``hspace`` value so that the
+                # heatmap panels do not become smaller while those titles no
+                # longer collide with the x-axis labels above them.
+                atlas_extra_row_height = 5.35
+                atlas_row_spacing = 0.62
                 figure_height = (
-                    5.15 + ((n_rows - 1) * 4.55)
+                    5.15 + ((n_rows - 1) * atlas_extra_row_height)
                     + (0.55 if feasibility_overlay else 0.0)
                     + (0.28 * extra_held_title_lines)
                 )
@@ -21653,7 +21657,7 @@ class AutoContr(Controller):
                         (0.80 if feasibility_overlay else 0.82)
                         - (0.02 * extra_held_title_lines)
                     ),
-                    hspace=0.42,
+                    hspace=atlas_row_spacing,
                     wspace=0.30
                 )
                 colorbar = figure.colorbar(

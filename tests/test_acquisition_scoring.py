@@ -1813,7 +1813,7 @@ class AutoLambdaMaximaExtractionTests(unittest.TestCase):
 
 
 class AutoPlotLayoutRegressionTests(unittest.TestCase):
-    '''Keeps shared legends and standalone slices out of the data panel.'''
+    '''Keeps plot headers and conditional-slice annotations readable.'''
 
     def test_pairwise_plots_reserve_a_dedicated_legend_header(self):
         method_node = _get_auto_controller_method_node(
@@ -1843,6 +1843,22 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         self.assertIn('standalone_title_lines = textwrap.wrap(', method_source)
         self.assertIn('legend_row_count', method_source)
         self.assertIn('axes_top = max(', method_source)
+
+    def test_atlas_rows_reserve_annotation_clearance(self):
+        method_node = _get_auto_controller_method_node(
+            'plot_higher_dimensional_GPR_conditional_slices'
+        )
+        method_source = ast.get_source_segment(
+            CONTROLLER_PATH.read_text(),
+            method_node
+        )
+
+        self.assertIn('atlas_extra_row_height = 5.35', method_source)
+        self.assertIn('atlas_row_spacing = 0.62', method_source)
+        self.assertIn(
+            '((n_rows - 1) * atlas_extra_row_height)', method_source
+        )
+        self.assertIn('hspace=atlas_row_spacing', method_source)
 
     def test_parallel_coordinate_plots_reserve_a_dedicated_legend_header(self):
         method_node = _get_auto_controller_method_node(
@@ -1998,7 +2014,7 @@ class AutoPlotLayoutRegressionTests(unittest.TestCase):
         self.assertIn('include_decorations=True', method_source)
         self.assertIn('0.018', method_source)
         self.assertIn("va='bottom'", method_source)
-        self.assertIn('hspace=0.42', method_source)
+        self.assertIn('hspace=atlas_row_spacing', method_source)
         self.assertIn('0.82', method_source)
 
 
