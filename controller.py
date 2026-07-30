@@ -26084,8 +26084,12 @@ class AutoContr(Controller):
 
             audit_rows.append({
                 'source_chemical_name': source_name,
-                'source_loc': source_entry.loc,
-                'source_deck_pos': source_entry.deck_pos,
+                # ``loc_req`` cache entries can retain NumPy scalar values
+                # from worksheet-derived robot metadata.  This audit is also
+                # copied into the JSON-only live-run journal, so normalize
+                # display-only source metadata at that durable boundary.
+                'source_loc': str(source_entry.loc),
+                'source_deck_pos': int(source_entry.deck_pos),
                 'robot_reported_current_volume_uL': float(source_entry.vol),
                 'robot_reported_aspirable_volume_uL': available_aspirable_uL,
                 'planned_usage_uL': planned_usage_uL,

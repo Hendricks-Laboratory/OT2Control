@@ -3491,6 +3491,28 @@ class AutoSourceVolumePreflightTests(unittest.TestCase):
             'aggregate_source_group'
         )
 
+    def test_aggregate_audit_is_json_serializable_with_numpy_deck_position(self):
+        controller = self._build_controller()
+        controller._cached_reader_locs['reagent_aC1.0'].deck_pos = (
+            np.int64(1)
+        )
+
+        with redirect_stdout(io.StringIO()):
+            audit_rows = controller._preflight_auto_source_volumes(
+                self._build_protocol_dataframe(),
+                'batch 0'
+            )
+
+        audit_by_source = {
+            row['source_chemical_name']: row
+            for row in audit_rows
+        }
+        self.assertIsInstance(
+            audit_by_source['reagent_aC1.0']['source_deck_pos'],
+            int
+        )
+        json.dumps(audit_rows, sort_keys=True)
+
     def test_preflight_rejects_insufficient_aggregate_aspirable_volume(self):
         controller = self._build_controller()
         controller._cached_reader_locs['reagent_aC1.0'].aspirable_vol = 44.0
