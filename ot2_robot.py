@@ -365,7 +365,18 @@ class MultiContainer(Container):
 
     @property
     def aspiratible_vol(self):
-        return sum([container.aspiratible_vol for container in self.cont_list[self._cont_i:]])
+        '''Returns usable liquid across the current and remaining sources.
+
+        A source below its physical dead volume cannot contribute negative
+        usable liquid.  Treating it as negative would under-report the
+        aggregate inventory of a same-name backup sequence to callers such as
+        the controller's source-volume audit, even though ``aspirate()``
+        correctly skips that source before selecting a sufficient backup.
+        '''
+        return sum(
+            max(0.0, container.aspiratible_vol)
+            for container in self.cont_list[self._cont_i:]
+        )
     
     @property
     def history(self):

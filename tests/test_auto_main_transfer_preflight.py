@@ -6,6 +6,7 @@ import json
 import math
 import pathlib
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -55,6 +56,34 @@ def _robot_preflight_class():
     namespace = {'math': math}
     exec(compile(module, str(ROBOT_SOURCE), 'exec'), namespace)
     return namespace['OT2Robot']
+
+
+def _multicontainer_availability_class():
+    '''Loads only MultiContainer's availability property without hardware.'''
+    source_tree = ast.parse(ROBOT_SOURCE.read_text())
+    multicontainer_class = next(
+        node for node in source_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == 'MultiContainer'
+    )
+    availability_property = next(
+        node for node in multicontainer_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == 'aspiratible_vol'
+    )
+    test_class = ast.ClassDef(
+        name='MultiContainerAvailability',
+        bases=[],
+        keywords=[],
+        body=[copy.deepcopy(availability_property)],
+        decorator_list=[]
+    )
+    module = ast.fix_missing_locations(ast.Module(
+        body=[test_class],
+        type_ignores=[]
+    ))
+    namespace = {}
+    exec(compile(module, str(ROBOT_SOURCE), 'exec'), namespace)
+    return namespace['MultiContainerAvailability']
 
 
 class _WellStub:
@@ -164,6 +193,18 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             backup.vol,
             robot.containers['reagent_aC1.0']._cont_i
         ))
+
+    def test_multicontainer_aggregate_ignores_sub_dead_source_deficits(self):
+        """An empty primary cannot reduce a usable backup's inventory."""
+        availability_class = _multicontainer_availability_class()
+        container = availability_class()
+        container._cont_i = 0
+        container.cont_list = [
+            SimpleNamespace(aspiratible_vol=-4995.0),
+            SimpleNamespace(aspiratible_vol=10764.0)
+        ]
+
+        self.assertEqual(container.aspiratible_vol, 10764.0)
 
     def test_preflight_result_is_json_serializable_with_numpy_deck_position(self):
         robot = self._build_robot()
