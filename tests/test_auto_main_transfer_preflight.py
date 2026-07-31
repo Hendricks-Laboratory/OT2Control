@@ -132,12 +132,16 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             'left': {
                 'size': 300.0,
                 'last_used': 'clean',
-                'pipette': _PipetteStub(unused_tip_count=8)
+                'pipette': _PipetteStub(unused_tip_count=8),
+                'tip_rack_deck_positions': [9],
+                'tip_rack_names': ['tip_rack_300uL']
             },
             'right': {
                 'size': 20.0,
                 'last_used': 'clean',
-                'pipette': _PipetteStub(unused_tip_count=right_tip_count)
+                'pipette': _PipetteStub(unused_tip_count=right_tip_count),
+                'tip_rack_deck_positions': [8],
+                'tip_rack_names': ['tip_rack_20uL']
             }
         }
         robot.containers = {
@@ -256,6 +260,7 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
         self.assertFalse(result['passed'])
         self.assertEqual(0, right_requirement['available_new_tips'])
         self.assertGreater(right_requirement['required_new_tips'], 0)
+        self.assertEqual([8], right_requirement['tip_rack_deck_positions'])
         self.assertIn('tip_inventory', [
             deficit['deficit_type'] for deficit in result['deficits']
         ])

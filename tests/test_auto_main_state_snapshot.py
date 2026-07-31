@@ -86,14 +86,15 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
             'containers': {'reagent': object()},
             'pipettes': {'left': object()},
             'temp_module': None,
-            'source_inventory_revision': 0
+            'source_inventory_revision': 0,
+            'tip_inventory_revision': 0
         })()
 
         snapshot = namespace['_build_robot_state_snapshot'](stub)
 
         self.assertEqual(1, snapshot['snapshot_schema_version'])
         self.assertEqual('Auto-main', snapshot['runtime_role'])
-        self.assertEqual('auto-main-state-v3', snapshot['protocol_version'])
+        self.assertEqual('auto-main-state-v4', snapshot['protocol_version'])
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
                          snapshot['tare_calibration_id'])
         self.assertEqual({
@@ -104,9 +105,11 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual([
             'get_robot_state_snapshot',
             'preflight_transfer_plan',
-            'refresh_source_container_mass'
+            'refresh_source_container_mass',
+            'reset_pipette_tip_racks'
         ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
+        self.assertEqual(0, snapshot['tip_inventory_revision'])
         self.assertTrue(snapshot['simulate'])
         self.assertEqual(1, snapshot['container_count'])
         self.assertEqual(1, snapshot['pipette_count'])
@@ -161,12 +164,16 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual(b'\x14', packet_types['transfer_plan_preflight'])
         self.assertEqual(b'\x15', packet_types['refresh_source_container_mass'])
         self.assertEqual(b'\x16', packet_types['source_container_mass_refreshed'])
+        self.assertEqual(b'\x17', packet_types['reset_pipette_tip_racks'])
+        self.assertEqual(b'\x18', packet_types['pipette_tip_racks_reset'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
         self.assertIn('transfer_plan_preflight', ghost_types)
         self.assertIn('refresh_source_container_mass', ghost_types)
         self.assertIn('source_container_mass_refreshed', ghost_types)
+        self.assertIn('reset_pipette_tip_racks', ghost_types)
+        self.assertIn('pipette_tip_racks_reset', ghost_types)
 
 
 class AutoMainSourceMassRefreshTests(unittest.TestCase):
@@ -288,6 +295,135 @@ class AutoMainSourceMassRefreshTests(unittest.TestCase):
         self.assertEqual(1, len(send_calls))
         self.assertEqual(
             'source_container_mass_refreshed',
+            ast.literal_eval(send_calls[0].args[0])
+        )
+
+
+class _TipWellStub:
+    def __init__(self, name):
+        self.name = name
+
+
+class _TipRackResetStub:
+    def __init__(self):
+        self._wells = {
+            '{}{}'.format(row, column): _TipWellStub(
+                '{}{}'.format(row, column)
+            )
+            for row in 'ABCDEFGH'
+            for column in range(1, 13)
+        }
+
+    def well(self, name):
+        return self._wells[name]
+
+
+class _PipetteTipResetStub:
+    def __init__(self, rack_count=2):
+        self.tip_racks = [_TipRackResetStub() for _ in range(rack_count)]
+        self.reset_calls = 0
+
+    def reset_tipracks(self):
+        self.reset_calls += 1
+
+
+class AutoMainCompleteTipRackResetTests(unittest.TestCase):
+    '''Verify only the safe, all-racks-per-pipette reset contract.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Robot = _load_robot_methods([
+            '_standard_96_tip_well_order',
+            '_preflight_number',
+            '_get_pipette_tip_rack_summary',
+            '_validate_tip_rack_reset_request',
+            '_build_pipette_tip_rack_reset'
+        ])
+
+    def _build_robot(self):
+        robot = self.Robot()
+        robot.tip_inventory_revision = 6
+        robot._preflight_number = (
+            lambda value, unused_label, minimum=0.0: float(value)
+        )
+        robot._standard_96_tip_well_order = lambda: [
+            '{}{}'.format(row, column)
+            for row in 'ABCDEFGH'
+            for column in range(1, 13)
+        ]
+        pipette = _PipetteTipResetStub(rack_count=2)
+        robot.pipettes = {
+            'left': {
+                'size': 300.0,
+                'pipette': pipette,
+                'configured_tip_wells': [],
+                'tip_rack_deck_positions': [8, 11],
+                'tip_rack_names': ['tip_rack_300uL', 'tip_rack_300uL']
+            }
+        }
+        return robot, pipette
+
+    @staticmethod
+    def _request(revision=6, arm='left'):
+        return {
+            'schema_version': 1,
+            'action_id': 'replace-all-left-racks',
+            'expected_tip_inventory_revision': revision,
+            'pipette_arm': arm
+        }
+
+    def test_reset_replaces_the_complete_registered_rack_set_only(self):
+        robot, pipette = self._build_robot()
+
+        result = robot._build_pipette_tip_rack_reset(self._request())
+
+        self.assertTrue(result['accepted'])
+        self.assertEqual('pipette_tip_racks_reset', result['record_type'])
+        self.assertEqual(7, result['tip_inventory_revision'])
+        self.assertEqual(1, pipette.reset_calls)
+        self.assertEqual(
+            [8, 11], result['tip_rack_summary']['tip_rack_deck_positions']
+        )
+        self.assertEqual(
+            192, len(robot.pipettes['left']['configured_tip_wells'])
+        )
+
+    def test_stale_or_partial_reset_request_cannot_mutate_tip_state(self):
+        for request in (
+                self._request(revision=5),
+                dict(self._request(), pipette_arm='right'),
+                dict(self._request(), selected_deck_position=8)):
+            robot, pipette = self._build_robot()
+            before_wells = list(robot.pipettes['left']['configured_tip_wells'])
+
+            result = robot._build_pipette_tip_rack_reset(request)
+
+            self.assertFalse(result['accepted'])
+            self.assertEqual(6, result['tip_inventory_revision'])
+            self.assertEqual(0, pipette.reset_calls)
+            self.assertEqual(
+                before_wells, robot.pipettes['left']['configured_tip_wells']
+            )
+
+    def test_reset_command_is_a_structured_ghost_acknowledgement(self):
+        handler = _class_method_node(
+            _ot2robot_class_node(), '_exec_reset_pipette_tip_racks'
+        )
+        self.assertEqual(1, len(handler.decorator_list))
+        decorator = handler.decorator_list[0]
+        self.assertFalse(ast.literal_eval(decorator.args[2]))
+        self.assertEqual(
+            'reset_pipette_tip_racks', ast.literal_eval(decorator.args[0])
+        )
+        send_calls = [
+            node for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'send_pack'
+        ]
+        self.assertEqual(1, len(send_calls))
+        self.assertEqual(
+            'pipette_tip_racks_reset',
             ast.literal_eval(send_calls[0].args[0])
         )
 

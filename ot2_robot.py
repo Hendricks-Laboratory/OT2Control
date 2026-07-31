@@ -1024,7 +1024,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v3'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v4'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1110,6 +1110,10 @@ class OT2Robot():
         # inventory refresh.  The controller uses this to reject stale
         # acknowledgements before retrying an unchanged Auto batch.
         self.source_inventory_revision = 0
+        # Tracks only deliberate whole-pipette rack resets. It is separate
+        # from liquid inventory so a completed recovery acknowledgement
+        # cannot be replayed after a later complete-rack reset.
+        self.tip_inventory_revision = 0
         self.pipettes = {}
         self.temp_module = None #will be overwritten if used
         self.my_ip = my_ip
@@ -1427,7 +1431,16 @@ class OT2Robot():
                 'size': float(pipette_size),
                 'last_used': 'clean',
                 'pipette': pipette,
-                'configured_tip_wells': configured_tip_wells
+                'configured_tip_wells': configured_tip_wells,
+                # A safe recovery can reset only the complete set assigned
+                # to this pipette.  Preserve the configured deck locations
+                # so the controller can instruct the operator precisely.
+                'tip_rack_deck_positions': [
+                    int(deck_pos) for deck_pos in tip_rows['deck_pos']
+                ],
+                'tip_rack_names': [
+                    str(name) for name in tip_rows['name']
+                ]
             }
             print("init info:")
             print(self.pipettes[arm_pos])
@@ -2140,6 +2153,19 @@ class OT2Robot():
                     state['available_new_tips'] >= state['required_new_tips']
                 )
             }
+            # This identifies the whole physical rack set required for a
+            # future recovery hold. It never authorizes a single-rack reset.
+            rack_positions = self.pipettes[arm].get(
+                'tip_rack_deck_positions'
+            )
+            rack_names = self.pipettes[arm].get('tip_rack_names')
+            if (
+                    isinstance(rack_positions, list)
+                    and isinstance(rack_names, list)
+                    and rack_positions
+                    and len(rack_positions) == len(rack_names)):
+                requirement['tip_rack_deck_positions'] = list(rack_positions)
+                requirement['tip_rack_names'] = list(rack_names)
             if not requirement['preflight_passed']:
                 deficits.append({
                     'deficit_type': 'tip_inventory',
@@ -2485,6 +2511,157 @@ class OT2Robot():
             response['message'] = str(exc)
         return response
 
+    def _get_pipette_tip_rack_summary(self, pipette_arm):
+        '''Returns the immutable identity of one pipette's configured racks.
+
+        Stage 8 intentionally supports only an all-rack reset for a single
+        pipette.  The Opentrons API tracks the assigned racks as one set; it
+        does not provide a safe, supported single-slot reset that preserves
+        used-tip state in the other racks.
+        '''
+        if pipette_arm not in self.pipettes:
+            raise ValueError('unknown pipette arm {!r}.'.format(pipette_arm))
+        details = self.pipettes[pipette_arm]
+        pipette = details.get('pipette')
+        if pipette is None or not hasattr(pipette, 'reset_tipracks'):
+            raise ValueError(
+                '{} pipette does not support a complete tip-rack reset.'
+                .format(pipette_arm)
+            )
+        deck_positions = details.get('tip_rack_deck_positions')
+        rack_names = details.get('tip_rack_names')
+        if (
+                not isinstance(deck_positions, list)
+                or not deck_positions
+                or not isinstance(rack_names, list)
+                or len(deck_positions) != len(rack_names)):
+            raise ValueError(
+                '{} pipette has no complete registered tip-rack map.'
+                .format(pipette_arm)
+            )
+        if any(
+                isinstance(deck_pos, bool)
+                or not isinstance(deck_pos, int)
+                or deck_pos < 1
+                or deck_pos > 12
+                for deck_pos in deck_positions):
+            raise ValueError('configured tip-rack deck position is invalid.')
+        if any(
+                not isinstance(rack_name, str) or not rack_name
+                for rack_name in rack_names):
+            raise ValueError('configured tip-rack name is invalid.')
+        if len(getattr(pipette, 'tip_racks', [])) != len(deck_positions):
+            raise ValueError(
+                '{} pipette rack objects do not match the registered map.'
+                .format(pipette_arm)
+            )
+        return {
+            'pipette_arm': pipette_arm,
+            'pipette_size_uL': self._preflight_number(
+                details.get('size'),
+                '{} pipette size'.format(pipette_arm),
+                minimum=1e-12
+            ),
+            'tip_rack_deck_positions': list(deck_positions),
+            'tip_rack_names': list(rack_names)
+        }
+
+    def _validate_tip_rack_reset_request(self, request):
+        '''Validates one operator-confirmed complete-pipette tip reset.'''
+        required_keys = {
+            'schema_version',
+            'action_id',
+            'expected_tip_inventory_revision',
+            'pipette_arm'
+        }
+        if not isinstance(request, dict) or set(request) != required_keys:
+            raise ValueError(
+                'tip-rack reset request must contain exactly {}.'.format(
+                    ', '.join(sorted(required_keys))
+                )
+            )
+        if request['schema_version'] != 1:
+            raise ValueError('tip-rack reset uses an unsupported schema.')
+        if (
+                not isinstance(request['action_id'], str)
+                or not request['action_id'].strip()):
+            raise ValueError('tip-rack reset action_id must be nonempty.')
+        revision = request['expected_tip_inventory_revision']
+        if (
+                isinstance(revision, bool)
+                or not isinstance(revision, int)
+                or revision < 0):
+            raise ValueError('tip-rack reset revision is invalid.')
+        if request['pipette_arm'] not in ('left', 'right'):
+            raise ValueError('tip-rack reset pipette_arm must be left or right.')
+        return {
+            'schema_version': 1,
+            'action_id': request['action_id'],
+            'expected_tip_inventory_revision': revision,
+            'pipette_arm': request['pipette_arm']
+        }
+
+    def _build_pipette_tip_rack_reset(self, request):
+        '''Resets every registered rack for one manually refreshed pipette.
+
+        This changes only the Opentrons tip-tracking state.  It does not move
+        the robot, transfer liquid, change source inventory, or alter the
+        held batch.  The controller may retry that exact batch only after a
+        fresh source-and-tip preflight passes.
+        '''
+        response = {
+            'schema_version': 1,
+            'record_type': 'pipette_tip_racks_reset',
+            'action_id': None,
+            'accepted': False,
+            'message': '',
+            'tip_inventory_revision': int(
+                getattr(self, 'tip_inventory_revision', 0)
+            ),
+            'tip_rack_summary': None
+        }
+        try:
+            normalized_request = self._validate_tip_rack_reset_request(
+                request
+            )
+            response['action_id'] = normalized_request['action_id']
+            if normalized_request['expected_tip_inventory_revision'] != \
+                    self.tip_inventory_revision:
+                raise ValueError(
+                    'tip inventory changed; retry preflight before resetting '
+                    'tip racks.'
+                )
+            summary = self._get_pipette_tip_rack_summary(
+                normalized_request['pipette_arm']
+            )
+            details = self.pipettes[normalized_request['pipette_arm']]
+            pipette = details['pipette']
+            configured_tip_wells = []
+            for tip_rack in pipette.tip_racks:
+                configured_tip_wells.extend(
+                    tip_rack.well(well_name)
+                    for well_name in self._standard_96_tip_well_order()
+                )
+            if not configured_tip_wells:
+                raise ValueError('registered pipette has no tip-rack wells.')
+
+            # This is safe only because the terminal workflow requires the
+            # operator to replace *every* rack in the summary above before
+            # confirming this action.  Never use it for one rack of many.
+            pipette.reset_tipracks()
+            details['configured_tip_wells'] = configured_tip_wells
+            self.tip_inventory_revision += 1
+            response['accepted'] = True
+            response['message'] = (
+                'all registered {} tip racks were reset to a fresh state.'
+                .format(normalized_request['pipette_arm'])
+            )
+            response['tip_inventory_revision'] = self.tip_inventory_revision
+            response['tip_rack_summary'] = summary
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+        return response
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -2501,10 +2678,14 @@ class OT2Robot():
             'supported_commands': [
                 'get_robot_state_snapshot',
                 'preflight_transfer_plan',
-                'refresh_source_container_mass'
+                'refresh_source_container_mass',
+                'reset_pipette_tip_racks'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
+            ),
+            'tip_inventory_revision': int(
+                getattr(self, 'tip_inventory_revision', 0)
             ),
             'simulate': bool(self.simulate),
             'container_count': len(self.containers),
@@ -2534,6 +2715,14 @@ class OT2Robot():
         self.portal.send_pack(
             'source_container_mass_refreshed',
             self._build_source_container_mass_refresh(request)
+        )
+
+    @exec_func('reset_pipette_tip_racks', 1, False, exec_funcs)
+    def _exec_reset_pipette_tip_racks(self, request):
+        '''Acknowledges an all-racks replacement for one pipette only.'''
+        self.portal.send_pack(
+            'pipette_tip_racks_reset',
+            self._build_pipette_tip_rack_reset(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)
