@@ -2420,7 +2420,10 @@ class OT2Robot():
         '''
         response = {
             'schema_version': 1,
-            'record_type': 'source_container_mass_refresh',
+            # Keep the structured record type identical to the corresponding
+            # ghost acknowledgement packet. The Auto controller validates
+            # both values before it can release an unchanged batch.
+            'record_type': 'source_container_mass_refreshed',
             'action_id': None,
             'accepted': False,
             'message': '',

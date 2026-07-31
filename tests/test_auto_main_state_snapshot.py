@@ -240,6 +240,10 @@ class AutoMainSourceMassRefreshTests(unittest.TestCase):
         result = robot._build_source_container_mass_refresh(self._request())
 
         self.assertTrue(result['accepted'])
+        self.assertEqual(
+            'source_container_mass_refreshed',
+            result['record_type']
+        )
         self.assertEqual(5, result['source_inventory_revision'])
         self.assertAlmostEqual(1000.0, tube.vol, places=6)
         self.assertAlmostEqual(0.9998395, tube.mass, places=7)
