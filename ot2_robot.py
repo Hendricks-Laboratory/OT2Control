@@ -16,6 +16,7 @@ and if run directly from the command line, that function will be invoked.
 from abc import ABC
 from abc import abstractmethod
 from collections import defaultdict
+import copy
 from datetime import datetime
 import pytz
 import socket
@@ -900,6 +901,20 @@ class WellPlate(Labware):
         #if you overflowed you'll be correted here
         self.full = self.current_well >= len(labware.wells())
 
+    def get_well_cursor_index(self, first_well):
+        '''Returns a validated cursor index without changing plate state.'''
+        if first_well is None:
+            return len(self.labware.wells())
+        for index, well in enumerate(self.labware.wells()):
+            if well._impl._name == first_well:
+                return index
+        raise ValueError('unknown plate well {!r}.'.format(first_well))
+
+    def reset_first_usable(self, first_well):
+        '''Resets only the product-well cursor after a plate replacement.'''
+        self.current_well = self.get_well_cursor_index(first_well)
+        self.full = self.current_well >= len(self.labware.wells())
+
     def pop_next_well(self, vol=None,container_type=None):
         '''
         returns the next well if there is one, otherwise returns None  
@@ -1024,7 +1039,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v4'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v5'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1114,6 +1129,10 @@ class OT2Robot():
         # from liquid inventory so a completed recovery acknowledgement
         # cannot be replayed after a later complete-rack reset.
         self.tip_inventory_revision = 0
+        # These revisions describe only controller-authorized physical plate
+        # cursor registration. They never move the gantry or change sources.
+        self.plate_mapping_revision = 0
+        self.plate_generation = 0
         self.pipettes = {}
         self.temp_module = None #will be overwritten if used
         self.my_ip = my_ip
@@ -1337,6 +1356,9 @@ class OT2Robot():
             self.lab_deck[deck_pos] = WellPlate24(labware, kwargs['first_well'], deck_pos)
         else:
             raise Exception("Sorry, Illegal Labware Option, {}. {} is not a tube or plate".format(name,name))
+        # Preserve the configured logical name for narrow Auto recovery
+        # commands; the underlying Opentrons labware is not replaced.
+        self.lab_deck[deck_pos].name = name
         #after you've added the labware, you must calibrate
         #offset is a dictionary with keys, x,y,z and float offset vals
         offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]
@@ -2662,6 +2684,93 @@ class OT2Robot():
             response['message'] = str(exc)
         return response
 
+    def _get_auto_plate_wrappers(self):
+        '''Returns the two configured plate-reader wrappers by logical name.'''
+        wrappers = {}
+        for labware in self.lab_deck:
+            name = getattr(labware, 'name', None)
+            if name in ('platereader4', 'platereader7'):
+                wrappers[name] = labware
+        if set(wrappers) != {'platereader4', 'platereader7'}:
+            raise ValueError('both configured plate-reader labware are required.')
+        return wrappers
+
+    def _validate_auto_plate_generation_request(self, request):
+        '''Validates a non-liquid, between-batch plate cursor request.'''
+        required = {
+            'schema_version', 'action_id', 'expected_plate_mapping_revision',
+            'plate_generation', 'start_well', 'plate_cursors'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('plate registration request has an invalid schema.')
+        if request['schema_version'] != 1:
+            raise ValueError('plate registration uses an unsupported schema.')
+        if not isinstance(request['action_id'], str) or not request['action_id'].strip():
+            raise ValueError('plate registration action_id must be nonempty.')
+        for key in ('expected_plate_mapping_revision', 'plate_generation'):
+            value = request[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError('plate registration {} is invalid.'.format(key))
+        if not isinstance(request['start_well'], str) or not request['start_well'].strip():
+            raise ValueError('plate registration start_well is invalid.')
+        cursors = request['plate_cursors']
+        if not isinstance(cursors, dict) or set(cursors) != {'platereader4', 'platereader7'}:
+            raise ValueError('plate registration must name both plate-reader cursors.')
+        if sum(value is not None for value in cursors.values()) != 1:
+            raise ValueError('plate registration must activate exactly one plate-reader cursor.')
+        for value in cursors.values():
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError('plate registration cursor is invalid.')
+        return copy.deepcopy(request)
+
+    def _build_auto_plate_generation_registration(self, request):
+        '''Applies one acknowledged product-well cursor reset atomically.
+
+        This deliberately performs no motion, transfer, source update, or tip
+        operation.  It only updates the existing in-memory WellPlate cursors.
+        '''
+        response = {
+            'schema_version': 1,
+            'record_type': 'auto_plate_generation_registered',
+            'action_id': None,
+            'accepted': False,
+            'message': '',
+            'plate_mapping_revision': int(getattr(self, 'plate_mapping_revision', 0)),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
+            'start_well': None,
+            'plate_cursors': None
+        }
+        try:
+            normalized = self._validate_auto_plate_generation_request(request)
+            response['action_id'] = normalized['action_id']
+            if normalized['expected_plate_mapping_revision'] != self.plate_mapping_revision:
+                raise ValueError('plate mapping changed; retry before replacing the plate.')
+            if normalized['plate_generation'] != self.plate_generation + 1:
+                raise ValueError('plate generation must increase by exactly one.')
+            wrappers = self._get_auto_plate_wrappers()
+            # Validate every cursor before changing either live wrapper.
+            indexes = {
+                name: wrappers[name].get_well_cursor_index(cursor)
+                for name, cursor in normalized['plate_cursors'].items()
+            }
+            for name, index in indexes.items():
+                wrapper = wrappers[name]
+                wrapper.current_well = index
+                wrapper.full = index >= len(wrapper.labware.wells())
+            self.plate_mapping_revision += 1
+            self.plate_generation = normalized['plate_generation']
+            response.update({
+                'accepted': True,
+                'message': 'plate-reader product-well cursor registered.',
+                'plate_mapping_revision': self.plate_mapping_revision,
+                'plate_generation': self.plate_generation,
+                'start_well': normalized['start_well'],
+                'plate_cursors': copy.deepcopy(normalized['plate_cursors'])
+            })
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+        return response
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -2679,7 +2788,8 @@ class OT2Robot():
                 'get_robot_state_snapshot',
                 'preflight_transfer_plan',
                 'refresh_source_container_mass',
-                'reset_pipette_tip_racks'
+                'reset_pipette_tip_racks',
+                'register_auto_plate_generation'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -2687,6 +2797,10 @@ class OT2Robot():
             'tip_inventory_revision': int(
                 getattr(self, 'tip_inventory_revision', 0)
             ),
+            'plate_mapping_revision': int(
+                getattr(self, 'plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
             'simulate': bool(self.simulate),
             'container_count': len(self.containers),
             'pipette_count': len(self.pipettes),
@@ -2723,6 +2837,14 @@ class OT2Robot():
         self.portal.send_pack(
             'pipette_tip_racks_reset',
             self._build_pipette_tip_rack_reset(request)
+        )
+
+    @exec_func('register_auto_plate_generation', 1, False, exec_funcs)
+    def _exec_register_auto_plate_generation(self, request):
+        '''Acknowledges a controller-authorized between-batch plate reset.'''
+        self.portal.send_pack(
+            'auto_plate_generation_registered',
+            self._build_auto_plate_generation_registration(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)
