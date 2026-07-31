@@ -2373,7 +2373,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v3'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v4'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2389,7 +2389,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v3',
+            'protocol_version': 'auto-main-state-v4',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
@@ -2399,9 +2399,11 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             'supported_commands': [
                 'get_robot_state_snapshot',
                 'preflight_transfer_plan',
-                'refresh_source_container_mass'
+                'refresh_source_container_mass',
+                'reset_pipette_tip_racks'
             ],
-            'source_inventory_revision': 0
+            'source_inventory_revision': 0,
+            'tip_inventory_revision': 0
         }
 
     def test_valid_snapshot_is_accepted_and_copied(self):
@@ -2886,6 +2888,200 @@ class AutoMainSameContainerRecoveryTests(unittest.TestCase):
             False
         ))
         self.assertEqual('finalized', controller.transitions[-1][0][0])
+
+
+class AutoMainCompleteTipRackRecoveryTests(unittest.TestCase):
+    '''Isolated Stage-8 tip recovery tests; no socket or robot import.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods(
+            [
+                '_get_auto_recoverable_tip_rack_candidates',
+                '_validate_auto_main_tip_rack_reset',
+                '_get_auto_preflight_hold_input',
+                '_hold_auto_batch_for_complete_tip_rack_replacement',
+                '_attempt_auto_prebatch_recovery'
+            ],
+            extra_namespace={
+                'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
+                'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch',
+                'LIFECYCLE_FINALIZED': 'finalized',
+                'sys': sys,
+                'uuid': uuid
+            }
+        )
+
+    @staticmethod
+    def _tip_deficit_result():
+        return {
+            'schema_version': 1,
+            'record_type': 'transfer_plan_preflight',
+            'batch_number': 2,
+            'passed': False,
+            'source_containers': [],
+            'allocations': [],
+            'tip_requirements': [{
+                'pipette_arm': 'right',
+                'pipette_size_uL': 20.0,
+                'initial_has_tip': True,
+                'required_new_tips': 2,
+                'available_new_tips': 0,
+                'preflight_passed': False,
+                'tip_rack_deck_positions': [8, 11],
+                'tip_rack_names': ['tip_rack_20uL', 'tip_rack_20uL']
+            }],
+            'deficits': [{
+                'deficit_type': 'tip_inventory',
+                'pipette_arm': 'right',
+                'required_new_tips': 2,
+                'available_new_tips': 0,
+                'message': 'Insufficient unused tips for this batch.'
+            }]
+        }
+
+    @staticmethod
+    def _accepted_reset_result(action_id):
+        return {
+            'schema_version': 1,
+            'record_type': 'pipette_tip_racks_reset',
+            'action_id': action_id,
+            'accepted': True,
+            'message': 'all registered right tip racks were reset to a fresh state.',
+            'tip_inventory_revision': 3,
+            'tip_rack_summary': {
+                'pipette_arm': 'right',
+                'pipette_size_uL': 20.0,
+                'tip_rack_deck_positions': [8, 11],
+                'tip_rack_names': ['tip_rack_20uL', 'tip_rack_20uL']
+            }
+        }
+
+    def _build_controller(self, input_values):
+        controller = self.AutoController()
+        controller.auto_live_run_journal = object()
+        controller.auto_main_robot_state_snapshot = {
+            'tip_inventory_revision': 2,
+            'source_inventory_revision': 4
+        }
+        responses = iter(input_values)
+        controller._auto_preflight_hold_input = lambda unused_prompt: next(
+            responses
+        )
+        controller.transitions = []
+        controller.events = []
+        controller._record_auto_live_run_transition = (
+            lambda *args, **kwargs: controller.transitions.append((args, kwargs))
+        )
+        controller._record_auto_live_run_event = (
+            lambda *args, **kwargs: controller.events.append((args, kwargs))
+        )
+        return controller
+
+    def test_tip_candidates_are_limited_to_declared_tip_inventory_deficits(self):
+        candidates = self.AutoController._get_auto_recoverable_tip_rack_candidates(
+            self._tip_deficit_result()
+        )
+        self.assertEqual([{
+            'pipette_arm': 'right',
+            'pipette_size_uL': 20.0,
+            'required_new_tips': 2,
+            'available_new_tips': 0,
+            'tip_rack_deck_positions': [8, 11],
+            'tip_rack_names': ['tip_rack_20uL', 'tip_rack_20uL'],
+            'message': 'Insufficient unused tips for this batch.'
+        }], candidates)
+
+    def test_complete_tip_rack_replacement_updates_only_tip_revision(self):
+        controller = self._build_controller([
+            'replace_all_tip_racks', '1', 'replace_all'
+        ])
+        requests = []
+
+        def reset_tip_racks(request):
+            requests.append(copy.deepcopy(request))
+            return controller._validate_auto_main_tip_rack_reset(
+                self._accepted_reset_result(request['action_id']), request
+            )
+
+        controller._request_auto_main_tip_rack_reset = reset_tip_racks
+        with redirect_stdout(io.StringIO()):
+            recovered = controller._hold_auto_batch_for_complete_tip_rack_replacement(
+                {'batch_number': 2, 'physical_wells': ['A1']},
+                {'batch_number': 2},
+                self._tip_deficit_result(),
+                ValueError('insufficient tips')
+            )
+
+        self.assertTrue(recovered)
+        self.assertEqual(1, len(requests))
+        self.assertEqual('right', requests[0]['pipette_arm'])
+        self.assertEqual(2, requests[0]['expected_tip_inventory_revision'])
+        self.assertEqual(3, controller.auto_main_robot_state_snapshot[
+            'tip_inventory_revision'
+        ])
+        self.assertEqual(4, controller.auto_main_robot_state_snapshot[
+            'source_inventory_revision'
+        ])
+        self.assertEqual('preflighting_batch', controller.transitions[-1][0][0])
+
+    def test_partial_or_rejected_tip_reset_cannot_release_batch(self):
+        controller = self._build_controller([
+            'replace_all_tip_racks', '1', 'replace_one', 'end_run'
+        ])
+        controller._request_auto_main_tip_rack_reset = lambda request: self.fail(
+            'partial confirmation must not send a Pi reset request'
+        )
+
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'ended by operator'):
+                controller._hold_auto_batch_for_complete_tip_rack_replacement(
+                    {'batch_number': 2, 'physical_wells': ['A1']},
+                    {'batch_number': 2},
+                    self._tip_deficit_result(),
+                    ValueError('insufficient tips')
+                )
+
+        self.assertEqual(2, controller.auto_main_robot_state_snapshot[
+            'tip_inventory_revision'
+        ])
+        self.assertEqual('finalized', controller.transitions[-1][0][0])
+
+    def test_malformed_complete_rack_summary_fails_closed(self):
+        request = {
+            'schema_version': 1,
+            'action_id': 'action-1',
+            'expected_tip_inventory_revision': 2,
+            'pipette_arm': 'right'
+        }
+        response = self._accepted_reset_result('action-1')
+        response['tip_rack_summary']['tip_rack_deck_positions'] = [8, 8]
+
+        with self.assertRaisesRegex(RuntimeError, 'duplicate rack deck'):
+            self.AutoController._validate_auto_main_tip_rack_reset(
+                response, request
+            )
+
+    def test_source_recovery_has_priority_when_both_deficits_exist(self):
+        controller = self.AutoController()
+        controller.robo_params = {'auto_source_volume_check': 'required'}
+        source_calls = []
+        controller._hold_auto_batch_for_same_container_refill = (
+            lambda *args: source_calls.append(args) or True
+        )
+        controller._hold_auto_batch_for_complete_tip_rack_replacement = (
+            lambda *args: self.fail(
+                'tip recovery must wait for a fresh post-source preflight'
+            )
+        )
+        error = ValueError('source and tip deficits')
+        error.pi_preflight_request = {'batch_number': 2}
+        error.pi_preflight_result = self._tip_deficit_result()
+
+        self.assertTrue(controller._attempt_auto_prebatch_recovery(
+            pd.DataFrame(), {'batch_number': 2}, error
+        ))
+        self.assertEqual(1, len(source_calls))
 
 
 class AcquisitionHeaderCompatibilityTests(unittest.TestCase):

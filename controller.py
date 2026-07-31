@@ -4977,7 +4977,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v3'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v4'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5145,6 +5145,16 @@ class AutoContr(Controller):
                 'controlled pre-batch recovery.'
             )
 
+        if (
+            'reset_pipette_tip_racks'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise reset_pipette_tip_racks required for controlled '
+                'tip-rack recovery.'
+            )
+
         source_inventory_revision = snapshot.get('source_inventory_revision')
         if (
             isinstance(source_inventory_revision, bool)
@@ -5153,6 +5163,17 @@ class AutoContr(Controller):
         ):
             raise RuntimeError(
                 'Auto-main compatibility check failed: source inventory '
+                'revision is invalid.'
+            )
+
+        tip_inventory_revision = snapshot.get('tip_inventory_revision')
+        if (
+            isinstance(tip_inventory_revision, bool)
+            or not isinstance(tip_inventory_revision, int)
+            or tip_inventory_revision < 0
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: tip inventory '
                 'revision is invalid.'
             )
 
@@ -5543,6 +5564,188 @@ class AutoContr(Controller):
         )
 
     @staticmethod
+    def _get_auto_recoverable_tip_rack_candidates(preflight_result):
+        '''Returns pipettes with a structured, recoverable tip deficit only.
+
+        Each candidate represents every registered tip rack for one pipette,
+        never an individual rack. The Pi owns the exact deck-map identity and
+        rejects an acknowledgement that does not refer to one complete set.
+        '''
+        if not isinstance(preflight_result, dict):
+            return []
+
+        requirements_by_arm = {}
+        for requirement in preflight_result.get('tip_requirements', []):
+            if not isinstance(requirement, dict):
+                continue
+            arm = requirement.get('pipette_arm')
+            required = requirement.get('required_new_tips')
+            available = requirement.get('available_new_tips')
+            rack_positions = requirement.get('tip_rack_deck_positions')
+            rack_names = requirement.get('tip_rack_names')
+            if (
+                    arm in ('left', 'right')
+                    and not isinstance(required, bool)
+                    and isinstance(required, int)
+                    and required >= 0
+                    and not isinstance(available, bool)
+                    and isinstance(available, int)
+                    and available >= 0
+                    and isinstance(rack_positions, list)
+                    and rack_positions
+                    and isinstance(rack_names, list)
+                    and len(rack_positions) == len(rack_names)
+                    and all(
+                        not isinstance(position, bool)
+                        and isinstance(position, int)
+                        and 1 <= position <= 12
+                        for position in rack_positions
+                    )
+                    and len(set(rack_positions)) == len(rack_positions)
+                    and all(
+                        isinstance(name, str) and name
+                        for name in rack_names
+                    )):
+                requirements_by_arm[arm] = {
+                    'pipette_arm': arm,
+                    'pipette_size_uL': requirement.get('pipette_size_uL'),
+                    'required_new_tips': required,
+                    'available_new_tips': available,
+                    'tip_rack_deck_positions': list(rack_positions),
+                    'tip_rack_names': list(rack_names)
+                }
+
+        candidates = []
+        seen_arms = set()
+        for deficit in preflight_result.get('deficits', []):
+            if (
+                    not isinstance(deficit, dict)
+                    or deficit.get('deficit_type') != 'tip_inventory'
+                    or deficit.get('pipette_arm') not in requirements_by_arm):
+                continue
+            arm = deficit['pipette_arm']
+            if arm in seen_arms:
+                continue
+            seen_arms.add(arm)
+            candidate = copy.deepcopy(requirements_by_arm[arm])
+            candidate['message'] = str(deficit.get('message', ''))
+            candidates.append(candidate)
+        return candidates
+
+    @staticmethod
+    def _validate_auto_main_tip_rack_reset(result, request):
+        '''Validates the Pi's all-racks-per-pipette reset acknowledgement.'''
+        required_keys = {
+            'schema_version',
+            'record_type',
+            'action_id',
+            'accepted',
+            'message',
+            'tip_inventory_revision',
+            'tip_rack_summary'
+        }
+        if not isinstance(result, dict) or set(result) != required_keys:
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned an invalid response '
+                'schema.'
+            )
+        if result['schema_version'] != 1:
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned an unsupported schema.'
+            )
+        if result['record_type'] != 'pipette_tip_racks_reset':
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned an invalid record type.'
+            )
+        if result['action_id'] != request['action_id']:
+            raise RuntimeError(
+                'Auto-main tip-rack reset acknowledgement action id does '
+                'not match the request.'
+            )
+        if not isinstance(result['accepted'], bool):
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned a non-boolean decision.'
+            )
+        if not isinstance(result['message'], str) or not result['message']:
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned an invalid message.'
+            )
+        revision = result['tip_inventory_revision']
+        if (
+                isinstance(revision, bool)
+                or not isinstance(revision, int)
+                or revision < 0):
+            raise RuntimeError(
+                'Auto-main tip-rack reset returned an invalid tip inventory '
+                'revision.'
+            )
+
+        summary = result['tip_rack_summary']
+        if result['accepted']:
+            required_summary_keys = {
+                'pipette_arm',
+                'pipette_size_uL',
+                'tip_rack_deck_positions',
+                'tip_rack_names'
+            }
+            if (
+                    not isinstance(summary, dict)
+                    or set(summary) != required_summary_keys
+                    or summary['pipette_arm'] != request['pipette_arm']
+                    or not isinstance(summary['tip_rack_deck_positions'], list)
+                    or not summary['tip_rack_deck_positions']
+                    or not isinstance(summary['tip_rack_names'], list)
+                    or len(summary['tip_rack_deck_positions'])
+                    != len(summary['tip_rack_names'])):
+                raise RuntimeError(
+                    'Auto-main tip-rack reset returned invalid complete '
+                    'rack-map metadata.'
+                )
+            if any(
+                    isinstance(position, bool)
+                    or not isinstance(position, int)
+                    or position < 1
+                    or position > 12
+                    for position in summary['tip_rack_deck_positions']):
+                raise RuntimeError(
+                    'Auto-main tip-rack reset returned an invalid rack deck '
+                    'position.'
+                )
+            if len(set(summary['tip_rack_deck_positions'])) != len(
+                    summary['tip_rack_deck_positions']):
+                raise RuntimeError(
+                    'Auto-main tip-rack reset returned duplicate rack deck '
+                    'positions.'
+                )
+            if any(
+                    not isinstance(name, str) or not name
+                    for name in summary['tip_rack_names']):
+                raise RuntimeError(
+                    'Auto-main tip-rack reset returned an invalid rack name.'
+                )
+        elif summary is not None:
+            raise RuntimeError(
+                'Auto-main rejected a tip-rack reset while returning rack '
+                'inventory data.'
+            )
+        return copy.deepcopy(result)
+
+    def _request_auto_main_tip_rack_reset(self, request):
+        '''Requests one confirmed all-racks tip reset from the Pi.'''
+        self.portal.send_pack('reset_pipette_tip_racks', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'pipette_tip_racks_reset':
+            raise RuntimeError(
+                'Auto-main tip-rack reset expected pipette_tip_racks_reset, '
+                'received {!r}.'.format(pack_type)
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto-main tip-rack reset received a malformed payload.'
+            )
+        return self._validate_auto_main_tip_rack_reset(payload[0], request)
+
+    @staticmethod
     def _get_auto_recoverable_source_candidates(preflight_result):
         '''Returns uniquely identified source tubes implicated in a rejection.'''
         if not isinstance(preflight_result, dict):
@@ -5894,13 +6097,278 @@ class AutoContr(Controller):
             )
             return True
 
+    def _hold_auto_batch_for_complete_tip_rack_replacement(
+        self,
+        batch_payload,
+        preflight_request,
+        preflight_result,
+        original_error
+    ):
+        '''Holds an unchanged batch for a complete pipette-rack replacement.
+
+        This recovery deliberately cannot replace or reset one rack in a
+        multi-rack pipette configuration. The Pi tracks each pipette's racks
+        as one set, and the operator must replace every listed rack before
+        the state reset is sent.
+        '''
+        candidates = self._get_auto_recoverable_tip_rack_candidates(
+            preflight_result
+        )
+        if not candidates:
+            return False
+        if getattr(self, 'auto_live_run_journal', None) is None:
+            return False
+        snapshot = getattr(self, 'auto_main_robot_state_snapshot', None)
+        if not isinstance(snapshot, dict):
+            return False
+        revision = snapshot.get('tip_inventory_revision')
+        if (
+                isinstance(revision, bool)
+                or not isinstance(revision, int)
+                or revision < 0):
+            return False
+
+        hold_action_id = uuid.uuid4().hex
+        hold_payload = copy.deepcopy(batch_payload)
+        hold_payload.update({
+            'hold_action_id': hold_action_id,
+            'hold_reason': 'pi_tip_inventory_preflight_rejected',
+            'preflight_error': str(original_error),
+            'pi_preflight_request': copy.deepcopy(preflight_request),
+            'pi_preflight_result': copy.deepcopy(preflight_result),
+            'permitted_actions': [
+                'replace_all_tip_racks',
+                'retry_preflight',
+                'end_run'
+            ],
+            'complete_tip_rack_replacement_candidates': copy.deepcopy(
+                candidates
+            )
+        })
+        self._record_auto_live_run_transition(
+            LIFECYCLE_HELD_FOR_OPERATOR,
+            'hold_entered',
+            hold_payload,
+            active_batch_number=batch_payload['batch_number'],
+            hold_action_id=hold_action_id
+        )
+
+        print('\n' + '=' * 72)
+        print('<<controller>> AUTO PRE-BATCH TIP-RACK HOLD')
+        print('=' * 72)
+        print(
+            '<<controller>> Batch {} is held before liquid handling. The '
+            'recipe and destination wells are unchanged.'.format(
+                batch_payload['batch_number']
+            )
+        )
+        print(
+            '<<controller>> A reset applies to every registered rack for '
+            'one pipette. Never replace only one listed rack.'
+        )
+        print(
+            '<<controller>> Permitted actions: replace_all_tip_racks, '
+            'retry_preflight, or end_run.'
+        )
+        print('\n<<controller>> Complete pipette-rack replacement option(s):')
+        for candidate_index, candidate in enumerate(candidates, start=1):
+            print(
+                '  [{}] {} pipette ({} uL): needs {} new tip(s); {} '
+                'available\n'
+                '      replace every registered rack at deck slot(s): {}\n'
+                '      configured rack type(s): {}\n'.format(
+                    candidate_index,
+                    candidate['pipette_arm'],
+                    candidate['pipette_size_uL'],
+                    candidate['required_new_tips'],
+                    candidate['available_new_tips'],
+                    ', '.join(
+                        str(position)
+                        for position in candidate['tip_rack_deck_positions']
+                    ),
+                    ', '.join(candidate['tip_rack_names'])
+                )
+            )
+        print('=' * 72)
+
+        while True:
+            action = str(self._get_auto_preflight_hold_input(
+                'Auto recovery action [replace_all_tip_racks / '
+                'retry_preflight / end_run]: '
+            )).strip().lower()
+            self._record_auto_live_run_event(
+                'operator_action_requested',
+                {
+                    'hold_action_id': hold_action_id,
+                    'requested_action': action
+                }
+            )
+            print('\n<<controller>> Recovery action received: {}\n'.format(
+                action or '(blank)'
+            ))
+
+            if action == 'end_run':
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_FINALIZED,
+                    'operator_action_applied',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'applied_action': 'end_run',
+                        'reason': 'operator_declined_tip_rack_recovery'
+                    },
+                    active_batch_number=None
+                )
+                error = RuntimeError(
+                    'Auto run ended by operator while batch {} was held '
+                    'before liquid handling.'.format(
+                        batch_payload['batch_number']
+                    )
+                )
+                error.auto_operator_end_run = True
+                raise error
+
+            if action == 'retry_preflight':
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_PREFLIGHTING_BATCH,
+                    'operator_action_applied',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'applied_action': 'retry_preflight',
+                        'physical_change_declared': False
+                    },
+                    active_batch_number=batch_payload['batch_number']
+                )
+                return True
+
+            if action != 'replace_all_tip_racks':
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'unsupported_stage_8_tip_action'
+                    }
+                )
+                print(
+                    '<<controller>> Invalid recovery action. No Pi state '
+                    'was changed.'
+                )
+                continue
+
+            selection_text = self._get_auto_preflight_hold_input(
+                'Select a listed complete pipette-rack set by number: '
+            )
+            try:
+                selected_index = int(str(selection_text).strip()) - 1
+                candidate = candidates[selected_index]
+            except (TypeError, ValueError, IndexError):
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'invalid_complete_tip_rack_selection'
+                    }
+                )
+                print(
+                    '<<controller>> Invalid tip-rack selection. No Pi state '
+                    'was changed.'
+                )
+                continue
+
+            confirmation = str(self._get_auto_preflight_hold_input(
+                'After replacing EVERY registered {}-pipette rack, type '
+                'replace_all to reset its complete tip state: '.format(
+                    candidate['pipette_arm']
+                )
+            )).strip().lower()
+            if confirmation != 'replace_all':
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reason': 'complete_tip_rack_replacement_not_confirmed'
+                    }
+                )
+                print(
+                    '<<controller>> Complete-rack replacement was not '
+                    'confirmed. No Pi state was changed.'
+                )
+                continue
+
+            reset_request = {
+                'schema_version': 1,
+                'action_id': hold_action_id,
+                'expected_tip_inventory_revision': revision,
+                'pipette_arm': candidate['pipette_arm']
+            }
+            reset_result = self._request_auto_main_tip_rack_reset(
+                reset_request
+            )
+            if not reset_result['accepted']:
+                self._record_auto_live_run_event(
+                    'operator_action_rejected',
+                    {
+                        'hold_action_id': hold_action_id,
+                        'requested_action': action,
+                        'reset_request': copy.deepcopy(reset_request),
+                        'reset_result': copy.deepcopy(reset_result)
+                    }
+                )
+                print(
+                    '<<controller>> Pi rejected the complete tip-rack '
+                    'reset: {}. No batch was released.'.format(
+                        reset_result['message']
+                    )
+                )
+                continue
+
+            self.auto_main_robot_state_snapshot = copy.deepcopy(snapshot)
+            self.auto_main_robot_state_snapshot['tip_inventory_revision'] = (
+                reset_result['tip_inventory_revision']
+            )
+            self._record_auto_live_run_event(
+                'operator_action_applied',
+                {
+                    'hold_action_id': hold_action_id,
+                    'applied_action': action,
+                    'reset_request': copy.deepcopy(reset_request),
+                    'reset_result': copy.deepcopy(reset_result)
+                }
+            )
+            self._record_auto_live_run_transition(
+                LIFECYCLE_PREFLIGHTING_BATCH,
+                'batch_preflight_requested',
+                {
+                    'batch_number': batch_payload['batch_number'],
+                    'hold_action_id': hold_action_id,
+                    'preflight_retry_reason': (
+                        'accepted_complete_pipette_tip_rack_replacement'
+                    )
+                },
+                active_batch_number=batch_payload['batch_number']
+            )
+            print(
+                '<<controller>> Pi accepted the complete {}-pipette rack '
+                'reset. Rechecking the unchanged batch before liquid '
+                'handling.'.format(candidate['pipette_arm'])
+            )
+            return True
+
     def _attempt_auto_prebatch_recovery(
         self,
         rxn_df,
         batch_payload,
         original_error
     ):
-        '''Attempts only the approved Stage 6 recovery after a source failure.'''
+        '''Attempts approved source recovery, then tip recovery, before retry.
+
+        A Pi preflight can report both source and tip deficits. Source
+        identity is resolved first because a successful source update must be
+        re-preflighted before the controller offers a separate complete-rack
+        tip replacement hold for any remaining tip deficit.
+        '''
         if (
             self.robo_params.get('auto_source_volume_check', 'off')
             != 'required'
@@ -5924,8 +6392,16 @@ class AutoContr(Controller):
             if preflight_result.get('passed'):
                 return False
 
-        return self._hold_auto_batch_for_same_container_refill(
+        source_recovered = self._hold_auto_batch_for_same_container_refill(
             rxn_df,
+            batch_payload,
+            preflight_request,
+            preflight_result,
+            original_error
+        )
+        if source_recovered:
+            return True
+        return self._hold_auto_batch_for_complete_tip_rack_replacement(
             batch_payload,
             preflight_request,
             preflight_result,
