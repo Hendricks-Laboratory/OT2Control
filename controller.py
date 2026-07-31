@@ -1481,30 +1481,13 @@ class Controller(ABC):
                 f"{self.robo_params['auto_source_reserve_volume_uL']:g} uL"
             )
 
-        # Optional controlled between-batch plate replacement.  Older
-        # spreadsheets retain the established single-plate hard-stop.
-        plate_replacement_value = str(
-            header_dict.get('auto_plate_replacement_mode', 'off')
-        ).strip().lower().replace('-', '_').replace(' ', '_')
-        plate_replacement_aliases = {
-            '': 'off', 'off': 'off', 'none': 'off', 'disabled': 'off',
-            'no': 'off', 'false': 'off', '0': 'off',
-            'terminal': 'terminal', 'on': 'terminal', 'enabled': 'terminal',
-            'yes': 'terminal', 'true': 'terminal', '1': 'terminal'
-        }
-        if plate_replacement_value not in plate_replacement_aliases:
-            raise ValueError(
-                'Header value auto_plate_replacement_mode must be off or '
-                'terminal. Received: {!r}.'.format(plate_replacement_value)
-            )
-        self.robo_params['auto_plate_replacement_mode'] = (
-            plate_replacement_aliases[plate_replacement_value]
-        )
-        print(
-            '<<controller>> Auto plate replacement mode: {}'.format(
-                self.robo_params['auto_plate_replacement_mode']
-            )
-        )
+        # Terminal operator recovery is a built-in, fail-closed Auto safety
+        # capability.  It covers same-container source refill, complete tip
+        # rack replacement, and between-batch plate replacement.  Do not
+        # expose the historic ``auto_plate_replacement_mode`` as a separate
+        # Header switch: it was inconsistent with the other recovery paths
+        # and could disable a safe operator hold merely by omission.  Legacy
+        # worksheets may retain that row; it is deliberately ignored.
 
         # The Pi now owns calibrated tube tare constants. Retain a narrow
         # compatibility check for older worksheets so a historical positive
@@ -19317,6 +19300,13 @@ class AutoContr(Controller):
             )
         )
         lines.append(
+            '- Operator recovery interface: built-in terminal holds. Source '
+            'refill and complete tip-rack replacement require source-volume '
+            'preflight; between-batch identical plate replacement is always '
+            'available. Every recovery action requires explicit operator '
+            'confirmation and otherwise fails closed before liquid handling.'
+        )
+        lines.append(
             '- Pi tube tare handling: calibrated robot-side tube tare '
             'constants; the controller sends measured source masses '
             'unchanged.'
@@ -27431,10 +27421,11 @@ class AutoContr(Controller):
     def _ensure_auto_plate_capacity_for_batch(self, physical_well_count):
         '''Ensures a whole Auto batch fits on one physical 96-well plate.
 
-        In terminal mode, a shortage creates a durable operator hold *before*
+        A shortage creates a durable terminal operator hold *before*
         container initialization.  The completed batch is never split across
         plates, and an acknowledged Pi cursor reset is the only operation that
-        changes physical plate state.
+        changes physical plate state.  A missing confirmation or failed Pi
+        acknowledgement stops before the unchanged batch can execute.
         '''
         count = int(physical_well_count)
         if count < 1 or count > 96:
@@ -27454,15 +27445,6 @@ class AutoContr(Controller):
         )
         if count <= available:
             return
-        if self.robo_params.get('auto_plate_replacement_mode', 'off') != 'terminal':
-            raise ValueError(
-                'Auto batch needs {} wells but only {} remain on plate '
-                'generation {} from {}. Enable terminal plate replacement '
-                'or use a new starting plate.'.format(
-                    count, available, self.auto_plate_generation,
-                    self.auto_plate_next_well
-                )
-            )
         self._record_auto_live_run_transition(
             LIFECYCLE_HELD_FOR_OPERATOR,
             'plate_replacement_required',
@@ -27570,25 +27552,11 @@ class AutoContr(Controller):
         )
         print(f"<<controller>> {available_wells} wells available from {starting_well} to H12")
 
-        replacement_mode = self.robo_params.get(
-            'auto_plate_replacement_mode', 'off'
-        )
-        if (
-            replacement_mode == 'terminal'
-            and max(initial_wells, batch_size * self.num_duplicates) > 96
-        ):
+        if max(initial_wells, batch_size * self.num_duplicates) > 96:
             raise Exception(
                 'Auto plate replacement cannot split one batch across plates. '
                 'Reduce initial_data or batch size/replicates so every batch '
                 'uses at most 96 wells.'
-            )
-
-        if required_wells > available_wells and replacement_mode != 'terminal':
-            raise Exception(
-                f"Auto run requires up to {required_wells} wells, but only "
-                f"{available_wells} wells are available from starting well {starting_well}. "
-                f"Choose an earlier starting well, reduce initial_data, reduce max_iterations, "
-                f"or reduce the number of replicates."
             )
 
         if required_wells > available_wells:

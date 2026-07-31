@@ -2564,7 +2564,8 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             '_get_96_well_plate_order',
             '_count_available_96_well_plate_wells',
             '_ensure_auto_plate_capacity_for_batch',
-            '_record_auto_plate_batch_execution'
+            '_record_auto_plate_batch_execution',
+            '_check_auto_well_capacity'
         ], {
             'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
             'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch'
@@ -2573,16 +2574,15 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
     def _build_controller(self):
         controller = self.AutoController()
         controller.robo_params = {
-            'platereader_input_first_usable': 'A1',
-            'auto_plate_replacement_mode': 'off'
+            'platereader_input_first_usable': 'A1'
         }
         controller.auto_plate_generation = 0
         controller.auto_plate_next_well = None
         controller._auto_plate_cursor_initialized = False
         return controller
 
-    def test_completed_first_plate_is_not_reinitialized_as_new_capacity(self):
-        '''A full generation must trigger the replacement path, never reuse A1.'''
+    def test_completed_first_plate_holds_without_automatic_reuse(self):
+        '''A full generation must hold; a missing confirmation cannot reuse A1.'''
         controller = self._build_controller()
 
         controller._ensure_auto_plate_capacity_for_batch(96)
@@ -2592,15 +2592,18 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
         controller._record_auto_plate_batch_execution(96)
         self.assertIsNone(controller.auto_plate_next_well)
 
-        with self.assertRaisesRegex(ValueError, 'only 0 remain'):
+        controller._get_auto_preflight_hold_input = lambda unused_prompt: 'END'
+        controller._record_auto_live_run_transition = lambda *args, **kwargs: None
+
+        with self.assertRaisesRegex(RuntimeError, 'ended Auto run'):
             controller._ensure_auto_plate_capacity_for_batch(1)
 
         self.assertIsNone(controller.auto_plate_next_well)
 
-    def test_completed_first_plate_enters_terminal_replacement_flow(self):
-        '''The replacement hold starts a new generation only after approval.'''
+    def test_legacy_plate_replacement_setting_cannot_disable_terminal_hold(self):
+        '''A legacy off row cannot suppress the built-in terminal recovery.'''
         controller = self._build_controller()
-        controller.robo_params['auto_plate_replacement_mode'] = 'terminal'
+        controller.robo_params['auto_plate_replacement_mode'] = 'off'
         controller.batch_num = 3
         controller._ensure_auto_plate_capacity_for_batch(96)
         controller._record_auto_plate_batch_execution(96)
@@ -2627,6 +2630,29 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
         self.assertEqual(1, controller.auto_plate_generation)
         self.assertEqual('A1', controller.auto_plate_next_well)
         self.assertEqual(2, len(transitions))
+
+    def test_multi_plate_run_is_allowed_but_one_batch_cannot_span_plates(self):
+        '''Capacity planning relies on the built-in hold, never a Header mode.'''
+        controller = self._build_controller()
+        controller.num_duplicates = 1
+        controller.getModelInfo = lambda: {
+            'initial_data': 1,
+            'max_iterations': 1
+        }
+
+        # 97 total wells cross a plate boundary, but each planned batch fits
+        # on one plate and can therefore stop for a safe terminal replacement.
+        with redirect_stdout(io.StringIO()):
+            controller._check_auto_well_capacity(
+                SimpleNamespace(batch_size=96)
+            )
+
+        # A 97-well batch itself cannot be split, even with the recovery
+        # mechanism available.
+        with self.assertRaisesRegex(Exception, 'cannot split one batch'):
+            controller._check_auto_well_capacity(
+                SimpleNamespace(batch_size=97)
+            )
 
 
 class AutoMainTransferPlanPreflightTests(unittest.TestCase):
@@ -3200,6 +3226,7 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
         auto_terminal_verbosity=None,
         auto_source_volume_check=None,
         auto_source_reserve_volume_uL=None,
+        auto_plate_replacement_mode=None,
         pi_legacy_tare_offset_g=None,
         true_zero_reagents=None,
         auto_spectral_response_policy=None,
@@ -3256,6 +3283,12 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
             header.append([
                 'auto_source_reserve_volume_uL',
                 str(auto_source_reserve_volume_uL)
+            ])
+
+        if auto_plate_replacement_mode is not None:
+            header.append([
+                'auto_plate_replacement_mode',
+                str(auto_plate_replacement_mode)
             ])
 
         if pi_legacy_tare_offset_g is not None:
@@ -3388,6 +3421,19 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                 auto_source_volume_check='required',
                 auto_source_reserve_volume_uL='-1'
             )
+
+    def test_legacy_plate_replacement_header_is_tolerated_and_ignored(self):
+        '''Old worksheets cannot disable built-in terminal plate recovery.'''
+        parsed = self._parse_header(auto_plate_replacement_mode='off')
+        self.assertNotIn('auto_plate_replacement_mode', parsed)
+
+        parsed = self._parse_header(auto_plate_replacement_mode='terminal')
+        self.assertNotIn('auto_plate_replacement_mode', parsed)
+
+        parsed = self._parse_header(
+            auto_plate_replacement_mode='future_live_workbook'
+        )
+        self.assertNotIn('auto_plate_replacement_mode', parsed)
 
     def test_pi_calibrated_tares_reject_legacy_offset_and_preserve_mass(self):
         # A historical explicit zero is harmless, but a nonzero value must
@@ -5931,6 +5977,8 @@ class ExactMaskAndControllerIntegrationTests(unittest.TestCase):
         self.assertIn('5 nm', report_text)
         self.assertIn('Pi tube tare handling', report_text)
         self.assertIn('controller sends measured source masses unchanged', report_text)
+        self.assertIn('Operator recovery interface', report_text)
+        self.assertIn('built-in terminal holds', report_text)
         self.assertNotIn('Legacy Pi tare offset', report_text)
         self.assertIn('## Spectral Observation Handling', report_text)
         self.assertIn('legacy audit-only policy was active', report_text)
