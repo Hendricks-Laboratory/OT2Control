@@ -59,6 +59,16 @@ class AutoPlotOrganizationTests(unittest.TestCase):
             'auto_design_space_exploration_3d.png': (
                 'design_space/auto_design_space_exploration_3d.png'
             ),
+            'initial_maximin_seed_design_feasibility_2d.png': (
+                'design_space/seed_feasibility_overlays/'
+                'initial_maximin_seed_design_feasibility_2d.png'
+            ),
+            'initial_maximin_seed_design_feasibility_'
+            'conditional_slices_atlas_page_01.png': (
+                'design_space/seed_feasibility_overlays/atlases/'
+                'initial_maximin_seed_design_feasibility_'
+                'conditional_slices_atlas_page_01.png'
+            ),
             'auto_recipe_concentration_history_final.png': (
                 'recipe_history/auto_recipe_concentration_history_final.png'
             ),
@@ -144,6 +154,27 @@ class AutoPlotOrganizationTests(unittest.TestCase):
         )
         self.assertIn(
             'filled error bars = replicate SEM; hollow error ',
+            source
+        )
+
+    def test_seed_feasibility_views_use_optimizer_feasibility_authority(self):
+        '''Seed overlays must not maintain a second physical-rule model.'''
+        source = CONTROLLER_PATH.read_text(encoding='utf-8')
+
+        self.assertIn(
+            'def _plot_initial_seed_feasibility_views(',
+            source
+        )
+        self.assertIn(
+            'get_candidate_feasibility_batch_for_plotting',
+            source
+        )
+        self.assertIn(
+            "'initial_maximin_seed_design_feasibility_'",
+            source
+        )
+        self.assertIn(
+            "'final initial seed physical-feasibility plots'",
             source
         )
 

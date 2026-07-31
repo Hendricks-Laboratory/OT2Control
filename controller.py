@@ -14409,6 +14409,20 @@ class AutoContr(Controller):
                 category = os.path.join(
                     'gp_surfaces', dimension_label, field_name, 'atlases'
                 )
+        elif filename.startswith('initial_maximin_seed_design_feasibility_'):
+            # Seed-design feasibility views are intentionally separate from
+            # the ordinary scatter/projection plots.  This keeps the
+            # physical-executability evidence together without changing the
+            # established design-space export locations.
+            category_parts = [
+                'design_space',
+                'seed_feasibility_overlays'
+            ]
+
+            if 'conditional_slices_atlas' in filename:
+                category_parts.append('atlases')
+
+            category = os.path.join(*category_parts)
         elif (
             filename.startswith('initial_maximin_seed_design_')
             or filename.startswith('auto_design_space_exploration_')
@@ -16947,6 +16961,624 @@ class AutoContr(Controller):
             fig,
             plot_filename
         )
+
+    def _plot_initial_seed_feasibility_views(
+        self,
+        model,
+        grid_size=201,
+        max_panels_per_page=6
+    ):
+        '''
+        Exports physical-feasibility companions for the initial seed design.
+
+        The ordinary initial-design figures show where seed conditions fall in
+        reagent space.  These companion figures use the optimizer's own
+        read-only mask-aware feasibility evaluator to show which portions of
+        that space were executable under the final reaction-volume, water,
+        minimum-transfer, and true-zero rules.  They are diagnostic evidence
+        only: this method never refits a GP, changes a recipe, or alters the
+        Auto execution path.
+
+        For three or more variable reagents, each pairwise panel is explicitly
+        conditional: non-displayed reagents are held at the first executed
+        seed condition.  Other seed markers are labelled as projections,
+        because their omitted coordinates can differ from that reference.
+
+        params:
+            OptimizationModel model:
+                Fitted Auto optimizer supplying the authoritative read-only
+                ``get_candidate_feasibility_batch_for_plotting`` helper.
+
+            int grid_size:
+                Number of normalized points per plotted dimension.  A modest
+                dense grid keeps physical boundaries smooth without repeating
+                GP prediction work.
+
+            int max_panels_per_page:
+                Maximum conditional pairwise panels in one atlas page.
+
+        returns:
+            list:
+                Successfully generated plot paths.
+        '''
+        generated_plot_paths = []
+
+        try:
+            grid_size = int(grid_size)
+            max_panels_per_page = int(max_panels_per_page)
+        except (TypeError, ValueError, OverflowError):
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because their grid settings were invalid'
+            )
+            return generated_plot_paths
+
+        if grid_size < 21 or max_panels_per_page < 1:
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because grid_size must be at least 21 and at least one '
+                'panel per page is required'
+            )
+            return generated_plot_paths
+
+        feasibility_batch = getattr(
+            model,
+            'get_candidate_feasibility_batch_for_plotting',
+            None
+        )
+
+        if not callable(feasibility_batch):
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because OptimizationModel does not expose the read-only '
+                'batch feasibility helper'
+            )
+            return generated_plot_paths
+
+        plot_df, design_columns = self._get_auto_design_plot_dataframe()
+
+        if plot_df.empty or len(design_columns) == 0:
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because no complete variable-reagent conditions were '
+                'available'
+            )
+            return generated_plot_paths
+
+        condition_types = plot_df.get(
+            'condition_type',
+            pd.Series('', index=plot_df.index)
+        ).fillna('').astype(str).str.strip().str.lower()
+        seed_df = plot_df.loc[
+            condition_types == 'seed'
+        ].copy(deep=True)
+
+        if seed_df.empty:
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because no condition_type=seed rows were available'
+            )
+            return generated_plot_paths
+
+        reagent_names = [
+            str(design_column['reagent_name'])
+            for design_column in design_columns
+        ]
+        model_reagent_names = [
+            str(reagent_name)
+            for reagent_name in list(
+                getattr(model, 'variable_reagents', [])
+            )
+        ]
+
+        if reagent_names != model_reagent_names:
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because controller and optimizer variable-reagent orders '
+                'did not match'
+            )
+            return generated_plot_paths
+
+        n_dimensions = len(reagent_names)
+        bounds = []
+
+        for reagent_index, reagent_name in enumerate(reagent_names):
+            lower_bound = self._get_auto_design_bound_value(
+                getattr(model, 'min_conc', None),
+                reagent_index,
+                reagent_name
+            )
+            upper_bound = self._get_auto_design_bound_value(
+                getattr(model, 'max_conc', None),
+                reagent_index,
+                reagent_name
+            )
+
+            if (
+                not np.isfinite(lower_bound)
+                or not np.isfinite(upper_bound)
+                or upper_bound <= lower_bound
+            ):
+                print(
+                    '<<controller warning>> skipping seed feasibility plots '
+                    'because {} did not have finite increasing optimizer '
+                    'bounds'.format(reagent_name)
+                )
+                return generated_plot_paths
+
+            bounds.append((float(lower_bound), float(upper_bound)))
+
+        column_names = [
+            design_column['column_name']
+            for design_column in design_columns
+        ]
+        seed_values = seed_df[column_names].to_numpy(dtype=float)
+
+        if not np.all(np.isfinite(seed_values)):
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because the seed concentration data were incomplete'
+            )
+            return generated_plot_paths
+
+        reference_recipe = np.asarray(seed_values[0], dtype=float)
+        reference_normalized = np.asarray([
+            (reference_recipe[index] - bounds[index][0])
+            / (bounds[index][1] - bounds[index][0])
+            for index in range(n_dimensions)
+        ], dtype=float)
+
+        if not np.all(
+            np.isfinite(reference_normalized)
+            & (reference_normalized >= -1.0e-9)
+            & (reference_normalized <= 1.0 + 1.0e-9)
+        ):
+            print(
+                '<<controller warning>> skipping seed feasibility plots '
+                'because the reference seed lay outside optimizer bounds'
+            )
+            return generated_plot_paths
+
+        reference_condition = seed_df.iloc[0].get(
+            'reaction_number',
+            0
+        )
+        try:
+            reference_condition = int(reference_condition)
+        except (TypeError, ValueError, OverflowError):
+            reference_condition = 0
+
+        normalized_axis = np.linspace(0.0, 1.0, grid_size)
+        font_sizes = self._get_auto_design_plot_font_sizes()
+        true_zero_enabled = bool(
+            self.robo_params.get('allow_true_zero', False)
+        )
+
+        def _evaluate_feasibility(recipes, grid_shape):
+            '''Runs the common read-only feasibility authority for one grid.'''
+            result = feasibility_batch(recipes)
+            return {
+                'mask_feasible': np.asarray(
+                    result['mask_feasible'],
+                    dtype=bool
+                ).reshape(grid_shape),
+                'water_volume': np.asarray(
+                    result['water_volume'],
+                    dtype=float
+                ).reshape(grid_shape),
+                'transfer_volume_uL_by_reagent': {
+                    reagent_name: np.asarray(
+                        result['variable_transfer_volumes'][reagent_name],
+                        dtype=float
+                    ).reshape(grid_shape)
+                    for reagent_name in reagent_names
+                }
+            }
+
+        def _apply_feasibility_axis_style(ax):
+            '''Styles feasibility maps as heatmap-like physical evidence.'''
+            ax.grid(False)
+            for spine in ax.spines.values():
+                spine.set_visible(True)
+                spine.set_linewidth(0.9)
+                spine.set_color('0.2')
+            ax.tick_params(
+                axis='both',
+                which='both',
+                direction='out',
+                top=False,
+                right=False,
+                labelsize=font_sizes['tick_label']
+            )
+
+        def _draw_feasibility_overlay(
+            ax,
+            panel,
+            include_projected_seed_markers=True
+        ):
+            '''Draws one conditional feasibility view from shared panel data.'''
+            x_physical = panel['x_physical']
+            y_physical = panel['y_physical']
+            infeasible = np.logical_not(panel['mask_feasible'])
+
+            if np.any(infeasible):
+                ax.contourf(
+                    x_physical,
+                    y_physical,
+                    infeasible.astype(float),
+                    levels=[0.5, 1.5],
+                    colors=['#cfcfcf'],
+                    alpha=0.82,
+                    antialiased=True
+                )
+
+            water_volume = panel['water_volume']
+            if np.any(np.isfinite(water_volume)):
+                for level, color, line_style in [
+                    (0.0, '#0072B2', '-'),
+                    (5.0, '#D55E00', '--')
+                ]:
+                    try:
+                        ax.contour(
+                            x_physical,
+                            y_physical,
+                            water_volume,
+                            levels=[level],
+                            colors=[color],
+                            linestyles=[line_style],
+                            linewidths=[1.35]
+                        )
+                    except (TypeError, ValueError):
+                        pass
+
+            for axis_index in [panel['x_index'], panel['y_index']]:
+                reagent_name = reagent_names[axis_index]
+                transfer_volume = panel[
+                    'transfer_volume_uL_by_reagent'
+                ][reagent_name]
+                try:
+                    ax.contour(
+                        x_physical,
+                        y_physical,
+                        transfer_volume,
+                        levels=[5.0],
+                        colors=['#009E73'],
+                        linestyles=[':'],
+                        linewidths=[1.15]
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+            x_index = panel['x_index']
+            y_index = panel['y_index']
+
+            if include_projected_seed_markers and len(seed_values) > 1:
+                ax.scatter(
+                    seed_values[1:, x_index],
+                    seed_values[1:, y_index],
+                    marker='o',
+                    s=32,
+                    facecolors='white',
+                    edgecolors='#2c7fb8',
+                    linewidths=1.1,
+                    zorder=6
+                )
+
+            ax.scatter(
+                [reference_recipe[x_index]],
+                [reference_recipe[y_index]],
+                marker='*',
+                s=115,
+                facecolors='#f4c542',
+                edgecolors='0.15',
+                linewidths=0.85,
+                zorder=7
+            )
+            ax.set_xlim(bounds[x_index])
+            ax.set_ylim(bounds[y_index])
+            ax.set_xlabel(
+                self._format_auto_design_axis_label(
+                    reagent_names[x_index]
+                ),
+                fontsize=font_sizes['axis_label']
+            )
+            ax.set_ylabel(
+                self._format_auto_design_axis_label(
+                    reagent_names[y_index]
+                ),
+                fontsize=font_sizes['axis_label']
+            )
+            _apply_feasibility_axis_style(ax)
+            self._apply_auto_design_square_box_aspect(ax)
+
+        def _build_pair_panel(x_index, y_index):
+            '''Builds one full-recipe conditional feasibility grid.'''
+            x_normalized, y_normalized = np.meshgrid(
+                normalized_axis,
+                normalized_axis,
+                indexing='xy'
+            )
+            recipes = np.tile(
+                reference_normalized,
+                (x_normalized.size, 1)
+            )
+            recipes[:, x_index] = x_normalized.ravel(order='C')
+            recipes[:, y_index] = y_normalized.ravel(order='C')
+            feasibility = _evaluate_feasibility(
+                recipes,
+                x_normalized.shape
+            )
+            held_indices = tuple(
+                index
+                for index in range(n_dimensions)
+                if index not in (x_index, y_index)
+            )
+            return {
+                'x_index': x_index,
+                'y_index': y_index,
+                'held_indices': held_indices,
+                'x_physical': (
+                    bounds[x_index][0]
+                    + x_normalized * (
+                        bounds[x_index][1] - bounds[x_index][0]
+                    )
+                ),
+                'y_physical': (
+                    bounds[y_index][0]
+                    + y_normalized * (
+                        bounds[y_index][1] - bounds[y_index][0]
+                    )
+                ),
+                'mask_feasible': feasibility['mask_feasible'],
+                'water_volume': feasibility['water_volume'],
+                'transfer_volume_uL_by_reagent': (
+                    feasibility['transfer_volume_uL_by_reagent']
+                )
+            }
+
+        legend_handles = [
+            mpatches.Patch(
+                facecolor='#cfcfcf',
+                edgecolor='none',
+                label='Excluded: overflow, water, or transfer rule'
+            ),
+            Line2D(
+                [0], [0], color='#0072B2', linewidth=1.35,
+                label='Water = 0 uL boundary'
+            ),
+            Line2D(
+                [0], [0], color='#D55E00', linewidth=1.35,
+                linestyle='--', label='Water = 5 uL boundary'
+            ),
+            Line2D(
+                [0], [0], color='#009E73', linewidth=1.15,
+                linestyle=':', label='Variable reagent = 5 uL boundary'
+            ),
+            Line2D(
+                [0], [0], marker='*', linestyle='None', markersize=10,
+                markerfacecolor='#f4c542', markeredgecolor='0.15',
+                label='Reference seed condition'
+            )
+        ]
+
+        if n_dimensions == 1:
+            x_physical = (
+                bounds[0][0]
+                + normalized_axis * (bounds[0][1] - bounds[0][0])
+            )
+            recipes = np.tile(
+                reference_normalized,
+                (normalized_axis.size, 1)
+            )
+            recipes[:, 0] = normalized_axis
+            feasibility = _evaluate_feasibility(
+                recipes,
+                (normalized_axis.size,)
+            )
+            fig, ax = plt.subplots(figsize=(8.5, 4.9))
+            ax.fill_between(
+                x_physical, 0.0, 1.0,
+                where=feasibility['mask_feasible'],
+                color='#eef7ec', step='mid'
+            )
+            ax.fill_between(
+                x_physical, 0.0, 1.0,
+                where=np.logical_not(feasibility['mask_feasible']),
+                color='#cfcfcf', alpha=0.82, step='mid'
+            )
+            ax.scatter(
+                seed_values[:, 0],
+                np.full(len(seed_values), 0.5),
+                marker='o', s=38, facecolors='white',
+                edgecolors='#2c7fb8', linewidths=1.1, zorder=5
+            )
+            ax.set_xlim(bounds[0])
+            ax.set_ylim(0.0, 1.0)
+            ax.set_yticks([])
+            ax.set_xlabel(
+                self._format_auto_design_axis_label(reagent_names[0]),
+                fontsize=font_sizes['axis_label']
+            )
+            _apply_feasibility_axis_style(ax)
+            fig.suptitle(
+                self._apply_auto_seed_design_label(
+                    'Initial Maximin Seed Design: Physical Feasibility'
+                ),
+                fontsize=font_sizes['title'], y=0.975
+            )
+            fig.legend(
+                handles=legend_handles[:1] + [
+                    Line2D(
+                        [0], [0], marker='o', linestyle='None',
+                        markersize=6, markerfacecolor='white',
+                        markeredgecolor='#2c7fb8',
+                        label='Seed condition'
+                    )
+                ],
+                loc='upper center', bbox_to_anchor=(0.5, 0.90),
+                ncol=2, frameon=False, fontsize=font_sizes['legend']
+            )
+            fig.subplots_adjust(left=0.10, right=0.97, bottom=0.20, top=0.72)
+            generated_plot_paths.append(
+                self._save_auto_design_plot(
+                    fig,
+                    'initial_maximin_seed_design_feasibility_1d.png'
+                )
+            )
+            return generated_plot_paths
+
+        if n_dimensions == 2:
+            panel = _build_pair_panel(0, 1)
+            fig, ax = plt.subplots(figsize=(8.7, 7.4))
+            _draw_feasibility_overlay(
+                ax,
+                panel,
+                include_projected_seed_markers=False
+            )
+            # On a complete two-dimensional plane every seed marker is an
+            # actual recipe, rather than only a projection of a higher-D one.
+            ax.scatter(
+                seed_values[:, 0], seed_values[:, 1], marker='o', s=34,
+                facecolors='white', edgecolors='#2c7fb8', linewidths=1.1,
+                zorder=6
+            )
+            fig.suptitle(
+                self._apply_auto_seed_design_label(
+                    'Initial Maximin Seed Design: 2D Physical Feasibility'
+                ),
+                fontsize=font_sizes['title'], y=0.975
+            )
+            # A 2D panel contains the complete variable-reagent space, so it
+            # has no hidden coordinates and no scientifically distinct
+            # reference seed.  Reserve the gold reference star for the
+            # genuinely conditional 3+ dimensional atlas panels.
+            two_d_handles = legend_handles[:-1] + [
+                Line2D(
+                    [0], [0], marker='o', linestyle='None', markersize=6,
+                    markerfacecolor='white', markeredgecolor='#2c7fb8',
+                    label='Seed condition'
+                )
+            ]
+            fig.legend(
+                handles=two_d_handles, loc='upper center',
+                bbox_to_anchor=(0.5, 0.905), ncol=2, frameon=False,
+                fontsize=font_sizes['legend'], columnspacing=1.0
+            )
+            footer = (
+                'True zero disabled; axes begin at the 5 uL executable '
+                'minimum.'
+                if not true_zero_enabled else
+                'Exact-zero eligibility follows the configured true-zero '
+                'reagent policy; the all-variable-off recipe is excluded.'
+            )
+            fig.text(0.5, 0.025, footer, ha='center', va='bottom',
+                     fontsize=font_sizes['annotation'], color='0.35')
+            fig.subplots_adjust(left=0.13, right=0.96, bottom=0.15, top=0.70)
+            generated_plot_paths.append(
+                self._save_auto_design_plot(
+                    fig,
+                    'initial_maximin_seed_design_feasibility_2d.png'
+                )
+            )
+            return generated_plot_paths
+
+        panels = []
+        for x_index in range(n_dimensions):
+            for y_index in range(x_index + 1, n_dimensions):
+                panels.append(_build_pair_panel(x_index, y_index))
+
+        total_pages = int(math.ceil(
+            float(len(panels)) / float(max_panels_per_page)
+        ))
+
+        for page_index in range(total_pages):
+            page_panels = panels[
+                page_index * max_panels_per_page:
+                (page_index + 1) * max_panels_per_page
+            ]
+            n_columns = min(3, len(page_panels))
+            n_rows = int(math.ceil(float(len(page_panels)) / n_columns))
+            fig, axes = plt.subplots(
+                n_rows, n_columns,
+                figsize=(5.35 * n_columns, 4.45 * n_rows + 2.55),
+                squeeze=False
+            )
+            axes = axes.ravel()
+
+            for panel_index, panel in enumerate(page_panels):
+                ax = axes[panel_index]
+                _draw_feasibility_overlay(ax, panel)
+                held_text = '; '.join([
+                    '{} = {:.4g} mM'.format(
+                        reagent_names[held_index],
+                        reference_recipe[held_index]
+                    )
+                    for held_index in panel['held_indices']
+                ])
+                ax.set_title(
+                    textwrap.fill('Hold: {}'.format(held_text), width=38),
+                    fontsize=font_sizes['annotation'], pad=6.0
+                )
+
+            for unused_axis in axes[len(page_panels):]:
+                unused_axis.set_visible(False)
+
+            fig.suptitle(
+                self._apply_auto_seed_design_label(
+                    'Initial Maximin Seed Design: Conditional Physical '
+                    'Feasibility (page {}/{})'.format(
+                        page_index + 1,
+                        total_pages
+                    )
+                ),
+                fontsize=font_sizes['title'], y=0.985
+            )
+            high_dim_handles = legend_handles + [
+                Line2D(
+                    [0], [0], marker='o', linestyle='None', markersize=6,
+                    markerfacecolor='white', markeredgecolor='#2c7fb8',
+                    label='Other seed projection'
+                )
+            ]
+            fig.legend(
+                handles=high_dim_handles, loc='upper center',
+                bbox_to_anchor=(0.5, 0.925), ncol=3, frameon=False,
+                fontsize=font_sizes['legend'], columnspacing=0.9,
+                handletextpad=0.35
+            )
+            fig.text(
+                0.5, 0.855,
+                'All panels hold nondisplayed reagents at seed condition {}; '
+                'other markers are pairwise projections.'.format(
+                    reference_condition
+                ),
+                ha='center', va='center', fontsize=font_sizes['annotation'],
+                color='0.30'
+            )
+            footer = (
+                'True zero disabled; axes begin at the 5 uL executable '
+                'minimum.'
+                if not true_zero_enabled else
+                'Exact-zero eligibility follows the configured true-zero '
+                'reagent policy; the all-variable-off recipe is excluded.'
+            )
+            fig.text(0.5, 0.022, footer, ha='center', va='bottom',
+                     fontsize=font_sizes['annotation'], color='0.35')
+            fig.subplots_adjust(
+                left=0.08, right=0.98, bottom=0.11, top=0.79,
+                hspace=0.70, wspace=0.38
+            )
+            generated_plot_paths.append(
+                self._save_auto_design_plot(
+                    fig,
+                    'initial_maximin_seed_design_feasibility_'
+                    'conditional_slices_atlas_page_{:02d}.png'.format(
+                        page_index + 1
+                    )
+                )
+            )
+
+        return generated_plot_paths
 
     def _plot_initial_training_designs_after_run(self):
         '''
@@ -23745,6 +24377,11 @@ class AutoContr(Controller):
             _run_output_step(
                 'final dimension-aware Auto design-space plots',
                 self._plot_initial_training_designs_after_run
+            )
+
+            _run_output_step(
+                'final initial seed physical-feasibility plots',
+                lambda: self._plot_initial_seed_feasibility_views(model)
             )
 
             _run_output_step(
