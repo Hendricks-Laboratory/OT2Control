@@ -1481,6 +1481,31 @@ class Controller(ABC):
                 f"{self.robo_params['auto_source_reserve_volume_uL']:g} uL"
             )
 
+        # Optional controlled between-batch plate replacement.  Older
+        # spreadsheets retain the established single-plate hard-stop.
+        plate_replacement_value = str(
+            header_dict.get('auto_plate_replacement_mode', 'off')
+        ).strip().lower().replace('-', '_').replace(' ', '_')
+        plate_replacement_aliases = {
+            '': 'off', 'off': 'off', 'none': 'off', 'disabled': 'off',
+            'no': 'off', 'false': 'off', '0': 'off',
+            'terminal': 'terminal', 'on': 'terminal', 'enabled': 'terminal',
+            'yes': 'terminal', 'true': 'terminal', '1': 'terminal'
+        }
+        if plate_replacement_value not in plate_replacement_aliases:
+            raise ValueError(
+                'Header value auto_plate_replacement_mode must be off or '
+                'terminal. Received: {!r}.'.format(plate_replacement_value)
+            )
+        self.robo_params['auto_plate_replacement_mode'] = (
+            plate_replacement_aliases[plate_replacement_value]
+        )
+        print(
+            '<<controller>> Auto plate replacement mode: {}'.format(
+                self.robo_params['auto_plate_replacement_mode']
+            )
+        )
+
         # The Pi now owns calibrated tube tare constants. Retain a narrow
         # compatibility check for older worksheets so a historical positive
         # controller-side offset cannot silently double-correct source mass.
@@ -4977,7 +5002,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v4'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v5'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5052,6 +5077,18 @@ class AutoContr(Controller):
         # are derived monitoring artifacts and never feed back into Auto.
         self.auto_live_run_sync_queue = None
         self.auto_main_robot_state_snapshot = None
+        # Physical plates may be replaced only at a completed-batch boundary.
+        # Logical Auto well names remain globally unique; this state records
+        # the physical 96-well plate generation separately for audit/reporting.
+        self.auto_plate_generation = 0
+        self.auto_plate_next_well = None
+        # ``None`` is overloaded deliberately: before the first batch the
+        # controller has not yet resolved the configured starting well, while
+        # after a completed plate it means that no physical wells remain.
+        # Keep those states distinct so a full generation cannot silently
+        # reset itself to the original starting well instead of entering the
+        # controlled replacement hold.
+        self._auto_plate_cursor_initialized = False
 
     def _validate_auto_main_robot_state_snapshot(self, snapshot):
         '''
@@ -5155,6 +5192,16 @@ class AutoContr(Controller):
                 'tip-rack recovery.'
             )
 
+        if (
+            'register_auto_plate_generation'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise register_auto_plate_generation required for '
+                'controlled plate replacement.'
+            )
+
         source_inventory_revision = snapshot.get('source_inventory_revision')
         if (
             isinstance(source_inventory_revision, bool)
@@ -5176,6 +5223,18 @@ class AutoContr(Controller):
                 'Auto-main compatibility check failed: tip inventory '
                 'revision is invalid.'
             )
+
+        for field_name in ('plate_mapping_revision', 'plate_generation'):
+            field_value = snapshot.get(field_name)
+            if (
+                isinstance(field_value, bool)
+                or not isinstance(field_value, int)
+                or field_value < 0
+            ):
+                raise RuntimeError(
+                    'Auto-main compatibility check failed: {} is invalid.'
+                    .format(field_name)
+                )
 
         return copy.deepcopy(snapshot)
 
@@ -9964,6 +10023,18 @@ class AutoContr(Controller):
                     if len(condition_well_locations) > 0
                     else None
                 ),
+                # Physical reader coordinates are reused only after an
+                # explicit Stage-8C plate replacement. Keep the generation
+                # separate so CSV/report consumers never collapse A1 from
+                # two different physical plates into one apparent well.
+                'replicate_plate_generations': (
+                    self._serialize_auto_audit_value(
+                        [int(getattr(self, 'auto_plate_generation', 0))]
+                        * len(condition_well_locations)
+                    )
+                    if len(condition_well_locations) > 0
+                    else None
+                ),
                 'acquisition_mode': acquisition_mode,
                 'acquisition_score': acquisition_score,
                 'balanced_exploration_weight': (
@@ -11729,11 +11800,25 @@ class AutoContr(Controller):
             for well_index, well_name in enumerate(plate_order)
         }
         ordered_wells = []
+        ordered_plate_keys = []
 
-        for raw_well_locations in ordered_performance_df[
+        for row_index, raw_well_locations in ordered_performance_df[
             'replicate_well_locations'
-        ]:
+        ].items():
             parsed_well_locations = raw_well_locations
+            raw_generations = (
+                ordered_performance_df.at[
+                    row_index, 'replicate_plate_generations'
+                ]
+                if 'replicate_plate_generations' in ordered_performance_df.columns
+                else None
+            )
+            parsed_generations = raw_generations
+            if isinstance(raw_generations, str):
+                try:
+                    parsed_generations = json.loads(raw_generations)
+                except (TypeError, ValueError):
+                    parsed_generations = None
 
             if isinstance(raw_well_locations, str):
                 try:
@@ -11749,7 +11834,10 @@ class AutoContr(Controller):
             if not isinstance(parsed_well_locations, (list, tuple)):
                 parsed_well_locations = [parsed_well_locations]
 
-            for well_location in parsed_well_locations:
+            if not isinstance(parsed_generations, (list, tuple)):
+                parsed_generations = [0] * len(parsed_well_locations)
+
+            for location_index, well_location in enumerate(parsed_well_locations):
                 if well_location is None:
                     continue
 
@@ -11764,7 +11852,17 @@ class AutoContr(Controller):
                 if well_text not in plate_well_indices:
                     continue
 
-                if well_text not in ordered_wells:
+                generation = (
+                    parsed_generations[location_index]
+                    if location_index < len(parsed_generations) else 0
+                )
+                try:
+                    generation = int(generation)
+                except (TypeError, ValueError):
+                    generation = 0
+                plate_key = (generation, well_text)
+                if plate_key not in ordered_plate_keys:
+                    ordered_plate_keys.append(plate_key)
                     ordered_wells.append(well_text)
 
         if len(ordered_wells) == 0:
@@ -11786,13 +11884,24 @@ class AutoContr(Controller):
             else None
         )
 
-        return {
+        summary = {
             'first_well': first_well,
             'last_well': last_well,
             'unique_well_count': len(ordered_wells),
             'remaining_well_count': len(plate_order) - next_well_index,
             'next_well': next_well
         }
+        generations = sorted(set(key[0] for key in ordered_plate_keys))
+        if len(generations) > 1:
+            summary['plate_generation_count'] = len(generations)
+            summary['plate_generation_wells'] = {
+                generation: [
+                    well for key_generation, well in ordered_plate_keys
+                    if key_generation == generation
+                ]
+                for generation in generations
+            }
+        return summary
 
     def _build_auto_report_responsive_sections(
         self,
@@ -18282,6 +18391,26 @@ class AutoContr(Controller):
         )
         if physical_well_span is None:
             lines.append('- Physical plate-well span: not recorded.')
+        elif physical_well_span.get('plate_generation_count', 1) > 1:
+            generation_descriptions = []
+            for generation, wells in sorted(
+                    physical_well_span['plate_generation_wells'].items()):
+                generation_descriptions.append(
+                    'generation {}: {} through {} ({} wells)'.format(
+                        generation, wells[0], wells[-1], len(wells)
+                    )
+                )
+            lines.append(
+                '- Physical plate-well span: {} plate generations; {}.'
+                .format(
+                    physical_well_span['plate_generation_count'],
+                    '; '.join(generation_descriptions)
+                )
+            )
+            lines.append(
+                '- Same-plate reuse guidance: consult the final plate '
+                'generation above; earlier plate generations were replaced.'
+            )
         else:
             lines.append(
                 '- Physical plate-well span: '
@@ -25771,7 +25900,8 @@ class AutoContr(Controller):
 
         # Generate wellnames for this batch
         wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
-        
+        self._ensure_auto_plate_capacity_for_batch(len(wellnames))
+
         # Plan and execute a reaction according to the Header num_duplicates setting.
         self._create_samples(wellnames, recipes, model)
 
@@ -26013,6 +26143,7 @@ class AutoContr(Controller):
             
             # Run the experiments
             wellnames = [self._generate_wellname() for i in range(recipes.shape[0])]
+            self._ensure_auto_plate_capacity_for_batch(len(wellnames))
             self._create_samples(wellnames, recipes, model)
             
             # Pull in the scan data
@@ -26337,7 +26468,9 @@ class AutoContr(Controller):
         batch_payload = {
             'batch_number': batch_number,
             'physical_well_count': int(len(wellnames)),
-            'wellnames': list(wellnames)
+            'wellnames': list(wellnames),
+            'plate_generation': int(getattr(self, 'auto_plate_generation', 0)),
+            'plate_start_well': getattr(self, 'auto_plate_next_well', None)
         }
 
         # Record intent before the controller enters its existing protocol
@@ -26488,6 +26621,8 @@ class AutoContr(Controller):
             )
 
         self.execute_protocol_df(model)
+        if hasattr(self, '_record_auto_plate_batch_execution'):
+            self._record_auto_plate_batch_execution(len(wellnames))
 
         if hasattr(self, '_record_auto_live_run_transition'):
             self._record_auto_live_run_transition(
@@ -26565,6 +26700,185 @@ class AutoContr(Controller):
         first_index = plate_order.index(starting_well)
 
         return len(plate_order) - first_index
+
+    def _get_auto_plate_cursor_request(self, starting_well):
+        '''Builds one non-mutating Pi plate-cursor registration request.
+
+        The workbook exposes one ordinary 96-well coordinate.  The controller
+        translates it to the existing split plate-reader labware mapping and
+        explicitly marks the unused half inactive.  No liquid, source, or tip
+        state is represented in this request.
+        '''
+        well = str(starting_well).strip().upper()
+        if well not in self._get_96_well_plate_order():
+            raise ValueError(
+                'Replacement plate starting well {!r} is invalid. Use A1 '
+                'through H12.'.format(starting_well)
+            )
+        internal_well, plate_name = self.PLATEREADER_INDEX_TRANSLATOR[well]
+        cursors = {'platereader4': None, 'platereader7': None}
+        cursors[plate_name] = str(internal_well)
+        snapshot = self.auto_main_robot_state_snapshot or {}
+        return {
+            'schema_version': 1,
+            'action_id': 'auto-plate-generation-{}-{}'.format(
+                int(self.auto_plate_generation) + 1,
+                well
+            ),
+            'expected_plate_mapping_revision': int(
+                snapshot.get('plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(self.auto_plate_generation) + 1,
+            'start_well': well,
+            'plate_cursors': cursors
+        }
+
+    def _request_auto_main_plate_generation_registration(self, request):
+        '''Requests one Pi-side physical plate cursor reset and validates it.'''
+        self.portal.send_pack('register_auto_plate_generation', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'auto_plate_generation_registered':
+            raise RuntimeError(
+                'Auto-main plate replacement expected '
+                'auto_plate_generation_registered, received {!r}.'.format(
+                    pack_type
+                )
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto-main plate replacement received malformed payload.'
+            )
+        result = payload[0]
+        required = {
+            'schema_version', 'record_type', 'action_id', 'accepted',
+            'message', 'plate_mapping_revision', 'plate_generation',
+            'start_well', 'plate_cursors'
+        }
+        if not isinstance(result, dict) or set(result) != required:
+            raise RuntimeError(
+                'Auto-main plate replacement returned an invalid schema.'
+            )
+        if (
+            result['schema_version'] != 1
+            or result['record_type'] != 'auto_plate_generation_registered'
+            or result['action_id'] != request['action_id']
+            or not isinstance(result['accepted'], bool)
+        ):
+            raise RuntimeError(
+                'Auto-main plate replacement returned an invalid acknowledgement.'
+            )
+        if not result['accepted']:
+            raise RuntimeError(
+                'Auto-main declined plate replacement: {}'.format(
+                    result.get('message', 'no reason supplied')
+                )
+            )
+        if (
+            result['plate_generation'] != request['plate_generation']
+            or result['start_well'] != request['start_well']
+            or result['plate_cursors'] != request['plate_cursors']
+        ):
+            raise RuntimeError(
+                'Auto-main plate replacement acknowledgement does not match '
+                'the requested cursor mapping.'
+            )
+        if self.auto_main_robot_state_snapshot is not None:
+            self.auto_main_robot_state_snapshot['plate_mapping_revision'] = (
+                result['plate_mapping_revision']
+            )
+            self.auto_main_robot_state_snapshot['plate_generation'] = (
+                result['plate_generation']
+            )
+        return copy.deepcopy(result)
+
+    def _ensure_auto_plate_capacity_for_batch(self, physical_well_count):
+        '''Ensures a whole Auto batch fits on one physical 96-well plate.
+
+        In terminal mode, a shortage creates a durable operator hold *before*
+        container initialization.  The completed batch is never split across
+        plates, and an acknowledged Pi cursor reset is the only operation that
+        changes physical plate state.
+        '''
+        count = int(physical_well_count)
+        if count < 1 or count > 96:
+            raise ValueError(
+                'An Auto batch must contain from 1 through 96 physical wells; '
+                'received {}.'.format(physical_well_count)
+            )
+        if not getattr(self, '_auto_plate_cursor_initialized', False):
+            self.auto_plate_next_well = str(
+                self.robo_params['platereader_input_first_usable']
+            ).strip().upper()
+            self._auto_plate_cursor_initialized = True
+        available = 0 if self.auto_plate_next_well is None else (
+            self._count_available_96_well_plate_wells(
+                self.auto_plate_next_well
+            )
+        )
+        if count <= available:
+            return
+        if self.robo_params.get('auto_plate_replacement_mode', 'off') != 'terminal':
+            raise ValueError(
+                'Auto batch needs {} wells but only {} remain on plate '
+                'generation {} from {}. Enable terminal plate replacement '
+                'or use a new starting plate.'.format(
+                    count, available, self.auto_plate_generation,
+                    self.auto_plate_next_well
+                )
+            )
+        self._record_auto_live_run_transition(
+            LIFECYCLE_HELD_FOR_OPERATOR,
+            'plate_replacement_required',
+            {
+                'plate_generation': int(self.auto_plate_generation),
+                'remaining_start_well': self.auto_plate_next_well or 'full',
+                'remaining_well_count': int(available),
+                'required_batch_well_count': count
+            },
+            active_batch_number=int(getattr(self, 'batch_num', 0))
+        )
+        print('\n<<controller>> AUTO PLATE REPLACEMENT REQUIRED')
+        print('<<controller>> Batch {} needs {} wells; only {} remain on plate generation {}.'.format(
+            getattr(self, 'batch_num', 0), count, available,
+            self.auto_plate_generation
+        ))
+        print('<<controller>> Replace the plate with an identical empty plate. No liquid-handling command has been sent for this batch.')
+        next_well = self._get_auto_preflight_hold_input(
+            '<<controller>> Enter the new plate starting well (A1-H12), or END to stop: '
+        )
+        if str(next_well).strip().upper() == 'END':
+            error = RuntimeError('Operator ended Auto run during plate replacement hold.')
+            error.auto_operator_end_run = True
+            raise error
+        request = self._get_auto_plate_cursor_request(next_well)
+        confirmation = self._get_auto_preflight_hold_input(
+            '<<controller>> Type REPLACE to register the new plate cursor: '
+        )
+        if str(confirmation).strip().upper() != 'REPLACE':
+            raise RuntimeError('Plate replacement was not confirmed; batch remains unexecuted.')
+        result = self._request_auto_main_plate_generation_registration(request)
+        self.auto_plate_generation = result['plate_generation']
+        self.auto_plate_next_well = result['start_well']
+        self._record_auto_live_run_transition(
+            LIFECYCLE_PREFLIGHTING_BATCH,
+            'plate_replacement_registered',
+            copy.deepcopy(result),
+            active_batch_number=int(getattr(self, 'batch_num', 0))
+        )
+        print('<<controller>> New plate generation {} registered from {}. Rechecking unchanged batch preflight.'.format(
+            self.auto_plate_generation, self.auto_plate_next_well
+        ))
+
+    def _record_auto_plate_batch_execution(self, physical_well_count):
+        '''Advances controller-side physical plate audit state after execution.'''
+        plate_order = self._get_96_well_plate_order()
+        start_index = plate_order.index(self.auto_plate_next_well)
+        next_index = start_index + int(physical_well_count)
+        if next_index > len(plate_order):
+            raise RuntimeError('Auto plate cursor advanced beyond H12.')
+        self.auto_plate_next_well = (
+            plate_order[next_index] if next_index < len(plate_order) else None
+        )
     
     def _check_auto_well_capacity(self, model):
         '''
@@ -26619,7 +26933,20 @@ class AutoContr(Controller):
         )
         print(f"<<controller>> {available_wells} wells available from {starting_well} to H12")
 
-        if required_wells > available_wells:
+        replacement_mode = self.robo_params.get(
+            'auto_plate_replacement_mode', 'off'
+        )
+        if (
+            replacement_mode == 'terminal'
+            and max(initial_wells, batch_size * self.num_duplicates) > 96
+        ):
+            raise Exception(
+                'Auto plate replacement cannot split one batch across plates. '
+                'Reduce initial_data or batch size/replicates so every batch '
+                'uses at most 96 wells.'
+            )
+
+        if required_wells > available_wells and replacement_mode != 'terminal':
             raise Exception(
                 f"Auto run requires up to {required_wells} wells, but only "
                 f"{available_wells} wells are available from starting well {starting_well}. "
@@ -26627,6 +26954,11 @@ class AutoContr(Controller):
                 f"or reduce the number of replicates."
             )
 
+        if required_wells > available_wells:
+            print(
+                '<<controller>> Auto well capacity exceeds the first plate; '
+                'terminal replacement holds will occur only between complete batches.'
+            )
         print("<<controller>> Auto well capacity check passed")
 
     def _count_available_pipette_tips_by_size(self):

@@ -2373,7 +2373,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v4'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v5'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2389,7 +2389,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v4',
+            'protocol_version': 'auto-main-state-v5',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
@@ -2400,10 +2400,13 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 'get_robot_state_snapshot',
                 'preflight_transfer_plan',
                 'refresh_source_container_mass',
-                'reset_pipette_tip_racks'
+                'reset_pipette_tip_racks',
+                'register_auto_plate_generation'
             ],
             'source_inventory_revision': 0,
-            'tip_inventory_revision': 0
+            'tip_inventory_revision': 0,
+            'plate_mapping_revision': 0,
+            'plate_generation': 0
         }
 
     def test_valid_snapshot_is_accepted_and_copied(self):
@@ -2510,6 +2513,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertEqual(b'\x16', packet_types['source_container_mass_refreshed'])
         self.assertEqual(b'\x17', packet_types['reset_pipette_tip_racks'])
         self.assertEqual(b'\x18', packet_types['pipette_tip_racks_reset'])
+        self.assertEqual(b'\x19', packet_types['register_auto_plate_generation'])
+        self.assertEqual(b'\x1A', packet_types['auto_plate_generation_registered'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -2518,6 +2523,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertIn('source_container_mass_refreshed', ghost_types)
         self.assertIn('reset_pipette_tip_racks', ghost_types)
         self.assertIn('pipette_tip_racks_reset', ghost_types)
+        self.assertIn('register_auto_plate_generation', ghost_types)
+        self.assertIn('auto_plate_generation_registered', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')
@@ -2546,6 +2553,80 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             )
             for node in ast.walk(method)
         ))
+
+
+class AutoPlateCursorLifecycleTests(unittest.TestCase):
+    '''Pure controller tests for physical plate cursor state transitions.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_get_96_well_plate_order',
+            '_count_available_96_well_plate_wells',
+            '_ensure_auto_plate_capacity_for_batch',
+            '_record_auto_plate_batch_execution'
+        ], {
+            'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
+            'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch'
+        })
+
+    def _build_controller(self):
+        controller = self.AutoController()
+        controller.robo_params = {
+            'platereader_input_first_usable': 'A1',
+            'auto_plate_replacement_mode': 'off'
+        }
+        controller.auto_plate_generation = 0
+        controller.auto_plate_next_well = None
+        controller._auto_plate_cursor_initialized = False
+        return controller
+
+    def test_completed_first_plate_is_not_reinitialized_as_new_capacity(self):
+        '''A full generation must trigger the replacement path, never reuse A1.'''
+        controller = self._build_controller()
+
+        controller._ensure_auto_plate_capacity_for_batch(96)
+        self.assertEqual('A1', controller.auto_plate_next_well)
+        self.assertTrue(controller._auto_plate_cursor_initialized)
+
+        controller._record_auto_plate_batch_execution(96)
+        self.assertIsNone(controller.auto_plate_next_well)
+
+        with self.assertRaisesRegex(ValueError, 'only 0 remain'):
+            controller._ensure_auto_plate_capacity_for_batch(1)
+
+        self.assertIsNone(controller.auto_plate_next_well)
+
+    def test_completed_first_plate_enters_terminal_replacement_flow(self):
+        '''The replacement hold starts a new generation only after approval.'''
+        controller = self._build_controller()
+        controller.robo_params['auto_plate_replacement_mode'] = 'terminal'
+        controller.batch_num = 3
+        controller._ensure_auto_plate_capacity_for_batch(96)
+        controller._record_auto_plate_batch_execution(96)
+
+        responses = iter(['A1', 'REPLACE'])
+        transitions = []
+        controller._get_auto_preflight_hold_input = lambda prompt: next(responses)
+        controller._get_auto_plate_cursor_request = lambda well: {
+            'start_well': well
+        }
+        controller._request_auto_main_plate_generation_registration = (
+            lambda request: {
+                'plate_generation': 1,
+                'start_well': request['start_well']
+            }
+        )
+        controller._record_auto_live_run_transition = (
+            lambda *args, **kwargs: transitions.append((args, kwargs))
+        )
+
+        with redirect_stdout(io.StringIO()):
+            controller._ensure_auto_plate_capacity_for_batch(1)
+
+        self.assertEqual(1, controller.auto_plate_generation)
+        self.assertEqual('A1', controller.auto_plate_next_well)
+        self.assertEqual(2, len(transitions))
 
 
 class AutoMainTransferPlanPreflightTests(unittest.TestCase):
