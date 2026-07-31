@@ -2508,12 +2508,16 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertEqual(b'\x14', packet_types['transfer_plan_preflight'])
         self.assertEqual(b'\x15', packet_types['refresh_source_container_mass'])
         self.assertEqual(b'\x16', packet_types['source_container_mass_refreshed'])
+        self.assertEqual(b'\x17', packet_types['reset_pipette_tip_racks'])
+        self.assertEqual(b'\x18', packet_types['pipette_tip_racks_reset'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
         self.assertIn('transfer_plan_preflight', ghost_types)
         self.assertIn('refresh_source_container_mass', ghost_types)
         self.assertIn('source_container_mass_refreshed', ghost_types)
+        self.assertIn('reset_pipette_tip_racks', ghost_types)
+        self.assertIn('pipette_tip_racks_reset', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')
