@@ -5680,20 +5680,29 @@ class AutoContr(Controller):
             hold_action_id=hold_action_id
         )
 
+        # Keep this human-supervised hold visually separate from ordinary
+        # lifecycle output (for example, Live-workbook refresh notices).
+        # The terminal is the offline recovery interface, so the available
+        # actions and exact registered source identity must be easy to scan.
+        print('\n' + '=' * 72)
+        print('<<controller>> AUTO PRE-BATCH RESOURCE HOLD')
+        print('=' * 72)
         print(
-            '<<controller>> Auto batch {} is held before liquid handling. '
-            'The recipe and destination wells are unchanged.'.format(
+            '<<controller>> Batch {} is held before liquid handling. The '
+            'recipe and destination wells are unchanged.'.format(
                 batch_payload['batch_number']
             )
         )
         print(
-            '<<controller>> Stage 6 permits only a same-container refill, '
-            'a no-change preflight retry, or ending the run.'
+            '<<controller>> Permitted actions: refill_same_container, '
+            'retry_preflight, or end_run.'
         )
+        print('\n<<controller>> Registered same-container refill option(s):')
         for candidate_index, candidate in enumerate(candidates, start=1):
             print(
-                '<<controller>> refill option {}: {} container {} at deck '
-                '{} {}.'.format(
+                '  [{}] reagent: {}\n'
+                '      container: {}\n'
+                '      location: deck {} {}\n'.format(
                     candidate_index,
                     candidate['source_chemical_name'],
                     candidate['source_container_index'],
@@ -5701,6 +5710,7 @@ class AutoContr(Controller):
                     candidate['source_loc']
                 )
             )
+        print('=' * 72)
 
         while True:
             action = str(self._get_auto_preflight_hold_input(
@@ -5715,6 +5725,11 @@ class AutoContr(Controller):
                 'operator_action_requested',
                 requested_payload
             )
+            # The journal event above can print a Live-workbook update. Put
+            # the next operator-facing instruction on a fresh, readable line.
+            print('\n<<controller>> Recovery action received: {}\n'.format(
+                action or '(blank)'
+            ))
 
             if action == 'end_run':
                 self._record_auto_live_run_transition(
@@ -5767,7 +5782,7 @@ class AutoContr(Controller):
                 continue
 
             selection_text = self._get_auto_preflight_hold_input(
-                'Select a listed same-container refill option by number: '
+                'Select a listed refill option by number: '
             )
             try:
                 selected_index = int(str(selection_text).strip()) - 1
@@ -5787,9 +5802,14 @@ class AutoContr(Controller):
                 )
                 continue
 
+            print(
+                '\n<<controller>> Refill only the exact registered tube '
+                'shown above; do not change reagent, concentration, or '
+                'location.'
+            )
             mass_text = self._get_auto_preflight_hold_input(
-                'Enter the measured total tube-plus-liquid mass in grams '
-                'for {} at deck {} {}: '.format(
+                'Enter its measured total tube-plus-liquid mass (g) for '
+                '{} at deck {} {}: '.format(
                     candidate['source_chemical_name'],
                     candidate['source_deck_pos'],
                     candidate['source_loc']
