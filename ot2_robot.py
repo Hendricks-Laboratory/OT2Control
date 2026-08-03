@@ -737,6 +737,11 @@ class Labware(ABC):
         self.labware = labware
         self.full = False
         self.deck_pos = deck_pos
+        # The logical spreadsheet name can differ from the underlying
+        # Opentrons definition name (for example, the two plate-reader
+        # labware definitions).  Keep that controller-facing identity on the
+        # wrapper, never by attempting to mutate the read-only API object.
+        self._logical_name = None
 
     @abstractmethod
     def pop_next_well(self, vol=None, container_type=None):
@@ -768,7 +773,12 @@ class Labware(ABC):
 
     @property
     def name(self):
-        return self.labware.name
+        '''Returns the configured labware identity when one is available.'''
+        return (
+            self._logical_name
+            if self._logical_name is not None
+            else self.labware.name
+        )
 
 class TubeHolder(Labware):
     '''
@@ -1357,8 +1367,10 @@ class OT2Robot():
         else:
             raise Exception("Sorry, Illegal Labware Option, {}. {} is not a tube or plate".format(name,name))
         # Preserve the configured logical name for narrow Auto recovery
-        # commands; the underlying Opentrons labware is not replaced.
-        self.lab_deck[deck_pos].name = name
+        # commands. ``Labware.name`` is intentionally read-only because it
+        # proxies the Opentrons object; storing the alias on the wrapper keeps
+        # custom plate-reader identities without mutating that API object.
+        self.lab_deck[deck_pos]._logical_name = name
         #after you've added the labware, you must calibrate
         #offset is a dictionary with keys, x,y,z and float offset vals
         offset = self._CALIBRATIONS[self._LABWARE_TYPES[name]['opentrons_name']]

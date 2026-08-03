@@ -18,6 +18,14 @@ def _ot2robot_class_node():
     raise AssertionError('OT2Robot class was not found in ot2_robot.py')
 
 
+def _labware_class_node():
+    source_tree = ast.parse(ROBOT_SOURCE.read_text())
+    for node in source_tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == 'Labware':
+            return node
+    raise AssertionError('Labware class was not found in ot2_robot.py')
+
+
 def _class_assignment_value(class_node, name):
     for node in class_node.body:
         if isinstance(node, ast.Assign):
@@ -181,6 +189,65 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertIn('pipette_tip_racks_reset', ghost_types)
         self.assertIn('register_auto_plate_generation', ghost_types)
         self.assertIn('auto_plate_generation_registered', ghost_types)
+
+
+class AutoMainLabwareIdentityTests(unittest.TestCase):
+    '''Ensure Auto aliases do not mutate read-only Opentrons labware names.'''
+
+    def test_configured_logical_name_is_wrapper_owned(self):
+        robot_class = _ot2robot_class_node()
+        add_to_deck = _class_method_node(robot_class, '_add_to_deck')
+        assignments = [
+            node for node in ast.walk(add_to_deck)
+            if isinstance(node, ast.Assign)
+        ]
+
+        assigned_attributes = [
+            target.attr
+            for assignment in assignments
+            for target in assignment.targets
+            if isinstance(target, ast.Attribute)
+        ]
+        self.assertIn('_logical_name', assigned_attributes)
+        self.assertNotIn('name', assigned_attributes)
+
+    def test_labware_name_prefers_logical_alias_without_mutating_api_object(self):
+        labware_class = _labware_class_node()
+        init_method = copy.deepcopy(
+            next(
+                node for node in labware_class.body
+                if isinstance(node, ast.FunctionDef) and node.name == '__init__'
+            )
+        )
+        name_property = copy.deepcopy(
+            next(
+                node for node in labware_class.body
+                if isinstance(node, ast.FunctionDef) and node.name == 'name'
+            )
+        )
+        name_property.decorator_list = [
+            decorator for decorator in name_property.decorator_list
+            if isinstance(decorator, ast.Name) and decorator.id == 'property'
+        ]
+        module = ast.fix_missing_locations(ast.Module(
+            body=[ast.ClassDef(
+                name='LabwareIdentity',
+                bases=[],
+                keywords=[],
+                body=[init_method, name_property],
+                decorator_list=[]
+            )],
+            type_ignores=[]
+        ))
+        namespace = {}
+        exec(compile(module, str(ROBOT_SOURCE), 'exec'), namespace)
+        api_labware = type('ApiLabware', (), {'name': 'plate_reader_4'})()
+        wrapper = namespace['LabwareIdentity'](api_labware, 4)
+
+        self.assertEqual('plate_reader_4', wrapper.name)
+        wrapper._logical_name = 'platereader4'
+        self.assertEqual('platereader4', wrapper.name)
+        self.assertEqual('plate_reader_4', api_labware.name)
 
 
 class AutoMainPlateGenerationTests(unittest.TestCase):
