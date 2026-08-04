@@ -27445,16 +27445,23 @@ class AutoContr(Controller):
         )
         if count <= available:
             return
+        # A held lifecycle state is only valid when it identifies the exact
+        # operator action that may release it.  Keep this identifier in both
+        # the hold and accepted-registration records so the local journal can
+        # unambiguously connect a physical plate change to the unchanged batch.
+        hold_action_id = uuid.uuid4().hex
         self._record_auto_live_run_transition(
             LIFECYCLE_HELD_FOR_OPERATOR,
             'plate_replacement_required',
             {
+                'hold_action_id': hold_action_id,
                 'plate_generation': int(self.auto_plate_generation),
                 'remaining_start_well': self.auto_plate_next_well or 'full',
                 'remaining_well_count': int(available),
                 'required_batch_well_count': count
             },
-            active_batch_number=int(getattr(self, 'batch_num', 0))
+            active_batch_number=int(getattr(self, 'batch_num', 0)),
+            hold_action_id=hold_action_id
         )
         print('\n<<controller>> AUTO PLATE REPLACEMENT REQUIRED')
         print('<<controller>> Batch {} needs {} wells; only {} remain on plate generation {}.'.format(
@@ -27481,7 +27488,7 @@ class AutoContr(Controller):
         self._record_auto_live_run_transition(
             LIFECYCLE_PREFLIGHTING_BATCH,
             'plate_replacement_registered',
-            copy.deepcopy(result),
+            dict(copy.deepcopy(result), hold_action_id=hold_action_id),
             active_batch_number=int(getattr(self, 'batch_num', 0))
         )
         print('<<controller>> New plate generation {} registered from {}. Rechecking unchanged batch preflight.'.format(
@@ -27519,7 +27526,9 @@ class AutoContr(Controller):
         Postconditions:
             - Prints the maximum number of wells the Auto run may require.
             - Prints the number of wells available from the selected starting well.
-            - Raises an error before the run begins if there are not enough wells.
+            - Stops before the run begins only if one batch cannot fit on a
+              single 96-well plate, or if the user declines a multi-plate
+              planning warning.
         '''
         initial_data = (
             0
@@ -27561,8 +27570,31 @@ class AutoContr(Controller):
 
         if required_wells > available_wells:
             print(
-                '<<controller>> Auto well capacity exceeds the first plate; '
-                'terminal replacement holds will occur only between complete batches.'
+                '<<controller>> WARNING: the planned maximum run may exceed '
+                'the remaining capacity of the current plate.'
+            )
+            print(
+                '<<controller>> A controlled identical-plate replacement may '
+                'be required between complete batches. No batch will be split '
+                'across plates.'
+            )
+            print(
+                '<<controller>> If replacement is required, Auto will stop '
+                'before the next batch and require explicit terminal '
+                'confirmation before any liquid handling resumes.'
+            )
+            confirm = input(
+                '<<controller>> Type y or yes to acknowledge this possible '
+                'plate replacement and continue: '
+            ).strip().lower()
+            if confirm not in ('y', 'yes'):
+                raise RuntimeError(
+                    'Auto run stopped because possible plate replacement was '
+                    'not acknowledged.'
+                )
+            print(
+                '<<controller>> Auto plate-capacity warning acknowledged; '
+                'continuing with between-batch recovery enabled.'
             )
         print("<<controller>> Auto well capacity check passed")
 

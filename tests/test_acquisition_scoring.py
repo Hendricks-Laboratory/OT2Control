@@ -20,6 +20,7 @@ from tempfile import NamedTemporaryFile
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from matplotlib.lines import Line2D
 from matplotlib.text import Text
 
@@ -2568,7 +2569,8 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             '_check_auto_well_capacity'
         ], {
             'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
-            'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch'
+            'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch',
+            'uuid': uuid
         })
 
     def _build_controller(self):
@@ -2630,6 +2632,18 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
         self.assertEqual(1, controller.auto_plate_generation)
         self.assertEqual('A1', controller.auto_plate_next_well)
         self.assertEqual(2, len(transitions))
+        held_args, held_kwargs = transitions[0]
+        registered_args, _ = transitions[1]
+        self.assertEqual('held_for_operator', held_args[0])
+        self.assertEqual('plate_replacement_required', held_args[1])
+        self.assertEqual(
+            held_kwargs['hold_action_id'],
+            held_args[2]['hold_action_id']
+        )
+        self.assertEqual(
+            held_args[2]['hold_action_id'],
+            registered_args[2]['hold_action_id']
+        )
 
     def test_multi_plate_run_is_allowed_but_one_batch_cannot_span_plates(self):
         '''Capacity planning relies on the built-in hold, never a Header mode.'''
@@ -2642,10 +2656,11 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
 
         # 97 total wells cross a plate boundary, but each planned batch fits
         # on one plate and can therefore stop for a safe terminal replacement.
-        with redirect_stdout(io.StringIO()):
-            controller._check_auto_well_capacity(
-                SimpleNamespace(batch_size=96)
-            )
+        with patch('builtins.input', return_value='yes'):
+            with redirect_stdout(io.StringIO()):
+                controller._check_auto_well_capacity(
+                    SimpleNamespace(batch_size=96)
+                )
 
         # A 97-well batch itself cannot be split, even with the recovery
         # mechanism available.
@@ -2653,6 +2668,24 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             controller._check_auto_well_capacity(
                 SimpleNamespace(batch_size=97)
             )
+
+    def test_multi_plate_warning_requires_explicit_acknowledgement(self):
+        '''A recoverable plate shortage warns, but declining stops pre-run.'''
+        controller = self._build_controller()
+        controller.num_duplicates = 1
+        controller.getModelInfo = lambda: {
+            'initial_data': 1,
+            'max_iterations': 1
+        }
+
+        with patch('builtins.input', return_value='n'):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                'plate replacement was not acknowledged'
+            ):
+                controller._check_auto_well_capacity(
+                    SimpleNamespace(batch_size=96)
+                )
 
 
 class AutoMainTransferPlanPreflightTests(unittest.TestCase):
