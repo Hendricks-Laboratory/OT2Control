@@ -1,18 +1,21 @@
-'''Validated, hardware-free planning primitives for Auto reagent preparation.
+'''Hardware-free planning primitives for grouped Auto working-solution preparation.
 
 This module deliberately contains no controller, spreadsheet, portal, or robot
-imports.  It is the Stage 9A contract for an opt-in preparation phase that will
-run *once before* Auto seed and optimizer batches.  Keeping the requested
-preparations as a pure manifest makes the chemistry calculation independently
-testable and prevents an incomplete preparation feature from silently changing
-an Auto run.
+imports.  It turns the ``auto_preparation`` worksheet into a deterministic
+manifest before an Auto run connects to the Pi.  The manifest records the
+chemistry requested by the operator, but it does not allocate tubes, reserve
+source liquid, or issue a transfer command.  Those physical steps belong to
+the later Auto-main protocol stage and must use the Pi's runtime labware
+geometry rather than a misleading legacy container-class name.
 
-The calculation mirrors the established manual-controller dilution semantics:
+The planned dilution follows the established controller convention::
 
     C_stock * V_stock = C_working * V_final
 
-The future execution stage will use the existing controller convention of
-adding water first, then stock reagent, then mixing the prepared destination.
+For every working tube, execution will add the selected water first, add stock
+second, then mix.  Cold water selection is determined by the *stock source's*
+temperature-module placement, matching the existing manual dilution workflow;
+the destination tube placement does not decide which water source is used.
 '''
 
 from __future__ import division
@@ -29,12 +32,15 @@ class AutoPreparationValidationError(ValueError):
 PREPARATION_WORKSHEET_NAME = 'auto_preparation'
 PREPARATION_WORKSHEET_COLUMNS = (
     'enabled',
-    'stock_reagent',
+    'stock_source_group',
     'stock_concentration_mM',
     'working_concentration_mM',
-    'final_volume_uL',
+    'tube_count',
+    'final_volume_per_tube_uL',
+    'destination_labware',
+    'destination_container',
 )
-PREPARATION_SCHEMA_VERSION = 1
+PREPARATION_SCHEMA_VERSION = 2
 MIX_CYCLES = 2
 MIN_EXECUTABLE_TRANSFER_UL = 5.0
 
@@ -44,6 +50,15 @@ def _canonical_reagent_name(value):
     if value is None:
         return ''
     return '_'.join(str(value).strip().split())
+
+
+def _is_blank(value):
+    '''Return whether a spreadsheet value is absent without treating zero as blank.'''
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return str(value).strip() == ''
 
 
 def _finite_positive_number(value, field_name):
@@ -67,18 +82,26 @@ def _finite_positive_number(value, field_name):
     return parsed_value
 
 
+def _positive_integer(value, field_name):
+    '''Parse a finite, strictly positive integer spreadsheet value.'''
+    numeric_value = _finite_positive_number(value, field_name)
+    rounded_value = int(numeric_value)
+    if numeric_value != rounded_value:
+        raise AutoPreparationValidationError(
+            '{} must be a whole number; received {!r}.'.format(
+                field_name,
+                value
+            )
+        )
+    return rounded_value
+
+
 def _is_enabled(value):
     '''Interpret the optional worksheet enabled field conservatively.'''
-    if value is None:
-        return True
-    # Spreadsheet downloads represent blank cells as floating-point NaN.  A
-    # blank ``enabled`` cell is intentionally a skipped request, never an
-    # unrecognised affirmative value.  This keeps template rows inert until an
-    # operator explicitly enables them.
-    if isinstance(value, float) and math.isnan(value):
+    if _is_blank(value):
         return False
     normalized_value = str(value).strip().lower()
-    if normalized_value in ('', '0', 'false', 'no', 'n', 'off', 'disabled'):
+    if normalized_value in ('0', 'false', 'no', 'n', 'off', 'disabled'):
         return False
     if normalized_value in ('1', 'true', 'yes', 'y', 'on', 'enabled'):
         return True
@@ -103,7 +126,7 @@ def _chemical_name(reagent, concentration_mM):
 
 
 def _validate_executable_transfer(volume_uL, field_name):
-    '''Reject non-zero transfers that cannot be executed by the validated OT-2 rule.'''
+    '''Reject non-zero transfers that violate the validated OT-2 5-uL rule.'''
     if 0 < volume_uL < MIN_EXECUTABLE_TRANSFER_UL:
         raise AutoPreparationValidationError(
             '{} is {:.6g} uL, which lies in the non-executable 0–5 uL '
@@ -111,48 +134,57 @@ def _validate_executable_transfer(volume_uL, field_name):
         )
 
 
-def build_preparation_manifest(rows, destination_container, destination_capacity_uL):
-    '''Build and validate a deterministic Auto-preparation manifest.
+def _resolve_destination_capacity(destination_container, capacity_resolver):
+    '''Resolve an optional test-time capacity without inventing labware geometry.
+
+    Auto-main will perform the authoritative physical capacity check against the
+    Pi's runtime labware geometry.  The pure planner accepts this optional
+    resolver so unit tests and future callers can reject an impossible request
+    without hard-coding a capacity from a legacy class name such as
+    ``Tube20000uL``.
+    '''
+    if capacity_resolver is None:
+        return None
+    try:
+        capacity_uL = capacity_resolver(destination_container)
+    except TypeError:
+        try:
+            capacity_uL = capacity_resolver[destination_container]
+        except (KeyError, TypeError):
+            raise AutoPreparationValidationError(
+                'No destination capacity is available for {!r}.'.format(
+                    destination_container
+                )
+            )
+    return _finite_positive_number(
+        capacity_uL,
+        'destination capacity for {!r}'.format(destination_container)
+    )
+
+
+def build_preparation_manifest(rows, destination_capacity_resolver=None):
+    '''Build a deterministic grouped working-solution preparation manifest.
 
     Parameters
     ----------
     rows : iterable of mapping
-        Rows from the future ``auto_preparation`` worksheet.  The required
-        columns are listed in :data:`PREPARATION_WORKSHEET_COLUMNS`.  Disabled
-        rows are retained nowhere and have no effect.
-    destination_container : str
-        Empty-container type already configured by the existing ``dilution_cont``
-        Header setting.
-    destination_capacity_uL : number
-        The maximum permitted prepared volume, from ``dilution_vol``.
+        Rows from the ``auto_preparation`` worksheet.  Each enabled row defines
+        one stock source group and a set of identical destination working tubes.
+    destination_capacity_resolver : mapping or callable, optional
+        Optional capacity source for pure validation.  Production execution
+        intentionally leaves this ``None`` so Auto-main can validate the true
+        runtime tube geometry and its safe fill margin.
 
     Returns
     -------
     dict
-        JSON-serializable manifest.  It describes the requested chemistry only;
-        it does not allocate a physical destination, contact the robot, or issue
-        a transfer command.
-
-    Notes
-    -----
-    Stage 9A intentionally permits only one destination per resulting working
-    chemical name.  The later execution stage must explicitly support grouped
-    duplicate working sources before it can safely prepare multiple same-name
-    backup tubes.
+        JSON-serializable requested chemistry and per-tube transfer plan.  It
+        contains no physical source allocation and no robot commands.
     '''
-    normalized_destination = str(destination_container).strip()
-    if not normalized_destination:
-        raise AutoPreparationValidationError(
-            'destination_container must be provided by dilution_cont.'
-        )
-    capacity_uL = _finite_positive_number(
-        destination_capacity_uL,
-        'destination_capacity_uL'
-    )
-
     preparations = []
+    source_groups = set()
     working_names = set()
-    prepared_reagents = set()
+
     for row_number, row in enumerate(rows, start=2):
         if not isinstance(row, dict):
             raise AutoPreparationValidationError(
@@ -163,7 +195,7 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
 
         missing_columns = [
             column for column in PREPARATION_WORKSHEET_COLUMNS[1:]
-            if column not in row or str(row[column]).strip() == ''
+            if column not in row or _is_blank(row[column])
         ]
         if missing_columns:
             raise AutoPreparationValidationError(
@@ -173,19 +205,24 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
                 )
             )
 
-        stock_reagent = _canonical_reagent_name(row['stock_reagent'])
-        if not stock_reagent:
+        stock_source_group = _canonical_reagent_name(
+            row['stock_source_group']
+        )
+        if not stock_source_group:
             raise AutoPreparationValidationError(
-                'auto_preparation row {} has an empty stock_reagent.'.format(
+                'auto_preparation row {} has an empty stock_source_group.'.format(
                     row_number
                 )
             )
-        if stock_reagent in prepared_reagents:
+        if stock_source_group in source_groups:
             raise AutoPreparationValidationError(
-                'auto_preparation requests more than one working source for '
-                'reagent {!r}. One Auto reagent may use only one prepared '
-                'working concentration per run.'.format(stock_reagent)
+                'auto_preparation has more than one enabled row for stock '
+                'source group {!r}. Define one working concentration and one '
+                'destination-tube plan per source group.'.format(
+                    stock_source_group
+                )
             )
+
         stock_concentration_mM = _finite_positive_number(
             row['stock_concentration_mM'],
             'stock_concentration_mM (row {})'.format(row_number)
@@ -194,10 +231,21 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
             row['working_concentration_mM'],
             'working_concentration_mM (row {})'.format(row_number)
         )
-        final_volume_uL = _finite_positive_number(
-            row['final_volume_uL'],
-            'final_volume_uL (row {})'.format(row_number)
+        tube_count = _positive_integer(
+            row['tube_count'],
+            'tube_count (row {})'.format(row_number)
         )
+        final_volume_per_tube_uL = _finite_positive_number(
+            row['final_volume_per_tube_uL'],
+            'final_volume_per_tube_uL (row {})'.format(row_number)
+        )
+        destination_labware = str(row['destination_labware']).strip()
+        destination_container = str(row['destination_container']).strip()
+        if not destination_labware or not destination_container:
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} requires destination_labware and '
+                'destination_container.'.format(row_number)
+            )
         if working_concentration_mM >= stock_concentration_mM:
             raise AutoPreparationValidationError(
                 'auto_preparation row {} must dilute to a concentration below '
@@ -207,63 +255,100 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
                     stock_concentration_mM
                 )
             )
-        if final_volume_uL > capacity_uL:
+
+        destination_capacity_uL = _resolve_destination_capacity(
+            destination_container,
+            destination_capacity_resolver
+        )
+        if (
+            destination_capacity_uL is not None
+            and final_volume_per_tube_uL > destination_capacity_uL
+        ):
             raise AutoPreparationValidationError(
-                'auto_preparation row {} requests {:.6g} uL, exceeding the '
-                'configured {} capacity of {:.6g} uL.'.format(
+                'auto_preparation row {} requests {:.6g} uL per tube, '
+                'exceeding the {} capacity of {:.6g} uL.'.format(
                     row_number,
-                    final_volume_uL,
-                    normalized_destination,
-                    capacity_uL
+                    final_volume_per_tube_uL,
+                    destination_container,
+                    destination_capacity_uL
                 )
             )
 
-        stock_transfer_uL = (
-            final_volume_uL * working_concentration_mM /
+        stock_transfer_per_tube_uL = (
+            final_volume_per_tube_uL * working_concentration_mM /
             stock_concentration_mM
         )
-        water_transfer_uL = final_volume_uL - stock_transfer_uL
-        _validate_executable_transfer(stock_transfer_uL, 'stock transfer')
-        _validate_executable_transfer(water_transfer_uL, 'water transfer')
+        water_transfer_per_tube_uL = (
+            final_volume_per_tube_uL - stock_transfer_per_tube_uL
+        )
+        _validate_executable_transfer(
+            stock_transfer_per_tube_uL,
+            'stock transfer per tube (row {})'.format(row_number)
+        )
+        _validate_executable_transfer(
+            water_transfer_per_tube_uL,
+            'water transfer per tube (row {})'.format(row_number)
+        )
 
         stock_chemical_name = _chemical_name(
-            stock_reagent,
+            stock_source_group,
             stock_concentration_mM
         )
         working_chemical_name = _chemical_name(
-            stock_reagent,
+            stock_source_group,
             working_concentration_mM
         )
         if working_chemical_name in working_names:
             raise AutoPreparationValidationError(
-                'auto_preparation creates duplicate working source {!r}. '
-                'Multiple same-concentration backup destinations require the '
-                'future grouped-source execution stage.'.format(
+                'auto_preparation creates duplicate working source {!r}.'.format(
                     working_chemical_name
                 )
             )
+
+        tube_plan = []
+        for tube_index in range(1, tube_count + 1):
+            tube_plan.append({
+                'tube_index': tube_index,
+                'final_volume_uL': final_volume_per_tube_uL,
+                'stock_transfer_uL': stock_transfer_per_tube_uL,
+                'water_transfer_uL': water_transfer_per_tube_uL,
+                'destination_labware': destination_labware,
+                'destination_container': destination_container,
+            })
+
+        source_groups.add(stock_source_group)
         working_names.add(working_chemical_name)
-        prepared_reagents.add(stock_reagent)
         preparations.append({
             'row_number': row_number,
-            'stock_reagent': stock_reagent,
+            'stock_source_group': stock_source_group,
             'stock_chemical_name': stock_chemical_name,
             'stock_concentration_mM': stock_concentration_mM,
+            'working_source_group': working_chemical_name,
             'working_chemical_name': working_chemical_name,
             'working_concentration_mM': working_concentration_mM,
-            'final_volume_uL': final_volume_uL,
-            'stock_transfer_uL': stock_transfer_uL,
-            'water_transfer_uL': water_transfer_uL,
+            'tube_count': tube_count,
+            'final_volume_per_tube_uL': final_volume_per_tube_uL,
+            'total_final_volume_uL': final_volume_per_tube_uL * tube_count,
+            'stock_transfer_per_tube_uL': stock_transfer_per_tube_uL,
+            'water_transfer_per_tube_uL': water_transfer_per_tube_uL,
+            'total_stock_transfer_uL': stock_transfer_per_tube_uL * tube_count,
+            'total_water_transfer_uL': water_transfer_per_tube_uL * tube_count,
             'mix_cycles': MIX_CYCLES,
-            'water_source_policy': 'match_stock_temperature_module',
-            'destination_container': normalized_destination,
-            'destination_capacity_uL': capacity_uL
+            'water_source_policy': 'stock_temperature_module_selects_water',
+            'destination_labware': destination_labware,
+            'destination_container': destination_container,
+            'destination_capacity_uL': destination_capacity_uL,
+            'requires_runtime_destination_capacity_check': (
+                destination_capacity_uL is None
+            ),
+            'tube_plan': tube_plan,
         })
 
     manifest = {
         'schema_version': PREPARATION_SCHEMA_VERSION,
         'worksheet_name': PREPARATION_WORKSHEET_NAME,
-        'preparations': preparations
+        'execution_status': 'planning_only_pending_auto_main_group_protocol',
+        'preparations': preparations,
     }
     canonical_manifest = json.dumps(
         manifest,
@@ -275,12 +360,13 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
 
 
 def validate_manifest_source_names(manifest, available_source_names):
-    '''Fail closed unless every planned stock exists and no output collides.
+    '''Fail closed unless every planned stock exists and output names are unused.
 
-    The manifest intentionally uses the controller/Pi chemical-name format
-    (for example ``sodium_borohydrideC130.0``).  This pure check is performed
-    before a robot connection is created, so a misspelled source or a working
-    product that would overwrite an existing source cannot reach execution.
+    Physical group membership, source volume, water selection, destination
+    allocation, and runtime labware capacity are deliberately deferred to the
+    future Auto-main group protocol.  This pure check only establishes that
+    preparation cannot begin from a misspelled controller-side stock name or
+    overwrite an existing chemical name.
     '''
     if not isinstance(manifest, dict):
         raise AutoPreparationValidationError('preparation manifest must be a mapping.')

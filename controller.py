@@ -5133,9 +5133,7 @@ class AutoContr(Controller):
 
         try:
             manifest = build_preparation_manifest(
-                preparation_rows,
-                destination_container=self.dilution_params.cont,
-                destination_capacity_uL=self.dilution_params.vol
+                preparation_rows
             )
             if not manifest['preparations']:
                 raise AutoPreparationValidationError(
@@ -5154,9 +5152,15 @@ class AutoContr(Controller):
 
         self.auto_preparation_manifest = manifest
         print(
-            '<<controller>> validated {} Auto preparation request(s) from '
-            '{} (manifest {}).'.format(
+            '<<controller>> validated {} Auto preparation group(s) / {} '
+            'working tube(s) from {} (manifest {}). Physical preparation is '
+            'not enabled until the Auto-main group protocol is installed.'
+            .format(
                 len(manifest['preparations']),
+                sum(
+                    preparation['tube_count']
+                    for preparation in manifest['preparations']
+                ),
                 PREPARATION_WORKSHEET_NAME,
                 manifest['manifest_sha256'][:12]
             )
@@ -5403,68 +5407,30 @@ class AutoContr(Controller):
                 del self._cached_reader_locs[source_name]
 
     def _execute_auto_preparation_phase(self, model, simulate):
-        '''Runs required preparations once, before any Auto seed/batch recipe.
+        '''Fail closed until the grouped Auto-main preparation protocol exists.
 
-        Local preflight simulation intentionally does not create a working
-        source or mutate controller/model bounds. The real run performs the
-        same already-validated manifest after its Auto-main compatibility
-        handshake, making a physical preparation an explicit, journaled phase
-        rather than a hidden consequence of a conversion error.
+        The prior implementation created exactly one destination source per
+        request, which cannot represent the approved grouped working-tube
+        design.  Keeping that behavior reachable would risk an apparently
+        successful but incomplete preparation.  Stage 9A therefore validates
+        and journals the requested chemistry only; Stage 9B will replace this
+        guard with the versioned Auto-main group-reservation/execution flow.
         '''
         manifest = self.auto_preparation_manifest
         if manifest is None or self.auto_preparation_completed:
             return False
         if simulate:
             print(
-                '<<controller>> Auto preparation execution deferred during '
-                'local preflight simulation; the validated manifest will run '
-                'once before the real Auto batch.'
+                '<<controller>> grouped Auto preparation is planning-only '
+                'during this stage; local preflight will not execute it.'
             )
             return False
-
-        self._record_auto_live_run_event(
-            'auto_preparation_started',
-            {
-                'manifest_sha256': manifest['manifest_sha256'],
-                'preparations': copy.deepcopy(manifest['preparations'])
-            }
+        raise RuntimeError(
+            'auto_preparation_mode=required has a valid grouped preparation '
+            'manifest, but physical execution is intentionally unavailable '
+            'until the required Auto-main group-reservation protocol is '
+            'installed. Set auto_preparation_mode=off for this run.'
         )
-        print(
-            '<<controller>> executing {} required Auto preparation(s) before '
-            'seed/optimizer batches.'.format(len(manifest['preparations']))
-        )
-        for preparation in manifest['preparations']:
-            print(
-                '<<controller>> preparing {working_chemical_name}: '
-                '{water_transfer_uL:.4g} uL water + '
-                '{stock_transfer_uL:.4g} uL {stock_chemical_name}.'.format(
-                    **preparation
-                )
-            )
-            self._execute_auto_preparation_entry(preparation)
-
-        self._activate_auto_prepared_sources(
-            model,
-            manifest['preparations']
-        )
-        self.auto_preparation_completed = True
-        self._record_auto_live_run_event(
-            'auto_preparation_completed',
-            {
-                'manifest_sha256': manifest['manifest_sha256'],
-                'prepared_source_names': copy.deepcopy(
-                    self.auto_prepared_source_names
-                ),
-                'controller_runtime_sources': json.loads(
-                    self.robo_params['reagent_df'].to_json(orient='split')
-                )
-            }
-        )
-        print(
-            '<<controller>> Auto preparation completed and working sources '
-            'are active for recipe generation.'
-        )
-        return True
 
     def _validate_auto_main_robot_state_snapshot(self, snapshot):
         '''
@@ -29392,12 +29358,6 @@ class AutoContr(Controller):
         
 
         self._update_cached_locs('all')
-        # A completed Stage 9B preparation leaves the physical stock on the
-        # Pi, but future Auto recipes must use the working source whose
-        # concentration defined the refreshed GP bounds. Remove only those
-        # consumed-stock cache aliases before normal conversion chooses a
-        # container; Water and every unrelated source remain untouched.
-        self._apply_auto_prepared_source_cache_policy()
         def build_product_rows(row):
             '''
             params:  

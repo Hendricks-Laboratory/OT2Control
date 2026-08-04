@@ -1,4 +1,4 @@
-'''Source-level Stage 9B contract checks without importing hardware modules.'''
+'''Source-level Stage 9A checks without importing hardware modules.'''
 
 import ast
 import os
@@ -10,7 +10,7 @@ CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
 
 
 class AutoPreparationControllerContractTests(unittest.TestCase):
-    '''Guard the placement and fail-closed boundaries of Stage 9B wiring.'''
+    '''Guard Stage 9A's planning-only, fail-closed controller boundary.'''
 
     @classmethod
     def setUpClass(cls):
@@ -27,58 +27,46 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef)
         }
 
-    def test_required_stage_9b_methods_exist_once(self):
+    def test_planning_and_phase_methods_exist_once(self):
         for method_name in (
             '_initialize_auto_preparation_plan',
-            '_execute_auto_preparation_entry',
-            '_activate_auto_prepared_sources',
-            '_apply_auto_prepared_source_cache_policy',
             '_execute_auto_preparation_phase'
         ):
             self.assertIn(method_name, self.auto_methods)
             self.assertEqual(
                 sum(
-                    1
-                    for node in self.auto_class.body
-                    if (
-                        isinstance(node, ast.FunctionDef)
-                        and node.name == method_name
-                    )
+                    1 for node in self.auto_class.body
+                    if isinstance(node, ast.FunctionDef) and node.name == method_name
                 ),
                 1
             )
 
-    def test_execution_is_before_seed_generation_and_after_connection(self):
-        run_method = self.auto_methods['_run']
-        run_source = ast.get_source_segment(self.source, run_method)
+    def test_planning_runs_before_connection_and_seed_generation(self):
+        initialization = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_preparation_plan']
+        )
+        run_method = ast.get_source_segment(self.source, self.auto_methods['_run'])
+        self.assertIn('build_preparation_manifest(', initialization)
         self.assertLess(
-            run_source.index('self.create_connection('),
-            run_source.index('self._execute_auto_preparation_phase(')
+            run_method.index('self.create_connection('),
+            run_method.index('self._execute_auto_preparation_phase(')
         )
         self.assertLess(
-            run_source.index('self._execute_auto_preparation_phase('),
-            run_source.index('model.generate_initial_design(')
-        )
-
-    def test_working_source_cache_policy_precedes_volume_conversion(self):
-        build_method = self.auto_methods['_build_rxn_df']
-        build_source = ast.get_source_segment(self.source, build_method)
-        self.assertLess(
-            build_source.index('self._apply_auto_prepared_source_cache_policy()'),
-            build_source.index('self._convert_conc_to_vol(')
+            run_method.index('self._execute_auto_preparation_phase('),
+            run_method.index('model.generate_initial_design(')
         )
 
-    def test_local_preflight_does_not_physically_prepare_or_mutate_bounds(self):
+    def test_phase_is_planning_only_and_cannot_issue_old_one_tube_execution(self):
         phase_source = ast.get_source_segment(
             self.source,
             self.auto_methods['_execute_auto_preparation_phase']
         )
-        simulated_branch = phase_source.split('if simulate:', 1)[1].split(
-            "self._record_auto_live_run_event(", 1
-        )[0]
-        self.assertIn('deferred during', simulated_branch)
-        self.assertNotIn('_execute_auto_preparation_entry', simulated_branch)
-        self.assertNotIn('_activate_auto_prepared_sources', simulated_branch)
+        self.assertIn('planning-only', phase_source)
+        self.assertIn('Auto-main group-reservation protocol', phase_source)
+        self.assertNotIn('_execute_auto_preparation_entry(', phase_source)
+        self.assertNotIn('_activate_auto_prepared_sources(', phase_source)
+        self.assertNotIn('execute_protocol_df(', phase_source)
 
 
 if __name__ == '__main__':

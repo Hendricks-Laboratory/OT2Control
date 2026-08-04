@@ -1,7 +1,7 @@
-'''Pure unit tests for the Stage 9A Auto-preparation manifest contract.'''
+'''Pure unit tests for grouped Auto working-solution preparation planning.'''
 
-import unittest
 import math
+import unittest
 
 from auto_preparation import (
     AutoPreparationValidationError,
@@ -11,28 +11,29 @@ from auto_preparation import (
 
 
 class AutoPreparationManifestTests(unittest.TestCase):
-    '''Validate planned C1V1=C2V2 preparations without controller imports.'''
+    '''Validate grouped C1V1=C2V2 planning without controller imports.'''
 
     @staticmethod
     def _valid_row():
         return {
             'enabled': 'yes',
-            'stock_reagent': 'sodium borohydride',
+            'stock_source_group': 'sodium borohydride',
             'stock_concentration_mM': 130,
             'working_concentration_mM': 6.25,
-            'final_volume_uL': 1000
+            'tube_count': 10,
+            'final_volume_per_tube_uL': 1200,
+            'destination_labware': 'temp_mod_24_tube',
+            'destination_container': 'Tube2000uL'
         }
 
-    def test_manifest_matches_existing_dilution_equation_and_naming(self):
-        manifest = build_preparation_manifest(
-            [self._valid_row()],
-            destination_container='Tube2000uL',
-            destination_capacity_uL=1500
-        )
+    def test_manifest_has_per_tube_and_group_totals(self):
+        manifest = build_preparation_manifest([self._valid_row()])
 
-        self.assertEqual(manifest['schema_version'], 1)
-        self.assertEqual(manifest['worksheet_name'], 'auto_preparation')
-        self.assertEqual(len(manifest['preparations']), 1)
+        self.assertEqual(manifest['schema_version'], 2)
+        self.assertEqual(
+            manifest['execution_status'],
+            'planning_only_pending_auto_main_group_protocol'
+        )
         preparation = manifest['preparations'][0]
         self.assertEqual(
             preparation['stock_chemical_name'],
@@ -42,107 +43,91 @@ class AutoPreparationManifestTests(unittest.TestCase):
             preparation['working_chemical_name'],
             'sodium_borohydrideC6.25'
         )
-        self.assertAlmostEqual(preparation['stock_transfer_uL'], 48.0769230769)
-        self.assertAlmostEqual(preparation['water_transfer_uL'], 951.9230769231)
-        self.assertEqual(preparation['mix_cycles'], 2)
+        self.assertEqual(preparation['tube_count'], 10)
+        self.assertEqual(len(preparation['tube_plan']), 10)
+        self.assertAlmostEqual(
+            preparation['stock_transfer_per_tube_uL'],
+            57.6923076923
+        )
+        self.assertAlmostEqual(
+            preparation['water_transfer_per_tube_uL'],
+            1142.3076923077
+        )
+        self.assertAlmostEqual(preparation['total_final_volume_uL'], 12000)
+        self.assertAlmostEqual(preparation['total_stock_transfer_uL'], 576.923076923)
+        self.assertAlmostEqual(preparation['total_water_transfer_uL'], 11423.076923077)
         self.assertEqual(
             preparation['water_source_policy'],
-            'match_stock_temperature_module'
+            'stock_temperature_module_selects_water'
+        )
+        self.assertTrue(
+            preparation['requires_runtime_destination_capacity_check']
         )
         self.assertTrue(manifest['manifest_sha256'])
 
-    def test_disabled_rows_do_not_create_preparations(self):
-        row = self._valid_row()
-        row['enabled'] = 'off'
-        manifest = build_preparation_manifest(
-            [row],
-            destination_container='Tube2000uL',
-            destination_capacity_uL=1500
-        )
+    def test_capacity_resolver_can_reject_an_impossible_per_tube_volume(self):
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'exceeding the Tube2000uL capacity'
+        ):
+            build_preparation_manifest(
+                [self._valid_row()],
+                destination_capacity_resolver={'Tube2000uL': 1000}
+            )
+
+    def test_disabled_and_blank_rows_are_inert(self):
+        disabled = self._valid_row()
+        disabled['enabled'] = 'off'
+        blank = self._valid_row()
+        blank['enabled'] = float('nan')
+        manifest = build_preparation_manifest([disabled, blank])
+        self.assertTrue(math.isnan(blank['enabled']))
         self.assertEqual(manifest['preparations'], [])
 
-    def test_blank_spreadsheet_enabled_cell_is_skipped(self):
-        row = self._valid_row()
-        row['enabled'] = float('nan')
-        manifest = build_preparation_manifest(
-            [row],
-            destination_container='Tube2000uL',
-            destination_capacity_uL=1500
-        )
-        self.assertTrue(math.isnan(row['enabled']))
-        self.assertEqual(manifest['preparations'], [])
-
-    def test_rejects_non_dilution_capacity_and_non_executable_requests(self):
+    def test_rejects_invalid_dilution_count_and_transfer_size(self):
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
             'below the stock concentration'
         ):
             row = self._valid_row()
             row['working_concentration_mM'] = 130
-            build_preparation_manifest([row], 'Tube2000uL', 1500)
+            build_preparation_manifest([row])
 
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
-            'exceeding the configured'
+            'whole number'
         ):
             row = self._valid_row()
-            row['final_volume_uL'] = 1600
-            build_preparation_manifest([row], 'Tube2000uL', 1500)
+            row['tube_count'] = 1.5
+            build_preparation_manifest([row])
 
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
             'non-executable 0–5 uL'
         ):
             row = self._valid_row()
-            row['final_volume_uL'] = 100
+            row['final_volume_per_tube_uL'] = 100
             row['working_concentration_mM'] = 1
-            build_preparation_manifest([row], 'Tube2000uL', 1500)
+            build_preparation_manifest([row])
 
-    def test_rejects_ambiguous_duplicate_working_sources(self):
+    def test_rejects_duplicate_source_group(self):
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
-            'only one prepared working concentration'
+            'more than one enabled row for stock source group'
         ):
-            build_preparation_manifest(
-                [self._valid_row(), self._valid_row()],
-                'Tube2000uL',
-                1500
-            )
+            build_preparation_manifest([self._valid_row(), self._valid_row()])
 
-    def test_rejects_multiple_working_concentrations_for_one_reagent(self):
-        second_row = self._valid_row()
-        second_row['working_concentration_mM'] = 3.125
-        with self.assertRaisesRegex(
-            AutoPreparationValidationError,
-            'only one prepared working concentration'
-        ):
-            build_preparation_manifest(
-                [self._valid_row(), second_row],
-                'Tube2000uL',
-                1500
-            )
-
-    def test_source_name_validation_is_exact_and_refuses_collisions(self):
-        manifest = build_preparation_manifest(
-            [self._valid_row()],
-            destination_container='Tube2000uL',
-            destination_capacity_uL=1500
-        )
+    def test_source_name_validation_refuses_unknown_or_colliding_names(self):
+        manifest = build_preparation_manifest([self._valid_row()])
         validate_manifest_source_names(
             manifest,
             ['sodium_borohydrideC130.0', 'WaterC1.0']
         )
 
-        with self.assertRaisesRegex(
-            AutoPreparationValidationError,
-            'not present'
-        ):
+        with self.assertRaisesRegex(AutoPreparationValidationError, 'not present'):
             validate_manifest_source_names(manifest, ['WaterC1.0'])
 
-        with self.assertRaisesRegex(
-            AutoPreparationValidationError,
-            'already exists'
-        ):
+        with self.assertRaisesRegex(AutoPreparationValidationError, 'already exists'):
             validate_manifest_source_names(
                 manifest,
                 ['sodium_borohydrideC130.0', 'sodium_borohydrideC6.25']
