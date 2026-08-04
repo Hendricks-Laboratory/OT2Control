@@ -1049,7 +1049,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v5'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v6'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -2783,6 +2783,283 @@ class OT2Robot():
             response['message'] = str(exc)
         return response
 
+    def _validate_auto_preparation_reservation_request(self, request):
+        '''Validates a non-mutating grouped working-solution reservation request.
+
+        Stage 9B intentionally reserves *only* empty destination locations in
+        a copied view of the deck.  It neither creates containers nor consumes
+        stock, water, tips, or protocol state.  Stage 9C will use this exact
+        contract as the authority to execute water, stock, and mixing.
+        '''
+        required = {
+            'schema_version', 'action_id', 'manifest_sha256',
+            'expected_source_inventory_revision', 'preparations'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('preparation reservation request has an invalid schema.')
+        if request['schema_version'] != 1:
+            raise ValueError('preparation reservation uses an unsupported schema.')
+        if not isinstance(request['action_id'], str) or not request['action_id'].strip():
+            raise ValueError('preparation reservation action_id must be nonempty.')
+        manifest_hash = request['manifest_sha256']
+        if (
+                not isinstance(manifest_hash, str)
+                or len(manifest_hash) != 64
+                or any(character not in '0123456789abcdef' for character in manifest_hash)
+        ):
+            raise ValueError('preparation reservation manifest_sha256 is invalid.')
+        revision = request['expected_source_inventory_revision']
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise ValueError('preparation reservation source revision is invalid.')
+        preparations = request['preparations']
+        if not isinstance(preparations, list) or not preparations:
+            raise ValueError('preparation reservation requires one or more groups.')
+
+        required_preparation_keys = {
+            'row_number', 'stock_chemical_name', 'working_chemical_name',
+            'tube_count', 'final_volume_per_tube_uL',
+            'stock_transfer_per_tube_uL', 'water_transfer_per_tube_uL',
+            'total_stock_transfer_uL', 'total_water_transfer_uL',
+            'destination_labware', 'destination_container'
+        }
+        normalized = []
+        source_names = set()
+        working_names = set()
+        for preparation in preparations:
+            if not isinstance(preparation, dict) or set(preparation) != required_preparation_keys:
+                raise ValueError('preparation reservation group has an invalid schema.')
+            for field_name in (
+                    'stock_chemical_name', 'working_chemical_name',
+                    'destination_labware', 'destination_container'):
+                if not isinstance(preparation[field_name], str) or not preparation[field_name].strip():
+                    raise ValueError('preparation reservation {} is invalid.'.format(field_name))
+            row_number = preparation['row_number']
+            tube_count = preparation['tube_count']
+            if isinstance(row_number, bool) or not isinstance(row_number, int) or row_number < 2:
+                raise ValueError('preparation reservation row_number is invalid.')
+            if isinstance(tube_count, bool) or not isinstance(tube_count, int) or tube_count < 1:
+                raise ValueError('preparation reservation tube_count is invalid.')
+            numeric = {}
+            for field_name in (
+                    'final_volume_per_tube_uL', 'stock_transfer_per_tube_uL',
+                    'water_transfer_per_tube_uL', 'total_stock_transfer_uL',
+                    'total_water_transfer_uL'):
+                numeric[field_name] = self._preflight_number(
+                    preparation[field_name],
+                    'preparation reservation {}'.format(field_name),
+                    minimum=0.0
+                )
+            if numeric['final_volume_per_tube_uL'] <= 0:
+                raise ValueError('preparation reservation final volume must be positive.')
+            if numeric['stock_transfer_per_tube_uL'] <= 0 or numeric['water_transfer_per_tube_uL'] <= 0:
+                raise ValueError('preparation reservation transfers must be positive.')
+            if abs(
+                    numeric['stock_transfer_per_tube_uL']
+                    + numeric['water_transfer_per_tube_uL']
+                    - numeric['final_volume_per_tube_uL']) > 1e-6:
+                raise ValueError('preparation reservation per-tube volume balance is invalid.')
+            if abs(
+                    numeric['total_stock_transfer_uL']
+                    - tube_count * numeric['stock_transfer_per_tube_uL']) > 1e-6:
+                raise ValueError('preparation reservation stock total is invalid.')
+            if abs(
+                    numeric['total_water_transfer_uL']
+                    - tube_count * numeric['water_transfer_per_tube_uL']) > 1e-6:
+                raise ValueError('preparation reservation water total is invalid.')
+            source_name = preparation['stock_chemical_name']
+            working_name = preparation['working_chemical_name']
+            if source_name in source_names or working_name in working_names:
+                raise ValueError('preparation reservation contains duplicate source groups.')
+            source_names.add(source_name)
+            working_names.add(working_name)
+            normalized_preparation = copy.deepcopy(preparation)
+            normalized_preparation.update(numeric)
+            normalized.append(normalized_preparation)
+
+        normalized_request = copy.deepcopy(request)
+        normalized_request['preparations'] = normalized
+        return normalized_request
+
+    def _auto_preparation_destination_candidates(
+            self, destination_labware, destination_container, final_volume_uL,
+            already_reserved):
+        '''Returns free, correctly sized tube locations without mutating deck state.'''
+        candidates = []
+        viable_labware = []
+        for viable in self.lab_deck:
+            if viable is None:
+                continue
+            labware_ok = (
+                viable.name == destination_labware
+                or destination_labware in self._LABWARE_TYPES[viable.name]['groups']
+            )
+            container_ok = destination_container in viable.CONTAINERS_SERVICED
+            if labware_ok and container_ok and hasattr(viable, 'empty_tubes'):
+                viable_labware.append(viable)
+        viable_labware.sort(
+            key=lambda item: self._exec_init_containers.priority[item.name]
+        )
+        for viable in viable_labware:
+            # ``pop_next_well`` uses ``list.pop()``, so reverse this copied
+            # sequence to predict the same allocation order without consuming
+            # any real empty-tube entries.
+            empty_locations = list(
+                viable.empty_tubes.get(destination_container, [])
+            )
+            for location in reversed(empty_locations):
+                location_key = (int(viable.deck_pos), str(location))
+                if location_key in already_reserved:
+                    continue
+                container_type = viable.get_container_type(location)
+                capacity_uL = self._preflight_number(
+                    viable.labware.wells_by_name()[location]._geometry._max_volume,
+                    'destination capacity',
+                    minimum=1e-12
+                )
+                # Live container construction uses a strict less-than capacity
+                # check.  Match that safe rule here rather than claiming that
+                # a brim-full tube is reservable.
+                if final_volume_uL < capacity_uL:
+                    candidates.append({
+                        'loc': str(location),
+                        'deck_pos': int(viable.deck_pos),
+                        'labware': str(viable.name),
+                        'container': str(container_type),
+                        'max_volume_uL': capacity_uL,
+                        'final_volume_uL': final_volume_uL
+                    })
+        return candidates
+
+    def _build_auto_preparation_group_reservation(self, request):
+        '''Checks grouped preparation inputs and reserves no live robot state.
+
+        The returned locations are advisory until Stage 9C executes and
+        registers the new containers.  This request does not change empty-tube
+        lists, source volumes, tip state, or inventory revisions.
+        '''
+        response = {
+            'schema_version': 1,
+            'record_type': 'auto_preparation_groups_reserved',
+            'action_id': None,
+            'manifest_sha256': None,
+            'accepted': False,
+            'message': '',
+            'source_inventory_revision': int(
+                getattr(self, 'source_inventory_revision', 0)
+            ),
+            'preparations': [],
+            'deficits': []
+        }
+        try:
+            normalized = self._validate_auto_preparation_reservation_request(
+                request
+            )
+            response['action_id'] = normalized['action_id']
+            response['manifest_sha256'] = normalized['manifest_sha256']
+            if normalized['expected_source_inventory_revision'] != self.source_inventory_revision:
+                raise ValueError(
+                    'source inventory changed; retry preparation reservation.'
+                )
+
+            already_reserved = set()
+            reservations = []
+            for preparation in normalized['preparations']:
+                source_name = preparation['stock_chemical_name']
+                if preparation['working_chemical_name'] in self.containers:
+                    raise ValueError(
+                        'working source {} already exists; refusing to overwrite it.'
+                        .format(preparation['working_chemical_name'])
+                    )
+                descriptors, active_index = self._get_preflight_source_containers(
+                    source_name
+                )
+                source_container = self.containers[source_name]
+                active_container = (
+                    source_container.cont_list[active_index]
+                    if hasattr(source_container, 'cont_list')
+                    else source_container
+                )
+                stock_is_cold = (
+                    getattr(getattr(active_container, 'labware', None), 'name', None)
+                    == 'temp_mod_24_tube'
+                )
+                water_name = 'ColdWaterC1.0' if stock_is_cold else 'WaterC1.0'
+                if water_name not in self.containers:
+                    raise ValueError(
+                        'required {} source is not registered on the Pi.'
+                        .format(water_name)
+                    )
+
+                candidates = self._auto_preparation_destination_candidates(
+                    preparation['destination_labware'],
+                    preparation['destination_container'],
+                    preparation['final_volume_per_tube_uL'],
+                    already_reserved
+                )
+                if len(candidates) < preparation['tube_count']:
+                    raise ValueError(
+                        'only {} empty {} destination tube(s) are available; '
+                        '{} are required.'.format(
+                            len(candidates),
+                            preparation['destination_container'],
+                            preparation['tube_count']
+                        )
+                    )
+                destination_tubes = candidates[:preparation['tube_count']]
+                for tube in destination_tubes:
+                    already_reserved.add((tube['deck_pos'], tube['loc']))
+
+                # Simulate stock availability using the Pi's same whole-
+                # aspiration source-switching rule.  No volume is consumed.
+                stock_plan = self._simulate_preflight_source({
+                    'source_chemical_name': source_name,
+                    'transfer_steps': [{
+                        'destination_name': preparation['working_chemical_name'],
+                        'volume_uL': preparation['total_stock_transfer_uL']
+                    }]
+                }, 0.0)
+                if stock_plan['deficits']:
+                    raise ValueError(stock_plan['deficits'][0]['message'])
+
+                water_plan = self._simulate_preflight_source({
+                    'source_chemical_name': water_name,
+                    'transfer_steps': [{
+                        'destination_name': preparation['working_chemical_name'],
+                        'volume_uL': preparation['total_water_transfer_uL']
+                    }]
+                }, 0.0)
+                if water_plan['deficits']:
+                    raise ValueError(water_plan['deficits'][0]['message'])
+
+                reservations.append({
+                    'row_number': preparation['row_number'],
+                    'stock_chemical_name': source_name,
+                    'working_chemical_name': preparation['working_chemical_name'],
+                    'stock_source_containers': descriptors,
+                    'stock_source_active_container_index': active_index,
+                    'stock_uses_temperature_module': stock_is_cold,
+                    'water_chemical_name': water_name,
+                    'destination_tubes': destination_tubes,
+                    'stock_preflight': stock_plan['source_containers'],
+                    'water_preflight': water_plan['source_containers']
+                })
+            response.update({
+                'accepted': True,
+                'message': (
+                    'grouped preparation destinations reserved in a copied '
+                    'deck view; no liquid, tips, containers, or revisions '
+                    'were changed.'
+                ),
+                'preparations': reservations
+            })
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+            response['deficits'] = [{
+                'deficit_type': 'auto_preparation_reservation',
+                'message': str(exc)
+            }]
+        return response
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -2801,7 +3078,8 @@ class OT2Robot():
                 'preflight_transfer_plan',
                 'refresh_source_container_mass',
                 'reset_pipette_tip_racks',
-                'register_auto_plate_generation'
+                'register_auto_plate_generation',
+                'reserve_auto_preparation_groups'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -2857,6 +3135,14 @@ class OT2Robot():
         self.portal.send_pack(
             'auto_plate_generation_registered',
             self._build_auto_plate_generation_registration(request)
+        )
+
+    @exec_func('reserve_auto_preparation_groups', 1, False, exec_funcs)
+    def _exec_reserve_auto_preparation_groups(self, request):
+        '''Returns a read-only grouped working-tube reservation record.'''
+        self.portal.send_pack(
+            'auto_preparation_groups_reserved',
+            self._build_auto_preparation_group_reservation(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)
