@@ -27878,9 +27878,15 @@ class AutoContr(Controller):
                 "or reducing replicates."
             )
 
-            confirm = input("Continue anyway? [yn] ").lower()
+            # Use the same explicit acknowledgement convention as the
+            # recoverable plate-capacity warning.  An empty Enter must not be
+            # mistaken for consent to start a run that may exhaust tips.
+            confirm = input(
+                '<<controller>> Type y or yes to acknowledge this possible '
+                'pipette-tip shortage and continue: '
+            ).strip().lower()
 
-            if confirm != 'y':
+            if confirm not in ('y', 'yes'):
                 raise RuntimeError(
                     "Auto run stopped because configured pipette tip capacity was not confirmed."
                 )

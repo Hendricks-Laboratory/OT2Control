@@ -2746,6 +2746,45 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
                 )
 
 
+class AutoPipetteTipCapacityWarningTests(unittest.TestCase):
+    '''Checks the pre-run tip warning uses the shared explicit consent rule.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_check_auto_pipette_tip_capacity'
+        ])
+
+    def _build_controller(self):
+        controller = self.AutoController()
+        controller._estimate_max_auto_pipette_tips_needed = lambda unused: {
+            20.0: 2,
+            300.0: 0
+        }
+        controller._count_available_pipette_tips_by_size = lambda: {
+            20.0: 1,
+            300.0: 96
+        }
+        return controller
+
+    def test_tip_warning_accepts_yes_and_rejects_blank_enter(self):
+        '''Both pre-run capacity warnings require the same positive consent.'''
+        controller = self._build_controller()
+
+        with patch('builtins.input', return_value='yes'):
+            with redirect_stdout(io.StringIO()) as output:
+                controller._check_auto_pipette_tip_capacity(None)
+
+        self.assertIn(
+            'Auto pipette tip capacity warning accepted',
+            output.getvalue()
+        )
+
+        with patch('builtins.input', return_value=''):
+            with self.assertRaisesRegex(RuntimeError, 'not confirmed'):
+                controller._check_auto_pipette_tip_capacity(None)
+
+
 class AutoMainTransferPlanPreflightTests(unittest.TestCase):
     '''Pure controller tests for the Stage 4 Pi resource authority.'''
 
