@@ -2631,8 +2631,11 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             lambda *args, **kwargs: events.append((args, kwargs))
         )
 
-        with redirect_stdout(io.StringIO()):
+        terminal_output = io.StringIO()
+        with redirect_stdout(terminal_output):
             controller._ensure_auto_plate_capacity_for_batch(1)
+
+        rendered_hold = terminal_output.getvalue()
 
         self.assertEqual(1, controller.auto_plate_generation)
         self.assertEqual('A1', controller.auto_plate_next_well)
@@ -2667,6 +2670,13 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             args[1]['hold_action_id'] == held_args[2]['hold_action_id']
             for args, unused_kwargs in events
         ))
+        self.assertIn('AUTO PLATE REPLACEMENT HOLD', rendered_hold)
+        self.assertIn('Permitted actions: replace_wellplate or end_run.', rendered_hold)
+        self.assertIn('Replacement start received: A1.', rendered_hold)
+        self.assertIn(
+            'Confirm that the identical unused plate is installed',
+            rendered_hold
+        )
 
     def test_plate_replacement_end_run_finalizes_durable_hold(self):
         '''An operator end is auditable and cannot resume the held batch.'''

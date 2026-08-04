@@ -27468,14 +27468,39 @@ class AutoContr(Controller):
             active_batch_number=int(getattr(self, 'batch_num', 0)),
             hold_action_id=hold_action_id
         )
-        print('\n<<controller>> AUTO PLATE REPLACEMENT REQUIRED')
-        print('<<controller>> Batch {} needs {} wells; only {} remain on plate generation {}.'.format(
-            getattr(self, 'batch_num', 0), count, available,
-            self.auto_plate_generation
-        ))
-        print('<<controller>> Replace the plate with an identical empty plate. No liquid-handling command has been sent for this batch.')
+        # Match the durable source- and tip-recovery holds.  Live-workbook
+        # refresh notices can be emitted after an entered response, so group
+        # every operator instruction inside a readable banner and print a
+        # fresh confirmation section after the first journaled response.
+        print('\n' + '=' * 72)
+        print('<<controller>> AUTO PLATE REPLACEMENT HOLD')
+        print('=' * 72)
+        print(
+            '<<controller>> Batch {} is held before liquid handling. The '
+            'recipe and destination wells are unchanged.'.format(
+                getattr(self, 'batch_num', 0)
+            )
+        )
+        print(
+            '<<controller>> Plate generation {} has {} remaining well(s) '
+            'from {}. This batch requires {} well(s).'.format(
+                self.auto_plate_generation,
+                available,
+                self.auto_plate_next_well or 'a full plate',
+                count
+            )
+        )
+        print(
+            '<<controller>> Install an identical unused plate. No '
+            'liquid-handling command has been sent for this batch.'
+        )
+        print(
+            '<<controller>> Permitted actions: replace_wellplate or '
+            'end_run.'
+        )
+        print('=' * 72)
         next_well = self._get_auto_preflight_hold_input(
-            '<<controller>> Enter the new plate starting well (A1-H12), or END to stop: '
+            'Enter the new plate starting well (A1-H12), or END to stop: '
         )
         if str(next_well).strip().upper() == 'END':
             self._record_auto_live_run_transition(
@@ -27500,8 +27525,18 @@ class AutoContr(Controller):
                 'plate_cursor_request': copy.deepcopy(request)
             }
         )
+        # The event above refreshes the local Live workbook.  Place the
+        # safety confirmation below any resulting lifecycle output rather
+        # than allowing it to appear visually attached to the prior prompt.
+        print('\n<<controller>> Replacement start received: {}.'.format(
+            request['start_well']
+        ))
+        print(
+            '<<controller>> Confirm that the identical unused plate is '
+            'installed before registering its cursor.'
+        )
         confirmation = self._get_auto_preflight_hold_input(
-            '<<controller>> Type REPLACE to register the new plate cursor: '
+            'Type REPLACE to register the new plate cursor: '
         )
         if str(confirmation).strip().upper() != 'REPLACE':
             self._record_auto_live_run_event(
