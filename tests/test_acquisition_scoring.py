@@ -2369,12 +2369,15 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.AutoController = _load_auto_controller_methods([
             '_validate_auto_main_robot_state_snapshot',
-            '_request_auto_main_robot_state_snapshot'
+            '_request_auto_main_robot_state_snapshot',
+            '_build_auto_preparation_reservation_request',
+            '_validate_auto_preparation_group_reservation',
+            '_request_auto_preparation_group_reservation'
         ])
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v5'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v6'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2390,7 +2393,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v5',
+            'protocol_version': 'auto-main-state-v6',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
@@ -2402,7 +2405,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 'preflight_transfer_plan',
                 'refresh_source_container_mass',
                 'reset_pipette_tip_racks',
-                'register_auto_plate_generation'
+                'register_auto_plate_generation',
+                'reserve_auto_preparation_groups'
             ],
             'source_inventory_revision': 0,
             'tip_inventory_revision': 0,
@@ -2488,6 +2492,128 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'robot_state_snapshot'):
             controller._request_auto_main_robot_state_snapshot()
 
+    def _preparation_manifest(self):
+        return {
+            'manifest_sha256': 'a' * 64,
+            'preparations': [{
+                'row_number': 2,
+                'stock_chemical_name': 'sodium_borohydrideC130.0',
+                'working_chemical_name': 'sodium_borohydrideC6.25',
+                'tube_count': 2,
+                'final_volume_per_tube_uL': 1000.0,
+                'stock_transfer_per_tube_uL': 48.0769230769,
+                'water_transfer_per_tube_uL': 951.9230769231,
+                'total_stock_transfer_uL': 96.1538461538,
+                'total_water_transfer_uL': 1903.8461538462,
+                'destination_labware': 'temp_mod_24_tube',
+                'destination_container': 'Tube2000uL'
+            }]
+        }
+
+    def _valid_preparation_reservation(self, request):
+        return {
+            'schema_version': 1,
+            'record_type': 'auto_preparation_groups_reserved',
+            'action_id': request['action_id'],
+            'manifest_sha256': request['manifest_sha256'],
+            'accepted': True,
+            'message': 'read-only reservation passed',
+            'source_inventory_revision': request[
+                'expected_source_inventory_revision'
+            ],
+            'preparations': [{
+                'row_number': 2,
+                'stock_chemical_name': 'sodium_borohydrideC130.0',
+                'working_chemical_name': 'sodium_borohydrideC6.25',
+                'stock_source_containers': [{
+                    'container_index': 0,
+                    'loc': 'A1',
+                    'deck_pos': 3,
+                    'current_volume_uL': 1400.0,
+                    'dead_volume_uL': 250.0
+                }],
+                'stock_source_active_container_index': 0,
+                'stock_uses_temperature_module': True,
+                'water_chemical_name': 'ColdWaterC1.0',
+                'destination_tubes': [{
+                    'loc': 'A2',
+                    'deck_pos': 3,
+                    'labware': 'temp_mod_24_tube',
+                    'container': 'Tube2000uL',
+                    'max_volume_uL': 2000.0,
+                    'final_volume_uL': 1000.0
+                }, {
+                    'loc': 'A3',
+                    'deck_pos': 3,
+                    'labware': 'temp_mod_24_tube',
+                    'container': 'Tube2000uL',
+                    'max_volume_uL': 2000.0,
+                    'final_volume_uL': 1000.0
+                }],
+                'stock_preflight': [],
+                'water_preflight': []
+            }],
+            'deficits': []
+        }
+
+    def test_preparation_reservation_contract_rejects_stale_or_inconsistent_data(self):
+        controller = self._build_controller()
+        controller.auto_main_robot_state_snapshot = self._valid_snapshot()
+        request = controller._build_auto_preparation_reservation_request(
+            self._preparation_manifest()
+        )
+        result = self._valid_preparation_reservation(request)
+        accepted = controller._validate_auto_preparation_group_reservation(
+            result,
+            request
+        )
+        self.assertEqual(result, accepted)
+
+        stale = copy.deepcopy(result)
+        stale['source_inventory_revision'] += 1
+        with self.assertRaisesRegex(RuntimeError, 'source inventory changed'):
+            controller._validate_auto_preparation_group_reservation(stale, request)
+
+        wrong_water = copy.deepcopy(result)
+        wrong_water['preparations'][0]['water_chemical_name'] = 'WaterC1.0'
+        with self.assertRaisesRegex(RuntimeError, 'water inconsistently'):
+            controller._validate_auto_preparation_group_reservation(
+                wrong_water,
+                request
+            )
+
+    def test_preparation_reservation_request_uses_packet_contract(self):
+        controller = self._build_controller()
+        controller.auto_main_robot_state_snapshot = self._valid_snapshot()
+        request = controller._build_auto_preparation_reservation_request(
+            self._preparation_manifest()
+        )
+
+        class PortalStub:
+            def __init__(self, response):
+                self.response = response
+                self.sent = []
+
+            def send_pack(self, *args):
+                self.sent.append(args)
+
+            def recv_pack(self):
+                return self.response
+
+        controller.portal = PortalStub((
+            'auto_preparation_groups_reserved',
+            0,
+            (self._valid_preparation_reservation(request),)
+        ))
+        accepted = controller._request_auto_preparation_group_reservation(
+            request
+        )
+        self.assertTrue(accepted['accepted'])
+        self.assertEqual(
+            [('reserve_auto_preparation_groups', request)],
+            controller.portal.sent
+        )
+
     def test_protocol_packet_names_are_ghost_response_messages(self):
         source_tree = ast.parse(
             (REPOSITORY_ROOT / 'Armchair' / 'armchair.py').read_text()
@@ -2516,6 +2642,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertEqual(b'\x18', packet_types['pipette_tip_racks_reset'])
         self.assertEqual(b'\x19', packet_types['register_auto_plate_generation'])
         self.assertEqual(b'\x1A', packet_types['auto_plate_generation_registered'])
+        self.assertEqual(b'\x1B', packet_types['reserve_auto_preparation_groups'])
+        self.assertEqual(b'\x1C', packet_types['auto_preparation_groups_reserved'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -2526,6 +2654,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertIn('pipette_tip_racks_reset', ghost_types)
         self.assertIn('register_auto_plate_generation', ghost_types)
         self.assertIn('auto_plate_generation_registered', ghost_types)
+        self.assertIn('reserve_auto_preparation_groups', ghost_types)
+        self.assertIn('auto_preparation_groups_reserved', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')

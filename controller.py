@@ -5050,7 +5050,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v5'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v6'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5407,14 +5407,13 @@ class AutoContr(Controller):
                 del self._cached_reader_locs[source_name]
 
     def _execute_auto_preparation_phase(self, model, simulate):
-        '''Fail closed until the grouped Auto-main preparation protocol exists.
+        '''Reserve grouped preparation resources, then stop before execution.
 
-        The prior implementation created exactly one destination source per
-        request, which cannot represent the approved grouped working-tube
-        design.  Keeping that behavior reachable would risk an apparently
-        successful but incomplete preparation.  Stage 9A therefore validates
-        and journals the requested chemistry only; Stage 9B will replace this
-        guard with the versioned Auto-main group-reservation/execution flow.
+        Stage 9B verifies the requested stock group, runtime tube capacity,
+        empty destination locations, and cold-water policy on Auto-main.  It
+        deliberately does not move liquid, consume tips, allocate a live
+        container, or alter the Auto model.  Stage 9C alone may execute the
+        water/stock/mix protocol and activate completed working sources.
         '''
         manifest = self.auto_preparation_manifest
         if manifest is None or self.auto_preparation_completed:
@@ -5425,11 +5424,252 @@ class AutoContr(Controller):
                 'during this stage; local preflight will not execute it.'
             )
             return False
+        request = self._build_auto_preparation_reservation_request(manifest)
+        result = self._request_auto_preparation_group_reservation(request)
+        self._record_auto_live_run_event(
+            'auto_preparation_groups_reserved',
+            {
+                'request': request,
+                'result': result,
+                'physical_execution': 'not_started_stage_9b_only'
+            }
+        )
+        print(
+            '<<controller>> Auto-main validated {} grouped preparation '
+            'destination reservation(s); no liquid was moved.'
+            .format(len(result['preparations']))
+        )
         raise RuntimeError(
-            'auto_preparation_mode=required has a valid grouped preparation '
-            'manifest, but physical execution is intentionally unavailable '
-            'until the required Auto-main group-reservation protocol is '
-            'installed. Set auto_preparation_mode=off for this run.'
+            'auto_preparation_mode=required has a validated grouped '
+            'Auto-main reservation, but physical preparation is intentionally '
+            'unavailable until Stage 9C execution is installed. No liquid '
+            'was moved; set auto_preparation_mode=off for this run.'
+        )
+
+    def _build_auto_preparation_reservation_request(self, manifest):
+        '''Builds the strict, read-only Auto-main reservation request.'''
+        if not isinstance(manifest, dict):
+            raise RuntimeError('Auto preparation manifest is invalid.')
+        preparations = manifest.get('preparations')
+        manifest_hash = manifest.get('manifest_sha256')
+        snapshot = self.auto_main_robot_state_snapshot
+        if not isinstance(preparations, list) or not preparations:
+            raise RuntimeError('Auto preparation manifest has no groups to reserve.')
+        if not isinstance(manifest_hash, str) or len(manifest_hash) != 64:
+            raise RuntimeError('Auto preparation manifest hash is invalid.')
+        if not isinstance(snapshot, dict):
+            raise RuntimeError(
+                'Auto preparation requires a validated Auto-main state snapshot.'
+            )
+
+        request_preparation_keys = (
+            'row_number', 'stock_chemical_name', 'working_chemical_name',
+            'tube_count', 'final_volume_per_tube_uL',
+            'stock_transfer_per_tube_uL', 'water_transfer_per_tube_uL',
+            'total_stock_transfer_uL', 'total_water_transfer_uL',
+            'destination_labware', 'destination_container'
+        )
+        request_preparations = []
+        for preparation in preparations:
+            if not isinstance(preparation, dict):
+                raise RuntimeError('Auto preparation manifest group is invalid.')
+            try:
+                request_preparations.append({
+                    key: copy.deepcopy(preparation[key])
+                    for key in request_preparation_keys
+                })
+            except KeyError as exc:
+                raise RuntimeError(
+                    'Auto preparation manifest is missing {!r}.'.format(exc.args[0])
+                )
+        return {
+            'schema_version': 1,
+            'action_id': 'auto-preparation-reservation-{}'.format(
+                manifest_hash[:16]
+            ),
+            'manifest_sha256': manifest_hash,
+            'expected_source_inventory_revision': snapshot[
+                'source_inventory_revision'
+            ],
+            'preparations': request_preparations
+        }
+
+    def _validate_auto_preparation_group_reservation(self, result, request):
+        '''Reject malformed or stale Pi reservation records before Stage 9C.'''
+        required_keys = {
+            'schema_version', 'record_type', 'action_id', 'manifest_sha256',
+            'accepted', 'message', 'source_inventory_revision',
+            'preparations', 'deficits'
+        }
+        if not isinstance(result, dict) or set(result) != required_keys:
+            raise RuntimeError(
+                'Auto preparation reservation returned an invalid schema.'
+            )
+        if result['schema_version'] != 1 or result['record_type'] != \
+                'auto_preparation_groups_reserved':
+            raise RuntimeError(
+                'Auto preparation reservation returned an unsupported record.'
+            )
+        if result['action_id'] != request['action_id'] or \
+                result['manifest_sha256'] != request['manifest_sha256']:
+            raise RuntimeError(
+                'Auto preparation reservation does not match this manifest.'
+            )
+        if not isinstance(result['accepted'], bool) or \
+                not isinstance(result['message'], str):
+            raise RuntimeError(
+                'Auto preparation reservation returned an invalid decision.'
+            )
+        revision = result['source_inventory_revision']
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise RuntimeError(
+                'Auto preparation reservation returned an invalid source revision.'
+            )
+        if revision != request['expected_source_inventory_revision']:
+            raise RuntimeError(
+                'Auto preparation reservation source inventory changed; retry '
+                'the reservation before any preparation execution.'
+            )
+        if not isinstance(result['preparations'], list) or not isinstance(result['deficits'], list):
+            raise RuntimeError(
+                'Auto preparation reservation returned invalid group details.'
+            )
+        if not result['accepted']:
+            if not result['deficits']:
+                raise RuntimeError(
+                    'Auto preparation reservation was rejected without a deficit.'
+                )
+            raise RuntimeError(
+                'Auto preparation reservation was rejected: {}.'.format(
+                    result['message']
+                )
+            )
+        if result['deficits'] or len(result['preparations']) != len(request['preparations']):
+            raise RuntimeError(
+                'Auto preparation reservation approved an incomplete result.'
+            )
+
+        requested_by_working_name = {
+            preparation['working_chemical_name']: preparation
+            for preparation in request['preparations']
+        }
+        seen_working_names = set()
+        for reservation in result['preparations']:
+            required_reservation_keys = {
+                'row_number', 'stock_chemical_name', 'working_chemical_name',
+                'stock_source_containers',
+                'stock_source_active_container_index',
+                'stock_uses_temperature_module', 'water_chemical_name',
+                'destination_tubes', 'stock_preflight', 'water_preflight'
+            }
+            if not isinstance(reservation, dict) or set(reservation) != required_reservation_keys:
+                raise RuntimeError(
+                    'Auto preparation reservation group has an invalid schema.'
+                )
+            working_name = reservation['working_chemical_name']
+            requested = requested_by_working_name.get(working_name)
+            if requested is None or working_name in seen_working_names:
+                raise RuntimeError(
+                    'Auto preparation reservation returned an unexpected group.'
+                )
+            seen_working_names.add(working_name)
+            if (
+                    reservation['row_number'] != requested['row_number']
+                    or reservation['stock_chemical_name'] != requested['stock_chemical_name']
+                    or not isinstance(reservation['stock_uses_temperature_module'], bool)
+                    or reservation['water_chemical_name'] not in ('WaterC1.0', 'ColdWaterC1.0')
+            ):
+                raise RuntimeError(
+                    'Auto preparation reservation group metadata is invalid.'
+                )
+            expected_water = (
+                'ColdWaterC1.0'
+                if reservation['stock_uses_temperature_module']
+                else 'WaterC1.0'
+            )
+            if reservation['water_chemical_name'] != expected_water:
+                raise RuntimeError(
+                    'Auto preparation reservation selected water inconsistently '
+                    'with the stock temperature-module placement.'
+                )
+            if not isinstance(reservation['stock_source_containers'], list) or \
+                    not reservation['stock_source_containers'] or \
+                    not isinstance(reservation['stock_preflight'], list) or \
+                    not isinstance(reservation['water_preflight'], list):
+                raise RuntimeError(
+                    'Auto preparation reservation source details are invalid.'
+                )
+            active_index = reservation['stock_source_active_container_index']
+            if isinstance(active_index, bool) or not isinstance(active_index, int) or \
+                    active_index < 0 or active_index >= len(reservation['stock_source_containers']):
+                raise RuntimeError(
+                    'Auto preparation reservation active source index is invalid.'
+                )
+            tubes = reservation['destination_tubes']
+            if not isinstance(tubes, list) or len(tubes) != requested['tube_count']:
+                raise RuntimeError(
+                    'Auto preparation reservation destination count is invalid.'
+                )
+            locations = set()
+            for tube in tubes:
+                required_tube_keys = {
+                    'loc', 'deck_pos', 'labware', 'container',
+                    'max_volume_uL', 'final_volume_uL'
+                }
+                if not isinstance(tube, dict) or set(tube) != required_tube_keys:
+                    raise RuntimeError(
+                        'Auto preparation reservation destination schema is invalid.'
+                    )
+                if (
+                        tube['labware'] != requested['destination_labware']
+                        or tube['container'] != requested['destination_container']
+                        or not isinstance(tube['loc'], str)
+                        or isinstance(tube['deck_pos'], bool)
+                        or not isinstance(tube['deck_pos'], int)
+                ):
+                    raise RuntimeError(
+                        'Auto preparation reservation destination metadata is invalid.'
+                    )
+                try:
+                    max_volume = float(tube['max_volume_uL'])
+                    final_volume = float(tube['final_volume_uL'])
+                except (TypeError, ValueError):
+                    raise RuntimeError(
+                        'Auto preparation reservation destination volume is invalid.'
+                    )
+                if not math.isfinite(max_volume) or not math.isfinite(final_volume) or \
+                        final_volume != float(requested['final_volume_per_tube_uL']) or \
+                        not 0 < final_volume < max_volume:
+                    raise RuntimeError(
+                        'Auto preparation reservation destination capacity is invalid.'
+                    )
+                location = (tube['deck_pos'], tube['loc'])
+                if location in locations:
+                    raise RuntimeError(
+                        'Auto preparation reservation duplicated a destination tube.'
+                    )
+                locations.add(location)
+        if set(requested_by_working_name) != seen_working_names:
+            raise RuntimeError('Auto preparation reservation omitted a group.')
+        return copy.deepcopy(result)
+
+    def _request_auto_preparation_group_reservation(self, request):
+        '''Requests the non-mutating Stage 9B Auto-main reservation protocol.'''
+        self.portal.send_pack('reserve_auto_preparation_groups', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'auto_preparation_groups_reserved':
+            raise RuntimeError(
+                'Auto preparation reservation expected '
+                'auto_preparation_groups_reserved, received {!r}.'.format(
+                    pack_type
+                )
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Auto preparation reservation received a malformed payload.'
+            )
+        return self._validate_auto_preparation_group_reservation(
+            payload[0], request
         )
 
     def _validate_auto_main_robot_state_snapshot(self, snapshot):
@@ -5542,6 +5782,16 @@ class AutoContr(Controller):
                 'Auto-main compatibility check failed: the Pi does not '
                 'advertise register_auto_plate_generation required for '
                 'controlled plate replacement.'
+            )
+
+        if (
+            'reserve_auto_preparation_groups'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise reserve_auto_preparation_groups required for '
+                'grouped working-solution preparation.'
             )
 
         source_inventory_revision = snapshot.get('source_inventory_revision')

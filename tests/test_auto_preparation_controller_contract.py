@@ -1,4 +1,4 @@
-'''Source-level Stage 9A checks without importing hardware modules.'''
+'''Source-level Stage 9A/9B checks without importing hardware modules.'''
 
 import ast
 import os
@@ -10,7 +10,7 @@ CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
 
 
 class AutoPreparationControllerContractTests(unittest.TestCase):
-    '''Guard Stage 9A's planning-only, fail-closed controller boundary.'''
+    '''Guard the staged, fail-closed grouped-preparation controller boundary.'''
 
     @classmethod
     def setUpClass(cls):
@@ -30,7 +30,10 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
     def test_planning_and_phase_methods_exist_once(self):
         for method_name in (
             '_initialize_auto_preparation_plan',
-            '_execute_auto_preparation_phase'
+            '_execute_auto_preparation_phase',
+            '_build_auto_preparation_reservation_request',
+            '_validate_auto_preparation_group_reservation',
+            '_request_auto_preparation_group_reservation'
         ):
             self.assertIn(method_name, self.auto_methods)
             self.assertEqual(
@@ -57,16 +60,36 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             run_method.index('model.generate_initial_design(')
         )
 
-    def test_phase_is_planning_only_and_cannot_issue_old_one_tube_execution(self):
+    def test_phase_uses_read_only_reservation_and_cannot_execute_preparation(self):
         phase_source = ast.get_source_segment(
             self.source,
             self.auto_methods['_execute_auto_preparation_phase']
         )
-        self.assertIn('planning-only', phase_source)
-        self.assertIn('Auto-main group-reservation protocol', phase_source)
+        self.assertIn('_build_auto_preparation_reservation_request(', phase_source)
+        self.assertIn('_request_auto_preparation_group_reservation(', phase_source)
+        self.assertIn('no liquid was moved', phase_source)
         self.assertNotIn('_execute_auto_preparation_entry(', phase_source)
         self.assertNotIn('_activate_auto_prepared_sources(', phase_source)
         self.assertNotIn('execute_protocol_df(', phase_source)
+
+    def test_reservation_contract_is_versioned_and_journaled_before_fail_closed(self):
+        phase_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_preparation_phase']
+        )
+        request_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_build_auto_preparation_reservation_request']
+        )
+        validation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_reservation']
+        )
+        self.assertIn("'schema_version': 1", request_source)
+        self.assertIn("'expected_source_inventory_revision'", request_source)
+        self.assertIn("'auto_preparation_groups_reserved'", validation_source)
+        self.assertIn("'stock_uses_temperature_module'", validation_source)
+        self.assertIn('_record_auto_live_run_event(', phase_source)
 
 
 if __name__ == '__main__':
