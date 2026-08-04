@@ -71,6 +71,12 @@ def _is_enabled(value):
     '''Interpret the optional worksheet enabled field conservatively.'''
     if value is None:
         return True
+    # Spreadsheet downloads represent blank cells as floating-point NaN.  A
+    # blank ``enabled`` cell is intentionally a skipped request, never an
+    # unrecognised affirmative value.  This keeps template rows inert until an
+    # operator explicitly enables them.
+    if isinstance(value, float) and math.isnan(value):
+        return False
     normalized_value = str(value).strip().lower()
     if normalized_value in ('', '0', 'false', 'no', 'n', 'off', 'disabled'):
         return False
@@ -146,6 +152,7 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
 
     preparations = []
     working_names = set()
+    prepared_reagents = set()
     for row_number, row in enumerate(rows, start=2):
         if not isinstance(row, dict):
             raise AutoPreparationValidationError(
@@ -172,6 +179,12 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
                 'auto_preparation row {} has an empty stock_reagent.'.format(
                     row_number
                 )
+            )
+        if stock_reagent in prepared_reagents:
+            raise AutoPreparationValidationError(
+                'auto_preparation requests more than one working source for '
+                'reagent {!r}. One Auto reagent may use only one prepared '
+                'working concentration per run.'.format(stock_reagent)
             )
         stock_concentration_mM = _finite_positive_number(
             row['stock_concentration_mM'],
@@ -230,6 +243,7 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
                 )
             )
         working_names.add(working_chemical_name)
+        prepared_reagents.add(stock_reagent)
         preparations.append({
             'row_number': row_number,
             'stock_reagent': stock_reagent,
@@ -257,4 +271,38 @@ def build_preparation_manifest(rows, destination_container, destination_capacity
         separators=(',', ':')
     ).encode('utf-8')
     manifest['manifest_sha256'] = hashlib.sha256(canonical_manifest).hexdigest()
+    return manifest
+
+
+def validate_manifest_source_names(manifest, available_source_names):
+    '''Fail closed unless every planned stock exists and no output collides.
+
+    The manifest intentionally uses the controller/Pi chemical-name format
+    (for example ``sodium_borohydrideC130.0``).  This pure check is performed
+    before a robot connection is created, so a misspelled source or a working
+    product that would overwrite an existing source cannot reach execution.
+    '''
+    if not isinstance(manifest, dict):
+        raise AutoPreparationValidationError('preparation manifest must be a mapping.')
+    preparations = manifest.get('preparations')
+    if not isinstance(preparations, list):
+        raise AutoPreparationValidationError(
+            'preparation manifest has invalid preparations data.'
+        )
+
+    source_names = {str(name) for name in available_source_names}
+    for preparation in preparations:
+        stock_name = preparation['stock_chemical_name']
+        working_name = preparation['working_chemical_name']
+        if stock_name not in source_names:
+            raise AutoPreparationValidationError(
+                'auto_preparation stock source {!r} is not present in '
+                'reagent_info.'.format(stock_name)
+            )
+        if working_name in source_names:
+            raise AutoPreparationValidationError(
+                'auto_preparation working source {!r} already exists in '
+                'reagent_info; refusing to overwrite or ambiguously reuse it.'
+                .format(working_name)
+            )
     return manifest

@@ -1,10 +1,11 @@
-# Auto preparation worksheet contract (Stage 9A)
+# Auto preparation worksheet and execution contract (Stages 9A–9B)
 
-This document defines the preparation request format that will be executed in
-Stage 9B.  Stage 9A does **not** read the worksheet during a run and does not
-send preparation transfers to the robot.  It exists so the planned spreadsheet
-interface and its chemical calculations can be reviewed before execution is
-introduced.
+This document defines the opt-in Auto working-solution preparation interface.
+Stage 9A supplies the pure, hardware-free chemistry manifest. Stage 9B reads
+that manifest during Auto setup and executes it exactly once before seed or
+optimizer recipes are generated. It is deliberately separate from legacy
+conversion-error dilution: a malformed request fails before robot connection,
+and a failed preparation prevents Auto batch execution.
 
 ## Worksheet
 
@@ -18,7 +19,7 @@ Its columns are:
 
 | Column | Meaning |
 | --- | --- |
-| `enabled` | `yes`/`on`/`true`/`1` to request the row.  `no`/`off`/`false`/`0` skips it. |
+| `enabled` | `yes`/`on`/`true`/`1` to request the row. `no`/`off`/`false`/`0`, or a blank cell, skips it. |
 | `stock_reagent` | Reagent root name, such as `sodium_borohydride`. Spaces are normalized to underscores. |
 | `stock_concentration_mM` | Measured concentration of the existing source container. |
 | `working_concentration_mM` | Desired working concentration. It must be lower than the stock concentration. |
@@ -30,6 +31,18 @@ The existing Header values remain the destination configuration:
 dilution_cont    <empty destination container type>
 dilution_vol     <maximum prepared volume in uL>
 ```
+
+Preparation is disabled by default for legacy worksheets. To require an
+enabled worksheet request, add this Header row:
+
+```text
+auto_preparation_mode    required
+```
+
+`off` is the default and preserves existing Auto behavior. `required` is
+fail-closed: an absent worksheet, no enabled rows, invalid chemistry, missing
+stock source, or an existing destination name stops the run before an Auto
+recipe is generated.
 
 For example, a 130 mM stock prepared as 1000 uL of 6.25 mM working solution is:
 
@@ -54,18 +67,22 @@ The pure manifest builder rejects a requested preparation when it has:
 - a target concentration at or above the stock concentration;
 - final volume above `dilution_vol`;
 - stock or water transfer in the non-executable `0 < volume < 5 uL` interval;
-- more than one requested output with the same resulting working chemical name.
+- more than one requested working concentration for the same Auto reagent;
+- more than one requested output with the same resulting working chemical name;
+- a stock chemical name absent from `reagent_info`;
+- a working chemical name that already exists in `reagent_info`.
 
-The last constraint is intentional for now.  The current legacy robot
-initialization maps one chemical name to one prepared destination.  Preparing
-multiple same-concentration backup tubes will be added only after an explicit
-grouped-source registration design is implemented and tested; it must not be
-silently inferred from duplicate rows.
+The one-working-source-per-reagent constraint is intentional. Auto's current
+concentration-to-volume and GP-bound logic requires one active stock
+concentration per reagent coordinate. Multiple same-concentration backup tubes
+also require a separate grouped-source registration design. Neither situation
+is silently inferred from duplicate worksheet rows.
 
-## Planned execution semantics
+## Implemented Stage 9B execution semantics
 
-Stage 9B will execute each validated preparation exactly once before Auto seed
-or optimizer transfers:
+For a real Auto run, Stage 9B executes each validated preparation exactly once
+after the Auto-main compatibility handshake and before Auto seed or optimizer
+transfers:
 
 1. allocate an appropriate empty `dilution_cont` destination;
 2. choose `WaterC1.0` or `ColdWaterC1.0` based on whether the stock source is
@@ -73,8 +90,26 @@ or optimizer transfers:
 3. transfer water, then stock reagent;
 4. mix twice;
 5. resolve and journal the destination returned by the robot;
-6. make the prepared source available to Auto’s ordinary concentration-to-volume
-   conversion only after completion is confirmed.
+6. resolve the destination returned by the Pi;
+7. replace the controller and optimizer runtime source view for that reagent
+   with the confirmed working source, refresh its physical bounds, and prevent
+   later Auto conversion from falling back to the consumed stock name.
 
 No Auto batch will start if an enabled preparation request cannot be validated
 or completed.
+
+During the local `simulate` preflight, Stage 9B records that the validated
+preparation was deferred. It does not create a working tube or mutate model
+bounds against the local simulator; the preparation runs once in the following
+real Auto session.
+
+## Current boundaries
+
+- Stage 9B uses the existing Auto-main `init_containers`, `transfer`, `mix`,
+  and location-query commands; it does not require a new Pi packet type.
+- A checkpoint import cannot currently be combined with required preparation.
+  Reconciliation between an imported model's coordinate history and a new
+  working-source transformation needs a dedicated lineage stage.
+- Prepared backup groups and unattended preparation-source replacement are not
+  implemented. An operator must configure one valid preparation destination per
+  prepared reagent.

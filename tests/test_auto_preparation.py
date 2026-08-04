@@ -1,10 +1,12 @@
 '''Pure unit tests for the Stage 9A Auto-preparation manifest contract.'''
 
 import unittest
+import math
 
 from auto_preparation import (
     AutoPreparationValidationError,
-    build_preparation_manifest
+    build_preparation_manifest,
+    validate_manifest_source_names
 )
 
 
@@ -59,6 +61,17 @@ class AutoPreparationManifestTests(unittest.TestCase):
         )
         self.assertEqual(manifest['preparations'], [])
 
+    def test_blank_spreadsheet_enabled_cell_is_skipped(self):
+        row = self._valid_row()
+        row['enabled'] = float('nan')
+        manifest = build_preparation_manifest(
+            [row],
+            destination_container='Tube2000uL',
+            destination_capacity_uL=1500
+        )
+        self.assertTrue(math.isnan(row['enabled']))
+        self.assertEqual(manifest['preparations'], [])
+
     def test_rejects_non_dilution_capacity_and_non_executable_requests(self):
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
@@ -88,12 +101,51 @@ class AutoPreparationManifestTests(unittest.TestCase):
     def test_rejects_ambiguous_duplicate_working_sources(self):
         with self.assertRaisesRegex(
             AutoPreparationValidationError,
-            'duplicate working source'
+            'only one prepared working concentration'
         ):
             build_preparation_manifest(
                 [self._valid_row(), self._valid_row()],
                 'Tube2000uL',
                 1500
+            )
+
+    def test_rejects_multiple_working_concentrations_for_one_reagent(self):
+        second_row = self._valid_row()
+        second_row['working_concentration_mM'] = 3.125
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'only one prepared working concentration'
+        ):
+            build_preparation_manifest(
+                [self._valid_row(), second_row],
+                'Tube2000uL',
+                1500
+            )
+
+    def test_source_name_validation_is_exact_and_refuses_collisions(self):
+        manifest = build_preparation_manifest(
+            [self._valid_row()],
+            destination_container='Tube2000uL',
+            destination_capacity_uL=1500
+        )
+        validate_manifest_source_names(
+            manifest,
+            ['sodium_borohydrideC130.0', 'WaterC1.0']
+        )
+
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'not present'
+        ):
+            validate_manifest_source_names(manifest, ['WaterC1.0'])
+
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'already exists'
+        ):
+            validate_manifest_source_names(
+                manifest,
+                ['sodium_borohydrideC130.0', 'sodium_borohydrideC6.25']
             )
 
 

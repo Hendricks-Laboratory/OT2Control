@@ -107,6 +107,12 @@ from auto_output_directory import (
     resolve_auto_output_directory
 )
 from auto_terminal_transcript import AutoPreOutputTranscript
+from auto_preparation import (
+    AutoPreparationValidationError,
+    PREPARATION_WORKSHEET_NAME,
+    build_preparation_manifest,
+    validate_manifest_source_names
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -568,6 +574,11 @@ class Controller(ABC):
             self.robo_params['instruments'] = self._get_instrument_dict(deck_data)
             self.robo_params['labware_df'] = self._get_labware_df(deck_data, empty_containers)
             self.robo_params['product_df'] = self._get_product_df(products_to_labware)
+            # The base controller deliberately does nothing here.  Auto mode
+            # overrides this hook to validate an opt-in preparation worksheet
+            # after all source, labware, and dilution-capacity information is
+            # available, but before any robot connection exists.
+            self._initialize_auto_preparation_plan(wks_key, credentials)
 
         except Exception:
             print("<<controller>> ERROR during controller initialization")
@@ -581,6 +592,14 @@ class Controller(ABC):
         Ordinary protocol execution has no checkpoint-import workflow.  Auto
         mode overrides this hook so an operator can validate a package before
         entering fresh source-container locations and masses.
+        '''
+        return None
+
+    def _initialize_auto_preparation_plan(self, spreadsheet_key, credentials):
+        '''Optional Auto-only hook for a pre-batch preparation manifest.
+
+        Base/manual controller workflows never read the Auto preparation
+        worksheet and therefore retain their established behavior.
         '''
         return None
 
@@ -1479,6 +1498,52 @@ class Controller(ABC):
                 "<<controller>> Auto source-volume reserve beyond robot "
                 "dead volume: "
                 f"{self.robo_params['auto_source_reserve_volume_uL']:g} uL"
+            )
+
+        # Opt-in one-time preparation runs before Auto seed/optimizer batches.
+        # ``required`` is intentionally fail-closed: an enabled worksheet row
+        # must validate and execute before Auto can create its first recipe.
+        # A missing Header row preserves all prior Auto workflows.
+        preparation_mode_value = str(
+            header_dict.get(
+                'auto_preparation_mode',
+                'off'
+            )
+        ).strip().lower()
+        preparation_mode_value = (
+            preparation_mode_value
+            .replace('-', '_')
+            .replace(' ', '_')
+        )
+        preparation_mode_aliases = {
+            '': 'off',
+            'off': 'off',
+            'none': 'off',
+            'disabled': 'off',
+            'no': 'off',
+            'false': 'off',
+            '0': 'off',
+            'required': 'required',
+            'prepare': 'required',
+            'on': 'required',
+            'enabled': 'required',
+            'yes': 'required',
+            'true': 'required',
+            '1': 'required'
+        }
+        if preparation_mode_value not in preparation_mode_aliases:
+            raise ValueError(
+                "Header value auto_preparation_mode must be off or "
+                "required. Received: "
+                f"{preparation_mode_value!r}."
+            )
+        self.robo_params['auto_preparation_mode'] = (
+            preparation_mode_aliases[preparation_mode_value]
+        )
+        if self.robo_params['auto_preparation_mode'] == 'required':
+            print(
+                '<<controller>> Auto preparation is required before the '
+                'first Auto batch.'
             )
 
         # Terminal operator recovery is a built-in, fail-closed Auto safety
@@ -4995,6 +5060,109 @@ class AutoContr(Controller):
         'tube_50ml': 13.6950
     }
 
+    def _initialize_auto_preparation_plan(self, spreadsheet_key, credentials):
+        '''Loads and validates the optional one-time Auto preparation plan.
+
+        This hook runs during controller construction after ``reagent_info``
+        has been parsed but before any connection, robot initialization, or
+        Auto model construction.  It therefore fails closed for malformed
+        chemistry/source requests without sending an OT-2 command.
+
+        The plan is only *validated* here.  Stage 9B executes it later, once,
+        after the real Auto-main connection has been established and before
+        seed or optimizer recipe generation.
+        '''
+        self.auto_preparation_manifest = None
+        self.auto_preparation_completed = False
+        self.auto_prepared_source_names = {}
+
+        if self.robo_params.get('auto_preparation_mode', 'off') != 'required':
+            return None
+
+        # An imported checkpoint has model coordinates that were validated
+        # before this new working-source transformation.  Do not silently
+        # reinterpret that model.  Import-aware preparation lineage belongs to
+        # a later stage and must be explicitly validated.
+        if self.robo_params.get('auto_model_checkpoint_mode') == 'import':
+            raise ValueError(
+                'auto_preparation_mode=required cannot currently be combined '
+                'with auto_model_checkpoint_mode=import. Start a fresh Auto '
+                'run or disable preparation; imported-model source-coordinate '
+                'reconciliation is not implemented yet.'
+            )
+
+        cache_filename = os.path.join(
+            self.cache_path,
+            'auto_preparation_sheet.pkl'
+        )
+        try:
+            if self.use_cache:
+                with open(cache_filename, 'rb') as preparation_cache:
+                    preparation_df = dill.load(preparation_cache)
+            else:
+                preparation_df = g2d.download(
+                    spreadsheet_key,
+                    PREPARATION_WORKSHEET_NAME,
+                    col_names=True,
+                    row_names=False,
+                    credentials=credentials
+                )
+                with open(cache_filename, 'wb') as preparation_cache:
+                    dill.dump(preparation_df, preparation_cache)
+        except (IOError, OSError, ValueError, KeyError) as exc:
+            raise ValueError(
+                'Could not load the {} worksheet required for Auto '
+                'preparation: {}.'.format(PREPARATION_WORKSHEET_NAME, exc)
+            )
+
+        if not isinstance(preparation_df, pd.DataFrame):
+            raise ValueError(
+                'The {} worksheet did not download as a table.'.format(
+                    PREPARATION_WORKSHEET_NAME
+                )
+            )
+
+        # Preserve blank cells as ``None`` before handing rows to the pure
+        # manifest contract.  This gives intentionally blank template rows
+        # the documented disabled behavior instead of treating pandas NaN as
+        # a chemistry value.
+        preparation_rows = preparation_df.where(
+            pd.notna(preparation_df),
+            None
+        ).to_dict(orient='records')
+
+        try:
+            manifest = build_preparation_manifest(
+                preparation_rows,
+                destination_container=self.dilution_params.cont,
+                destination_capacity_uL=self.dilution_params.vol
+            )
+            if not manifest['preparations']:
+                raise AutoPreparationValidationError(
+                    'auto_preparation_mode is required but no enabled '
+                    'preparation rows were found.'
+                )
+            validate_manifest_source_names(
+                manifest,
+                self.robo_params['reagent_df'].index
+            )
+        except AutoPreparationValidationError as exc:
+            raise ValueError(
+                'Auto preparation setup failed before robot connection: {}'
+                .format(exc)
+            )
+
+        self.auto_preparation_manifest = manifest
+        print(
+            '<<controller>> validated {} Auto preparation request(s) from '
+            '{} (manifest {}).'.format(
+                len(manifest['preparations']),
+                PREPARATION_WORKSHEET_NAME,
+                manifest['manifest_sha256'][:12]
+            )
+        )
+        return manifest
+
     def _clean_template(self):
         '''
         There are some traces of the template column that must be removed from the rxn_df and 
@@ -5072,6 +5240,231 @@ class AutoContr(Controller):
         # reset itself to the original starting well instead of entering the
         # controlled replacement hold.
         self._auto_plate_cursor_initialized = False
+
+    @staticmethod
+    def _auto_preparation_source_base_name(chemical_name):
+        '''Returns a source's reagent root without guessing non-source names.'''
+        chemical_name = str(chemical_name)
+        concentration_match = re.search(r'C\d*\.\d*$', chemical_name)
+        if concentration_match is None:
+            return chemical_name
+        return chemical_name[:concentration_match.start()]
+
+    def _execute_auto_preparation_entry(self, preparation):
+        '''Creates one validated working source with the legacy dilution order.
+
+        This is deliberately a small, parameterized Auto wrapper around the
+        established dilution micro-protocol rather than an extension of
+        conversion-error recovery.  It executes exactly water, stock, then
+        mix, into one newly allocated destination before an Auto batch exists.
+        The original Auto dataframe and product list are restored even if the
+        robot rejects a command.
+        '''
+        product_name = preparation['working_chemical_name']
+        product_df = pd.DataFrame(
+            {
+                'labware': '',
+                'container': preparation['destination_container'],
+                'max_vol': preparation['final_volume_uL']
+            },
+            index=[product_name]
+        )
+        self.portal.send_pack('init_containers', product_df.to_dict())
+
+        metadata_columns = list(
+            self.rxn_df_template.loc[:, :'reagent'].columns
+        )
+        preparation_row = pd.Series(
+            np.nan,
+            index=metadata_columns + [product_name],
+            dtype=object
+        )
+        preparation_row['op'] = 'dilution'
+        preparation_row['callbacks'] = ''
+        preparation_row['dilution_conc'] = preparation[
+            'working_concentration_mM'
+        ]
+        preparation_row['chemical_name'] = preparation['stock_chemical_name']
+        preparation_row['conc'] = preparation['stock_concentration_mM']
+        preparation_row['reagent'] = preparation['stock_reagent']
+        preparation_row[product_name] = preparation['final_volume_uL']
+
+        cached_products = self._products
+        cached_rxn_df = self.rxn_df
+        try:
+            self._products = [product_name]
+            self.rxn_df = pd.DataFrame([preparation_row])
+            self.execute_protocol_df()
+        finally:
+            self._products = cached_products
+            self.rxn_df = cached_rxn_df
+
+        self._update_cached_locs([product_name])
+        if product_name not in self._cached_reader_locs:
+            raise RuntimeError(
+                'Auto preparation completed without a resolvable destination '
+                'for {!r}.'.format(product_name)
+            )
+
+    def _activate_auto_prepared_sources(self, model, preparations):
+        '''Makes completed working sources the sole Auto runtime source view.
+
+        The Pi retains the original stock source internally because it was
+        needed to create the working solution.  The controller and optimizer,
+        however, must see one concentration per Auto reagent.  Otherwise a
+        variable could have both stock and working concentrations and violate
+        the one-coordinate/one-stock invariant used for volume conversion and
+        GP bounds.
+        '''
+        prepared_reagent_df = self.robo_params['reagent_df'].copy(deep=True)
+
+        for preparation in preparations:
+            reagent_name = preparation['stock_reagent']
+            working_name = preparation['working_chemical_name']
+            working_entry = self._cached_reader_locs[working_name]
+
+            matching_rows = [
+                index
+                for index in prepared_reagent_df.index
+                if self._auto_preparation_source_base_name(index)
+                == reagent_name
+            ]
+            if not matching_rows:
+                raise RuntimeError(
+                    'Auto preparation source {!r} vanished before its '
+                    'working source could be activated.'.format(reagent_name)
+                )
+
+            # Preserve the normal reagent dataframe schema but record only a
+            # physical location and concentration that the Pi has confirmed.
+            prepared_row = prepared_reagent_df.loc[matching_rows[0]].copy()
+            if isinstance(prepared_row, pd.DataFrame):
+                prepared_row = prepared_row.iloc[0].copy()
+            prepared_row['conc'] = preparation['working_concentration_mM']
+            prepared_row['loc'] = working_entry.loc
+            prepared_row['deck_pos'] = int(working_entry.deck_pos)
+            # This mass belongs to the freshly created destination rather than
+            # a user-weighed tube. It is never sent back to the Pi; null avoids
+            # falsely presenting the stock tube's mass as a working-source
+            # measurement in controller-side audit records.
+            prepared_row['mass'] = np.nan
+
+            prepared_reagent_df = prepared_reagent_df.drop(matching_rows)
+            prepared_reagent_df.loc[working_name] = prepared_row
+            self.auto_prepared_source_names[reagent_name] = working_name
+
+            # Fixed transfers name their source directly. Their configured
+            # transfer volume stays unchanged, but source provenance must now
+            # identify the working solution actually dispensed.
+            fixed_mask = (
+                (self.rxn_df_template['op'] == 'transfer')
+                & (self.rxn_df_template['reagent'] == reagent_name)
+                & self.rxn_df_template['conc'].notna()
+            )
+            if fixed_mask.any():
+                self.rxn_df_template.loc[
+                    fixed_mask,
+                    'chemical_name'
+                ] = working_name
+                self.rxn_df_template.loc[
+                    fixed_mask,
+                    'conc'
+                ] = preparation['working_concentration_mM']
+
+        self.robo_params['reagent_df'] = prepared_reagent_df
+
+        # The model is intentionally unfitted at this point: this happens
+        # before seed generation. Rebuild its bound metadata from exactly the
+        # same prepared source view used by controller conversion.
+        self.max_conc = list(self.get_max_conc().values())
+        self.min_conc = list(self.get_min_conc().values())
+        model.reagent_info = prepared_reagent_df.copy(deep=True)
+        model.max_conc = list(self.max_conc)
+        model.min_conc = list(self.min_conc)
+
+    def _apply_auto_prepared_source_cache_policy(self):
+        '''Hides consumed stock names from later Auto concentration conversion.'''
+        for reagent_name, working_name in self.auto_prepared_source_names.items():
+            if working_name not in self._cached_reader_locs:
+                raise RuntimeError(
+                    'Prepared Auto source {!r} is missing from the Pi '
+                    'location cache.'.format(working_name)
+                )
+            stale_source_names = [
+                source_name
+                for source_name in self._cached_reader_locs
+                if (
+                    self._auto_preparation_source_base_name(source_name)
+                    == reagent_name
+                    and source_name != working_name
+                )
+            ]
+            for source_name in stale_source_names:
+                del self._cached_reader_locs[source_name]
+
+    def _execute_auto_preparation_phase(self, model, simulate):
+        '''Runs required preparations once, before any Auto seed/batch recipe.
+
+        Local preflight simulation intentionally does not create a working
+        source or mutate controller/model bounds. The real run performs the
+        same already-validated manifest after its Auto-main compatibility
+        handshake, making a physical preparation an explicit, journaled phase
+        rather than a hidden consequence of a conversion error.
+        '''
+        manifest = self.auto_preparation_manifest
+        if manifest is None or self.auto_preparation_completed:
+            return False
+        if simulate:
+            print(
+                '<<controller>> Auto preparation execution deferred during '
+                'local preflight simulation; the validated manifest will run '
+                'once before the real Auto batch.'
+            )
+            return False
+
+        self._record_auto_live_run_event(
+            'auto_preparation_started',
+            {
+                'manifest_sha256': manifest['manifest_sha256'],
+                'preparations': copy.deepcopy(manifest['preparations'])
+            }
+        )
+        print(
+            '<<controller>> executing {} required Auto preparation(s) before '
+            'seed/optimizer batches.'.format(len(manifest['preparations']))
+        )
+        for preparation in manifest['preparations']:
+            print(
+                '<<controller>> preparing {working_chemical_name}: '
+                '{water_transfer_uL:.4g} uL water + '
+                '{stock_transfer_uL:.4g} uL {stock_chemical_name}.'.format(
+                    **preparation
+                )
+            )
+            self._execute_auto_preparation_entry(preparation)
+
+        self._activate_auto_prepared_sources(
+            model,
+            manifest['preparations']
+        )
+        self.auto_preparation_completed = True
+        self._record_auto_live_run_event(
+            'auto_preparation_completed',
+            {
+                'manifest_sha256': manifest['manifest_sha256'],
+                'prepared_source_names': copy.deepcopy(
+                    self.auto_prepared_source_names
+                ),
+                'controller_runtime_sources': json.loads(
+                    self.robo_params['reagent_df'].to_json(orient='split')
+                )
+            }
+        )
+        print(
+            '<<controller>> Auto preparation completed and working sources '
+            'are active for recipe generation.'
+        )
+        return True
 
     def _validate_auto_main_robot_state_snapshot(self, snapshot):
         '''
@@ -6594,6 +6987,7 @@ class AutoContr(Controller):
             'auto_spectral_response_policy',
             'auto_source_volume_check',
             'auto_source_reserve_volume_uL',
+            'auto_preparation_mode',
             'auto_model_checkpoint_mode',
             'auto_plot_profile'
         )
@@ -26463,6 +26857,7 @@ class AutoContr(Controller):
                 'auto_main_compatibility_validated',
                 copy.deepcopy(self.auto_main_robot_state_snapshot)
             )
+        self._execute_auto_preparation_phase(model, simulate)
         # An imported checkpoint already contains a fitted cumulative GP.  It
         # must continue directly with new optimizer-selected batches instead
         # of spending wells on a second seed design.
@@ -28997,6 +29392,12 @@ class AutoContr(Controller):
         
 
         self._update_cached_locs('all')
+        # A completed Stage 9B preparation leaves the physical stock on the
+        # Pi, but future Auto recipes must use the working source whose
+        # concentration defined the refreshed GP bounds. Remove only those
+        # consumed-stock cache aliases before normal conversion chooses a
+        # container; Water and every unrelated source remain untouched.
+        self._apply_auto_prepared_source_cache_policy()
         def build_product_rows(row):
             '''
             params:  

@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-07-29
+**Updated through:** 2026-08-04
 
 > [!NOTE]
 > **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
@@ -139,6 +139,8 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Inherited seed-design figure and report labeling | Implemented **[Claude Code]** in `248d95d` | An imported run titles seed figures and report headings `Inherited Seed Design (from <run>)`, naming the run that built the seed rather than the immediate import source |
 | Auto design-space gridline styling | Implemented **[Claude Code]** in `4ae04b1` | Green dashed gridlines drawn behind plotted points across every design-space dimensionality, including the 3D pane grid, which ignores ordinary Matplotlib grid keyword arguments |
 | Pairwise/parallel label and higher-dimensional atlas layout | Implemented | Pairwise and parallel-coordinate condition labels move text only through deterministic non-overlapping positions while plotted recipes remain exact. Shared title/legend headers and higher-dimensional atlas spacing are compacted without changing 300-DPI export or GP/feasibility grid density. Standalone slices retain their centered axis-label/colorbar group and compact annotation band. Source-level layout regression tests and synthetic Matplotlib rendering passed. |
+| Stage 9A Auto preparation manifest | Implemented | Pure, hardware-free `C_stock × V_stock = C_working × V_final` manifest rejects unsafe dilution volumes, capacity overruns, ambiguous reagent coordinates, unknown source names, and destination-name collisions. |
+| Stage 9B one-time Auto preparation execution | Implemented; controlled dry debug pending | Opt-in `auto_preparation_mode=required` validates an `auto_preparation` worksheet before connection, then after the real Auto-main compatibility handshake creates each working solution by water-first transfer, stock transfer, and mixing. Only confirmed working sources are activated for subsequent Auto conversion/model bounds. Local simulation defers without mutating bounds; checkpoint import plus required preparation fails closed pending explicit lineage reconciliation. |
 
 ### Current acquisition semantics
 
