@@ -14,6 +14,7 @@ from auto_live_run_journal import (
 )
 from auto_live_run_state import (
     LIFECYCLE_EXECUTING_BATCH,
+    LIFECYCLE_HELD_FOR_OPERATOR,
     LIFECYCLE_MEASURING_BATCH,
     LIFECYCLE_PREFLIGHTING_BATCH,
     LIFECYCLE_PROCESSING_BATCH,
@@ -179,6 +180,51 @@ class AutoLiveRunJournalTests(unittest.TestCase):
                 'batch_measurement_completed',
                 'batch_completed'
             ]
+        )
+
+    def test_ready_batch_can_enter_a_durable_plate_replacement_hold(self):
+        '''A full plate is a pre-execution hold, not an execution fault.'''
+        journal = self._initialize_journal()
+        hold_action_id = 'replace-plate-action-1'
+
+        journal.record_transition(
+            LIFECYCLE_HELD_FOR_OPERATOR,
+            'hold_entered',
+            {
+                'hold_action_id': hold_action_id,
+                'hold_reason': 'insufficient_remaining_plate_capacity'
+            },
+            active_batch_number=1,
+            hold_action_id=hold_action_id
+        )
+        journal.record_event(
+            'operator_action_applied',
+            {
+                'hold_action_id': hold_action_id,
+                'applied_action': 'replace_wellplate'
+            }
+        )
+        journal.record_transition(
+            LIFECYCLE_PREFLIGHTING_BATCH,
+            'batch_preflight_requested',
+            {
+                'batch_number': 1,
+                'hold_action_id': hold_action_id,
+                'preflight_retry_reason': 'accepted_wellplate_replacement'
+            },
+            active_batch_number=1
+        )
+
+        current_state = self._read_json(AutoLiveRunJournal.CURRENT_STATE_FILENAME)
+        self.assertEqual(
+            LIFECYCLE_PREFLIGHTING_BATCH,
+            current_state['lifecycle_state']
+        )
+        self.assertEqual(1, current_state['active_batch_number'])
+        self.assertIsNone(current_state['hold_action_id'])
+        self.assertEqual(
+            ['hold_entered', 'operator_action_applied', 'batch_preflight_requested'],
+            [event['event_type'] for event in self._read_events()[-3:]]
         )
 
     def test_current_state_is_not_replaced_if_atomic_state_write_fails(self):

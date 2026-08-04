@@ -27452,13 +27452,18 @@ class AutoContr(Controller):
         hold_action_id = uuid.uuid4().hex
         self._record_auto_live_run_transition(
             LIFECYCLE_HELD_FOR_OPERATOR,
-            'plate_replacement_required',
+            'hold_entered',
             {
                 'hold_action_id': hold_action_id,
+                'hold_reason': 'insufficient_remaining_plate_capacity',
                 'plate_generation': int(self.auto_plate_generation),
                 'remaining_start_well': self.auto_plate_next_well or 'full',
                 'remaining_well_count': int(available),
-                'required_batch_well_count': count
+                'required_batch_well_count': count,
+                'permitted_actions': [
+                    'replace_wellplate',
+                    'end_run'
+                ]
             },
             active_batch_number=int(getattr(self, 'batch_num', 0)),
             hold_action_id=hold_action_id
@@ -27473,22 +27478,62 @@ class AutoContr(Controller):
             '<<controller>> Enter the new plate starting well (A1-H12), or END to stop: '
         )
         if str(next_well).strip().upper() == 'END':
+            self._record_auto_live_run_transition(
+                LIFECYCLE_FINALIZED,
+                'operator_action_applied',
+                {
+                    'hold_action_id': hold_action_id,
+                    'applied_action': 'end_run',
+                    'reason': 'operator_declined_plate_replacement'
+                },
+                active_batch_number=None
+            )
             error = RuntimeError('Operator ended Auto run during plate replacement hold.')
             error.auto_operator_end_run = True
             raise error
         request = self._get_auto_plate_cursor_request(next_well)
+        self._record_auto_live_run_event(
+            'operator_action_requested',
+            {
+                'hold_action_id': hold_action_id,
+                'requested_action': 'replace_wellplate',
+                'plate_cursor_request': copy.deepcopy(request)
+            }
+        )
         confirmation = self._get_auto_preflight_hold_input(
             '<<controller>> Type REPLACE to register the new plate cursor: '
         )
         if str(confirmation).strip().upper() != 'REPLACE':
+            self._record_auto_live_run_event(
+                'operator_action_rejected',
+                {
+                    'hold_action_id': hold_action_id,
+                    'requested_action': 'replace_wellplate',
+                    'reason': 'plate_replacement_not_confirmed'
+                }
+            )
             raise RuntimeError('Plate replacement was not confirmed; batch remains unexecuted.')
         result = self._request_auto_main_plate_generation_registration(request)
         self.auto_plate_generation = result['plate_generation']
         self.auto_plate_next_well = result['start_well']
+        self._record_auto_live_run_event(
+            'operator_action_applied',
+            {
+                'hold_action_id': hold_action_id,
+                'applied_action': 'replace_wellplate',
+                'plate_cursor_request': copy.deepcopy(request),
+                'plate_cursor_registration': copy.deepcopy(result)
+            }
+        )
         self._record_auto_live_run_transition(
             LIFECYCLE_PREFLIGHTING_BATCH,
-            'plate_replacement_registered',
-            dict(copy.deepcopy(result), hold_action_id=hold_action_id),
+            'batch_preflight_requested',
+            {
+                'batch_number': int(getattr(self, 'batch_num', 0)),
+                'hold_action_id': hold_action_id,
+                'preflight_retry_reason': 'accepted_wellplate_replacement',
+                'plate_cursor_registration': copy.deepcopy(result)
+            },
             active_batch_number=int(getattr(self, 'batch_num', 0))
         )
         print('<<controller>> New plate generation {} registered from {}. Rechecking unchanged batch preflight.'.format(

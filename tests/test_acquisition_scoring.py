@@ -2568,6 +2568,7 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
             '_record_auto_plate_batch_execution',
             '_check_auto_well_capacity'
         ], {
+            'LIFECYCLE_FINALIZED': 'finalized',
             'LIFECYCLE_HELD_FOR_OPERATOR': 'held_for_operator',
             'LIFECYCLE_PREFLIGHTING_BATCH': 'preflighting_batch',
             'uuid': uuid
@@ -2612,6 +2613,7 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
 
         responses = iter(['A1', 'REPLACE'])
         transitions = []
+        events = []
         controller._get_auto_preflight_hold_input = lambda prompt: next(responses)
         controller._get_auto_plate_cursor_request = lambda well: {
             'start_well': well
@@ -2625,6 +2627,9 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
         controller._record_auto_live_run_transition = (
             lambda *args, **kwargs: transitions.append((args, kwargs))
         )
+        controller._record_auto_live_run_event = (
+            lambda *args, **kwargs: events.append((args, kwargs))
+        )
 
         with redirect_stdout(io.StringIO()):
             controller._ensure_auto_plate_capacity_for_batch(1)
@@ -2633,16 +2638,59 @@ class AutoPlateCursorLifecycleTests(unittest.TestCase):
         self.assertEqual('A1', controller.auto_plate_next_well)
         self.assertEqual(2, len(transitions))
         held_args, held_kwargs = transitions[0]
-        registered_args, _ = transitions[1]
+        preflight_args, _ = transitions[1]
         self.assertEqual('held_for_operator', held_args[0])
-        self.assertEqual('plate_replacement_required', held_args[1])
+        self.assertEqual('hold_entered', held_args[1])
+        self.assertEqual(
+            'insufficient_remaining_plate_capacity',
+            held_args[2]['hold_reason']
+        )
+        self.assertEqual(
+            ['replace_wellplate', 'end_run'],
+            held_args[2]['permitted_actions']
+        )
+        self.assertEqual('preflighting_batch', preflight_args[0])
+        self.assertEqual('batch_preflight_requested', preflight_args[1])
         self.assertEqual(
             held_kwargs['hold_action_id'],
             held_args[2]['hold_action_id']
         )
         self.assertEqual(
             held_args[2]['hold_action_id'],
-            registered_args[2]['hold_action_id']
+            preflight_args[2]['hold_action_id']
+        )
+        self.assertEqual(
+            ['operator_action_requested', 'operator_action_applied'],
+            [args[0] for args, unused_kwargs in events]
+        )
+        self.assertTrue(all(
+            args[1]['hold_action_id'] == held_args[2]['hold_action_id']
+            for args, unused_kwargs in events
+        ))
+
+    def test_plate_replacement_end_run_finalizes_durable_hold(self):
+        '''An operator end is auditable and cannot resume the held batch.'''
+        controller = self._build_controller()
+        controller._ensure_auto_plate_capacity_for_batch(96)
+        controller._record_auto_plate_batch_execution(96)
+
+        transitions = []
+        controller._get_auto_preflight_hold_input = lambda unused_prompt: 'END'
+        controller._record_auto_live_run_transition = (
+            lambda *args, **kwargs: transitions.append((args, kwargs))
+        )
+
+        with self.assertRaisesRegex(RuntimeError, 'ended Auto run'):
+            controller._ensure_auto_plate_capacity_for_batch(1)
+
+        self.assertEqual(2, len(transitions))
+        self.assertEqual('held_for_operator', transitions[0][0][0])
+        self.assertEqual('hold_entered', transitions[0][0][1])
+        self.assertEqual('finalized', transitions[1][0][0])
+        self.assertEqual('operator_action_applied', transitions[1][0][1])
+        self.assertEqual(
+            transitions[0][0][2]['hold_action_id'],
+            transitions[1][0][2]['hold_action_id']
         )
 
     def test_multi_plate_run_is_allowed_but_one_batch_cannot_span_plates(self):

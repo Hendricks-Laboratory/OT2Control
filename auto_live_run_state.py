@@ -55,6 +55,10 @@ ALLOWED_LIFECYCLE_TRANSITIONS = {
     LIFECYCLE_CREATED: frozenset({LIFECYCLE_READY_FOR_BATCH}),
     LIFECYCLE_READY_FOR_BATCH: frozenset({
         LIFECYCLE_PREFLIGHTING_BATCH,
+        # A completed batch may leave too little physical plate capacity for
+        # the next unchanged batch.  That is a pre-execution operator hold,
+        # not a partial batch fault.
+        LIFECYCLE_HELD_FOR_OPERATOR,
         LIFECYCLE_FINALIZED
     }),
     LIFECYCLE_PREFLIGHTING_BATCH: frozenset({
