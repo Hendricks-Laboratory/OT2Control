@@ -4,6 +4,8 @@ import ast
 import os
 import unittest
 
+from auto_live_run_state import EVENT_TYPES
+
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
@@ -100,6 +102,35 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
         self.assertIn("'physical_execution_started'", execution_validation)
         self.assertIn("'auto_preparation_groups_executed'", execution_validation)
         self.assertIn('_record_auto_live_run_event(', phase_source)
+
+    def test_preparation_phase_events_match_live_run_contract(self):
+        '''Each controller-emitted preparation event must be journal-valid.'''
+        phase_node = self.auto_methods['_execute_auto_preparation_phase']
+        event_names = []
+
+        for node in ast.walk(phase_node):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != '_record_auto_live_run_event':
+                continue
+
+            self.assertTrue(node.args)
+            self.assertIsInstance(node.args[0], ast.Constant)
+            event_names.append(node.args[0].value)
+
+        self.assertEqual(
+            event_names,
+            [
+                'auto_preparation_groups_reserved',
+                'auto_preparation_groups_executed',
+                'auto_preparation_sources_activated'
+            ]
+        )
+
+        for event_name in event_names:
+            self.assertIn(event_name, EVENT_TYPES)
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ import unittest
 from auto_live_run_state import (
     CURRENT_STATE_RECORD_TYPE,
     EVENT_RECORD_TYPE,
+    EVENT_TYPES,
     LIFECYCLE_CREATED,
     LIFECYCLE_EXECUTING_BATCH,
     LIFECYCLE_FAULTED_PARTIAL_BATCH,
@@ -174,6 +175,18 @@ class AutoLiveRunStateContractTests(unittest.TestCase):
         }
 
         validate_event(event)
+
+    def test_auto_preparation_events_are_accepted(self):
+        '''Stage 9 preparation milestones remain valid journal events.'''
+        for event_type in (
+                'auto_preparation_groups_reserved',
+                'auto_preparation_groups_executed',
+                'auto_preparation_sources_activated'):
+            with self.subTest(event_type=event_type):
+                self.assertIn(event_type, EVENT_TYPES)
+                event = self._event()
+                event['event_type'] = event_type
+                validate_event(event)
 
 
 if __name__ == '__main__':

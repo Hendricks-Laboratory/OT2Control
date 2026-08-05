@@ -95,6 +95,11 @@ EVENT_TYPES = frozenset({
     # batch lifecycle transition. It is recorded after the controller connects
     # and before any recipe can be executed.
     'auto_main_compatibility_validated',
+    # Grouped Auto-preparation milestones are durable provenance records
+    # emitted before an experimental batch is dispatched.
+    'auto_preparation_groups_reserved',
+    'auto_preparation_groups_executed',
+    'auto_preparation_sources_activated',
     'batch_preflight_requested',
     'batch_preflight_validated',
     'batch_preflight_rejected',
