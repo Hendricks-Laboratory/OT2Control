@@ -2372,12 +2372,15 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             '_request_auto_main_robot_state_snapshot',
             '_build_auto_preparation_reservation_request',
             '_validate_auto_preparation_group_reservation',
-            '_request_auto_preparation_group_reservation'
+            '_request_auto_preparation_group_reservation',
+            '_build_auto_preparation_execution_request',
+            '_validate_auto_preparation_group_execution',
+            '_request_auto_preparation_group_execution'
         ])
 
     def _build_controller(self):
         controller = self.AutoController()
-        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v6'
+        controller.AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v7'
         controller.AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
             'ot2control_tube_tares_2026_07_v1'
         )
@@ -2393,7 +2396,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         return {
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
-            'protocol_version': 'auto-main-state-v6',
+            'protocol_version': 'auto-main-state-v7',
             'tare_calibration_id': 'ot2control_tube_tares_2026_07_v1',
             'tare_calibration_g': {
                 'tube_2ml': 1.7,
@@ -2406,7 +2409,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 'refresh_source_container_mass',
                 'reset_pipette_tip_racks',
                 'register_auto_plate_generation',
-                'reserve_auto_preparation_groups'
+                'reserve_auto_preparation_groups',
+                'execute_auto_preparation_groups'
             ],
             'source_inventory_revision': 0,
             'tip_inventory_revision': 0,
@@ -2614,6 +2618,43 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             controller.portal.sent
         )
 
+    def test_preparation_execution_rejects_partial_physical_acknowledgement(self):
+        controller = self._build_controller()
+        controller.auto_main_robot_state_snapshot = self._valid_snapshot()
+        reservation_request = controller._build_auto_preparation_reservation_request(
+            self._preparation_manifest()
+        )
+        reservation = self._valid_preparation_reservation(reservation_request)
+        request = controller._build_auto_preparation_execution_request(
+            reservation_request, reservation
+        )
+        complete = {
+            'schema_version': 1,
+            'record_type': 'auto_preparation_groups_executed',
+            'action_id': request['action_id'],
+            'manifest_sha256': request['manifest_sha256'],
+            'accepted': True,
+            'message': 'completed',
+            'source_inventory_revision': 1,
+            'preparations': [{
+                'working_chemical_name': 'sodium_borohydrideC6.25',
+                'water_chemical_name': 'ColdWaterC1.0',
+                'destination_tubes': [{'loc': 'A2'}]
+            }],
+            'failures': [],
+            'physical_execution_started': True
+        }
+        self.assertTrue(
+            controller._validate_auto_preparation_group_execution(
+                complete, request
+            )['accepted']
+        )
+        partial = copy.deepcopy(complete)
+        partial.update({'accepted': False, 'message': 'pipette fault',
+                        'failures': [{'message': 'pipette fault'}]})
+        with self.assertRaisesRegex(RuntimeError, 'Do not retry'):
+            controller._validate_auto_preparation_group_execution(partial, request)
+
     def test_protocol_packet_names_are_ghost_response_messages(self):
         source_tree = ast.parse(
             (REPOSITORY_ROOT / 'Armchair' / 'armchair.py').read_text()
@@ -2644,6 +2685,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertEqual(b'\x1A', packet_types['auto_plate_generation_registered'])
         self.assertEqual(b'\x1B', packet_types['reserve_auto_preparation_groups'])
         self.assertEqual(b'\x1C', packet_types['auto_preparation_groups_reserved'])
+        self.assertEqual(b'\x1D', packet_types['execute_auto_preparation_groups'])
+        self.assertEqual(b'\x1E', packet_types['auto_preparation_groups_executed'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -2656,6 +2699,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
         self.assertIn('auto_plate_generation_registered', ghost_types)
         self.assertIn('reserve_auto_preparation_groups', ghost_types)
         self.assertIn('auto_preparation_groups_reserved', ghost_types)
+        self.assertIn('execute_auto_preparation_groups', ghost_types)
+        self.assertIn('auto_preparation_groups_executed', ghost_types)
 
     def test_compatibility_request_is_skipped_only_for_local_simulation(self):
         method = _get_auto_controller_method_node('init_robot')

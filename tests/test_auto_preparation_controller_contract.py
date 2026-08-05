@@ -1,4 +1,4 @@
-'''Source-level Stage 9A/9B checks without importing hardware modules.'''
+'''Source-level Stage 9A/9C checks without importing hardware modules.'''
 
 import ast
 import os
@@ -33,7 +33,10 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             '_execute_auto_preparation_phase',
             '_build_auto_preparation_reservation_request',
             '_validate_auto_preparation_group_reservation',
-            '_request_auto_preparation_group_reservation'
+            '_request_auto_preparation_group_reservation',
+            '_build_auto_preparation_execution_request',
+            '_validate_auto_preparation_group_execution',
+            '_request_auto_preparation_group_execution'
         ):
             self.assertIn(method_name, self.auto_methods)
             self.assertEqual(
@@ -60,19 +63,20 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             run_method.index('model.generate_initial_design(')
         )
 
-    def test_phase_uses_read_only_reservation_and_cannot_execute_preparation(self):
+    def test_phase_reserves_then_executes_before_source_activation(self):
         phase_source = ast.get_source_segment(
             self.source,
             self.auto_methods['_execute_auto_preparation_phase']
         )
         self.assertIn('_build_auto_preparation_reservation_request(', phase_source)
         self.assertIn('_request_auto_preparation_group_reservation(', phase_source)
-        self.assertIn('no liquid was moved', phase_source)
+        self.assertIn('_build_auto_preparation_execution_request(', phase_source)
+        self.assertIn('_request_auto_preparation_group_execution(', phase_source)
         self.assertNotIn('_execute_auto_preparation_entry(', phase_source)
-        self.assertNotIn('_activate_auto_prepared_sources(', phase_source)
+        self.assertIn('_activate_auto_prepared_sources(', phase_source)
         self.assertNotIn('execute_protocol_df(', phase_source)
 
-    def test_reservation_contract_is_versioned_and_journaled_before_fail_closed(self):
+    def test_execution_contract_is_versioned_and_journaled_before_activation(self):
         phase_source = ast.get_source_segment(
             self.source,
             self.auto_methods['_execute_auto_preparation_phase']
@@ -85,10 +89,16 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             self.source,
             self.auto_methods['_validate_auto_preparation_group_reservation']
         )
+        execution_validation = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_execution']
+        )
         self.assertIn("'schema_version': 1", request_source)
         self.assertIn("'expected_source_inventory_revision'", request_source)
         self.assertIn("'auto_preparation_groups_reserved'", validation_source)
         self.assertIn("'stock_uses_temperature_module'", validation_source)
+        self.assertIn("'physical_execution_started'", execution_validation)
+        self.assertIn("'auto_preparation_groups_executed'", execution_validation)
         self.assertIn('_record_auto_live_run_event(', phase_source)
 
 

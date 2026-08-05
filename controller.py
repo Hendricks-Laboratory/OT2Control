@@ -5050,7 +5050,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v6'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v7'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5407,13 +5407,14 @@ class AutoContr(Controller):
                 del self._cached_reader_locs[source_name]
 
     def _execute_auto_preparation_phase(self, model, simulate):
-        '''Reserve grouped preparation resources, then stop before execution.
+        '''Execute and activate validated grouped working-solution preparation.
 
-        Stage 9B verifies the requested stock group, runtime tube capacity,
-        empty destination locations, and cold-water policy on Auto-main.  It
-        deliberately does not move liquid, consume tips, allocate a live
-        container, or alter the Auto model.  Stage 9C alone may execute the
-        water/stock/mix protocol and activate completed working sources.
+        A fresh Auto-main reservation is made immediately before execution.
+        The Pi revalidates that same reservation immediately before its first
+        physical transfer, then performs water, stock, and mix for every
+        destination tube.  Controller source activation happens only after a
+        complete, positively acknowledged Pi result; a partial physical
+        execution therefore fails closed instead of being retried blindly.
         '''
         manifest = self.auto_preparation_manifest
         if manifest is None or self.auto_preparation_completed:
@@ -5434,17 +5435,118 @@ class AutoContr(Controller):
                 'physical_execution': 'not_started_stage_9b_only'
             }
         )
+        execution_request = self._build_auto_preparation_execution_request(
+            request, result
+        )
         print(
-            '<<controller>> Auto-main validated {} grouped preparation '
-            'destination reservation(s); no liquid was moved.'
+            '<<controller>> Auto-main reserved {} grouped preparation '
+            'destination(s); executing water, stock, then mix once per tube.'
             .format(len(result['preparations']))
         )
-        raise RuntimeError(
-            'auto_preparation_mode=required has a validated grouped '
-            'Auto-main reservation, but physical preparation is intentionally '
-            'unavailable until Stage 9C execution is installed. No liquid '
-            'was moved; set auto_preparation_mode=off for this run.'
+        execution = self._request_auto_preparation_group_execution(
+            execution_request
         )
+        self._record_auto_live_run_event(
+            'auto_preparation_groups_executed',
+            {'request': execution_request, 'result': execution}
+        )
+        self._update_cached_locs([
+            preparation['working_chemical_name']
+            for preparation in manifest['preparations']
+        ])
+        self._activate_auto_prepared_sources(model, manifest['preparations'])
+        self._apply_auto_prepared_source_cache_policy()
+        self.auto_preparation_completed = True
+        self.auto_main_robot_state_snapshot['source_inventory_revision'] = (
+            execution['source_inventory_revision']
+        )
+        self._record_auto_live_run_event(
+            'auto_preparation_sources_activated',
+            {'working_sources': dict(self.auto_prepared_source_names)}
+        )
+        print(
+            '<<controller>> grouped Auto preparation completed and working '
+            'sources are active for seed generation.'
+        )
+        return True
+
+    def _build_auto_preparation_execution_request(self, reservation_request,
+                                                  reservation):
+        '''Binds one physical execution to one fresh, validated reservation.'''
+        return {
+            'schema_version': 1,
+            'action_id': 'auto-preparation-execution-{}'.format(
+                reservation_request['manifest_sha256'][:16]
+            ),
+            'manifest_sha256': reservation_request['manifest_sha256'],
+            'expected_source_inventory_revision': reservation[
+                'source_inventory_revision'
+            ],
+            'reservation_request': copy.deepcopy(reservation_request),
+            'reservation': copy.deepcopy(reservation)
+        }
+
+    def _validate_auto_preparation_group_execution(self, result, request):
+        '''Accept only a complete Pi execution acknowledgement for this run.'''
+        required_keys = {
+            'schema_version', 'record_type', 'action_id', 'manifest_sha256',
+            'accepted', 'message', 'source_inventory_revision',
+            'preparations', 'failures', 'physical_execution_started'
+        }
+        if not isinstance(result, dict) or set(result) != required_keys:
+            raise RuntimeError('Auto preparation execution returned an invalid schema.')
+        if result['schema_version'] != 1 or result['record_type'] != \
+                'auto_preparation_groups_executed':
+            raise RuntimeError('Auto preparation execution returned an unsupported record.')
+        if result['action_id'] != request['action_id'] or \
+                result['manifest_sha256'] != request['manifest_sha256']:
+            raise RuntimeError('Auto preparation execution does not match this manifest.')
+        if not isinstance(result['accepted'], bool) or \
+                not isinstance(result['message'], str) or \
+                not isinstance(result['physical_execution_started'], bool) or \
+                not isinstance(result['failures'], list):
+            raise RuntimeError('Auto preparation execution returned invalid status fields.')
+        revision = result['source_inventory_revision']
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise RuntimeError('Auto preparation execution returned an invalid source revision.')
+        if not result['accepted']:
+            raise RuntimeError(
+                'Auto preparation execution failed{}: {}. Do not retry this '
+                'run automatically; inspect the Pi execution record first.'.format(
+                    ' after physical transfer began' if result['physical_execution_started'] else '',
+                    result['message']
+                )
+            )
+        if result['failures'] or not result['physical_execution_started']:
+            raise RuntimeError('Auto preparation execution acknowledgement is incomplete.')
+        expected_names = set(
+            item['working_chemical_name']
+            for item in request['reservation_request']['preparations']
+        )
+        returned_names = set()
+        for preparation in result['preparations']:
+            if not isinstance(preparation, dict) or set(preparation) != {
+                    'working_chemical_name', 'water_chemical_name',
+                    'destination_tubes'}:
+                raise RuntimeError('Auto preparation execution group schema is invalid.')
+            tubes = preparation['destination_tubes']
+            if not isinstance(tubes, list) or not tubes:
+                raise RuntimeError('Auto preparation execution omitted destination tubes.')
+            returned_names.add(preparation['working_chemical_name'])
+        if returned_names != expected_names:
+            raise RuntimeError('Auto preparation execution omitted or added a group.')
+        if revision <= request['expected_source_inventory_revision']:
+            raise RuntimeError('Auto preparation execution did not advance source state.')
+        return copy.deepcopy(result)
+
+    def _request_auto_preparation_group_execution(self, request):
+        '''Executes one already-reserved grouped preparation protocol on the Pi.'''
+        self.portal.send_pack('execute_auto_preparation_groups', request)
+        pack_type, _, payload = self.portal.recv_pack()
+        if pack_type != 'auto_preparation_groups_executed' or \
+                not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError('Auto preparation execution returned a malformed response.')
+        return self._validate_auto_preparation_group_execution(payload[0], request)
 
     def _build_auto_preparation_reservation_request(self, manifest):
         '''Builds the strict, read-only Auto-main reservation request.'''
@@ -5791,6 +5893,16 @@ class AutoContr(Controller):
             raise RuntimeError(
                 'Auto-main compatibility check failed: the Pi does not '
                 'advertise reserve_auto_preparation_groups required for '
+                'grouped working-solution preparation.'
+            )
+
+        if (
+            'execute_auto_preparation_groups'
+            not in snapshot.get('supported_commands', [])
+        ):
+            raise RuntimeError(
+                'Auto-main compatibility check failed: the Pi does not '
+                'advertise execute_auto_preparation_groups required for '
                 'grouped working-solution preparation.'
             )
 
