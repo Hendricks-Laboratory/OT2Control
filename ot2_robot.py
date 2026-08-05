@@ -1049,7 +1049,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v6'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v7'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -3079,7 +3079,8 @@ class OT2Robot():
                 'refresh_source_container_mass',
                 'reset_pipette_tip_racks',
                 'register_auto_plate_generation',
-                'reserve_auto_preparation_groups'
+                'reserve_auto_preparation_groups',
+                'execute_auto_preparation_groups'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -3143,6 +3144,179 @@ class OT2Robot():
         self.portal.send_pack(
             'auto_preparation_groups_reserved',
             self._build_auto_preparation_group_reservation(request)
+        )
+
+    def _validate_auto_preparation_execution_request(self, request):
+        '''Rebuilds a reservation and rejects stale or altered execution work.'''
+        required = {
+            'schema_version', 'action_id', 'manifest_sha256',
+            'expected_source_inventory_revision', 'reservation_request',
+            'reservation'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('preparation execution request has an invalid schema.')
+        if request['schema_version'] != 1 or not isinstance(request['action_id'], str):
+            raise ValueError('preparation execution request is invalid.')
+        if request['expected_source_inventory_revision'] != self.source_inventory_revision:
+            raise ValueError('source inventory changed before preparation execution.')
+        reservation_request = self._validate_auto_preparation_reservation_request(
+            request['reservation_request']
+        )
+        if reservation_request['manifest_sha256'] != request['manifest_sha256']:
+            raise ValueError('preparation execution manifest does not match reservation.')
+        rebuilt = self._build_auto_preparation_group_reservation(reservation_request)
+        if not rebuilt['accepted']:
+            raise ValueError('preparation execution reservation is no longer valid: {}'
+                             .format(rebuilt['message']))
+        supplied = request['reservation']
+        if not isinstance(supplied, dict) or supplied.get('accepted') is not True:
+            raise ValueError('preparation execution requires an accepted reservation.')
+        # The reservation is deterministic for an unchanged deck. Comparing
+        # only the operational group records permits a human-readable message
+        # to evolve without permitting destinations or water source changes.
+        if supplied.get('preparations') != rebuilt['preparations']:
+            raise ValueError('preparation destinations changed before execution.')
+        return reservation_request, rebuilt
+
+    def _claim_auto_preparation_destination(self, tube, temporary_name,
+                                            working_concentration):
+        '''Claims one previously reserved empty tube and constructs it empty.'''
+        deck_pos = tube['deck_pos']
+        location = tube['loc']
+        viable = self.lab_deck[deck_pos]
+        if viable is None or viable.name != tube['labware']:
+            raise ValueError('reserved preparation labware is no longer present.')
+        empty_locations = viable.empty_tubes.get(tube['container'], [])
+        if location not in empty_locations:
+            raise ValueError('reserved preparation destination {} is no longer empty.'
+                             .format(location))
+        empty_locations.remove(location)
+        container = self._construct_container(
+            tube['container'], temporary_name, deck_pos, location,
+            conc=working_concentration
+        )
+        self.containers[temporary_name] = container
+        return container
+
+    def _build_auto_preparation_group_execution(self, request):
+        '''Execute grouped water/stock/mix preparation once and acknowledge it.
+
+        All validation and empty-tube availability checks occur before the
+        first liquid transfer.  If a hardware command subsequently fails, the
+        response records that physical execution began and the controller
+        fails closed instead of attempting an unsafe automatic replay.
+        '''
+        response = {
+            'schema_version': 1,
+            'record_type': 'auto_preparation_groups_executed',
+            'action_id': request.get('action_id') if isinstance(request, dict) else None,
+            'manifest_sha256': request.get('manifest_sha256') if isinstance(request, dict) else None,
+            'accepted': False,
+            'message': '',
+            'source_inventory_revision': int(getattr(self, 'source_inventory_revision', 0)),
+            'preparations': [],
+            'failures': [],
+            'physical_execution_started': False
+        }
+        temporary_names = []
+        claimed_destinations = []
+        try:
+            normalized, reservation = self._validate_auto_preparation_execution_request(request)
+            prepared_groups = []
+            # Claim every destination before liquid moves. This protects the
+            # reservation from changes made by another allocation path.
+            for preparation, reserved in zip(normalized['preparations'], reservation['preparations']):
+                destinations = []
+                for tube_index, tube in enumerate(reserved['destination_tubes']):
+                    temporary_name = '__auto_preparation_{}_{}'.format(
+                        preparation['working_chemical_name'], tube_index
+                    )
+                    if temporary_name in self.containers:
+                        raise ValueError('temporary preparation name collision.')
+                    temporary_names.append(temporary_name)
+                    claimed_destinations.append(tube)
+                    destinations.append((
+                        tube,
+                        temporary_name,
+                        self._claim_auto_preparation_destination(
+                            tube, temporary_name,
+                            self._get_conc(preparation['working_chemical_name'])
+                        )
+                    ))
+                prepared_groups.append((preparation, reserved, destinations))
+
+            for preparation, reserved, destinations in prepared_groups:
+                completed_tubes = []
+                response['physical_execution_started'] = True
+                for tube, temporary_name, container in destinations:
+                    # Preserve the established dilution order for each tube.
+                    self._exec_transfer(
+                        reserved['water_chemical_name'],
+                        [(temporary_name, preparation['water_transfer_per_tube_uL'])]
+                    )
+                    self._exec_transfer(
+                        preparation['stock_chemical_name'],
+                        [(temporary_name, preparation['stock_transfer_per_tube_uL'])]
+                    )
+                    self._mix(temporary_name, 2)
+                    completed_tubes.append({
+                        'loc': tube['loc'], 'deck_pos': tube['deck_pos'],
+                        'final_volume_uL': float(container.vol)
+                    })
+
+                working_name = preparation['working_chemical_name']
+                completed_containers = [
+                    self.containers[temporary_name]
+                    for _, temporary_name, _ in destinations
+                ]
+                for container in completed_containers:
+                    container.name = working_name
+                for _, temporary_name, _ in destinations:
+                    del self.containers[temporary_name]
+                    temporary_names.remove(temporary_name)
+                self.containers[working_name] = MultiContainer(completed_containers)
+                response['preparations'].append({
+                    'working_chemical_name': working_name,
+                    'water_chemical_name': reserved['water_chemical_name'],
+                    'destination_tubes': completed_tubes
+                })
+
+            self.source_inventory_revision += 1
+            response.update({
+                'accepted': True,
+                'message': 'grouped working solutions were prepared and registered.',
+                'source_inventory_revision': self.source_inventory_revision
+            })
+        except Exception as exc:
+            # Hardware/API exceptions must be returned as a durable negative
+            # acknowledgement.  They are not suppressed: the controller
+            # receives a failed record and terminates this Auto run rather
+            # than replaying a possibly partial physical preparation.
+            response['message'] = str(exc)
+            response['failures'] = [{'message': str(exc)}]
+            # Do not remove claimed or partially filled destinations after a
+            # physical attempt: retaining them makes the real deck state
+            # inspectable and prevents a later request from reusing a tube.
+            if not response['physical_execution_started']:
+                for temporary_name in temporary_names:
+                    self.containers.pop(temporary_name, None)
+                # Validation/claim failures occur before any liquid movement;
+                # restore this in-memory allocation exactly so an operator can
+                # correct the request without losing otherwise empty tubes.
+                for tube in claimed_destinations:
+                    empty_locations = self.lab_deck[tube['deck_pos']].empty_tubes[
+                        tube['container']
+                    ]
+                    if tube['loc'] not in empty_locations:
+                        empty_locations.append(tube['loc'])
+        return response
+
+    @exec_func('execute_auto_preparation_groups', 1, True, exec_funcs)
+    def _exec_execute_auto_preparation_groups(self, request):
+        '''Executes the one-time grouped preparation protocol and replies.'''
+        self.portal.send_pack(
+            'auto_preparation_groups_executed',
+            self._build_auto_preparation_group_execution(request)
         )
 
     @exec_func('pause', 1, True, exec_funcs)

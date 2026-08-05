@@ -1,4 +1,4 @@
-'''Static contract checks for the non-mutating Stage 9B Pi reservation path.'''
+'''Static contract checks for the Stage 9B reservation and Stage 9C execution paths.'''
 
 import ast
 import os
@@ -84,12 +84,37 @@ class AutoPreparationReservationContractTests(unittest.TestCase):
         self.assertEqual(
             b'\x1C', packet_types['auto_preparation_groups_reserved']
         )
+        self.assertEqual(
+            b'\x1D', packet_types['execute_auto_preparation_groups']
+        )
+        self.assertEqual(
+            b'\x1E', packet_types['auto_preparation_groups_executed']
+        )
         self.assertIn('reserve_auto_preparation_groups', ghost_types)
         self.assertIn('auto_preparation_groups_reserved', ghost_types)
+        self.assertIn('execute_auto_preparation_groups', ghost_types)
+        self.assertIn('auto_preparation_groups_executed', ghost_types)
         self.assertIn(
-            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v6'",
+            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v7'",
             self.robot_source
         )
+
+    def test_stage_9c_executes_water_stock_mix_and_registers_multicontainer(self):
+        for method_name in (
+                '_validate_auto_preparation_execution_request',
+                '_claim_auto_preparation_destination',
+                '_build_auto_preparation_group_execution',
+                '_exec_execute_auto_preparation_groups'):
+            self.assertIn(method_name, self.methods)
+        source = ast.get_source_segment(
+            self.robot_source,
+            self.methods['_build_auto_preparation_group_execution']
+        )
+        self.assertIn("reserved['water_chemical_name']", source)
+        self.assertIn("preparation['stock_chemical_name']", source)
+        self.assertIn('self._mix(temporary_name, 2)', source)
+        self.assertIn('MultiContainer(completed_containers)', source)
+        self.assertIn("'physical_execution_started'", source)
 
 
 if __name__ == '__main__':
