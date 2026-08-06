@@ -177,6 +177,18 @@ class AutoPlotOrganizationTests(unittest.TestCase):
             "'final initial seed physical-feasibility plots'",
             source
         )
+        self.assertIn(
+            "hatches=['///']",
+            source
+        )
+        self.assertIn(
+            "hatch='///'",
+            source
+        )
+        self.assertIn(
+            'include_reference_seed_marker=False',
+            source
+        )
 
 
 if __name__ == '__main__':

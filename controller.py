@@ -17899,7 +17899,8 @@ class AutoContr(Controller):
         def _draw_feasibility_overlay(
             ax,
             panel,
-            include_projected_seed_markers=True
+            include_projected_seed_markers=True,
+            include_reference_seed_marker=True
         ):
             '''Draws one conditional feasibility view from shared panel data.'''
             x_physical = panel['x_physical']
@@ -17913,7 +17914,11 @@ class AutoContr(Controller):
                     infeasible.astype(float),
                     levels=[0.5, 1.5],
                     colors=['#cfcfcf'],
-                    alpha=0.82,
+                    # A neutral hatch makes the entire excluded field visible
+                    # in grayscale and prevents the overflow corner from
+                    # reading as unused white plot space in exported figures.
+                    hatches=['///'],
+                    alpha=0.90,
                     antialiased=True
                 )
 
@@ -17969,16 +17974,17 @@ class AutoContr(Controller):
                     zorder=6
                 )
 
-            ax.scatter(
-                [reference_recipe[x_index]],
-                [reference_recipe[y_index]],
-                marker='*',
-                s=115,
-                facecolors='#f4c542',
-                edgecolors='0.15',
-                linewidths=0.85,
-                zorder=7
-            )
+            if include_reference_seed_marker:
+                ax.scatter(
+                    [reference_recipe[x_index]],
+                    [reference_recipe[y_index]],
+                    marker='*',
+                    s=115,
+                    facecolors='#f4c542',
+                    edgecolors='0.15',
+                    linewidths=0.85,
+                    zorder=7
+                )
             ax.set_xlim(bounds[x_index])
             ax.set_ylim(bounds[y_index])
             ax.set_xlabel(
@@ -18044,7 +18050,8 @@ class AutoContr(Controller):
         legend_handles = [
             mpatches.Patch(
                 facecolor='#cfcfcf',
-                edgecolor='none',
+                edgecolor='0.45',
+                hatch='///',
                 label='Excluded: overflow, water, or transfer rule'
             ),
             Line2D(
@@ -18138,7 +18145,8 @@ class AutoContr(Controller):
             _draw_feasibility_overlay(
                 ax,
                 panel,
-                include_projected_seed_markers=False
+                include_projected_seed_markers=False,
+                include_reference_seed_marker=False
             )
             # On a complete two-dimensional plane every seed marker is an
             # actual recipe, rather than only a projection of a higher-D one.
