@@ -6,16 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-08-04
-
-> [!NOTE]
-> **Authorship tagging.** Entries marked **[Claude Code]** were implemented by
-> Claude Code (Opus 5) working in this repository under the project owner's
-> direction and review. Untagged entries predate that convention or were
-> authored directly by the project owner. The tag records provenance only: a
-> tagged change passed the same Python 3.9 compilation, isolated hardware-free
-> test, and human-review gates as any other change, and no tagged change has
-> physical-run clearance on the strength of this record alone.
+**Updated through:** 2026-08-06
 
 ---
 
@@ -37,7 +28,7 @@ It is intended as a branch-specific record of:
 
 ---
 
-# Current Auto-RTG Development Record — Complete Reconciliation, July 21, 2026
+# Current Auto-RTG Development Record — Complete Reconciliation, August 6, 2026
 
 > [!IMPORTANT]
 > The older sections below preserve historical `Auto-RTG-v1` validation
@@ -57,17 +48,19 @@ recent feature commit only.
 |---|---|
 | Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
 | Initial reconciliation snapshot | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
-| Latest validated working tree | `Auto-RTG` at `5428191` plus the current uncommitted pairwise-legend, standalone-slice layout, mask-aware true-zero feasibility-overlay refinement, and recipe-concentration-history plotting work |
+| Last reviewed Auto-RTG code commit | `882b1d1` (`Fix Auto preparation source activation contract`) |
+| Paired Pi development revision | `origin/Auto-main` at `d81235d` (`Fix Auto-main preparation response acknowledgement`) |
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
-| Reviewed range | `Auto...Auto-RTG`, containing 174 commits |
-| Files changed in the range | `controller.py`, `optimizers.py`, `ot2_robot.py`, Auto tests, validation/governance documents, `.gitignore`, and removal of an ignored local `.DS_Store` artifact |
-| Current validation result | Python 3.9.6 compilation passed; 179 isolated hardware-free tests passed on July 27, 2026 |
+| Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
+| Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
+| Latest focused validation | At `882b1d1`, Python 3.9.6 compilation passed for the controller, preparation planner, and focused tests; all 12 preparation planner/controller-contract tests passed |
 
 The reconciliation inspected current controller, optimizer, robot-container,
-plot/report, and test code as well as the accumulated Git history. It did not
-run a controller launcher, robot, plate reader, credential workflow, or live
-protocol. Therefore it confirms code/documentation coverage and isolated
-behavior, not physical-run clearance.
+plot/report, state/recovery, preparation, and test code as well as the
+accumulated Git history. Automated validation did not run a controller
+launcher, robot, plate reader, credential workflow, or live protocol.
+Controlled dry-debug observations cited below are human-supervised lab evidence
+and do not establish real-chemistry or unattended-run clearance.
 
 ## Current branch purpose
 
@@ -112,7 +105,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Four-or-more-variable all-pair conditional GP slice atlases and standalone slices | Implemented | Synthetic four-variable pair/held-recipe, true-zero/mask feasibility, rendering/path validation, compact atlas-layout regression checks, and full hardware-free test suite |
 | Dimension-aware design-space plots and portfolio trace with mode-specific markers | Implemented | Isolated plot-classification and marker/error-bar legend tests, plus collision-aware condition-label and compact-header layout checks |
 | Categorized Auto plot folders and plot manifest | Implemented in `cf2fcb9` | Python 3.9 compilation and isolated path tests |
-| Condition-level recipe-concentration history plots | Implemented in current working tree | Variable-only and complete-recipe grouped bar charts use executed final concentrations in mM, write under `Plots/recipe_history`, obey plot profiles, append to the plot manifest, and appear in the final report; isolated lifecycle, report, data-contract, and rendering tests |
+| Condition-level recipe-concentration history plots | Implemented | Variable-only and complete-recipe grouped bar charts use executed final concentrations in mM, write under `Plots/recipe_history`, obey plot profiles, append to the plot manifest, and appear in the final report; isolated lifecycle, report, data-contract, and rendering tests |
 | Controller-side source-volume preflight and reserve volume | Implemented | Isolated fail-closed preflight tests; needs run-specific source-inventory review |
 | Calibrated robot-side tube tare defaults with controller-side legacy-offset retirement | Implemented; static/synthetic validation passed | Pi runtime owns calibrated 2 mL, 15 mL, and 50 mL tare constants. Auto rejects a nonzero historical Header offset rather than double-correcting measured source mass. Physical weighing remains human-verified. |
 | Terminal verbosity and lifecycle progress messages | Implemented | Header normalization and source-level lifecycle review |
@@ -121,7 +114,9 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 2 local Live workbook and offline sync queue | Implemented; hardware-free validation passed | Every durable Stage 1 revision now atomically refreshes `Live_Run/<effective-data-dir>_LIVE.xlsx`, then preserves a checksum-identified per-revision snapshot before adding it to `Run_State/pending_cloud_sync.jsonl`. The queue supports strict FIFO replay through an injected adapter, stops on the first failure, and preserves unsynchronized order. No Drive adapter, credential access, or remote request is configured yet, so normal Auto execution remains offline-capable; a controlled local-workbook dry debug is still required before a later, separately approved Drive integration. |
 | Stage 3 Pi `Auto-main` compatibility snapshot | Implemented; controlled dry debug passed | The separately deployed `Auto-main` Pi branch reports a versioned, read-only state snapshot before Auto execution begins. The controller validates the protocol/tare-calibration contract, records the accepted snapshot in durable run state, and rejects incompatible deployments. This does not modify the protected Pi `main` checkout or change transfer behavior. |
 | Stage 4 exact Pi next-batch resource preflight | Implemented; hardware-free and controlled dry-debug validation passed | With `auto_source_volume_check=required`, the controller retains its aggregate source audit and sends the exact next-batch transfer plan to `Auto-main`. The Pi non-mutatively simulates current per-container usable volume, same-name backup selection, pipette-size-dependent transfer steps, and fresh-tip availability. A structured deficit rejects the batch before execution; a passed allocation is journaled. Controlled dry tests confirmed a valid backup allocation, insufficient-source rejection, and an `H12` one-tip rack rejection before liquid transfer. Isolated backup-switch, source/reserve, insufficient-tip, malformed-payload, no-mutation, configured-tip-suffix, and controller fail-closed tests passed. |
-| Stage 6 same-container source-refill hold | Implemented; hardware-free validation complete | A recoverable source-volume deficit now enters a durable, operator-supervised pre-batch hold. The only inventory-changing action is `refill_same_container`: the Pi validates the exact existing source identity, stale-revision guard, calibrated tube tare, nonnegative mass, and tube capacity before updating only that tube’s inventory. The controller then refreshes its audit cache and re-runs both aggregate and exact Pi preflights on the unchanged dataframe before any transfer. `retry_preflight` performs no inventory mutation; `end_run` fails closed. New sources, concentration/deck/labware changes, tip/plate recovery, recipe regeneration, and unattended continuation remain out of scope. A controlled physical dry debug is still required. |
+| Stage 6 same-container source-refill hold | Implemented; controlled dry-debug exercised | A recoverable source-volume deficit enters a durable, operator-supervised pre-batch hold. The only inventory-changing action is `refill_same_container`: the Pi validates the exact existing source identity, stale-revision guard, calibrated tube tare, nonnegative mass, and tube capacity before updating only that tube’s inventory. The controller refreshes its audit cache and re-runs both aggregate and exact Pi preflights on the unchanged dataframe before any transfer. `retry_preflight` performs no inventory mutation; `end_run` fails closed. New sources, concentration/deck/labware changes, recipe regeneration, and unattended continuation remain out of scope. |
+| Stage 8 complete tip-rack replacement hold | Implemented; controlled dry-debug exercised | An insufficient-tip deficit can pause only at a safe pre-batch boundary. The operator may replace the complete rack set for one affected pipette, the Pi resets those configured rack positions, and the controller re-runs exact preflight before the unchanged batch proceeds. The flow is terminal-only, durable, and fails closed for partial, stale, malformed, or declined actions. |
+| Between-batch identical plate replacement | Implemented; controlled dry-debug exercised | Plate-capacity preflight warns rather than blocks when a run may outgrow one plate. At a completed-batch boundary, the operator may replace the same plate type and position; the controller records a new physical plate generation while preserving globally unique logical condition/well audit identities. A batch larger than one plate remains rejected. |
 | Auto output-directory collision isolation | Implemented; dry debug passed | A repeated Header `data_dir` prompted for exact `yes`, created the first unused `_N` sibling, and preserved separate output and `Run_State` records. Noninteractive collisions fail closed. The requested and effective directories are retained in the runtime baseline and final report. |
 | Auto early terminal transcript | Implemented; normal dry debug passed | Auto buffers Header parsing, safety warnings, and output-directory collision messages in memory after the Header download. Once the approved per-run `Debug/terminal_output.txt` can be opened, it prepends that transcript and continues normal live capture. The July 29 `DEBUGRTG_STAGE1_5` audit confirmed the buffered setup record and live-capture marker were present in the saved log, while the copied interactive terminal showed the expected later live-capture marker. Early setup failure restores normal streams and creates no transcript artifact. |
 | Import-only run-context lineage, tabular snapshots, final cross-run plots, and reporting | Implemented | Existing-output imports flatten and checksum-identify ancestor runs without nesting; they export de-duplicated native condition and well-level replicate CSV snapshots plus source-availability diagnostics. Final import-only plots provide separate current-run-only and cumulative-lineage λmax progress and replicate views from those flat snapshots, with run identity and provenance-aware semantics. The final report describes lineage scope, source availability, condition/replicate row counts, raw-scan deferral, and links the generated cross-run figures. Manual checkpoint imports remain model-only. Raw scan ingestion remains deferred. Python 3.9 isolated lineage, branching, duplicate-conflict, legacy, tabular-history, cross-run rendering, and report tests passed. |
@@ -134,14 +129,14 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Objective UV scan-quality diagnostics | Implemented, warning-only by default | Records blank-corrected peak height and 300/1000 nm boundary maxima; legacy worksheets retain warning-only behavior |
 | Boundary-aware exact-λmax routing | Implemented, opt-in | `boundary_aware` excludes only exact 300/1000 nm maxima from exact-λmax QC/training and target decisions while preserving raw outcomes |
 | Usable-spectrum probability classifier and conditional/joint maps | Implemented, observational | Cumulative binary GPy classifier learns interior versus exact-boundary outcomes; it does not yet affect acquisition or stopping |
-| Imported-continuation reaction and batch numbering | Implemented **[Claude Code]** in `248d95d` | A resumed run continues numbering above its imported history instead of restarting at zero; isolated tests assert no duplicate batch/reaction keys and cover the exact key-name defect that caused the reset |
-| Per-row Auto run provenance (`executed_in_current_run`, `origin_run_directory`) | Implemented **[Claude Code]** in `248d95d` | Distinguishes conditions this run physically executed from inherited checkpoint history, and survives multi-generation imports; physical-well reporting is scoped to locally executed rows |
-| Inherited seed-design figure and report labeling | Implemented **[Claude Code]** in `248d95d` | An imported run titles seed figures and report headings `Inherited Seed Design (from <run>)`, naming the run that built the seed rather than the immediate import source |
-| Auto design-space gridline styling | Implemented **[Claude Code]** in `4ae04b1` | Green dashed gridlines drawn behind plotted points across every design-space dimensionality, including the 3D pane grid, which ignores ordinary Matplotlib grid keyword arguments |
+| Imported-continuation reaction and batch numbering | Implemented in `248d95d` | A resumed run continues numbering above its imported history instead of restarting at zero; isolated tests assert no duplicate batch/reaction keys and cover the exact key-name defect that caused the reset |
+| Per-row Auto run provenance (`executed_in_current_run`, `origin_run_directory`) | Implemented in `248d95d` | Distinguishes conditions this run physically executed from inherited checkpoint history, and survives multi-generation imports; physical-well reporting is scoped to locally executed rows |
+| Inherited seed-design figure and report labeling | Implemented in `248d95d` | An imported run titles seed figures and report headings `Inherited Seed Design (from <run>)`, naming the run that built the seed rather than the immediate import source |
+| Auto design-space gridline styling | Implemented in `4ae04b1` | Green dashed gridlines drawn behind plotted points across every design-space dimensionality, including the 3D pane grid, which ignores ordinary Matplotlib grid keyword arguments |
 | Pairwise/parallel label and higher-dimensional atlas layout | Implemented | Pairwise and parallel-coordinate condition labels move text only through deterministic non-overlapping positions while plotted recipes remain exact. Shared title/legend headers and higher-dimensional atlas spacing are compacted without changing 300-DPI export or GP/feasibility grid density. Standalone slices retain their centered axis-label/colorbar group and compact annotation band. Source-level layout regression tests and synthetic Matplotlib rendering passed. |
 | Stage 9.0/9A grouped Auto preparation schema and planner | Implemented; hardware-free validation complete | `auto_preparation` now describes one stock source group, a working concentration, a destination labware/container type, and `tube_count × final_volume_per_tube_uL`. The pure `C_stock × V_stock = C_working × V_final` manifest expands deterministic per-tube and group-total transfers, rejects invalid dilution or 0–5 uL transfers, and fails closed for unknown stocks or output-name collisions. Cold-versus-standard dilution water is declared to follow the stock source's temperature-module placement, matching manual dilution. Physical capacity is deliberately deferred to Auto-main runtime geometry; the misleading legacy `Tube20000uL` identifier is not used as a capacity authority. |
 | Stage 9B Auto-main group reservation | Implemented; static/synthetic contract validation complete | `auto_preparation_mode=required` performs a versioned, read-only Auto-main reservation handshake before seed generation. Auto-main validates stock-group and selected-water availability using its whole-aspiration backup-source simulation, selects `ColdWaterC1.0` only when the active stock source is in the temperature module, checks runtime destination-tube capacity, and reserves distinct empty locations in a copied deck view. |
-| Stage 9C grouped preparation execution and activation | Implemented; static/synthetic contract validation complete; controlled dry debug required | Immediately after reservation, Auto-main rebuilds and compares the reservation against current source state before the first liquid move, claims all reserved destinations, then performs water → stock → mix once per tube. Completed same-name working tubes are registered as a `MultiContainer` for normal automatic source switching. The controller activates those working sources only after a complete versioned acknowledgement, updates its source cache/model bounds, and journals each boundary. Any negative or partial execution acknowledgement fails closed and is explicitly not retried automatically. Legacy manual dilution remains unchanged. |
+| Stage 9C grouped preparation execution and activation | Implemented; initial controlled dry debug reached physical preparation; repeat required after `882b1d1` | Auto-main rebuilds and compares the reservation against current source state before the first liquid move, claims all reserved destinations, then performs water → stock → mix once per tube. In the first controlled run, that physical sequence completed and the Pi acknowledged it, but controller activation then failed closed on a stale manifest key (`stock_reagent`). Commit `882b1d1` aligns activation with the planner’s canonical `stock_source_group` and per-tube volume fields; focused Python 3.9 compilation and 12 planner/controller tests pass. A fresh-destination controlled repeat must confirm source activation and subsequent seed generation. Completed same-name working tubes are registered as a `MultiContainer` for normal automatic source switching. |
 
 ### Current acquisition semantics
 
@@ -245,7 +240,7 @@ final mask feasibility. The controller prefers the batch helper when supplied
 by `OptimizationModel` and retains its scalar fallback for legacy isolated
 test doubles.
 
-### Bounded conditional-slice rendering — Stage 5 Part 2 (pending controlled debug)
+### Bounded conditional-slice rendering — Stage 5 Part 2
 
 After the complete read-only panel snapshot has been built in the parent
 controller, each higher-dimensional atlas page and standalone conditional
@@ -264,8 +259,7 @@ and retains already-written artifacts for audit; it does not silently return a
 partial suite. Source-level and synthetic orchestration tests confirm that the
 parent submits each planned artifact once, restores serial output ordering, and
 that child workers use the immutable snapshot with parallel rendering disabled
-to prevent recursion. A controlled 5D dry debug remains required to validate
-the actual process-spawn environment and quantify the wall-clock improvement.
+to prevent recursion.
 
 The controlled five-variable `DEBUGRTG_STAGE5_part1` dry run completed both
 the after-model-update and final conditional-slice suites without a traceback;
@@ -275,9 +269,12 @@ follow-up makes standalone slice headers responsive to the wrapped main title,
 two-column legend height, and wrapped `Hold:` provenance annotation, so long
 held-reagent lists cannot be cut off at the export edge. The same follow-up
 compacts the pairwise design-space title/legend band without moving any plotted
-recipe coordinates or changing GP, feasibility, or execution behavior.
+recipe coordinates or changing GP, feasibility, or execution behavior. Later
+controlled output review found and corrected atlas row/footer collisions; those
+layout changes remain presentation-only and do not change numerical panels,
+feasibility, or robot behavior.
 
-### Imported-continuation numbering, run provenance, and seed labeling — July 24, 2026 **[Claude Code]**
+### Imported-continuation numbering, run provenance, and seed labeling — July 24, 2026
 
 Commits `4ae04b1` (plot styling) and `248d95d` (numbering, provenance, seed
 labeling). This work began as a read-only audit of a deliberately paired debug
@@ -446,6 +443,7 @@ retain the stated legacy defaults when their Header row is absent.
 | `auto_plot_profile` | `standard`, `final_only`, or `off`; missing defaults to `standard`. It controls automatic diagnostic/final plots, not model fitting, acquisition, QC, or execution. |
 | `auto_terminal_verbosity` | `essential`, `standard`, or `diagnostic`; missing defaults to `standard`. `off` means essential safety/scientific output, not silence; `limited` maps to standard; `all` maps to diagnostic. Persistent CSV/report audit output is unaffected. |
 | `auto_model_checkpoint_mode` | `off` (legacy default), `save`, or `import`. `save` exports immutable JSON/NumPy packages after the seed GP fit, every completed optimizer batch, and finalization to `Model_Checkpoints/`. For `import`, before completing the reagent sheet choose either `manual` (place exactly one compatible package in this run's `Model_Checkpoints/Import_Here/`) or `run` (enter an exact prior `Protocol_Outputs` folder name such as `RTG_020`, then select `final`, `seed`, `batch N`, or a listed package filename). Prior-run selection is restricted to direct output-run children and canonical checkpoint files; arbitrary paths are rejected. Auto checksum-validates and archive-copies the source, writes `import_provenance.json`, then rebuilds a fresh model from numeric cumulative history after confirming current chemistry, normalized bounds, and spectral-response policy compatibility. The imported model skips a new seed design; `max_iterations` applies to new batches only. |
+| `auto_preparation_mode` | `off` (legacy default) or `required`. `required` requires a validated `auto_preparation` worksheet and runs its grouped working-solution preparation once after the Auto-main handshake and before seed generation. It cannot currently be combined with checkpoint import. The worksheet uses `enabled`, `stock_source_group`, `stock_concentration_mM`, `working_concentration_mM`, `tube_count`, `final_volume_per_tube_uL`, `destination_labware`, and `destination_container`. Each enabled row produces identical working tubes through water → stock → mix; the stock source's temperature-module placement selects cold versus standard dilution water. Auto-main is the authority for physical destination allocation and capacity. |
 | `auto_source_volume_check` | `off` (legacy default) or `required`. `required` performs a fail-closed aggregate source-inventory preflight before each batch. |
 | `auto_source_reserve_volume_uL` | Nonnegative additional source reserve beyond the robot's dead-volume calculation; defaults to `0`. It matters only when source-volume checking is required. |
 | `auto_plate_replacement_mode` | Retired compatibility key. Omit this row for new worksheets. Existing values are tolerated and ignored: controlled between-batch identical-plate replacement is a built-in terminal operator hold, not a spreadsheet-selectable mode. |
@@ -742,18 +740,25 @@ silently alter GP acquisition scores or make a scientifically valuable recipe
 unavailable merely because a stock is temporarily low.
 
 This feature is deliberately not a general recovery system: it cannot add or
-substitute a source, change concentration or mapping, reload tips, replace a
-plate, alter the recipe, or continue without an interactive operator. A
-controlled physical dry debug must confirm the deployed `Auto-main` revision
-and the complete hold/retry audit before using it in chemistry.
+substitute a source, change concentration or mapping, alter the recipe, or
+continue without an interactive operator. Complete tip-rack and identical-plate
+replacement now have their own separately validated pre-batch holds; they do
+not broaden same-container source refill.
 
 ### Deferred, not immediate
 
 - further plot styling unless a new controlled output audit finds a readability
   defect;
-- new-source substitution, tip replacement, or plate replacement recovery;
-- higher-dimensional GP-surface visualization beyond the existing projection,
-  parallel-coordinate, PCA, and three-variable conditional-slice views;
+- source substitution or unattended registration of new reagent sources;
+- a Drive adapter and editable remote workbook action surface; the local Live
+  workbook and durable offline queue exist, but no network dependency is
+  configured;
+- a controlled repeat of grouped Auto preparation after the `882b1d1`
+  activation-contract repair, using a fresh or explicitly reset destination;
+- preparation enhancements deliberately tabled pending that repeat: a
+  per-row water-temperature policy and operator-selected destination locations
+  for multiple prepared reagents;
+- imported-model reconciliation with required Auto preparation;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;
 - unattended or large-scale chemistry optimization;
 - promotion of `Auto-RTG` into `Auto-RTG-v1`.
