@@ -179,6 +179,8 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual(b'\x18', packet_types['pipette_tip_racks_reset'])
         self.assertEqual(b'\x19', packet_types['register_auto_plate_generation'])
         self.assertEqual(b'\x1A', packet_types['auto_plate_generation_registered'])
+        self.assertEqual(b'\x1D', packet_types['execute_auto_preparation_groups'])
+        self.assertEqual(b'\x1E', packet_types['auto_preparation_groups_executed'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -189,6 +191,35 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertIn('pipette_tip_racks_reset', ghost_types)
         self.assertIn('register_auto_plate_generation', ghost_types)
         self.assertIn('auto_plate_generation_registered', ghost_types)
+        self.assertIn('execute_auto_preparation_groups', ghost_types)
+        self.assertIn('auto_preparation_groups_executed', ghost_types)
+
+    def test_preparation_execution_is_a_structured_ghost_acknowledgement(self):
+        """A ghost preparation result must not be followed by ``ready``."""
+        handler = _class_method_node(
+            self.class_node, '_exec_execute_auto_preparation_groups'
+        )
+        self.assertEqual(1, len(handler.decorator_list))
+        decorator = handler.decorator_list[0]
+        self.assertIsInstance(decorator, ast.Call)
+        self.assertEqual('exec_func', decorator.func.id)
+        self.assertEqual(
+            'execute_auto_preparation_groups',
+            ast.literal_eval(decorator.args[0])
+        )
+        self.assertFalse(ast.literal_eval(decorator.args[2]))
+
+        send_calls = [
+            node for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'send_pack'
+        ]
+        self.assertEqual(1, len(send_calls))
+        self.assertEqual(
+            'auto_preparation_groups_executed',
+            ast.literal_eval(send_calls[0].args[0])
+        )
 
 
 class AutoMainLabwareIdentityTests(unittest.TestCase):

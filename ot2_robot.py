@@ -3311,7 +3311,11 @@ class OT2Robot():
                         empty_locations.append(tube['loc'])
         return response
 
-    @exec_func('execute_auto_preparation_groups', 1, True, exec_funcs)
+    # The structured preparation result is a ghost packet.  Do not append a
+    # normal ``ready`` acknowledgement: ghost requests are intentionally not
+    # tracked in Armchair's in-flight queue, so that extra packet would later
+    # be treated as an acknowledgement for a request that was never recorded.
+    @exec_func('execute_auto_preparation_groups', 1, False, exec_funcs)
     def _exec_execute_auto_preparation_groups(self, request):
         '''Executes the one-time grouped preparation protocol and replies.'''
         self.portal.send_pack(
