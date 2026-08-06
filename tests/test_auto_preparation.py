@@ -158,6 +158,25 @@ class AutoPreparationManifestTests(unittest.TestCase):
             {'deck_pos': 3, 'loc': 'A2'}
         )
 
+        # Excel stores a single numeric deck-position cell as 3.0.  That is
+        # physically identical to the documented text form "3".
+        row = self._valid_row()
+        row['tube_count'] = 1
+        row['destination_locs'] = 'A1'
+        row['destination_deck_positions'] = 3.0
+        manifest = build_preparation_manifest([row])
+        self.assertEqual(
+            manifest['preparations'][0]['requested_destination_tubes'],
+            [{'deck_pos': 3, 'loc': 'A1'}]
+        )
+
+        row['destination_deck_positions'] = 3.5
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError,
+                'invalid destination_deck_positions entry'):
+            build_preparation_manifest([row])
+
+        row['tube_count'] = 10
         row['destination_locs'] = 'A1;A2'
         row['destination_deck_positions'] = '3;3'
         with self.assertRaisesRegex(

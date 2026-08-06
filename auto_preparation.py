@@ -424,6 +424,10 @@ def _parse_destination_tube_locations(
         )
 
     locations = [token.strip().upper() for token in str(loc_value).split(';')]
+    # Excel commonly returns a one-cell deck position such as ``3`` as the
+    # numeric value ``3.0``.  Preserve the ordered-list interface while
+    # accepting that lossless numeric representation; fractional deck
+    # positions remain invalid.
     deck_positions = [
         token.strip() for token in str(deck_position_value).split(';')
     ]
@@ -446,7 +450,16 @@ def _parse_destination_tube_locations(
                     row_number, DESTINATION_LOCS_COLUMN, location
                 )
             )
-        if not re.match(r'^\d+$', deck_position_text):
+        try:
+            deck_position_number = float(deck_position_text)
+        except (TypeError, ValueError):
+            deck_position_number = None
+        if (
+                deck_position_number is None
+                or not math.isfinite(deck_position_number)
+                or deck_position_number < 0
+                or deck_position_number != int(deck_position_number)
+        ):
             raise AutoPreparationValidationError(
                 'auto_preparation row {} has invalid {} entry {!r}. Use '
                 'integer deck positions such as 3;3.'.format(
@@ -455,7 +468,7 @@ def _parse_destination_tube_locations(
                 )
             )
         requested_tube = {
-            'deck_pos': int(deck_position_text),
+            'deck_pos': int(deck_position_number),
             'loc': location
         }
         location_key = (requested_tube['deck_pos'], requested_tube['loc'])
