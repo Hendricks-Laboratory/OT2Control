@@ -30,7 +30,7 @@ class AutoPreparationManifestTests(unittest.TestCase):
     def test_manifest_has_per_tube_and_group_totals(self):
         manifest = build_preparation_manifest([self._valid_row()])
 
-        self.assertEqual(manifest['schema_version'], 2)
+        self.assertEqual(manifest['schema_version'], 6)
         self.assertEqual(
             manifest['execution_status'],
             'planning_only_pending_auto_main_group_protocol'
@@ -59,12 +59,37 @@ class AutoPreparationManifestTests(unittest.TestCase):
         self.assertAlmostEqual(preparation['total_water_transfer_uL'], 11423.076923077)
         self.assertEqual(
             preparation['water_source_policy'],
-            'stock_temperature_module_selects_water'
+            'auto'
         )
         self.assertTrue(
             preparation['requires_runtime_destination_capacity_check']
         )
         self.assertTrue(manifest['manifest_sha256'])
+
+    def test_water_source_policy_defaults_and_normalizes_explicit_values(self):
+        default_manifest = build_preparation_manifest([self._valid_row()])
+        self.assertEqual(
+            default_manifest['preparations'][0]['water_source_policy'], 'auto'
+        )
+
+        for raw_value, expected in (
+                ('temperature controlled', 'temperature_controlled'),
+                ('cold', 'temperature_controlled'),
+                ('Cold Water', 'temperature_controlled'),
+                ('ambient', 'ambient'), ('standard', 'ambient')):
+            row = self._valid_row()
+            row['water_source_policy'] = raw_value
+            manifest = build_preparation_manifest([row])
+            self.assertEqual(
+                manifest['preparations'][0]['water_source_policy'], expected
+            )
+
+        row = self._valid_row()
+        row['water_source_policy'] = 'lukewarm'
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError,
+                'auto, temperature_controlled, or ambient'):
+            build_preparation_manifest([row])
 
     def test_capacity_resolver_can_reject_an_impossible_per_tube_volume(self):
         with self.assertRaisesRegex(
@@ -117,6 +142,69 @@ class AutoPreparationManifestTests(unittest.TestCase):
             'more than one enabled row for stock source group'
         ):
             build_preparation_manifest([self._valid_row(), self._valid_row()])
+
+    def test_explicit_destinations_are_ordered_and_must_match_tube_count(self):
+        row = self._valid_row()
+        row['destination_locs'] = 'A1;A2;A3;A4;A5;A6;B1;B2;B3;B4'
+        row['destination_deck_positions'] = '3;3;3;3;3;3;3;3;3;3'
+        manifest = build_preparation_manifest([row])
+        preparation = manifest['preparations'][0]
+        self.assertEqual(
+            preparation['requested_destination_tubes'][0],
+            {'deck_pos': 3, 'loc': 'A1'}
+        )
+        self.assertEqual(
+            preparation['tube_plan'][1]['requested_destination_tube'],
+            {'deck_pos': 3, 'loc': 'A2'}
+        )
+
+        row['destination_locs'] = 'A1;A2'
+        row['destination_deck_positions'] = '3;3'
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError, 'exactly 10 destination_locs'):
+            build_preparation_manifest([row])
+
+        row = self._valid_row()
+        row['destination_locs'] = 'A1;A2'
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError,
+                'both destination_locs and destination_deck_positions'):
+            build_preparation_manifest([row])
+
+        row = self._valid_row()
+        row['destination_locs'] = 'A1;A2;A3;A4;A5;A6;B1;B2;B3;B4'
+        row['destination_deck_positions'] = '3;3;3;3;3;3;3;3;3;3'
+        row['destination_tube_locations'] = '3:A1;3:A2'
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError, 'cannot combine deprecated'):
+            build_preparation_manifest([row])
+
+    def test_legacy_combined_destinations_remain_a_read_only_fallback(self):
+        '''Existing temporary worksheets remain readable during migration.'''
+        row = self._valid_row()
+        row['destination_tube_locations'] = (
+            '3:A1;3:A2;3:A3;3:A4;3:A5;3:A6;3:B1;3:B2;3:B3;3:B4'
+        )
+        manifest = build_preparation_manifest([row])
+        self.assertEqual(
+            manifest['preparations'][0]['requested_destination_tubes'][1],
+            {'deck_pos': 3, 'loc': 'A2'}
+        )
+
+    def test_explicit_destinations_cannot_overlap_across_groups(self):
+        first = self._valid_row()
+        first['tube_count'] = 1
+        first['destination_locs'] = 'A1'
+        first['destination_deck_positions'] = '3'
+        second = self._valid_row()
+        second['stock_source_group'] = 'silver nitrate'
+        second['working_concentration_mM'] = 0.1
+        second['tube_count'] = 1
+        second['destination_locs'] = 'A1'
+        second['destination_deck_positions'] = '3'
+        with self.assertRaisesRegex(
+                AutoPreparationValidationError, 'repeats destination 3:A1'):
+            build_preparation_manifest([first, second])
 
     def test_source_name_validation_refuses_unknown_or_colliding_names(self):
         manifest = build_preparation_manifest([self._valid_row()])

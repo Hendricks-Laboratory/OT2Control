@@ -1,11 +1,11 @@
 # Auto preparation worksheet and execution contract (Stages 9A–9B)
 
 This document defines the opt-in Auto working-solution preparation interface.
-Stage 9A supplies the pure, hardware-free chemistry manifest. Stage 9B reads
-that manifest during Auto setup and executes it exactly once before seed or
-optimizer recipes are generated. It is deliberately separate from legacy
-conversion-error dilution: a malformed request fails before robot connection,
-and a failed preparation prevents Auto batch execution.
+The planner supplies a hardware-free chemistry manifest; Auto-main validates,
+reserves, and executes it exactly once before seed or optimizer recipes are
+generated. It is deliberately separate from legacy conversion-error dilution:
+a malformed request fails before robot connection, and a failed preparation
+prevents Auto batch execution.
 
 ## Worksheet
 
@@ -20,17 +20,27 @@ Its columns are:
 | Column | Meaning |
 | --- | --- |
 | `enabled` | `yes`/`on`/`true`/`1` to request the row. `no`/`off`/`false`/`0`, or a blank cell, skips it. |
-| `stock_reagent` | Reagent root name, such as `sodium_borohydride`. Spaces are normalized to underscores. |
+| `stock_source_group` | Reagent root name, such as `sodium_borohydride`. Spaces are normalized to underscores. |
 | `stock_concentration_mM` | Measured concentration of the existing source container. |
 | `working_concentration_mM` | Desired working concentration. It must be lower than the stock concentration. |
-| `final_volume_uL` | Total prepared volume. It must not exceed the existing Header `dilution_vol` capacity. |
+| `tube_count` | Number of identical working tubes to create. |
+| `final_volume_per_tube_uL` | Final volume in each working tube. |
+| `destination_labware` | Destination labware type, for example `temp_mod_24_tube`. |
+| `destination_container` | Destination tube/container class, for example `Tube2000uL`. |
+| `destination_locs` *(optional)* | Ordered empty-tube wells, separated by semicolons, such as `A1;A2`. It must list exactly `tube_count` unique locations when supplied. |
+| `destination_deck_positions` *(optional)* | Ordered deck positions corresponding to `destination_locs`, separated by semicolons, such as `3;3`. It must list exactly `tube_count` positions when supplied. Both destination columns must be completed together or both left blank to retain Auto-main's compatible-empty-tube allocation. |
+| `water_source_policy` *(optional)* | `auto` (default) follows stock temperature-module placement; `temperature_controlled` requires the water source on the temperature module; `ambient` requires the ordinary water source outside that module. |
 
-The existing Header values remain the destination configuration:
+Preparation destinations must be declared as `empty` tube locations in
+`reagent_info`; `destination_locs` and `destination_deck_positions` narrow
+that declared empty-tube pool to the exact positions for one group. The legacy Header ``dilution_cont``
+and ``dilution_vol`` settings remain for manual dilution workflows; they do
+not override an Auto preparation row.
 
-```text
-dilution_cont    <empty destination container type>
-dilution_vol     <maximum prepared volume in uL>
-```
+Temporary worksheets using the earlier combined
+`destination_tube_locations` column remain readable only when both new
+destination columns are blank. Do not mix the old and new forms in one row;
+new worksheets should use the separate columns exclusively.
 
 Preparation is disabled by default for legacy worksheets. To require an
 enabled worksheet request, add this Header row:
@@ -46,18 +56,18 @@ recipe is generated.
 
 For example, a 130 mM stock prepared as 1000 uL of 6.25 mM working solution is:
 
-| enabled | stock_reagent | stock_concentration_mM | working_concentration_mM | final_volume_uL |
-| --- | --- | ---: | ---: | ---: |
-| yes | sodium_borohydride | 130 | 6.25 | 1000 |
+| enabled | stock_source_group | stock_concentration_mM | working_concentration_mM | tube_count | final_volume_per_tube_uL | destination_labware | destination_container | destination_locs | destination_deck_positions | water_source_policy |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |
+| yes | sodium_borohydride | 130 | 6.25 | 2 | 1000 | temp_mod_24_tube | Tube2000uL | A1;A2 | 3;3 | auto |
 
 The planned calculation is the manual-controller dilution calculation:
 
 ```text
-stock_transfer_uL = final_volume_uL × working_concentration_mM / stock_concentration_mM
-water_transfer_uL = final_volume_uL − stock_transfer_uL
+stock_transfer_per_tube_uL = final_volume_per_tube_uL × working_concentration_mM / stock_concentration_mM
+water_transfer_per_tube_uL = final_volume_per_tube_uL − stock_transfer_per_tube_uL
 ```
 
-In this example the manifest requires 48.0769 uL stock and 951.9231 uL water.
+In this example each tube requires 48.0769 uL stock and 951.9231 uL water.
 
 ## Safety checks already implemented
 
@@ -84,9 +94,15 @@ For a real Auto run, Stage 9B executes each validated preparation exactly once
 after the Auto-main compatibility handshake and before Auto seed or optimizer
 transfers:
 
-1. allocate an appropriate empty `dilution_cont` destination;
-2. choose `WaterC1.0` or `ColdWaterC1.0` based on whether the stock source is
-   stored in the temperature module, matching the manual controller;
+1. reserve the specified empty destinations, or allocate compatible empty
+   tubes only when both destination columns are blank;
+2. select water according to `water_source_policy`: `auto` chooses the
+   temperature-controlled water source only when the active stock source is in
+   the temperature module (matching the manual controller);
+   `temperature_controlled` requires that source and `ambient` requires the
+   ordinary water source outside the module. The established internal key
+   `ColdWaterC1.0` remains a compatibility identifier only; the Header
+   temperature determines whether the module heats or cools the water.
 3. transfer water, then stock reagent;
 4. mix twice;
 5. resolve and journal the destination returned by the robot;

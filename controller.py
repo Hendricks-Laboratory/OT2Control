@@ -4231,8 +4231,10 @@ class Controller(ABC):
         Takes in a dilution row and builds two transfer rows to be used by the transfer command.  
         This command will communicate with the robot to get the current deck position of the
         thing being diluted.  
-        This is required because if that thing is on a temperature controller, ColdWater shall
-        be used instead of Water.  
+        This is required because if that thing is on a temperature module, the
+        temperature-controlled water source shall be used instead of ambient
+        water.  The legacy runtime key for that source remains ``ColdWaterC1.0``
+        for compatibility; the module may heat or cool its contents.
         params:  
             pd.Series row: a row of self.rxn_df  
         returns:  
@@ -4242,8 +4244,9 @@ class Controller(ABC):
             Note the second row (the reagent row) will have have whichever callbacks are passed.
         Preconditions:  
             robot has been initialized  
-            Water or ColdWater is on the deck (depending on if this is on temperature module
-            or not.  
+            Ambient water or the temperature-controlled water source is on the
+            deck, according to whether the diluted reagent is on the temperature
+            module.
         '''
         reagent = row['chemical_name']
         #figure out if it is on temperature module
@@ -4251,8 +4254,17 @@ class Controller(ABC):
         deck_pos = self._cached_reader_locs[reagent].deck_pos
         df = self.robo_params['labware_df'] #cause typing hurts
         #iloc is necessary because will give a series by default, but always has one element
-        is_temp_cont = df.loc[df['deck_pos'] == deck_pos,'name'].iloc[0] == 'temp_mod_24_tube'
-        water_src = 'ColdWaterC1.0' if is_temp_cont else 'WaterC1.0'
+        uses_temperature_module = (
+            df.loc[df['deck_pos'] == deck_pos, 'name'].iloc[0]
+            == 'temp_mod_24_tube'
+        )
+        # ``ColdWaterC1.0`` is the established internal key for the water
+        # source placed on the temperature module. It does not imply cooling.
+        water_src = (
+            'ColdWaterC1.0'
+            if uses_temperature_module
+            else 'WaterC1.0'
+        )
         product_cols = row.loc[self._products]
         dilution_name_vol = product_cols.loc[~product_cols.apply(lambda x: math.isclose(x,0,abs_tol=1e-9))]
         #TODO investigate if this works
@@ -5097,7 +5109,7 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v7'
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v9'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
@@ -5658,7 +5670,7 @@ class AutoContr(Controller):
                                                   reservation):
         '''Binds one physical execution to one fresh, validated reservation.'''
         return {
-            'schema_version': 1,
+            'schema_version': 3,
             'action_id': 'auto-preparation-execution-{}'.format(
                 reservation_request['manifest_sha256'][:16]
             ),
@@ -5679,7 +5691,7 @@ class AutoContr(Controller):
         }
         if not isinstance(result, dict) or set(result) != required_keys:
             raise RuntimeError('Auto preparation execution returned an invalid schema.')
-        if result['schema_version'] != 1 or result['record_type'] != \
+        if result['schema_version'] != 3 or result['record_type'] != \
                 'auto_preparation_groups_executed':
             raise RuntimeError('Auto preparation execution returned an unsupported record.')
         if result['action_id'] != request['action_id'] or \
@@ -5753,7 +5765,8 @@ class AutoContr(Controller):
             'tube_count', 'final_volume_per_tube_uL',
             'stock_transfer_per_tube_uL', 'water_transfer_per_tube_uL',
             'total_stock_transfer_uL', 'total_water_transfer_uL',
-            'destination_labware', 'destination_container'
+            'destination_labware', 'destination_container',
+            'requested_destination_tubes', 'water_source_policy'
         )
         request_preparations = []
         for preparation in preparations:
@@ -5769,7 +5782,7 @@ class AutoContr(Controller):
                     'Auto preparation manifest is missing {!r}.'.format(exc.args[0])
                 )
         return {
-            'schema_version': 1,
+            'schema_version': 3,
             'action_id': 'auto-preparation-reservation-{}'.format(
                 manifest_hash[:16]
             ),
@@ -5791,7 +5804,7 @@ class AutoContr(Controller):
             raise RuntimeError(
                 'Auto preparation reservation returned an invalid schema.'
             )
-        if result['schema_version'] != 1 or result['record_type'] != \
+        if result['schema_version'] != 3 or result['record_type'] != \
                 'auto_preparation_groups_reserved':
             raise RuntimeError(
                 'Auto preparation reservation returned an unsupported record.'
@@ -5840,12 +5853,14 @@ class AutoContr(Controller):
             for preparation in request['preparations']
         }
         seen_working_names = set()
+        reserved_locations = set()
         for reservation in result['preparations']:
             required_reservation_keys = {
                 'row_number', 'stock_chemical_name', 'working_chemical_name',
                 'stock_source_containers',
                 'stock_source_active_container_index',
-                'stock_uses_temperature_module', 'water_chemical_name',
+                'stock_uses_temperature_module', 'water_source_policy',
+                'water_uses_temperature_module', 'water_chemical_name',
                 'destination_tubes', 'stock_preflight', 'water_preflight'
             }
             if not isinstance(reservation, dict) or set(reservation) != required_reservation_keys:
@@ -5863,20 +5878,45 @@ class AutoContr(Controller):
                     reservation['row_number'] != requested['row_number']
                     or reservation['stock_chemical_name'] != requested['stock_chemical_name']
                     or not isinstance(reservation['stock_uses_temperature_module'], bool)
+                    or reservation['water_source_policy'] != requested['water_source_policy']
+                    or not isinstance(
+                        reservation['water_uses_temperature_module'], bool
+                    )
                     or reservation['water_chemical_name'] not in ('WaterC1.0', 'ColdWaterC1.0')
             ):
                 raise RuntimeError(
                     'Auto preparation reservation group metadata is invalid.'
                 )
-            expected_water = (
-                'ColdWaterC1.0'
-                if reservation['stock_uses_temperature_module']
-                else 'WaterC1.0'
-            )
+            water_policy = requested['water_source_policy']
+            if water_policy == 'auto':
+                expected_water = (
+                    'ColdWaterC1.0'
+                    if reservation['stock_uses_temperature_module']
+                    else 'WaterC1.0'
+                )
+            elif water_policy == 'temperature_controlled':
+                expected_water = 'ColdWaterC1.0'
+            elif water_policy == 'ambient':
+                expected_water = 'WaterC1.0'
+            else:
+                raise RuntimeError(
+                    'Auto preparation reservation has an invalid water policy.'
+                )
             if reservation['water_chemical_name'] != expected_water:
                 raise RuntimeError(
                     'Auto preparation reservation selected water inconsistently '
-                    'with the stock temperature-module placement.'
+                    'with the requested water policy.'
+                )
+            expected_water_temperature_control = (
+                reservation['stock_uses_temperature_module']
+                if water_policy == 'auto'
+                else water_policy == 'temperature_controlled'
+            )
+            if reservation['water_uses_temperature_module'] != \
+                    expected_water_temperature_control:
+                raise RuntimeError(
+                    'Auto preparation reservation selected water with an '
+                    'inconsistent temperature-module placement.'
                 )
             if not isinstance(reservation['stock_source_containers'], list) or \
                     not reservation['stock_source_containers'] or \
@@ -5934,7 +5974,25 @@ class AutoContr(Controller):
                     raise RuntimeError(
                         'Auto preparation reservation duplicated a destination tube.'
                     )
+                if location in reserved_locations:
+                    raise RuntimeError(
+                        'Auto preparation reservation reused a destination '
+                        'tube across groups.'
+                    )
                 locations.add(location)
+                reserved_locations.add(location)
+
+            requested_tubes = requested['requested_destination_tubes']
+            if requested_tubes:
+                returned_locations = [
+                    {'deck_pos': tube['deck_pos'], 'loc': tube['loc']}
+                    for tube in tubes
+                ]
+                if returned_locations != requested_tubes:
+                    raise RuntimeError(
+                        'Auto preparation reservation did not honor the '
+                        'explicit destination-tube plan.'
+                    )
         if set(requested_by_working_name) != seen_working_names:
             raise RuntimeError('Auto preparation reservation omitted a group.')
         return copy.deepcopy(result)

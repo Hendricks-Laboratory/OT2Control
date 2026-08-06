@@ -2510,13 +2510,15 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 'total_stock_transfer_uL': 96.1538461538,
                 'total_water_transfer_uL': 1903.8461538462,
                 'destination_labware': 'temp_mod_24_tube',
-                'destination_container': 'Tube2000uL'
+                'destination_container': 'Tube2000uL',
+                'requested_destination_tubes': [],
+                'water_source_policy': 'auto'
             }]
         }
 
     def _valid_preparation_reservation(self, request):
         return {
-            'schema_version': 1,
+            'schema_version': 3,
             'record_type': 'auto_preparation_groups_reserved',
             'action_id': request['action_id'],
             'manifest_sha256': request['manifest_sha256'],
@@ -2538,6 +2540,8 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
                 }],
                 'stock_source_active_container_index': 0,
                 'stock_uses_temperature_module': True,
+                'water_source_policy': 'auto',
+                'water_uses_temperature_module': True,
                 'water_chemical_name': 'ColdWaterC1.0',
                 'destination_tubes': [{
                     'loc': 'A2',
@@ -2629,7 +2633,7 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             reservation_request, reservation
         )
         complete = {
-            'schema_version': 1,
+            'schema_version': 3,
             'record_type': 'auto_preparation_groups_executed',
             'action_id': request['action_id'],
             'manifest_sha256': request['manifest_sha256'],

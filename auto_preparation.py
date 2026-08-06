@@ -13,9 +13,11 @@ The planned dilution follows the established controller convention::
     C_stock * V_stock = C_working * V_final
 
 For every working tube, execution will add the selected water first, add stock
-second, then mix.  Cold water selection is determined by the *stock source's*
-temperature-module placement, matching the existing manual dilution workflow;
-the destination tube placement does not decide which water source is used.
+second, then mix.  The optional per-row water policy defaults to automatic
+selection from the *stock source's* temperature-module placement, matching the
+existing manual dilution workflow. A row may explicitly require
+temperature-controlled or ambient water when that chemistry requires an
+intentional exception.
 '''
 
 from __future__ import division
@@ -41,7 +43,19 @@ PREPARATION_WORKSHEET_COLUMNS = (
     'destination_labware',
     'destination_container',
 )
-PREPARATION_SCHEMA_VERSION = 2
+# Optional rather than required so existing validated preparation worksheets
+# retain their Auto-main allocation behavior. When supplied, the ordered lists
+# form an exact physical-destination contract rather than a preference. They
+# intentionally mirror the separate ``loc`` and ``deck_pos`` fields used by
+# reagent information rather than encoding both values in one token.
+DESTINATION_LOCS_COLUMN = 'destination_locs'
+DESTINATION_DECK_POSITIONS_COLUMN = 'destination_deck_positions'
+# Kept as a read-only migration fallback for worksheets created during the
+# short-lived combined-column implementation. New worksheets must use the two
+# explicit columns above.
+LEGACY_DESTINATION_TUBE_LOCATIONS_COLUMN = 'destination_tube_locations'
+WATER_SOURCE_POLICY_COLUMN = 'water_source_policy'
+PREPARATION_SCHEMA_VERSION = 6
 MIX_CYCLES = 2
 MIN_EXECUTABLE_TRANSFER_UL = 5.0
 VARIABLE_SOURCE_CONCENTRATION_COLUMN = 'variable_source_concentration_mM'
@@ -112,6 +126,44 @@ def _is_enabled(value):
             value
         )
     )
+
+
+def _parse_water_source_policy(value, row_number):
+    '''Return the canonical water-selection policy for one preparation row.
+
+    ``auto`` preserves the established manual-dilution convention: a stock
+    source in the temperature module uses the temperature-controlled-water
+    source (whose legacy internal key is ``ColdWaterC1.0``), and any other
+    stock source uses ``WaterC1.0``.  The canonical explicit value is
+    ``temperature_controlled`` because the module may heat or cool water.
+    Explicit values are deliberately narrow so accidental free text cannot
+    silently change reagent handling.
+    '''
+    normalized = 'auto' if _is_blank(value) else str(value).strip().lower()
+    normalized = normalized.replace('-', '_').replace(' ', '_')
+    aliases = {
+        'auto': 'auto',
+        'default': 'auto',
+        'stock_location': 'auto',
+        'temperature_controlled': 'temperature_controlled',
+        'temp_controlled': 'temperature_controlled',
+        'temperature_module': 'temperature_controlled',
+        # Read legacy values without perpetuating an inaccurate scientific
+        # label. The canonical manifest never stores ``cold``.
+        'cold': 'temperature_controlled',
+        'cold_water': 'temperature_controlled',
+        'ambient': 'ambient',
+        'room_temperature': 'ambient',
+        'standard': 'ambient',
+    }
+    if normalized not in aliases:
+        raise AutoPreparationValidationError(
+            'auto_preparation row {} has invalid {} {!r}. Use auto, '
+            'temperature_controlled, or ambient.'.format(
+                row_number, WATER_SOURCE_POLICY_COLUMN, value
+            )
+        )
+    return aliases[normalized]
 
 
 def _concentration_label(value):
@@ -332,6 +384,135 @@ def _resolve_destination_capacity(destination_container, capacity_resolver):
     )
 
 
+def _parse_destination_tube_locations(
+        loc_value, deck_position_value, legacy_value, tube_count, row_number):
+    '''Parse optional explicit preparation destinations from separate columns.
+
+    ``destination_locs`` and ``destination_deck_positions`` are ordered,
+    semicolon-separated lists, for example ``A1;A2`` and ``3;3``. Both fields
+    must be blank to retain Pi-selected compatible-empty allocation, or both
+    must name every requested destination exactly once. The short-lived legacy
+    combined column remains a migration fallback only when both new fields are
+    blank; it is not emitted or documented for new worksheets.
+    '''
+    loc_is_blank = _is_blank(loc_value)
+    deck_position_is_blank = _is_blank(deck_position_value)
+    if loc_is_blank != deck_position_is_blank:
+        raise AutoPreparationValidationError(
+            'auto_preparation row {} must provide both {} and {} or leave '
+            'both blank.'.format(
+                row_number, DESTINATION_LOCS_COLUMN,
+                DESTINATION_DECK_POSITIONS_COLUMN
+            )
+        )
+
+    if loc_is_blank:
+        if _is_blank(legacy_value):
+            return []
+        return _parse_legacy_destination_tube_locations(
+            legacy_value, tube_count, row_number
+        )
+
+    if not _is_blank(legacy_value):
+        raise AutoPreparationValidationError(
+            'auto_preparation row {} cannot combine deprecated {} with {} '
+            'and {}. Remove the combined-column value.'
+            .format(
+                row_number, LEGACY_DESTINATION_TUBE_LOCATIONS_COLUMN,
+                DESTINATION_LOCS_COLUMN, DESTINATION_DECK_POSITIONS_COLUMN
+            )
+        )
+
+    locations = [token.strip().upper() for token in str(loc_value).split(';')]
+    deck_positions = [
+        token.strip() for token in str(deck_position_value).split(';')
+    ]
+    if len(locations) != tube_count or len(deck_positions) != tube_count:
+        raise AutoPreparationValidationError(
+            'auto_preparation row {} must name exactly {} {} and {} entries '
+            'to match tube_count.'.format(
+                row_number, tube_count, DESTINATION_LOCS_COLUMN,
+                DESTINATION_DECK_POSITIONS_COLUMN
+            )
+        )
+
+    requested_tubes = []
+    seen_locations = set()
+    for location, deck_position_text in zip(locations, deck_positions):
+        if not re.match(r'^[A-Z]+\d+$', location):
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} has invalid {} entry {!r}. Use '
+                'well locations such as A1;A2.'.format(
+                    row_number, DESTINATION_LOCS_COLUMN, location
+                )
+            )
+        if not re.match(r'^\d+$', deck_position_text):
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} has invalid {} entry {!r}. Use '
+                'integer deck positions such as 3;3.'.format(
+                    row_number, DESTINATION_DECK_POSITIONS_COLUMN,
+                    deck_position_text
+                )
+            )
+        requested_tube = {
+            'deck_pos': int(deck_position_text),
+            'loc': location
+        }
+        location_key = (requested_tube['deck_pos'], requested_tube['loc'])
+        if location_key in seen_locations:
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} repeats destination {}:{}.'
+                .format(
+                    row_number, requested_tube['deck_pos'],
+                    requested_tube['loc']
+                )
+            )
+        seen_locations.add(location_key)
+        requested_tubes.append(requested_tube)
+    return requested_tubes
+
+
+def _parse_legacy_destination_tube_locations(value, tube_count, row_number):
+    '''Read legacy combined destinations without advertising that input form.'''
+    requested_tubes = []
+    seen_locations = set()
+    for token in str(value).split(';'):
+        token = token.strip()
+        match = re.match(r'^(\d+)\s*:\s*([A-Za-z]+\d+)$', token)
+        if match is None:
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} has invalid legacy {} entry {!r}. '
+                'Use {} and {} as separate columns for new worksheets.'
+                .format(
+                    row_number, LEGACY_DESTINATION_TUBE_LOCATIONS_COLUMN,
+                    token, DESTINATION_LOCS_COLUMN,
+                    DESTINATION_DECK_POSITIONS_COLUMN
+                )
+            )
+        requested_tube = {
+            'deck_pos': int(match.group(1)),
+            'loc': match.group(2).upper()
+        }
+        location_key = (requested_tube['deck_pos'], requested_tube['loc'])
+        if location_key in seen_locations:
+            raise AutoPreparationValidationError(
+                'auto_preparation row {} repeats destination {}:{}.'
+                .format(
+                    row_number, requested_tube['deck_pos'],
+                    requested_tube['loc']
+                )
+            )
+        seen_locations.add(location_key)
+        requested_tubes.append(requested_tube)
+    if len(requested_tubes) != tube_count:
+        raise AutoPreparationValidationError(
+            'auto_preparation row {} names {} destination tube(s), but '
+            'tube_count is {}. Name every destination exactly once.'
+            .format(row_number, len(requested_tubes), tube_count)
+        )
+    return requested_tubes
+
+
 def build_preparation_manifest(rows, destination_capacity_resolver=None):
     '''Build a deterministic grouped working-solution preparation manifest.
 
@@ -354,6 +535,7 @@ def build_preparation_manifest(rows, destination_capacity_resolver=None):
     preparations = []
     source_groups = set()
     working_names = set()
+    requested_destination_locations = set()
 
     for row_number, row in enumerate(rows, start=2):
         if not isinstance(row, dict):
@@ -416,6 +598,27 @@ def build_preparation_manifest(rows, destination_capacity_resolver=None):
                 'auto_preparation row {} requires destination_labware and '
                 'destination_container.'.format(row_number)
             )
+        requested_destination_tubes = _parse_destination_tube_locations(
+            row.get(DESTINATION_LOCS_COLUMN),
+            row.get(DESTINATION_DECK_POSITIONS_COLUMN),
+            row.get(LEGACY_DESTINATION_TUBE_LOCATIONS_COLUMN),
+            tube_count,
+            row_number
+        )
+        water_source_policy = _parse_water_source_policy(
+            row.get(WATER_SOURCE_POLICY_COLUMN),
+            row_number
+        )
+        for requested_tube in requested_destination_tubes:
+            location_key = (
+                requested_tube['deck_pos'], requested_tube['loc']
+            )
+            if location_key in requested_destination_locations:
+                raise AutoPreparationValidationError(
+                    'auto_preparation repeats destination {}:{} across '
+                    'enabled preparation groups.'.format(*location_key)
+                )
+            requested_destination_locations.add(location_key)
         if working_concentration_mM >= stock_concentration_mM:
             raise AutoPreparationValidationError(
                 'auto_preparation row {} must dilute to a concentration below '
@@ -477,6 +680,10 @@ def build_preparation_manifest(rows, destination_capacity_resolver=None):
 
         tube_plan = []
         for tube_index in range(1, tube_count + 1):
+            requested_tube = (
+                requested_destination_tubes[tube_index - 1]
+                if requested_destination_tubes else None
+            )
             tube_plan.append({
                 'tube_index': tube_index,
                 'final_volume_uL': final_volume_per_tube_uL,
@@ -484,6 +691,7 @@ def build_preparation_manifest(rows, destination_capacity_resolver=None):
                 'water_transfer_uL': water_transfer_per_tube_uL,
                 'destination_labware': destination_labware,
                 'destination_container': destination_container,
+                'requested_destination_tube': requested_tube,
             })
 
         source_groups.add(stock_source_group)
@@ -504,9 +712,10 @@ def build_preparation_manifest(rows, destination_capacity_resolver=None):
             'total_stock_transfer_uL': stock_transfer_per_tube_uL * tube_count,
             'total_water_transfer_uL': water_transfer_per_tube_uL * tube_count,
             'mix_cycles': MIX_CYCLES,
-            'water_source_policy': 'stock_temperature_module_selects_water',
+            'water_source_policy': water_source_policy,
             'destination_labware': destination_labware,
             'destination_container': destination_container,
+            'requested_destination_tubes': requested_destination_tubes,
             'destination_capacity_uL': destination_capacity_uL,
             'requires_runtime_destination_capacity_check': (
                 destination_capacity_uL is None

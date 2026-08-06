@@ -107,10 +107,14 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             self.source,
             self.auto_methods['_validate_auto_preparation_group_execution']
         )
-        self.assertIn("'schema_version': 1", request_source)
+        self.assertIn("'schema_version': 3", request_source)
         self.assertIn("'expected_source_inventory_revision'", request_source)
         self.assertIn("'auto_preparation_groups_reserved'", validation_source)
         self.assertIn("'stock_uses_temperature_module'", validation_source)
+        self.assertIn("'water_source_policy'", validation_source)
+        self.assertIn("if water_policy == 'auto'", validation_source)
+        self.assertIn("water_policy == 'temperature_controlled'", validation_source)
+        self.assertIn("'water_uses_temperature_module'", validation_source)
         self.assertIn("'physical_execution_started'", execution_validation)
         self.assertIn("'auto_preparation_groups_executed'", execution_validation)
         self.assertIn('_record_auto_live_run_event(', phase_source)
@@ -155,6 +159,21 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
         self.assertIn('build_variable_source_bindings(', binding_source)
         self.assertIn('variable_source_binding_column_present', binding_source)
         self.assertIn('variable_source_bindings', transfer_source)
+
+    def test_explicit_destination_tubes_flow_to_the_pi_reservation(self):
+        '''An operator-specified destination plan must not become a hint.'''
+        request_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_build_auto_preparation_reservation_request']
+        )
+        validation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_reservation']
+        )
+        self.assertIn("'requested_destination_tubes'", request_source)
+        self.assertIn("'water_source_policy'", request_source)
+        self.assertIn("requested['requested_destination_tubes']", validation_source)
+        self.assertIn('explicit destination-tube plan', validation_source)
 
     def test_optional_workbook_field_preserves_legacy_product_columns(self):
         '''A missing new field must be inserted before, never after, reagent.'''
