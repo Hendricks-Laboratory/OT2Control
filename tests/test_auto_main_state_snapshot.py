@@ -102,7 +102,7 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
 
         self.assertEqual(1, snapshot['snapshot_schema_version'])
         self.assertEqual('Auto-main', snapshot['runtime_role'])
-        self.assertEqual('auto-main-state-v5', snapshot['protocol_version'])
+        self.assertEqual('auto-main-state-v9', snapshot['protocol_version'])
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
                          snapshot['tare_calibration_id'])
         self.assertEqual({
@@ -113,10 +113,12 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual([
             'get_robot_state_snapshot',
             'preflight_transfer_plan',
-                'refresh_source_container_mass',
-                'reset_pipette_tip_racks',
-                'register_auto_plate_generation'
-            ], snapshot['supported_commands'])
+            'refresh_source_container_mass',
+            'reset_pipette_tip_racks',
+            'register_auto_plate_generation',
+            'reserve_auto_preparation_groups',
+            'execute_auto_preparation_groups'
+        ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
         self.assertEqual(0, snapshot['tip_inventory_revision'])
         self.assertEqual(0, snapshot['plate_mapping_revision'])

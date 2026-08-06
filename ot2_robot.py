@@ -1049,7 +1049,7 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v7'
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v9'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1699,9 +1699,15 @@ class OT2Robot():
         #update some things you didn't know when you initialized
         self.containers[chem_name].conc = conc
         self.containers[chem_name].name = chem_name
-        #figure out what your water source should be
-        is_cold = self.containers[chem_name].labware.name == 'temp_mod_24_tube'
-        water_src = 'ColdWaterC1.0' if is_cold else 'WaterC1.0'
+        # Determine whether the working source needs water held at the active
+        # temperature-module setting. ``ColdWaterC1.0`` is a legacy chemical
+        # key; the module may intentionally cool or heat that water.
+        uses_temperature_module = (
+            self.containers[chem_name].labware.name == 'temp_mod_24_tube'
+        )
+        water_src = (
+            'ColdWaterC1.0' if uses_temperature_module else 'WaterC1.0'
+        )
         #dilute the thing
         self._exec_transfer(water_src,[(chem_name,vol)])
         #rewrite history (since first entry is water instead of what we want)
@@ -2797,7 +2803,7 @@ class OT2Robot():
         }
         if not isinstance(request, dict) or set(request) != required:
             raise ValueError('preparation reservation request has an invalid schema.')
-        if request['schema_version'] != 1:
+        if request['schema_version'] != 3:
             raise ValueError('preparation reservation uses an unsupported schema.')
         if not isinstance(request['action_id'], str) or not request['action_id'].strip():
             raise ValueError('preparation reservation action_id must be nonempty.')
@@ -2820,7 +2826,8 @@ class OT2Robot():
             'tube_count', 'final_volume_per_tube_uL',
             'stock_transfer_per_tube_uL', 'water_transfer_per_tube_uL',
             'total_stock_transfer_uL', 'total_water_transfer_uL',
-            'destination_labware', 'destination_container'
+            'destination_labware', 'destination_container',
+            'requested_destination_tubes', 'water_source_policy'
         }
         normalized = []
         source_names = set()
@@ -2830,15 +2837,38 @@ class OT2Robot():
                 raise ValueError('preparation reservation group has an invalid schema.')
             for field_name in (
                     'stock_chemical_name', 'working_chemical_name',
-                    'destination_labware', 'destination_container'):
+                    'destination_labware', 'destination_container',
+                    'water_source_policy'):
                 if not isinstance(preparation[field_name], str) or not preparation[field_name].strip():
                     raise ValueError('preparation reservation {} is invalid.'.format(field_name))
+            if preparation['water_source_policy'] not in (
+                    'auto', 'temperature_controlled', 'ambient'):
+                raise ValueError('preparation reservation water_source_policy is invalid.')
             row_number = preparation['row_number']
             tube_count = preparation['tube_count']
             if isinstance(row_number, bool) or not isinstance(row_number, int) or row_number < 2:
                 raise ValueError('preparation reservation row_number is invalid.')
             if isinstance(tube_count, bool) or not isinstance(tube_count, int) or tube_count < 1:
                 raise ValueError('preparation reservation tube_count is invalid.')
+            requested_destination_tubes = preparation['requested_destination_tubes']
+            if not isinstance(requested_destination_tubes, list):
+                raise ValueError('preparation reservation requested destinations are invalid.')
+            seen_requested_locations = set()
+            for requested_tube in requested_destination_tubes:
+                if not isinstance(requested_tube, dict) or set(requested_tube) != {
+                        'deck_pos', 'loc'}:
+                    raise ValueError('preparation reservation requested destination is invalid.')
+                deck_pos = requested_tube['deck_pos']
+                location = requested_tube['loc']
+                if isinstance(deck_pos, bool) or not isinstance(deck_pos, int) or \
+                        not isinstance(location, str) or not location:
+                    raise ValueError('preparation reservation requested destination is invalid.')
+                location_key = (deck_pos, location)
+                if location_key in seen_requested_locations:
+                    raise ValueError('preparation reservation repeats a requested destination.')
+                seen_requested_locations.add(location_key)
+            if requested_destination_tubes and len(requested_destination_tubes) != tube_count:
+                raise ValueError('preparation reservation destination count does not match tube_count.')
             numeric = {}
             for field_name in (
                     'final_volume_per_tube_uL', 'stock_transfer_per_tube_uL',
@@ -2882,7 +2912,7 @@ class OT2Robot():
 
     def _auto_preparation_destination_candidates(
             self, destination_labware, destination_container, final_volume_uL,
-            already_reserved):
+            already_reserved, requested_destination_tubes=None):
         '''Returns free, correctly sized tube locations without mutating deck state.'''
         candidates = []
         viable_labware = []
@@ -2928,7 +2958,27 @@ class OT2Robot():
                         'max_volume_uL': capacity_uL,
                         'final_volume_uL': final_volume_uL
                     })
-        return candidates
+        requested_destination_tubes = requested_destination_tubes or []
+        if not requested_destination_tubes:
+            return candidates
+
+        candidates_by_location = {
+            (candidate['deck_pos'], candidate['loc']): candidate
+            for candidate in candidates
+        }
+        requested_candidates = []
+        for requested_tube in requested_destination_tubes:
+            location_key = (
+                requested_tube['deck_pos'], requested_tube['loc']
+            )
+            candidate = candidates_by_location.get(location_key)
+            if candidate is None:
+                raise ValueError(
+                    'requested preparation destination {}:{} is not an '
+                    'available compatible empty tube.'.format(*location_key)
+                )
+            requested_candidates.append(candidate)
+        return requested_candidates
 
     def _build_auto_preparation_group_reservation(self, request):
         '''Checks grouped preparation inputs and reserves no live robot state.
@@ -2938,7 +2988,7 @@ class OT2Robot():
         lists, source volumes, tip state, or inventory revisions.
         '''
         response = {
-            'schema_version': 1,
+            'schema_version': 3,
             'record_type': 'auto_preparation_groups_reserved',
             'action_id': None,
             'manifest_sha256': None,
@@ -2979,22 +3029,48 @@ class OT2Robot():
                     if hasattr(source_container, 'cont_list')
                     else source_container
                 )
-                stock_is_cold = (
+                stock_uses_temperature_module = (
                     getattr(getattr(active_container, 'labware', None), 'name', None)
                     == 'temp_mod_24_tube'
                 )
-                water_name = 'ColdWaterC1.0' if stock_is_cold else 'WaterC1.0'
+                water_policy = preparation['water_source_policy']
+                if water_policy == 'auto':
+                    water_name = (
+                        'ColdWaterC1.0' if stock_uses_temperature_module
+                        else 'WaterC1.0'
+                    )
+                elif water_policy == 'temperature_controlled':
+                    water_name = 'ColdWaterC1.0'
+                else:
+                    water_name = 'WaterC1.0'
                 if water_name not in self.containers:
                     raise ValueError(
                         'required {} source is not registered on the Pi.'
                         .format(water_name)
+                    )
+                water_container = self.containers[water_name]
+                water_uses_temperature_module = (
+                    getattr(
+                        getattr(water_container, 'labware', None), 'name', None
+                    ) == 'temp_mod_24_tube'
+                )
+                expected_temperature_control = (
+                    stock_uses_temperature_module
+                    if water_policy == 'auto'
+                    else water_policy == 'temperature_controlled'
+                )
+                if water_uses_temperature_module != expected_temperature_control:
+                    raise ValueError(
+                        'required {} source has an inconsistent '
+                        'temperature-module placement.'.format(water_name)
                     )
 
                 candidates = self._auto_preparation_destination_candidates(
                     preparation['destination_labware'],
                     preparation['destination_container'],
                     preparation['final_volume_per_tube_uL'],
-                    already_reserved
+                    already_reserved,
+                    preparation['requested_destination_tubes']
                 )
                 if len(candidates) < preparation['tube_count']:
                     raise ValueError(
@@ -3037,7 +3113,11 @@ class OT2Robot():
                     'working_chemical_name': preparation['working_chemical_name'],
                     'stock_source_containers': descriptors,
                     'stock_source_active_container_index': active_index,
-                    'stock_uses_temperature_module': stock_is_cold,
+                    'stock_uses_temperature_module': stock_uses_temperature_module,
+                    'water_source_policy': water_policy,
+                    'water_uses_temperature_module': (
+                        water_uses_temperature_module
+                    ),
                     'water_chemical_name': water_name,
                     'destination_tubes': destination_tubes,
                     'stock_preflight': stock_plan['source_containers'],
@@ -3155,7 +3235,7 @@ class OT2Robot():
         }
         if not isinstance(request, dict) or set(request) != required:
             raise ValueError('preparation execution request has an invalid schema.')
-        if request['schema_version'] != 1 or not isinstance(request['action_id'], str):
+        if request['schema_version'] != 3 or not isinstance(request['action_id'], str):
             raise ValueError('preparation execution request is invalid.')
         if request['expected_source_inventory_revision'] != self.source_inventory_revision:
             raise ValueError('source inventory changed before preparation execution.')
@@ -3207,7 +3287,7 @@ class OT2Robot():
         fails closed instead of attempting an unsafe automatic replay.
         '''
         response = {
-            'schema_version': 1,
+            'schema_version': 3,
             'record_type': 'auto_preparation_groups_executed',
             'action_id': request.get('action_id') if isinstance(request, dict) else None,
             'manifest_sha256': request.get('manifest_sha256') if isinstance(request, dict) else None,

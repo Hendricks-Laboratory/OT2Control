@@ -52,7 +52,10 @@ class AutoPreparationReservationContractTests(unittest.TestCase):
             self.robot_source,
             self.methods['_auto_preparation_destination_candidates']
         )
-        self.assertIn("'ColdWaterC1.0' if stock_is_cold", source)
+        self.assertIn("if water_policy == 'auto'", source)
+        self.assertIn("elif water_policy == 'temperature_controlled'", source)
+        self.assertIn("'water_uses_temperature_module'", source)
+        self.assertIn("'ColdWaterC1.0'", source)
         self.assertIn("'WaterC1.0'", source)
         self.assertGreaterEqual(source.count('_simulate_preflight_source('), 2)
         self.assertNotIn('self._exec_transfer(', source)
@@ -61,6 +64,22 @@ class AutoPreparationReservationContractTests(unittest.TestCase):
         self.assertNotIn('self._exec_init_containers(', source)
         self.assertIn('list(', candidates)
         self.assertNotIn('pop_next_well(', candidates)
+        self.assertIn('requested_destination_tubes', candidates)
+        self.assertIn('requested preparation destination', candidates)
+
+    def test_explicit_destinations_are_part_of_the_versioned_request(self):
+        validation = ast.get_source_segment(
+            self.robot_source,
+            self.methods['_validate_auto_preparation_reservation_request']
+        )
+        reservation = ast.get_source_segment(
+            self.robot_source,
+            self.methods['_build_auto_preparation_group_reservation']
+        )
+        self.assertIn("'requested_destination_tubes'", validation)
+        self.assertIn("'water_source_policy'", validation)
+        self.assertIn("preparation['requested_destination_tubes']", reservation)
+        self.assertIn("preparation['water_source_policy']", reservation)
 
     def test_packet_codes_and_compatibility_version_are_registered(self):
         with open(ARMCHAIR_PATH, 'r', encoding='utf-8') as source_file:
@@ -95,7 +114,7 @@ class AutoPreparationReservationContractTests(unittest.TestCase):
         self.assertIn('execute_auto_preparation_groups', ghost_types)
         self.assertIn('auto_preparation_groups_executed', ghost_types)
         self.assertIn(
-            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v7'",
+            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v9'",
             self.robot_source
         )
 
