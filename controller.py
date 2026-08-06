@@ -5269,7 +5269,7 @@ class AutoContr(Controller):
             {
                 'labware': '',
                 'container': preparation['destination_container'],
-                'max_vol': preparation['final_volume_uL']
+                'max_vol': preparation['final_volume_per_tube_uL']
             },
             index=[product_name]
         )
@@ -5290,8 +5290,8 @@ class AutoContr(Controller):
         ]
         preparation_row['chemical_name'] = preparation['stock_chemical_name']
         preparation_row['conc'] = preparation['stock_concentration_mM']
-        preparation_row['reagent'] = preparation['stock_reagent']
-        preparation_row[product_name] = preparation['final_volume_uL']
+        preparation_row['reagent'] = preparation['stock_source_group']
+        preparation_row[product_name] = preparation['final_volume_per_tube_uL']
 
         cached_products = self._products
         cached_rxn_df = self.rxn_df
@@ -5323,7 +5323,10 @@ class AutoContr(Controller):
         prepared_reagent_df = self.robo_params['reagent_df'].copy(deep=True)
 
         for preparation in preparations:
-            reagent_name = preparation['stock_reagent']
+            # The pure preparation planner defines the canonical reagent root
+            # as ``stock_source_group``.  Use that exact contract when the
+            # Pi-confirmed working source replaces its original stock view.
+            reagent_name = preparation['stock_source_group']
             working_name = preparation['working_chemical_name']
             working_entry = self._cached_reader_locs[working_name]
 

@@ -9,6 +9,7 @@ from auto_live_run_state import EVENT_TYPES
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
+PREPARATION_PATH = os.path.join(REPOSITORY_ROOT, 'auto_preparation.py')
 
 
 class AutoPreparationControllerContractTests(unittest.TestCase):
@@ -18,6 +19,8 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
     def setUpClass(cls):
         with open(CONTROLLER_PATH, 'r', encoding='utf-8') as source_file:
             cls.source = source_file.read()
+        with open(PREPARATION_PATH, 'r', encoding='utf-8') as source_file:
+            cls.preparation_source = source_file.read()
         cls.tree = ast.parse(cls.source, filename=CONTROLLER_PATH)
         cls.auto_class = next(
             node for node in cls.tree.body
@@ -102,6 +105,27 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
         self.assertIn("'physical_execution_started'", execution_validation)
         self.assertIn("'auto_preparation_groups_executed'", execution_validation)
         self.assertIn('_record_auto_live_run_event(', phase_source)
+
+    def test_source_activation_uses_the_planner_manifest_schema(self):
+        '''Activation must consume the same keys emitted by the pure planner.'''
+        activation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_activate_auto_prepared_sources']
+        )
+        legacy_entry_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_preparation_entry']
+        )
+
+        self.assertIn("'stock_source_group'", self.preparation_source)
+        self.assertIn("preparation['stock_source_group']", activation_source)
+        self.assertIn("preparation['stock_source_group']", legacy_entry_source)
+        self.assertIn(
+            "preparation['final_volume_per_tube_uL']",
+            legacy_entry_source
+        )
+        self.assertNotIn('stock_reagent', activation_source)
+        self.assertNotIn('stock_reagent', legacy_entry_source)
 
     def test_preparation_phase_events_match_live_run_contract(self):
         '''Each controller-emitted preparation event must be journal-valid.'''
