@@ -26,9 +26,18 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
             node for node in cls.tree.body
             if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
         )
+        cls.controller_class = next(
+            node for node in cls.tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'Controller'
+        )
         cls.auto_methods = {
             node.name: node
             for node in cls.auto_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        cls.controller_methods = {
+            node.name: node
+            for node in cls.controller_class.body
             if isinstance(node, ast.FunctionDef)
         }
 
@@ -126,6 +135,36 @@ class AutoPreparationControllerContractTests(unittest.TestCase):
         )
         self.assertNotIn('stock_reagent', activation_source)
         self.assertNotIn('stock_reagent', legacy_entry_source)
+
+    def test_variable_source_binding_is_validated_before_robot_connection(self):
+        '''Prepared variables must bind to working-source provenance early.'''
+        initialization_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_preparation_plan']
+        )
+        binding_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_resolve_variable_source_bindings']
+        )
+        transfer_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_get_transfer_container']
+        )
+
+        self.assertIn('_resolve_variable_source_bindings(', initialization_source)
+        self.assertIn('build_variable_source_bindings(', binding_source)
+        self.assertIn('variable_source_binding_column_present', binding_source)
+        self.assertIn('variable_source_bindings', transfer_source)
+
+    def test_optional_workbook_field_preserves_legacy_product_columns(self):
+        '''A missing new field must be inserted before, never after, reagent.'''
+        load_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_load_rxn_df']
+        )
+        self.assertIn("'variable source concentration (mM)'", load_source)
+        self.assertIn('reagent_column_position', load_source)
+        self.assertIn('rxn_df.insert(', load_source)
 
     def test_preparation_phase_events_match_live_run_contract(self):
         '''Each controller-emitted preparation event must be journal-valid.'''

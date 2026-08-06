@@ -6,6 +6,7 @@ import unittest
 from auto_preparation import (
     AutoPreparationValidationError,
     build_preparation_manifest,
+    build_variable_source_bindings,
     validate_manifest_source_names
 )
 
@@ -131,6 +132,100 @@ class AutoPreparationManifestTests(unittest.TestCase):
             validate_manifest_source_names(
                 manifest,
                 ['sodium_borohydrideC130.0', 'sodium_borohydrideC6.25']
+            )
+
+
+class AutoVariableSourceBindingTests(unittest.TestCase):
+    '''Exercise physical-source provenance without controller/robot imports.'''
+
+    @staticmethod
+    def _variable_row(source_concentration):
+        return {
+            'reagent': 'sodium borohydride',
+            'variable_source_concentration_mM': source_concentration
+        }
+
+    @staticmethod
+    def _source_rows():
+        return [
+            {'chemical_name': 'sodium_borohydrideC130.0', 'conc': 130.0},
+            {'chemical_name': 'sodium_borohydrideC6.25', 'conc': 6.25},
+            {'chemical_name': 'silver_nitrateC0.375', 'conc': 0.375}
+        ]
+
+    def test_prepared_variable_binds_to_working_not_stock_concentration(self):
+        manifest = build_preparation_manifest([
+            AutoPreparationManifestTests._valid_row()
+        ])
+        bindings = build_variable_source_bindings(
+            [self._variable_row(6.25)],
+            self._source_rows(),
+            preparations=manifest['preparations'],
+            require_bindings=True
+        )
+
+        self.assertEqual(
+            bindings['sodium_borohydride']['chemical_name'],
+            'sodium_borohydrideC6.25'
+        )
+        self.assertEqual(
+            bindings['sodium_borohydride']['source_role'],
+            'prepared_working_source'
+        )
+
+    def test_prepared_variable_rejects_its_stock_concentration(self):
+        manifest = build_preparation_manifest([
+            AutoPreparationManifestTests._valid_row()
+        ])
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'working concentration, not the stock concentration'
+        ):
+            build_variable_source_bindings(
+                [self._variable_row(130.0)],
+                self._source_rows(),
+                preparations=manifest['preparations'],
+                require_bindings=True
+            )
+
+    def test_existing_variable_source_binding_selects_exact_deck_source(self):
+        bindings = build_variable_source_bindings(
+            [{
+                'reagent': 'silver nitrate',
+                'variable_source_concentration_mM': 0.375
+            }],
+            self._source_rows(),
+            require_bindings=True
+        )
+        self.assertEqual(
+            bindings['silver_nitrate']['chemical_name'],
+            'silver_nitrateC0.375'
+        )
+        self.assertEqual(
+            bindings['silver_nitrate']['source_role'],
+            'existing_deck_source'
+        )
+
+    def test_present_binding_column_cannot_be_blank_for_a_variable(self):
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'requires variable_source_concentration_mM'
+        ):
+            build_variable_source_bindings(
+                [self._variable_row(None)],
+                self._source_rows(),
+                require_bindings=True
+            )
+
+    def test_variable_rows_must_not_disagree_about_one_source(self):
+        with self.assertRaisesRegex(
+            AutoPreparationValidationError,
+            'inconsistent variable_source_concentration_mM'
+        ):
+            build_variable_source_bindings(
+                [self._variable_row(6.25), self._variable_row(130.0)],
+                self._source_rows(),
+                require_bindings=True
             )
 
 

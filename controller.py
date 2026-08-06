@@ -110,7 +110,9 @@ from auto_terminal_transcript import AutoPreOutputTranscript
 from auto_preparation import (
     AutoPreparationValidationError,
     PREPARATION_WORKSHEET_NAME,
+    VARIABLE_SOURCE_CONCENTRATION_COLUMN,
     build_preparation_manifest,
+    build_variable_source_bindings,
     validate_manifest_source_names
 )
 
@@ -3670,13 +3672,45 @@ class Controller(ABC):
         Postconditions:  
             self._products has been initialized to hold the names of all the products  
         '''
-        cols = make_unique(pd.Series(input_data[0])) 
+        cols = make_unique(pd.Series(input_data[0]))
+        variable_source_column_label = 'variable source concentration (mM)'
+        reagent_column_label = 'reagent (must be uniquely named)'
+        self.variable_source_binding_column_present = (
+            variable_source_column_label in cols.values
+        )
+        if self.variable_source_binding_column_present:
+            if cols[cols == variable_source_column_label].index[0] >= \
+                    cols[cols == reagent_column_label].index[0]:
+                raise ValueError(
+                    '{} must appear before {} in the input template. The '
+                    'columns after reagent are reaction-product columns, so '
+                    'placing this Auto metadata field there would change the '
+                    'protocol schema.'.format(
+                        variable_source_column_label,
+                        reagent_column_label
+                    )
+                )
         rxn_df = pd.DataFrame(input_data[4:], columns=cols)
         #rename some of the clunkier columns 
-        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
+        rxn_df.rename({'operation':'op', 'dilution concentration':'dilution_conc','max number of scans':'max_num_scans','concentration (mM)':'conc', 'variable source concentration (mM)':VARIABLE_SOURCE_CONCENTRATION_COLUMN, 'reagent (must be uniquely named)':'reagent', 'plot protocol':'plot_protocol', 'pause time (s)':'pause_time', 'comments (e.g. new bottle)':'comments','scan protocol':'scan_protocol', 'scan filename (no extension)':'scan_filename', 'plot filename (no extension)':'plot_filename'}, axis=1, inplace=True)
         rxn_df.drop(columns=['comments'], inplace=True)#comments are for humans
         rxn_df.replace('', np.nan,inplace=True)
-        rxn_df[['pause_time','dilution_conc','conc','max_num_scans']] = rxn_df[['pause_time','dilution_conc','conc','max_num_scans']].astype(float)
+        if VARIABLE_SOURCE_CONCENTRATION_COLUMN not in rxn_df.columns:
+            # The column is optional for legacy workbooks.  Auto validates it
+            # only when an operator opts into explicit binding or preparation.
+            # Insert it before reagent so the historic "everything after
+            # reagent is a product" parser contract remains unchanged.
+            reagent_column_position = rxn_df.columns.get_loc('reagent')
+            rxn_df.insert(
+                reagent_column_position,
+                VARIABLE_SOURCE_CONCENTRATION_COLUMN,
+                np.nan
+            )
+        rxn_df[['pause_time','dilution_conc','conc','max_num_scans',
+                VARIABLE_SOURCE_CONCENTRATION_COLUMN]] = rxn_df[
+                    ['pause_time','dilution_conc','conc','max_num_scans',
+                     VARIABLE_SOURCE_CONCENTRATION_COLUMN]
+                ].astype(float)
         rxn_df['reagent'] = rxn_df['reagent'].apply(lambda s: s if pd.isna(s) else s.replace(' ', '_'))
         rxn_df['chemical_name'] = rxn_df[['conc', 'reagent']].apply(self._get_chemical_name,axis=1)
         self._rename_products(rxn_df)
@@ -4731,8 +4765,21 @@ class Controller(ABC):
             the cached_reader_locs should be up to date  
         '''
         min_vol = 5
-        containers = [key for key in self._cached_reader_locs.keys() 
-                if re.fullmatch(reagent+r'C\d*\.\d*', key)]
+        binding = getattr(self, 'variable_source_bindings', {}).get(reagent)
+        if binding is not None:
+            # Explicit provenance means a same-name stock or prior working
+            # solution at another concentration is never an implicit fallback.
+            # Same-name backup tubes remain one cache key and retain the Pi's
+            # established MultiContainer switching behavior.
+            bound_source_name = binding['chemical_name']
+            containers = (
+                [bound_source_name]
+                if bound_source_name in self._cached_reader_locs
+                else []
+            )
+        else:
+            containers = [key for key in self._cached_reader_locs.keys()
+                    if re.fullmatch(reagent+r'C\d*\.\d*', key)]
         containers.sort(key=self._get_conc)
         filtered_conts = [] #this will hold the containers that are diluted enough to be able
         #to transfer without exceeding min_vol
@@ -5075,8 +5122,15 @@ class AutoContr(Controller):
         self.auto_preparation_manifest = None
         self.auto_preparation_completed = False
         self.auto_prepared_source_names = {}
+        self.variable_source_bindings = {}
 
         if self.robo_params.get('auto_preparation_mode', 'off') != 'required':
+            self._resolve_variable_source_bindings(None)
+            self.robo_params['reagent_df'] = (
+                self._apply_variable_source_bindings_to_runtime_source_view(
+                    self.robo_params['reagent_df']
+                )
+            )
             return None
 
         # An imported checkpoint has model coordinates that were validated
@@ -5151,6 +5205,21 @@ class AutoContr(Controller):
             )
 
         self.auto_preparation_manifest = manifest
+        self._resolve_variable_source_bindings(manifest)
+        # A prepared source's stock must remain visible to Auto-main until the
+        # one-time preparation completes.  Unprepared variables can already
+        # be narrowed to their explicitly bound physical source, preventing a
+        # same-name source at another concentration from becoming a fallback.
+        prepared_source_groups = {
+            preparation['stock_source_group']
+            for preparation in manifest['preparations']
+        }
+        self.robo_params['reagent_df'] = (
+            self._apply_variable_source_bindings_to_runtime_source_view(
+                self.robo_params['reagent_df'],
+                preserve_source_groups=prepared_source_groups
+            )
+        )
         print(
             '<<controller>> validated {} Auto preparation group(s) / {} '
             'working tube(s) from {} (manifest {}). Physical preparation is '
@@ -5166,6 +5235,113 @@ class AutoContr(Controller):
             )
         )
         return manifest
+
+    def _resolve_variable_source_bindings(self, preparation_manifest):
+        '''Validate workbook provenance for each Auto-variable working source.
+
+        Auto keeps ``concentration (mM)`` blank for a variable reagent.  That
+        blank is a model-control marker, not an omitted physical-source value.
+        The optional adjacent-before-reagent workbook field
+        ``variable source concentration (mM)`` therefore carries the source
+        concentration used for transfer conversion.  It becomes mandatory
+        whenever grouped Auto preparation is required, and whenever an
+        operator includes the column in a regular Auto template.
+        '''
+        variable_rows = self.rxn_df.loc[
+            (self.rxn_df['op'] == 'transfer') & self.rxn_df['conc'].isna(),
+            ['reagent', VARIABLE_SOURCE_CONCENTRATION_COLUMN]
+        ].to_dict(orient='records')
+        available_sources = []
+        for chemical_name, source_row in self.robo_params['reagent_df'].iterrows():
+            available_sources.append({
+                'chemical_name': str(chemical_name),
+                'conc': source_row.get('conc')
+            })
+
+        require_bindings = (
+            self.robo_params.get('auto_preparation_mode', 'off') == 'required'
+            or bool(getattr(self, 'variable_source_binding_column_present', False))
+        )
+        try:
+            bindings = build_variable_source_bindings(
+                variable_rows,
+                available_sources,
+                preparations=(
+                    preparation_manifest['preparations']
+                    if preparation_manifest is not None else []
+                ),
+                require_bindings=require_bindings
+            )
+        except AutoPreparationValidationError as exc:
+            raise ValueError(
+                'Auto variable-source binding setup failed before robot '
+                'connection: {}.'.format(exc)
+            )
+
+        self.variable_source_bindings = bindings
+        if bindings:
+            binding_summary = ', '.join(
+                '{} -> {} ({:.12g} mM)'.format(
+                    reagent_name,
+                    binding['chemical_name'],
+                    binding['source_concentration_mM']
+                )
+                for reagent_name, binding in sorted(bindings.items())
+            )
+            print(
+                '<<controller>> explicit Auto variable-source bindings: {}'
+                .format(binding_summary)
+            )
+        return bindings
+
+    def _apply_variable_source_bindings_to_runtime_source_view(
+            self, reagent_df, preserve_source_groups=None):
+        '''Restrict bound Auto variables to their one declared source identity.
+
+        Same-name backup tubes at the same concentration remain intact, so the
+        Pi can continue its existing MultiContainer switching behavior.  Only
+        different-concentration sources for a bound variable are hidden from
+        the controller/optimizer runtime view.  Prepared stock groups may be
+        preserved temporarily because Auto-main must consume the stock before
+        the working source exists.
+        '''
+        bindings = getattr(self, 'variable_source_bindings', {})
+        if not bindings:
+            return reagent_df
+
+        preserve_source_groups = {
+            str(group) for group in (preserve_source_groups or set())
+        }
+        keep_positions = []
+        for position, (chemical_name, _) in enumerate(
+                reagent_df.iterrows()):
+            reagent_name = self._auto_preparation_source_base_name(
+                chemical_name
+            )
+            binding = bindings.get(reagent_name)
+            if (
+                binding is None
+                or reagent_name in preserve_source_groups
+                or str(chemical_name) == binding['chemical_name']
+            ):
+                keep_positions.append(position)
+
+        return reagent_df.iloc[keep_positions].copy(deep=True)
+
+    def _get_variable_source_binding_audit_payload(self):
+        '''Return JSON-safe explicit source provenance for the live-run journal.'''
+        return {
+            str(reagent_name): {
+                'chemical_name': str(binding['chemical_name']),
+                'source_concentration_mM': float(
+                    binding['source_concentration_mM']
+                ),
+                'source_role': str(binding['source_role'])
+            }
+            for reagent_name, binding in sorted(
+                getattr(self, 'variable_source_bindings', {}).items()
+            )
+        }
 
     def _clean_template(self):
         '''
@@ -5465,7 +5641,12 @@ class AutoContr(Controller):
         )
         self._record_auto_live_run_event(
             'auto_preparation_sources_activated',
-            {'working_sources': dict(self.auto_prepared_source_names)}
+            {
+                'working_sources': dict(self.auto_prepared_source_names),
+                'variable_source_bindings': (
+                    self._get_variable_source_binding_audit_payload()
+                )
+            }
         )
         print(
             '<<controller>> grouped Auto preparation completed and working '
@@ -28807,6 +28988,12 @@ class AutoContr(Controller):
             float:
                 Stock concentration of the reagent on the deck.
         '''
+        binding = getattr(self, 'variable_source_bindings', {}).get(
+            reagent_name
+        )
+        if binding is not None:
+            return float(binding['source_concentration_mM'])
+
         reagent_df = self.robo_params['reagent_df']
 
         matching_sources = []

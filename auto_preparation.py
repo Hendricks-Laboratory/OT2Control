@@ -23,6 +23,7 @@ from __future__ import division
 import hashlib
 import json
 import math
+import re
 
 
 class AutoPreparationValidationError(ValueError):
@@ -43,6 +44,7 @@ PREPARATION_WORKSHEET_COLUMNS = (
 PREPARATION_SCHEMA_VERSION = 2
 MIX_CYCLES = 2
 MIN_EXECUTABLE_TRANSFER_UL = 5.0
+VARIABLE_SOURCE_CONCENTRATION_COLUMN = 'variable_source_concentration_mM'
 
 
 def _canonical_reagent_name(value):
@@ -123,6 +125,174 @@ def _chemical_name(reagent, concentration_mM):
         _canonical_reagent_name(reagent),
         _concentration_label(concentration_mM)
     )
+
+
+def _source_base_name(chemical_name):
+    '''Return a source's canonical reagent root from a chemical-name key.'''
+    chemical_name = str(chemical_name)
+    concentration_match = re.search(r'C\d*\.\d*$', chemical_name)
+    if concentration_match is None:
+        return _canonical_reagent_name(chemical_name)
+    return _canonical_reagent_name(chemical_name[:concentration_match.start()])
+
+
+def _source_concentration_from_name(chemical_name):
+    '''Return the concentration encoded in one canonical source name or None.'''
+    chemical_name = str(chemical_name)
+    concentration_match = re.search(r'C(\d*\.\d*)$', chemical_name)
+    if concentration_match is None:
+        return None
+    try:
+        return float(concentration_match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_variable_source_bindings(variable_rows, available_sources,
+                                   preparations=None, require_bindings=False):
+    '''Resolve explicit physical working sources for Auto variable reagents.
+
+    ``concentration (mM)`` remains blank for an Auto variable because that is
+    the established workbook marker for a model-controlled final-reaction
+    concentration.  This helper instead consumes the separate optional
+    ``variable source concentration (mM)`` field.  Its value identifies the
+    *physical* source concentration used to create model coordinates and
+    convert a selected final concentration into a transfer volume.
+
+    Parameters are plain mappings/lists so the contract is independently
+    testable without importing controller or robot code.  If the optional
+    column is present, every variable must provide one finite positive source
+    concentration.  In required preparation mode, that concentration must
+    equal the declared working concentration for any prepared source group.
+    '''
+    source_rows = list(available_sources or [])
+    preparation_by_group = {
+        _canonical_reagent_name(preparation['stock_source_group']): preparation
+        for preparation in (preparations or [])
+    }
+
+    values_by_reagent = {}
+    for row_number, row in enumerate(variable_rows or [], start=1):
+        if not isinstance(row, dict):
+            raise AutoPreparationValidationError(
+                'Variable-source row {} must be a mapping.'.format(row_number)
+            )
+        reagent = _canonical_reagent_name(row.get('reagent'))
+        if not reagent:
+            continue
+        values_by_reagent.setdefault(reagent, []).append(
+            row.get(VARIABLE_SOURCE_CONCENTRATION_COLUMN)
+        )
+
+    bindings = {}
+    for reagent, values in sorted(values_by_reagent.items()):
+        nonblank_values = [value for value in values if not _is_blank(value)]
+        if not nonblank_values:
+            if require_bindings:
+                raise AutoPreparationValidationError(
+                    'Auto variable {!r} requires {} in every variable '
+                    'transfer row. Leave concentration (mM) blank; enter '
+                    'the physical working-source concentration here.'
+                    .format(reagent, VARIABLE_SOURCE_CONCENTRATION_COLUMN)
+                )
+            continue
+        if len(nonblank_values) != len(values):
+            raise AutoPreparationValidationError(
+                'Auto variable {!r} has a partial {} declaration. Every '
+                'variable transfer row must state the same physical source '
+                'concentration.'.format(
+                    reagent, VARIABLE_SOURCE_CONCENTRATION_COLUMN
+                )
+            )
+
+        source_concentrations = [
+            _finite_positive_number(
+                value,
+                '{} for Auto variable {!r}'.format(
+                    VARIABLE_SOURCE_CONCENTRATION_COLUMN, reagent
+                )
+            )
+            for value in nonblank_values
+        ]
+        reference_concentration = source_concentrations[0]
+        if any(
+            not math.isclose(
+                concentration, reference_concentration,
+                rel_tol=1e-9, abs_tol=1e-12
+            )
+            for concentration in source_concentrations[1:]
+        ):
+            raise AutoPreparationValidationError(
+                'Auto variable {!r} has inconsistent {} values. It must '
+                'bind to exactly one physical working-source concentration.'
+                .format(reagent, VARIABLE_SOURCE_CONCENTRATION_COLUMN)
+            )
+
+        preparation = preparation_by_group.get(reagent)
+        if preparation is not None:
+            working_concentration = float(
+                preparation['working_concentration_mM']
+            )
+            if not math.isclose(
+                reference_concentration, working_concentration,
+                rel_tol=1e-9, abs_tol=1e-12
+            ):
+                raise AutoPreparationValidationError(
+                    'Auto variable {!r} binds to {:.12g} mM, but its '
+                    'auto_preparation working source is {:.12g} mM. Bind '
+                    'the variable to the working concentration, not the '
+                    'stock concentration.'.format(
+                        reagent,
+                        reference_concentration,
+                        working_concentration
+                    )
+                )
+            bindings[reagent] = {
+                'source_concentration_mM': working_concentration,
+                'chemical_name': preparation['working_chemical_name'],
+                'source_role': 'prepared_working_source'
+            }
+            continue
+
+        matching_source_names = []
+        for source in source_rows:
+            if isinstance(source, dict):
+                chemical_name = source.get('chemical_name')
+                source_concentration = source.get('conc')
+            else:
+                chemical_name = source
+                source_concentration = _source_concentration_from_name(source)
+            if chemical_name is None:
+                continue
+            if _source_base_name(chemical_name) != reagent:
+                continue
+            if source_concentration is None:
+                source_concentration = _source_concentration_from_name(chemical_name)
+            try:
+                source_concentration = float(source_concentration)
+            except (TypeError, ValueError):
+                continue
+            if math.isclose(
+                source_concentration, reference_concentration,
+                rel_tol=1e-9, abs_tol=1e-12
+            ):
+                matching_source_names.append(str(chemical_name))
+
+        if not matching_source_names:
+            raise AutoPreparationValidationError(
+                'Auto variable {!r} binds to {:.12g} mM, but reagent_info '
+                'contains no matching physical source.'.format(
+                    reagent, reference_concentration
+                )
+            )
+
+        bindings[reagent] = {
+            'source_concentration_mM': reference_concentration,
+            'chemical_name': matching_source_names[0],
+            'source_role': 'existing_deck_source'
+        }
+
+    return bindings
 
 
 def _validate_executable_transfer(volume_uL, field_name):
