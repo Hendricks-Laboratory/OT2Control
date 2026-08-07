@@ -1,9 +1,9 @@
 # Auto Live-Run Recovery and Performance Plan
 
-**Status:** Stages 0–6, 8–10C, and the offline Stage 11A
-remote-publication boundary are implemented. Stage 7 remains intentionally
-deferred. A remote service adapter and remote operator-action intake remain
-future, separately reviewed work.
+**Status:** Stages 0–6 and 8–10C are implemented. The controller-local Live
+workbook is already written inside the normal Lab-PC `Protocol_Outputs` tree,
+which is the only planned Drive-visible status path. Stage 11 action intake is
+future, separately reviewed work. Stage 7 remains intentionally deferred.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -11,7 +11,9 @@ future, separately reviewed work.
 
 Add an offline-resilient, auditable way for Auto runs to record live state, mirror that state to a human-facing workbook when network connectivity is available, and recover from selected resource shortages only at safe batch boundaries. The work also improves high-dimensional conditional-slice generation so it remains practical on the lab PC.
 
-The controller's local state is authoritative. A Google Drive workbook is a best-effort human-facing mirror and action-request surface; a network failure must not stop an otherwise healthy run.
+The controller's local state is authoritative. The Google Drive desktop client
+may synchronize the normal protocol-output folder as a best-effort
+human-facing mirror; a network failure must not stop an otherwise healthy run.
 
 ## Non-negotiable boundaries
 
@@ -29,35 +31,55 @@ Each run will have these local records:
 Run_State/run_manifest.json        immutable run identity and baseline hashes
 Run_State/current_state.json       current durable controller state
 Run_State/events.jsonl             append-only event/audit journal
-Run_State/pending_cloud_sync.jsonl retry queue for mirror updates
+Run_State/pending_cloud_sync.jsonl local queue retained for audit/history;
+                                    not replayed to a cloud service
 Live_Run/<run>_LIVE.xlsx           local rendered copy of the live workbook
 ```
 
-The remote workbook contains a read-only status mirror plus a deliberately small `Operator_Action_Request` surface. Each request includes `run_id`, an action ID, expected state revision, and replacement details. The controller rejects duplicate, stale, incomplete, or incompatible requests.
+The controller-written status workbook is read-only from the operator
+perspective. A future stage may create a *separate* operator-written workbook
+in this same `Live_Run` directory. Its requests will include `run_id`, an
+action ID, expected state revision, and replacement details. The controller
+will reject duplicate, stale, incomplete, or incompatible requests.
 
-For every state-changing operation: persist a local request event; validate it against controller and Pi state; apply it and receive an acknowledgement/snapshot; persist acknowledged state and increment its revision; queue (rather than require) remote synchronization; then rebuild and preflight the unchanged next batch.
+For every state-changing operation: persist a local request event; validate it
+against controller and Pi state; apply it and receive an acknowledgement or
+snapshot; persist acknowledged state and increment its revision; rebuild the
+local status workbook; then rebuild and preflight the unchanged next batch.
+Desktop synchronization, if available, observes that normal output file but is
+never required for continuation.
 
 ## Implementation stages
 
-### Stage 11 — remote Live workbook boundary
+### Stage 11 — desktop-synchronized Live workbook and action intake
 
-#### Stage 11A — immutable publication contract (implemented, offline only)
+#### Stage 11A — retired remote-publication contract (offline only)
 
-`auto_live_run_remote.py` defines a dependency-free contract for a future
-remote publisher. It derives a content-addressed, per-run, per-revision target
-from an already queued local workbook snapshot and permits only
-`create_immutable_snapshot` with `overwrite: false`. The contract validates a
-publisher receipt against the exact run ID, state revision, SHA-256 digest, and
-derived target path. It does not import a cloud SDK, access credentials or a
-network, call the controller, change Auto-main/Pi behavior, or contact Google
-Drive. Focused fake-publisher tests cover deterministic paths, checksum drift,
-and receipt tampering.
+`auto_live_run_remote.py` is an existing dependency-free, test-only boundary
+that was never connected to the controller. It remains offline and inert. It
+does not import a cloud SDK, access credentials or a network, call the
+controller, change Auto-main/Pi behavior, or contact Google Drive. It is not
+the planned publication mechanism and will not be wired into Stage 11.
 
-The original workbook and all existing remote files remain outside this
-contract. The later Stage 11B publisher may only create a new snapshot under
-the designated `Auto_Live_Runs/` namespace; Stage 11C will define read-only
-operator action-request intake with the existing terminal workflow retained as
-the offline fallback.
+The original workbook and all existing Drive files remain outside this retired
+contract.
+
+#### Stage 11B — Lab-PC synchronized Live output (revised direction)
+
+The normal publication path is the existing desktop synchronization of the
+Lab-PC `Protocol_Outputs` directory, not a Google Drive API client. The local
+status mirror already belongs under the resolved normal run-output directory:
+
+```text
+<Protocol_Outputs>/<effective-data-dir>/Live_Run/<run>_LIVE.xlsx
+```
+
+This location is the only intended Drive-visible status export. Stage 11 must
+not create a second cloud namespace, load credentials, use direct network
+requests, or alter the original input workbook. A future Stage 11C action
+intake will add a separate operator-written workbook in this same `Live_Run`
+directory, leaving the controller-written status mirror immutable from the
+operator perspective and preserving terminal entry as the offline fallback.
 
 ### Stage 0 — protocol and data-contract specification
 

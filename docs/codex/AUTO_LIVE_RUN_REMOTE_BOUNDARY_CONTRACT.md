@@ -2,22 +2,23 @@
 
 ## Status
 
-Stage 11A is implemented and deliberately offline. It introduces no cloud
-SDK, credentials, network call, controller integration, Pi change, or remote
-file operation.
+This is a retired, deliberately offline Stage 11A boundary. It introduces no
+cloud SDK, credentials, network call, controller integration, Pi change, or
+remote file operation. It is not the planned Google Drive publication path.
 
 ## Purpose
 
-When a reviewed remote publisher is added later, it must publish a local Live
-workbook revision as one **new immutable snapshot**. The original input
-workbook, existing remote documents, and unrelated Drive files are outside
-this contract.
+This file records the earlier, test-only immutable-publication concept. The
+original input workbook, existing Drive documents, and unrelated Drive files
+remain outside this contract. No reviewed remote publisher is planned under
+the current Stage 11 design.
 
 The local `AutoLiveRunSyncQueue` remains responsible for FIFO ordering and
-immutable per-revision local workbook copies. A remote publisher may be
-connected only through `auto_live_run_remote.py` after separate approval.
+immutable per-revision local workbook copies. The normal Drive-visible output
+is the existing Google Drive desktop synchronization of the Lab-PC
+`Protocol_Outputs` tree.
 
-## Allowed operation
+## Retired operation
 
 The only valid publication operation is:
 
@@ -36,9 +37,9 @@ The request includes `overwrite: false`; callers cannot provide an arbitrary
 remote path. The contract rejects a receipt that changes the operation, run,
 revision, checksum, or derived path.
 
-## Publisher interface for a later stage
+## Historical publisher interface
 
-An injected publisher must expose:
+An earlier proposed publisher would have exposed:
 
 ```python
 create_immutable_snapshot(request, workbook_path)
@@ -59,6 +60,19 @@ Stage 11A does not:
 - alter the controller, Auto-main/Pi behavior, source allocation, or recovery
   logic.
 
-Stage 11B may add a configured publisher that implements this narrow contract.
-Stage 11C may add read-only remote action-request intake with the existing
-terminal workflow remaining the offline fallback.
+## Current Stage 11 direction
+
+The former Google Drive API publisher prototype was deliberately removed before
+it was committed or connected to the controller. The supported publication path
+is the existing Lab-PC Google Drive desktop synchronization of the normal
+`Protocol_Outputs` tree. The controller already writes the derived status
+workbook beneath that tree at:
+
+```text
+<Protocol_Outputs>/<effective-data-dir>/Live_Run/<run>_LIVE.xlsx
+```
+
+Stage 11 must not create a second Drive namespace, configure credentials, or
+make direct network requests. A later operator-action stage will use a distinct
+operator-written workbook in the same `Live_Run` directory; it will never
+modify the controller-written status workbook or the original input workbook.
