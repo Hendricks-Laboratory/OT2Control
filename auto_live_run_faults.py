@@ -71,6 +71,52 @@ _FAULT_SCOPE_RULES = {
 }
 
 
+def classify_fault_lifecycle(
+    preceding_lifecycle_state,
+    preparation_execution_may_have_started=False
+):
+    '''Classifies one potentially physical Auto interruption conservatively.
+
+    This helper intentionally has no knowledge of controller exceptions,
+    portal packets, or hardware.  The controller supplies the last durable
+    lifecycle state and whether it had already dispatched grouped
+    preparation.  A returned mapping is sufficient to construct a fault
+    record; ``None`` means the failure occurred before this stage has
+    evidence that liquid handling could have started.
+
+    Preparation takes precedence only while the journal is still at its
+    pre-batch ``ready_for_batch`` boundary.  A later batch lifecycle state is
+    always classified from that durable state, even if a stale controller flag
+    exists, so the record cannot hide an active experimental batch.
+    '''
+    if (
+        preparation_execution_may_have_started
+        and preceding_lifecycle_state == LIFECYCLE_READY_FOR_BATCH
+    ):
+        return {
+            'fault_scope': FAULT_SCOPE_AUTO_PREPARATION,
+            'certainty': FAULT_CERTAINTY_PREPARATION_UNKNOWN_OR_PARTIAL,
+            'lifecycle_state': LIFECYCLE_FAULTED_PREPARATION
+        }
+
+    batch_certainty_by_state = {
+        LIFECYCLE_EXECUTING_BATCH:
+            FAULT_CERTAINTY_TRANSFER_UNKNOWN_OR_PARTIAL,
+        LIFECYCLE_MEASURING_BATCH:
+            FAULT_CERTAINTY_TRANSFER_COMPLETE_MEASUREMENT_UNKNOWN,
+        LIFECYCLE_PROCESSING_BATCH:
+            FAULT_CERTAINTY_MEASUREMENT_COMPLETE_PROCESSING_UNKNOWN
+    }
+    certainty = batch_certainty_by_state.get(preceding_lifecycle_state)
+    if certainty is None:
+        return None
+    return {
+        'fault_scope': FAULT_SCOPE_BATCH,
+        'certainty': certainty,
+        'lifecycle_state': LIFECYCLE_FAULTED_PARTIAL_BATCH
+    }
+
+
 class AutoLiveRunFaultError(RuntimeError):
     '''Raised when fault evidence is malformed or cannot be durably written.'''
 

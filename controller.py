@@ -85,6 +85,12 @@ from auto_live_run_journal import (
     AutoLiveRunJournal,
     AutoLiveRunJournalError
 )
+from auto_live_run_faults import (
+    AutoLiveRunFaultError,
+    AutoLiveRunFaultEvidenceWriter,
+    build_fault_record,
+    classify_fault_lifecycle
+)
 from auto_live_run_state import (
     LIFECYCLE_EXECUTING_BATCH,
     LIFECYCLE_FINALIZED,
@@ -5416,6 +5422,15 @@ class AutoContr(Controller):
         # The ordinary preflight simulation deliberately writes no live-run
         # recovery records.
         self.auto_live_run_journal = None
+        # Stage 10B keeps only local, conservative evidence for an unexpected
+        # interruption after physical work may have begun. These values never
+        # authorize automatic retry, continuation, or model updates.
+        self.auto_live_run_fault_handled = False
+        self.auto_live_run_fault_record = None
+        self._auto_live_run_active_batch_context = None
+        self._auto_live_run_active_protocol_dataframe = None
+        self._auto_live_run_preparation_execution_may_have_started = False
+        self._auto_live_run_preparation_context = None
         # Stage 2 creates these only for a real configured Auto model. They
         # are derived monitoring artifacts and never feed back into Auto.
         self.auto_live_run_sync_queue = None
@@ -5634,6 +5649,17 @@ class AutoContr(Controller):
             'destination(s); executing water, stock, then mix once per tube.'
             .format(len(result['preparations']))
         )
+        # A send or acknowledgement failure after this point cannot establish
+        # whether every planned preparation transfer occurred. Preserve that
+        # uncertainty for the Stage 10B fault path rather than letting the
+        # generic controller shutdown create normal completion artifacts.
+        self._auto_live_run_preparation_execution_may_have_started = True
+        self._auto_live_run_preparation_context = {
+            'preparation_group_count': int(len(result['preparations'])),
+            'reservation_action_id': str(request['action_id']),
+            'execution_action_id': str(execution_request['action_id']),
+            'manifest_sha256': str(request['manifest_sha256'])
+        }
         execution = self._request_auto_preparation_group_execution(
             execution_request
         )
@@ -5660,6 +5686,9 @@ class AutoContr(Controller):
                 )
             }
         )
+        # Only a complete acknowledgement, source activation, and durable
+        # activation event clear the possible-partial-preparation marker.
+        self._auto_live_run_preparation_execution_may_have_started = False
         print(
             '<<controller>> grouped Auto preparation completed and working '
             'sources are active for seed generation.'
@@ -7784,6 +7813,189 @@ class AutoContr(Controller):
             )
         self._refresh_auto_live_run_mirror()
         return event
+
+    def _get_auto_live_run_fault_descriptor(self):
+        '''Returns one conservative fault classification, or ``None``.
+
+        A controller exception is not itself proof that physical work began.
+        This Stage 10B boundary records evidence only after the durable
+        lifecycle state, or the preparation dispatch marker, establishes that
+        preparation or a numbered batch may already be physically affected.
+        Earlier configuration and preflight failures retain the established
+        generic error path.
+        '''
+        journal = getattr(self, 'auto_live_run_journal', None)
+        if journal is None or getattr(self, 'auto_live_run_fault_handled', False):
+            return None
+
+        state = copy.deepcopy(journal.current_state)
+        classification = classify_fault_lifecycle(
+            preceding_lifecycle_state=state['lifecycle_state'],
+            preparation_execution_may_have_started=bool(getattr(
+                self,
+                '_auto_live_run_preparation_execution_may_have_started',
+                False
+            ))
+        )
+        if classification is None:
+            return None
+
+        return {
+            'state': state,
+            'classification': classification
+        }
+
+    def _get_auto_live_run_fault_protocol_evidence(self):
+        '''Returns a detached planned-protocol CSV payload when available.'''
+        dataframe = getattr(
+            self,
+            '_auto_live_run_active_protocol_dataframe',
+            None
+        )
+        if dataframe is None:
+            return None, None
+
+        columns = [str(column) for column in dataframe.columns]
+        rows = [
+            {
+                str(column): value
+                for column, value in row.items()
+            }
+            for row in dataframe.to_dict(orient='records')
+        ]
+        return columns, rows
+
+    def _record_auto_live_run_fault(self, error):
+        '''Publishes Stage 10B fault evidence and terminally freezes the journal.
+
+        This method is deliberately best-effort after the original controller
+        failure.  Evidence-write or journal-write trouble is reported without
+        replacing the original exception, and no normal Auto save, report,
+        checkpoint, retry, or continuation path is invoked.
+        '''
+        descriptor = self._get_auto_live_run_fault_descriptor()
+        if descriptor is None:
+            return None
+
+        journal = self.auto_live_run_journal
+        state = descriptor['state']
+        classification = descriptor['classification']
+        fault_id = 'auto-fault-{}'.format(uuid.uuid4().hex)
+        is_batch_fault = classification['fault_scope'] == 'batch'
+        if is_batch_fault:
+            batch_context = copy.deepcopy(getattr(
+                self,
+                '_auto_live_run_active_batch_context',
+                {}
+            ) or {})
+            planned_columns, planned_rows = (
+                self._get_auto_live_run_fault_protocol_evidence()
+            )
+        else:
+            batch_context = copy.deepcopy(getattr(
+                self,
+                '_auto_live_run_preparation_context',
+                {}
+            ) or {})
+            planned_columns, planned_rows = None, None
+
+        # The previous durable event sequence is intentionally captured before
+        # the fault transition: the evidence package identifies the last known
+        # good boundary rather than implying that the fault event completed.
+        exception_message = str(error).strip() or repr(error)
+        fault_record = build_fault_record(
+            run_id=state['run_id'],
+            fault_id=fault_id,
+            fault_scope=classification['fault_scope'],
+            certainty=classification['certainty'],
+            preceding_lifecycle_state=state['lifecycle_state'],
+            lifecycle_state=classification['lifecycle_state'],
+            active_batch_number=state['active_batch_number'],
+            exception_class=error.__class__.__name__,
+            exception_message=exception_message,
+            last_event_sequence=state['last_event_sequence'],
+            batch_context=batch_context
+        )
+        exception_trace = ''.join(traceback.format_exception(
+            type(error),
+            error,
+            error.__traceback__
+        ))
+
+        evidence_directory = None
+        evidence_error = None
+        try:
+            evidence_directory = AutoLiveRunFaultEvidenceWriter.write(
+                journal.run_state_directory,
+                fault_record,
+                exception_trace,
+                planned_protocol_columns=planned_columns,
+                planned_protocol_rows=planned_rows
+            )
+        except (AutoLiveRunFaultError, OSError, ValueError) as exc:
+            evidence_error = str(exc)
+            print(
+                '<<controller warning>> Auto fault evidence could not be '
+                'fully published: {}'.format(exc)
+            )
+
+        transition_payload = {
+            'fault_id': fault_id,
+            'fault_scope': classification['fault_scope'],
+            'certainty': classification['certainty'],
+            'disposition': (
+                'human_review_required_no_automatic_resume'
+            ),
+            'evidence_directory': evidence_directory,
+            'evidence_write_error': evidence_error,
+            'last_known_event_sequence': state['last_event_sequence']
+        }
+        transition_error = None
+        try:
+            journal.record_transition(
+                lifecycle_state=classification['lifecycle_state'],
+                event_type='fault_recorded',
+                payload=transition_payload,
+                active_batch_number=state['active_batch_number'],
+                fault_id=fault_id
+            )
+        except AutoLiveRunJournalError as exc:
+            transition_error = str(exc)
+            print(
+                '<<controller warning>> Auto fault lifecycle transition '
+                'could not be recorded: {}'.format(exc)
+            )
+
+        self.auto_live_run_fault_handled = True
+        self.auto_live_run_fault_record = {
+            'fault_record': fault_record,
+            'evidence_directory': evidence_directory,
+            'evidence_write_error': evidence_error,
+            'transition_error': transition_error
+        }
+        print(
+            '<<controller>> Auto run entered a terminal fault disposition '
+            '({}); no automatic resume, model update, checkpoint, report, '
+            'or normal shutdown save will be attempted.'.format(
+                classification['certainty']
+            )
+        )
+        return copy.deepcopy(self.auto_live_run_fault_record)
+
+    def _error_handler(self, error):
+        '''Handles potentially physical Auto faults before generic teardown.
+
+        For a Stage 10B classified interruption, the controller stops at the
+        terminal journal state and re-raises the original exception.  It does
+        not call ``close_connection()``, because that legacy path saves normal
+        output and asks the Pi for a graceful completion sequence that would
+        be scientifically misleading after an unacknowledged partial batch.
+        Non-classified errors preserve the existing controller behavior.
+        '''
+        fault_record = self._record_auto_live_run_fault(error)
+        if fault_record is not None:
+            raise error
+        super()._error_handler(error)
 
     def _auto_model_checkpoint_saving_enabled(self, model):
         '''Returns whether one real Auto model may write checkpoints.
@@ -28204,6 +28416,26 @@ class AutoContr(Controller):
                 'batch_preflight_validated',
                 batch_payload
             )
+
+        # Preserve the exact planned dataframe and a JSON-safe summary before
+        # any liquid-handling request is dispatched.  If communication fails
+        # after the transition below, Stage 10B exports these as immutable
+        # evidence for a human disposition; they are not a recovery plan.
+        self._auto_live_run_active_batch_context = {
+            'batch_number': batch_number,
+            'physical_well_count': int(len(wellnames)),
+            'wellnames': list(wellnames),
+            'plate_generation': int(getattr(self, 'auto_plate_generation', 0)),
+            'plate_start_well': getattr(self, 'auto_plate_next_well', None),
+            'planned_protocol_filename': 'planned_protocol_dataframe.csv',
+            'planned_protocol_row_count': int(len(self.rxn_df.index)),
+            'planned_protocol_columns': [
+                str(column) for column in self.rxn_df.columns
+            ]
+        }
+        self._auto_live_run_active_protocol_dataframe = self.rxn_df.copy(
+            deep=True
+        )
         if hasattr(self, '_record_auto_live_run_transition'):
             self._record_auto_live_run_transition(
                 LIFECYCLE_EXECUTING_BATCH,

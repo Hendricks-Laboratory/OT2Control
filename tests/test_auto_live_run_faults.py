@@ -15,11 +15,16 @@ from auto_live_run_faults import (
     FAULT_SCOPE_AUTO_PREPARATION,
     FAULT_SCOPE_BATCH,
     build_fault_record,
+    classify_fault_lifecycle,
     validate_fault_record
 )
 from auto_live_run_state import (
+    LIFECYCLE_EXECUTING_BATCH,
     LIFECYCLE_FAULTED_PARTIAL_BATCH,
-    LIFECYCLE_FAULTED_PREPARATION
+    LIFECYCLE_FAULTED_PREPARATION,
+    LIFECYCLE_MEASURING_BATCH,
+    LIFECYCLE_PROCESSING_BATCH,
+    LIFECYCLE_READY_FOR_BATCH
 )
 
 
@@ -193,6 +198,40 @@ class AutoLiveRunFaultEvidenceTests(unittest.TestCase):
                 AutoLiveRunFaultError,
                 'preceding_lifecycle_state'):
             validate_fault_record(record)
+
+    def test_classifier_marks_only_potentially_physical_boundaries(self):
+        preparation = classify_fault_lifecycle(
+            LIFECYCLE_READY_FOR_BATCH,
+            preparation_execution_may_have_started=True
+        )
+        self.assertEqual(FAULT_SCOPE_AUTO_PREPARATION,
+                         preparation['fault_scope'])
+        self.assertEqual(LIFECYCLE_FAULTED_PREPARATION,
+                         preparation['lifecycle_state'])
+
+        executing = classify_fault_lifecycle(LIFECYCLE_EXECUTING_BATCH)
+        self.assertEqual(FAULT_SCOPE_BATCH, executing['fault_scope'])
+        self.assertEqual(
+            FAULT_CERTAINTY_TRANSFER_UNKNOWN_OR_PARTIAL,
+            executing['certainty']
+        )
+
+        measuring = classify_fault_lifecycle(LIFECYCLE_MEASURING_BATCH)
+        self.assertEqual(
+            'transfer_complete_measurement_unknown',
+            measuring['certainty']
+        )
+
+        processing = classify_fault_lifecycle(LIFECYCLE_PROCESSING_BATCH)
+        self.assertEqual(
+            'measurement_complete_processing_unknown',
+            processing['certainty']
+        )
+
+        self.assertIsNone(classify_fault_lifecycle(
+            LIFECYCLE_READY_FOR_BATCH,
+            preparation_execution_may_have_started=False
+        ))
 
 
 if __name__ == '__main__':
