@@ -2,8 +2,9 @@
 
 **Status:** Stages 0–6 and 8–10C are implemented. The controller-local Live
 workbook is already written inside the normal Lab-PC `Protocol_Outputs` tree,
-which is the only planned Drive-visible status path. Stage 11 action intake is
-future, separately reviewed work. Stage 7 remains intentionally deferred.
+which is the only planned Drive-visible status path. Stage 11C2 is implemented
+and awaiting a human-supervised controlled dry debug. Stage 7 remains
+intentionally deferred.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -37,10 +38,11 @@ Live_Run/<run>_LIVE.xlsx           local rendered copy of the live workbook
 ```
 
 The controller-written status workbook is read-only from the operator
-perspective. A future stage may create a *separate* operator-written workbook
-in this same `Live_Run` directory. Its requests will include `run_id`, an
-action ID, expected state revision, and replacement details. The controller
-will reject duplicate, stale, incomplete, or incompatible requests.
+perspective. A separate operator-written workbook in this same `Live_Run`
+directory supports only the approved same-container source-refill hold. Its
+requests include `run_id`, action ID, expected state revision, and the exact
+registered source candidates. The controller rejects duplicate, stale,
+incomplete, or incompatible responses.
 
 For every state-changing operation: persist a local request event; validate it
 against controller and Pi state; apply it and receive an acknowledgement or
@@ -93,11 +95,37 @@ non-overwriting workbook beside the status mirror:
 ```
 
 The action workbook contains `Instructions`, `Active Request`, and `Operator
-Response` sheets. It carries the run ID and initial state revision, explicitly
-states that response intake is inactive, and is never regenerated after its
-initial atomic creation. This prevents status refreshes from overwriting a
-future operator edit. No response is read, no recovery action is accepted, and
-no Pi, recipe, model, or execution behavior changes in this stage.
+Response` sheets. It carries the run ID and initial state revision and is never
+regenerated after its initial atomic creation. This prevents status refreshes
+from overwriting an operator edit.
+
+#### Stage 11C2 — active same-container source-refill response (implemented; controlled dry debug required)
+
+Only the already validated pre-batch `refill_same_container` hold may activate
+the separate action workbook. The controller writes one active request before
+asking for operator input. That request contains a fresh request ID, the
+expected durable journal revision, the held batch, the existing hold action
+ID, and only the exact same-container candidates already approved by the Pi
+preflight.
+
+The operator may edit only the `Operator Response` sheet, save the same XLSX
+file under the ordinary desktop-synchronized `Protocol_Outputs` directory,
+then enter `workbook` at the existing terminal hold. The local reader accepts
+only matching run/request/revision values and one permitted action:
+
+- `refill_same_container` requires `REFILL`, a listed candidate number, and a
+  finite nonnegative measured tube-plus-liquid mass;
+- `retry_preflight` requires `RETRY` and changes no inventory;
+- `end_run` requires `END` and finalizes the held run.
+
+The XLSX reader is standard-library-only and bound to small archive/XML size
+limits. Invalid, stale, incomplete, or unsupported responses change no Pi
+state. The controller records the rejection durably, issues a fresh request
+ID/revision, and leaves terminal entry available as the offline fallback. A
+valid refill still goes through the pre-existing Pi mass-refresh validation
+and exact unchanged-batch preflight before liquid handling. This adds no Drive
+API, credentials, network request, new Pi command, recipe regeneration, model
+change, or unattended continuation.
 
 ### Stage 0 — protocol and data-contract specification
 

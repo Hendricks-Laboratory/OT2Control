@@ -128,6 +128,10 @@ EVENT_TYPES = frozenset({
     'batch_model_update_completed',
     'batch_completed',
     'hold_entered',
+    # Stage 11C2 records a request and any rejected workbook response before
+    # the pre-existing terminal/Pi recovery path can act on a valid response.
+    'operator_action_workbook_activated',
+    'operator_action_workbook_response_rejected',
     'operator_action_requested',
     'operator_action_rejected',
     'operator_action_applied',

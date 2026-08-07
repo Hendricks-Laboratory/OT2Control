@@ -1,4 +1,4 @@
-'''Local operator-action workbook shell for a future Auto recovery hold.
+'''Local operator-action workbook for one explicitly approved Auto hold.
 
 This module creates one separate workbook beside the controller-written Live
 status workbook.  It is deliberately local and dependency-free: the Lab-PC
@@ -6,13 +6,18 @@ desktop synchronization client may mirror the normal protocol-output folder,
 but this module never accesses Google Drive, credentials, a network, the
 original input workbook, a controller, or the robot.
 
-Stage 11C1 creates the action-workbook shell exactly once for a run.  It does
-not read an operator response or change any recovery, resource, or execution
-behavior.  A later approved stage must validate an explicitly active request
-before any response can be considered.
+Stage 11C1 creates the action-workbook shell exactly once for a run.  Stage
+11C2 may activate one same-container source-refill request and read only a
+strictly matching, explicitly confirmed response. It never accesses a
+network, changes a robot, or bypasses the controller's existing terminal
+recovery path.
 '''
 
+import copy
+import math
 import os
+import zipfile
+import xml.etree.ElementTree as ElementTree
 
 from auto_live_run_workbook import (
     AutoLiveRunWorkbookError,
@@ -25,15 +30,39 @@ class AutoLiveRunOperatorActionWorkbookError(RuntimeError):
 
 
 class AutoLiveRunOperatorActionWorkbook:
-    '''Creates the non-overwriting operator-action workbook shell.
+    '''Creates and validates a non-overwriting operator-action workbook.
 
     The workbook is intentionally distinct from ``<run>_LIVE.xlsx``.  The
     controller may regenerate the status workbook after every durable event,
     whereas this action workbook is created once and left untouched until a
-    later hold-specific response reader is approved.
+    a hold-specific request is activated. Only Stage 11C2's constrained
+    same-container source-refill request is currently supported.
     '''
 
     ACTION_WORKBOOK_SUFFIX = '_OPERATOR_ACTIONS.xlsx'
+    WORKBOOK_SCHEMA_VERSION = 1
+    _MAIN_XML_NAMESPACE = (
+        'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+    )
+    _RELATIONSHIP_XML_NAMESPACE = (
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    )
+    _PACKAGE_RELATIONSHIP_XML_NAMESPACE = (
+        'http://schemas.openxmlformats.org/package/2006/relationships'
+    )
+    _MAX_WORKBOOK_BYTES = 4 * 1024 * 1024
+    _MAX_UNCOMPRESSED_XML_BYTES = 8 * 1024 * 1024
+
+    RESPONSE_FIELD_NAMES = (
+        'Run ID',
+        'Request ID',
+        'Expected state revision',
+        'Requested action',
+        'Candidate number',
+        'Measured total mass (g)',
+        'Confirmation',
+        'Operator note'
+    )
 
     @staticmethod
     def _validate_nonempty_string(value, field_name):
@@ -66,7 +95,7 @@ class AutoLiveRunOperatorActionWorkbook:
         return live_run_directory, os.path.join(live_run_directory, workbook_name)
 
     @classmethod
-    def _sheet_payloads(cls, run_id, initial_state_revision):
+    def _inactive_sheet_payloads(cls, run_id, initial_state_revision):
         return [
             (
                 'Instructions',
@@ -117,6 +146,7 @@ class AutoLiveRunOperatorActionWorkbook:
                         'will be populated only by a future safe-hold stage.'
                     ],
                     ['__HEADER__', 'Field', 'Value'],
+                    ['Schema version', cls.WORKBOOK_SCHEMA_VERSION],
                     ['Request status', 'inactive'],
                     ['Run ID', run_id],
                     ['Initial state revision', initial_state_revision],
@@ -147,6 +177,9 @@ class AutoLiveRunOperatorActionWorkbook:
                     ['Request ID', ''],
                     ['Expected state revision', ''],
                     ['Requested action', ''],
+                    ['Candidate number', ''],
+                    ['Measured total mass (g)', ''],
+                    ['Confirmation', ''],
                     ['Operator response', ''],
                     ['Replacement details', ''],
                     ['Operator note', '']
@@ -154,6 +187,568 @@ class AutoLiveRunOperatorActionWorkbook:
                 [30, 96]
             )
         ]
+
+    @classmethod
+    def _active_sheet_payloads(cls, request):
+        '''Builds one source-refill request without retaining any response.'''
+        candidates = request['same_container_refill_candidates']
+        candidate_lines = []
+        for index, candidate in enumerate(candidates, start=1):
+            candidate_lines.append(
+                '[{}] {} | container {} | deck {} {}'.format(
+                    index,
+                    candidate['source_chemical_name'],
+                    candidate['source_container_index'],
+                    candidate['source_deck_pos'],
+                    candidate['source_loc']
+                )
+            )
+
+        return [
+            (
+                'Instructions',
+                [
+                    ['__TITLE__', 'Auto Operator Action Workbook'],
+                    [
+                        '__WARNING__',
+                        'ACTIVE REQUEST: edit only the Operator Response '
+                        'sheet, save this same XLSX file, then return to the '
+                        'controller terminal and choose workbook.'
+                    ],
+                    [
+                        '__NOTE__',
+                        'The controller accepts a response only when the run '
+                        'ID, request ID, expected state revision, requested '
+                        'action, and action-specific confirmation all match '
+                        'this active request. A rejected response changes no '
+                        'Pi inventory or recipe.'
+                    ],
+                    ['__HEADER__', 'Rule', 'Meaning'],
+                    [
+                        'Status workbook',
+                        'Do not edit <run>_LIVE.xlsx; it is regenerated from '
+                        'durable controller state.'
+                    ],
+                    [
+                        'Original input workbook',
+                        'Never changed by this action workflow.'
+                    ],
+                    [
+                        'Terminal fallback',
+                        'Use the terminal recovery prompts if this workbook '
+                        'does not synchronize or cannot be validated.'
+                    ]
+                ],
+                [30, 112]
+            ),
+            (
+                'Active Request',
+                [
+                    ['__TITLE__', 'Active Operator Request'],
+                    ['__HEADER__', 'Field', 'Value'],
+                    ['Schema version', cls.WORKBOOK_SCHEMA_VERSION],
+                    ['Request status', 'active'],
+                    ['Run ID', request['run_id']],
+                    ['Request ID', request['request_id']],
+                    [
+                        'Expected state revision',
+                        request['expected_state_revision']
+                    ],
+                    ['Hold action ID', request['hold_action_id']],
+                    ['Hold reason', 'same-container source refill'],
+                    ['Batch number', request['batch_number']],
+                    [
+                        'Permitted actions',
+                        '; '.join(request['permitted_actions'])
+                    ],
+                    ['Refill candidates', '\n'.join(candidate_lines)],
+                    [
+                        'Required confirmation',
+                        'REFILL for refill_same_container; RETRY for '
+                        'retry_preflight; END for end_run.'
+                    ]
+                ],
+                [30, 112]
+            ),
+            (
+                'Operator Response',
+                [
+                    ['__TITLE__', 'Operator Response'],
+                    [
+                        '__WARNING__',
+                        'Enter values only for this active request. The '
+                        'controller rejects stale, incomplete, mismatched, '
+                        'or unsupported responses without changing Pi state.'
+                    ],
+                    ['__HEADER__', 'Field', 'Value'],
+                    ['Run ID', request['run_id']],
+                    ['Request ID', request['request_id']],
+                    [
+                        'Expected state revision',
+                        request['expected_state_revision']
+                    ],
+                    ['Requested action', ''],
+                    ['Candidate number', ''],
+                    ['Measured total mass (g)', ''],
+                    ['Confirmation', ''],
+                    ['Operator note', '']
+                ],
+                [30, 112]
+            )
+        ]
+
+    @classmethod
+    def _resolved_sheet_payloads(cls, request, response, resolution):
+        '''Builds a non-active audit record after a handled request.
+
+        This is intentionally an action-workbook presentation update only.
+        The controller writes its durable journal/Pi outcome first, so a
+        failure to render this convenience record cannot alter recovery.
+        '''
+        sheet_payloads = cls._active_sheet_payloads(request)
+        instructions = sheet_payloads[0][1]
+        instructions[1] = [
+            '__NOTE__',
+            'REQUEST RESOLVED: this response has already been handled. It '
+            'cannot be replayed to release another batch.'
+        ]
+        active_request_rows = sheet_payloads[1][1]
+        for row in active_request_rows:
+            if row and row[0] == 'Request status':
+                row[1] = 'resolved'
+        active_request_rows.append(['Resolution', resolution])
+
+        response_rows = sheet_payloads[2][1]
+        response_values = {
+            'Requested action': response['requested_action'],
+            'Candidate number': (
+                '' if response['candidate_index'] is None
+                else response['candidate_index'] + 1
+            ),
+            'Measured total mass (g)': (
+                '' if response['measured_total_mass_g'] is None
+                else response['measured_total_mass_g']
+            ),
+            'Confirmation': response['confirmation'],
+            'Operator note': response['operator_note']
+        }
+        for row in response_rows:
+            if row and row[0] in response_values:
+                row[1] = response_values[row[0]]
+        return sheet_payloads
+
+    @staticmethod
+    def _text(value):
+        return str(value).strip() if value is not None else ''
+
+    @classmethod
+    def _validate_source_refill_request(cls, request):
+        required_keys = {
+            'run_id',
+            'request_id',
+            'expected_state_revision',
+            'hold_action_id',
+            'batch_number',
+            'permitted_actions',
+            'same_container_refill_candidates'
+        }
+        if not isinstance(request, dict) or set(request) != required_keys:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action request has an invalid schema.'
+            )
+        for field_name in ('run_id', 'request_id', 'hold_action_id'):
+            cls._validate_nonempty_string(request[field_name], field_name)
+        for field_name in ('expected_state_revision', 'batch_number'):
+            cls._validate_nonnegative_integer(request[field_name], field_name)
+        permitted_actions = request['permitted_actions']
+        if (
+                not isinstance(permitted_actions, list)
+                or permitted_actions != [
+                    'refill_same_container', 'retry_preflight', 'end_run'
+                ]):
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action request has invalid permitted actions.'
+            )
+        candidates = request['same_container_refill_candidates']
+        if not isinstance(candidates, list) or not candidates:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action request requires at least one refill candidate.'
+            )
+        required_candidate_keys = {
+            'source_chemical_name',
+            'source_container_index',
+            'source_loc',
+            'source_deck_pos'
+        }
+        for candidate in candidates:
+            if (
+                    not isinstance(candidate, dict)
+                    or set(candidate) != required_candidate_keys):
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator-action request has an invalid refill candidate.'
+                )
+            cls._validate_nonempty_string(
+                candidate['source_chemical_name'],
+                'candidate source_chemical_name'
+            )
+            cls._validate_nonempty_string(
+                candidate['source_loc'], 'candidate source_loc'
+            )
+            if (
+                    isinstance(candidate['source_container_index'], bool)
+                    or not isinstance(candidate['source_container_index'], int)
+                    or candidate['source_container_index'] < 0
+                    or isinstance(candidate['source_deck_pos'], bool)
+                    or not isinstance(candidate['source_deck_pos'], int)
+                    or candidate['source_deck_pos'] < 1):
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator-action request has an invalid refill identity.'
+                )
+        return copy.deepcopy(request)
+
+    @staticmethod
+    def _worksheet_cell_value(cell, shared_strings):
+        namespace = '{%s}' % AutoLiveRunOperatorActionWorkbook._MAIN_XML_NAMESPACE
+        cell_type = cell.get('t')
+        if cell_type == 'inlineStr':
+            return ''.join(
+                node.text or '' for node in cell.findall(
+                    './/{}t'.format(namespace)
+                )
+            )
+        value_node = cell.find('{}v'.format(namespace))
+        if value_node is None:
+            return ''
+        value = value_node.text or ''
+        if cell_type == 's':
+            try:
+                return shared_strings[int(value)]
+            except (ValueError, IndexError):
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator-action workbook contains an invalid shared string.'
+                )
+        return value
+
+    @staticmethod
+    def _column_index(cell_reference):
+        letters = ''.join(character for character in cell_reference if character.isalpha())
+        if not letters:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook contains a cell without a column.'
+            )
+        value = 0
+        for character in letters.upper():
+            value = value * 26 + ord(character) - ord('A') + 1
+        return value - 1
+
+    @classmethod
+    def _read_workbook_sheets(cls, workbook_path):
+        if not os.path.isfile(workbook_path):
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook is missing: {}.'.format(workbook_path)
+            )
+        if os.path.getsize(workbook_path) > cls._MAX_WORKBOOK_BYTES:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook is too large to read safely.'
+            )
+        main_namespace = '{%s}' % cls._MAIN_XML_NAMESPACE
+        rel_namespace = '{%s}' % cls._RELATIONSHIP_XML_NAMESPACE
+        package_namespace = '{%s}' % cls._PACKAGE_RELATIONSHIP_XML_NAMESPACE
+        try:
+            with zipfile.ZipFile(workbook_path, 'r') as archive:
+                if sum(item.file_size for item in archive.infolist()) > (
+                        cls._MAX_UNCOMPRESSED_XML_BYTES):
+                    raise AutoLiveRunOperatorActionWorkbookError(
+                        'Operator-action workbook expands beyond the safe limit.'
+                    )
+                workbook_root = ElementTree.fromstring(
+                    archive.read('xl/workbook.xml')
+                )
+                relationship_root = ElementTree.fromstring(
+                    archive.read('xl/_rels/workbook.xml.rels')
+                )
+                relationships = {
+                    node.get('Id'): node.get('Target')
+                    for node in relationship_root.findall(
+                        '{}Relationship'.format(package_namespace)
+                    )
+                }
+                shared_strings = []
+                if 'xl/sharedStrings.xml' in archive.namelist():
+                    shared_root = ElementTree.fromstring(
+                        archive.read('xl/sharedStrings.xml')
+                    )
+                    shared_strings = [
+                        ''.join(
+                            node.text or '' for node in item.findall(
+                                './/{}t'.format(main_namespace)
+                            )
+                        )
+                        for item in shared_root.findall(
+                            '{}si'.format(main_namespace)
+                        )
+                    ]
+                sheets = {}
+                for sheet in workbook_root.findall(
+                        './/{}sheet'.format(main_namespace)):
+                    sheet_name = sheet.get('name')
+                    relationship_id = sheet.get('{}id'.format(rel_namespace))
+                    target = relationships.get(relationship_id)
+                    if not sheet_name or not target:
+                        raise AutoLiveRunOperatorActionWorkbookError(
+                            'Operator-action workbook has an invalid sheet map.'
+                        )
+                    sheet_path = target.lstrip('/')
+                    if not sheet_path.startswith('xl/'):
+                        sheet_path = 'xl/{}'.format(sheet_path)
+                    root = ElementTree.fromstring(archive.read(sheet_path))
+                    rows = {}
+                    for row in root.findall('.//{}row'.format(main_namespace)):
+                        row_number = int(row.get('r'))
+                        rows[row_number] = {
+                            cls._column_index(cell.get('r')): (
+                                cls._worksheet_cell_value(cell, shared_strings)
+                            )
+                            for cell in row.findall('{}c'.format(main_namespace))
+                        }
+                    sheets[sheet_name] = rows
+        except (
+                OSError,
+                ValueError,
+                zipfile.BadZipFile,
+                ElementTree.ParseError,
+                KeyError) as exc:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Could not read operator-action workbook safely: {}.'.format(exc)
+            )
+        return sheets
+
+    @classmethod
+    def _sheet_field_values(cls, sheets, sheet_name):
+        rows = sheets.get(sheet_name)
+        if not isinstance(rows, dict):
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook is missing the {} sheet.'.format(
+                    sheet_name
+                )
+            )
+        values = {}
+        for row in rows.values():
+            label = cls._text(row.get(0))
+            if label in values:
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator-action workbook has duplicate {} field.'.format(
+                        label
+                    )
+                )
+            if label:
+                values[label] = cls._text(row.get(1))
+        return values
+
+    @classmethod
+    def _require_exact_response_fields(cls, values):
+        missing = set(cls.RESPONSE_FIELD_NAMES) - set(values)
+        if missing:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action response is missing field(s): {}.'.format(
+                    ', '.join(sorted(missing))
+                )
+            )
+
+    @classmethod
+    def activate_source_refill_request(
+        cls,
+        workbook_path,
+        request,
+        replace_active_request=False
+    ):
+        '''Publishes one request only while the local file is safely inactive.
+
+        An explicit reissue may replace an already-active request only after
+        the controller has durably recorded its rejection.  Ordinary status
+        updates never call this method, so they cannot overwrite an operator
+        response in the separate workbook.
+        '''
+        request = cls._validate_source_refill_request(request)
+        sheets = cls._read_workbook_sheets(workbook_path)
+        active_fields = cls._sheet_field_values(sheets, 'Active Request')
+        response_fields = cls._sheet_field_values(sheets, 'Operator Response')
+        cls._require_exact_response_fields(response_fields)
+        if active_fields.get('Run ID') != request['run_id']:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook run ID does not match this run.'
+            )
+        active_status = active_fields.get('Request status')
+        if active_status == 'active' and not replace_active_request:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook already has an active request.'
+            )
+        if active_status not in ('inactive', 'active', 'resolved'):
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action workbook has an invalid request status.'
+            )
+        if active_status == 'inactive':
+            editable_values = [
+                response_fields[field_name]
+                for field_name in cls.RESPONSE_FIELD_NAMES
+                if field_name != 'Run ID'
+            ]
+            if any(editable_values):
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator-action workbook has an inactive response that '
+                    'must not be overwritten.'
+                )
+        try:
+            AutoLiveRunWorkbookRenderer.write_local_workbook(
+                workbook_path,
+                cls._active_sheet_payloads(request)
+            )
+        except AutoLiveRunWorkbookError as exc:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Could not activate operator-action workbook: {}.'.format(exc)
+            )
+        return copy.deepcopy(request)
+
+    @classmethod
+    def resolve_source_refill_request(
+        cls,
+        workbook_path,
+        request,
+        response,
+        resolution
+    ):
+        '''Marks a handled request resolved without authorizing any action.'''
+        request = cls._validate_source_refill_request(request)
+        if not isinstance(response, dict) or set(response) != {
+                'requested_action',
+                'candidate_index',
+                'measured_total_mass_g',
+                'confirmation',
+                'operator_note'}:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action resolution has an invalid response schema.'
+            )
+        if response['requested_action'] not in request['permitted_actions']:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator-action resolution has an unsupported action.'
+            )
+        cls._validate_nonempty_string(resolution, 'resolution')
+        sheets = cls._read_workbook_sheets(workbook_path)
+        active_fields = cls._sheet_field_values(sheets, 'Active Request')
+        required_active = {
+            'Request status': 'active',
+            'Run ID': request['run_id'],
+            'Request ID': request['request_id'],
+            'Expected state revision': str(request['expected_state_revision'])
+        }
+        for field_name, expected_value in required_active.items():
+            if active_fields.get(field_name) != expected_value:
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Active operator request has a mismatched {}.'.format(
+                        field_name
+                    )
+                )
+        try:
+            AutoLiveRunWorkbookRenderer.write_local_workbook(
+                workbook_path,
+                cls._resolved_sheet_payloads(request, response, resolution)
+            )
+        except AutoLiveRunWorkbookError as exc:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Could not resolve operator-action workbook: {}.'.format(exc)
+            )
+
+    @classmethod
+    def read_source_refill_response(cls, workbook_path, request):
+        '''Reads and strictly validates one active source-refill response.
+
+        This reader has no controller, Pi, or journal side effect.  It returns
+        a normalized response only after every identity and action-specific
+        confirmation check succeeds.
+        '''
+        request = cls._validate_source_refill_request(request)
+        sheets = cls._read_workbook_sheets(workbook_path)
+        active_fields = cls._sheet_field_values(sheets, 'Active Request')
+        response_fields = cls._sheet_field_values(sheets, 'Operator Response')
+        cls._require_exact_response_fields(response_fields)
+        required_active = {
+            'Schema version': str(cls.WORKBOOK_SCHEMA_VERSION),
+            'Request status': 'active',
+            'Run ID': request['run_id'],
+            'Request ID': request['request_id'],
+            'Expected state revision': str(request['expected_state_revision'])
+        }
+        for field_name, expected_value in required_active.items():
+            if active_fields.get(field_name) != expected_value:
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Active operator request has a mismatched {}.'.format(
+                        field_name
+                    )
+                )
+        for field_name in ('Run ID', 'Request ID', 'Expected state revision'):
+            expected_value = required_active[field_name]
+            if response_fields[field_name] != expected_value:
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator response has a mismatched {}.'.format(
+                        field_name
+                    )
+                )
+        action = response_fields['Requested action'].lower()
+        if action not in request['permitted_actions']:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator response requested an unsupported action.'
+            )
+        confirmation = response_fields['Confirmation'].upper()
+        candidate_index = None
+        measured_mass_g = None
+        if action == 'refill_same_container':
+            if confirmation != 'REFILL':
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'A same-container refill requires confirmation REFILL.'
+                )
+            try:
+                candidate_index = int(response_fields['Candidate number']) - 1
+            except ValueError:
+                candidate_index = -1
+            if not 0 <= candidate_index < len(
+                    request['same_container_refill_candidates']):
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator response selected an invalid refill candidate.'
+                )
+            try:
+                measured_mass_g = float(response_fields['Measured total mass (g)'])
+            except ValueError:
+                measured_mass_g = float('nan')
+            if not math.isfinite(measured_mass_g) or measured_mass_g < 0.0:
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Operator response has an invalid measured total mass.'
+                )
+        elif action == 'retry_preflight':
+            if confirmation != 'RETRY':
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'A preflight retry requires confirmation RETRY.'
+                )
+        elif action == 'end_run':
+            if confirmation != 'END':
+                raise AutoLiveRunOperatorActionWorkbookError(
+                    'Ending Auto requires confirmation END.'
+                )
+        operator_note = response_fields['Operator note']
+        if len(operator_note) > 1000:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'Operator response note exceeds the 1000-character limit.'
+            )
+        return {
+            'channel': 'operator_action_workbook',
+            'run_id': request['run_id'],
+            'request_id': request['request_id'],
+            'expected_state_revision': request['expected_state_revision'],
+            'hold_action_id': request['hold_action_id'],
+            'requested_action': action,
+            'candidate_index': candidate_index,
+            'measured_total_mass_g': measured_mass_g,
+            'operator_note': operator_note
+        }
 
     @classmethod
     def initialize(
@@ -207,7 +802,7 @@ class AutoLiveRunOperatorActionWorkbook:
         try:
             AutoLiveRunWorkbookRenderer.write_local_workbook(
                 workbook_path,
-                cls._sheet_payloads(run_id, initial_state_revision)
+                cls._inactive_sheet_payloads(run_id, initial_state_revision)
             )
         except AutoLiveRunWorkbookError as exc:
             raise AutoLiveRunOperatorActionWorkbookError(

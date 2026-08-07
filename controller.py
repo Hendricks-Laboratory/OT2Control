@@ -5438,10 +5438,14 @@ class AutoContr(Controller):
         # Stage 2 creates these only for a real configured Auto model. They
         # are derived monitoring artifacts and never feed back into Auto.
         self.auto_live_run_sync_queue = None
-        # Stage 11C1 creates a separate, non-overwriting action-workbook shell
-        # beside the regenerated status workbook. It has no response intake or
-        # execution effect until a later hold-specific stage is approved.
+        # Stage 11C1 creates a separate, non-overwriting action workbook
+        # beside the regenerated status workbook. Stage 11C2 activates it
+        # only during the existing safe same-container source-refill hold.
         self.auto_live_run_operator_action_workbook = None
+        # Stage 11C2 sets this only while a pre-batch source-refill hold has
+        # one matching active workbook request. It is local controller state,
+        # not an execution approval by itself.
+        self.auto_live_run_operator_active_request = None
         self.auto_main_robot_state_snapshot = None
         # Physical plates may be replaced only at a completed-batch boundary.
         # Logical Auto well names remain globally unique; this state records
@@ -6853,6 +6857,218 @@ class AutoContr(Controller):
             )
         return input(prompt)
 
+    def _activate_auto_live_source_refill_workbook_request(
+        self,
+        hold_action_id,
+        batch_number,
+        candidates,
+        replace_active_request=False,
+        prior_request_id=None,
+        rejection_reason=None
+    ):
+        '''Publishes one workbook request for an existing safe refill hold.
+
+        The workbook is written before the journal activation event so its
+        expected revision equals the revision after that event becomes
+        durable.  No Pi command is sent here.  If the local workbook cannot
+        be prepared, terminal-only recovery remains available.
+        '''
+        journal = getattr(self, 'auto_live_run_journal', None)
+        action_workbook = getattr(
+            self,
+            'auto_live_run_operator_action_workbook',
+            None
+        )
+        if journal is None or not isinstance(action_workbook, dict):
+            return None
+        workbook_path = action_workbook.get('workbook_path')
+        if not isinstance(workbook_path, str) or not workbook_path:
+            return None
+
+        request = {
+            'run_id': journal.current_state['run_id'],
+            'request_id': uuid.uuid4().hex,
+            'expected_state_revision': journal.current_state['revision'] + 1,
+            'hold_action_id': hold_action_id,
+            'batch_number': int(batch_number),
+            'permitted_actions': [
+                'refill_same_container',
+                'retry_preflight',
+                'end_run'
+            ],
+            'same_container_refill_candidates': copy.deepcopy(candidates)
+        }
+        try:
+            AutoLiveRunOperatorActionWorkbook.activate_source_refill_request(
+                workbook_path,
+                request,
+                replace_active_request=replace_active_request
+            )
+        except AutoLiveRunOperatorActionWorkbookError as exc:
+            print(
+                '<<controller warning>> Auto operator-action workbook could '
+                'not be activated; terminal recovery remains available: '
+                '{}'.format(exc)
+            )
+            return None
+
+        event_payload = {
+            'hold_action_id': hold_action_id,
+            'operator_action_request_id': request['request_id'],
+            'expected_state_revision': request['expected_state_revision'],
+            'request_kind': 'same_container_source_refill',
+            'permitted_actions': list(request['permitted_actions']),
+            'same_container_refill_candidates': copy.deepcopy(candidates),
+            'operator_action_workbook_path': workbook_path
+        }
+        if prior_request_id is not None:
+            event_payload['replaces_request_id'] = prior_request_id
+        if rejection_reason is not None:
+            event_payload['replacement_reason'] = rejection_reason
+        self._record_auto_live_run_event(
+            'operator_action_workbook_activated',
+            event_payload
+        )
+        if journal.current_state['revision'] != request['expected_state_revision']:
+            raise RuntimeError(
+                'Auto operator-action workbook request did not reach its '
+                'expected durable state revision.'
+            )
+        self.auto_live_run_operator_active_request = copy.deepcopy(request)
+        print(
+            '<<controller>> Active workbook recovery request {} is ready at '
+            '{}. Edit its Operator Response sheet, save the same file, then '
+            'choose workbook at this hold.'.format(
+                request['request_id'],
+                workbook_path
+            )
+        )
+        return copy.deepcopy(request)
+
+    def _read_auto_live_source_refill_workbook_response(self):
+        '''Reads one strictly matching response without changing any state.'''
+        request = getattr(
+            self,
+            'auto_live_run_operator_active_request',
+            None
+        )
+        action_workbook = getattr(
+            self,
+            'auto_live_run_operator_action_workbook',
+            None
+        )
+        journal = getattr(self, 'auto_live_run_journal', None)
+        if (
+                not isinstance(request, dict)
+                or not isinstance(action_workbook, dict)
+                or journal is None):
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'No active workbook recovery request is available.'
+            )
+        if journal.current_state['revision'] != request['expected_state_revision']:
+            raise AutoLiveRunOperatorActionWorkbookError(
+                'The active workbook request is stale; it cannot release '
+                'this hold.'
+            )
+        return AutoLiveRunOperatorActionWorkbook.read_source_refill_response(
+            action_workbook['workbook_path'],
+            request
+        )
+
+    def _reject_auto_live_source_refill_workbook_response(
+        self,
+        hold_action_id,
+        batch_number,
+        candidates,
+        reason
+    ):
+        '''Durably rejects a workbook response and issues a fresh request.
+
+        Reissuing changes both the request ID and expected state revision, so
+        a response based on the rejected workbook can never be replayed.
+        '''
+        prior_request = getattr(
+            self,
+            'auto_live_run_operator_active_request',
+            None
+        )
+        prior_request_id = None
+        if isinstance(prior_request, dict):
+            prior_request_id = prior_request.get('request_id')
+        self._record_auto_live_run_event(
+            'operator_action_workbook_response_rejected',
+            {
+                'hold_action_id': hold_action_id,
+                'operator_action_request_id': prior_request_id,
+                'reason': str(reason)
+            }
+        )
+        self.auto_live_run_operator_active_request = None
+        return self._activate_auto_live_source_refill_workbook_request(
+            hold_action_id=hold_action_id,
+            batch_number=batch_number,
+            candidates=candidates,
+            replace_active_request=True,
+            prior_request_id=prior_request_id,
+            rejection_reason=str(reason)
+        )
+
+    def _resolve_auto_live_source_refill_workbook_request(
+        self,
+        requested_action,
+        candidate_index=None,
+        measured_total_mass_g=None,
+        operator_note='',
+        response_channel='terminal',
+        resolution='accepted'
+    ):
+        '''Closes a handled action request without affecting recovery state.
+
+        Durable controller/Pi events always precede this optional local
+        presentation update. A render failure therefore leaves the existing
+        terminal recovery result intact and only reports that the workbook
+        could not be marked resolved.
+        '''
+        request = getattr(
+            self,
+            'auto_live_run_operator_active_request',
+            None
+        )
+        action_workbook = getattr(
+            self,
+            'auto_live_run_operator_action_workbook',
+            None
+        )
+        if not isinstance(request, dict) or not isinstance(action_workbook, dict):
+            return
+        confirmation_by_action = {
+            'refill_same_container': 'REFILL',
+            'retry_preflight': 'RETRY',
+            'end_run': 'END'
+        }
+        response = {
+            'requested_action': requested_action,
+            'candidate_index': candidate_index,
+            'measured_total_mass_g': measured_total_mass_g,
+            'confirmation': confirmation_by_action.get(requested_action, ''),
+            'operator_note': operator_note
+        }
+        try:
+            AutoLiveRunOperatorActionWorkbook.resolve_source_refill_request(
+                action_workbook['workbook_path'],
+                request,
+                response,
+                '{} via {}'.format(resolution, response_channel)
+            )
+        except AutoLiveRunOperatorActionWorkbookError as exc:
+            print(
+                '<<controller warning>> Auto operator-action workbook could '
+                'not be marked resolved; the durable recovery result remains '
+                'valid: {}'.format(exc)
+            )
+        finally:
+            self.auto_live_run_operator_active_request = None
+
     def _update_auto_cached_source_inventory(self, refresh_result):
         '''Synchronizes only the controller audit cache from an accepted Pi update.'''
         source_container = refresh_result['source_container']
@@ -6924,6 +7140,22 @@ class AutoContr(Controller):
             active_batch_number=batch_payload['batch_number'],
             hold_action_id=hold_action_id
         )
+        activate_workbook_request = getattr(
+            self,
+            '_activate_auto_live_source_refill_workbook_request',
+            None
+        )
+        if callable(activate_workbook_request):
+            activate_workbook_request(
+                hold_action_id=hold_action_id,
+                batch_number=batch_payload['batch_number'],
+                candidates=candidates
+            )
+        resolve_workbook_request = getattr(
+            self,
+            '_resolve_auto_live_source_refill_workbook_request',
+            None
+        )
 
         # Keep this human-supervised hold visually separate from ordinary
         # lifecycle output (for example, Live-workbook refresh notices).
@@ -6942,6 +7174,12 @@ class AutoContr(Controller):
             '<<controller>> Permitted actions: refill_same_container, '
             'retry_preflight, or end_run.'
         )
+        if getattr(self, 'auto_live_run_operator_active_request', None) is not None:
+            print(
+                '<<controller>> Workbook response is also available: edit '
+                'the separate Operator Response sheet, save it, then enter '
+                'workbook below.'
+            )
         print('\n<<controller>> Registered same-container refill option(s):')
         for candidate_index, candidate in enumerate(candidates, start=1):
             print(
@@ -6958,14 +7196,42 @@ class AutoContr(Controller):
         print('=' * 72)
 
         while True:
+            workbook_response = None
             action = str(self._get_auto_preflight_hold_input(
-                'Auto recovery action [refill_same_container / '
+                'Auto recovery action [workbook / refill_same_container / '
                 'retry_preflight / end_run]: '
             )).strip().lower()
+            if action == 'workbook':
+                try:
+                    workbook_response = (
+                        self._read_auto_live_source_refill_workbook_response()
+                    )
+                except AutoLiveRunOperatorActionWorkbookError as exc:
+                    self._reject_auto_live_source_refill_workbook_response(
+                        hold_action_id=hold_action_id,
+                        batch_number=batch_payload['batch_number'],
+                        candidates=candidates,
+                        reason=str(exc)
+                    )
+                    print(
+                        '<<controller>> Workbook response was rejected. '
+                        'No Pi state was changed; a fresh request was issued.'
+                    )
+                    continue
+                action = workbook_response['requested_action']
             requested_payload = {
                 'hold_action_id': hold_action_id,
-                'requested_action': action
+                'requested_action': action,
+                'response_channel': (
+                    workbook_response['channel']
+                    if workbook_response is not None
+                    else 'terminal'
+                )
             }
+            if workbook_response is not None:
+                requested_payload['operator_action_request_id'] = (
+                    workbook_response['request_id']
+                )
             self._record_auto_live_run_event(
                 'operator_action_requested',
                 requested_payload
@@ -6987,6 +7253,19 @@ class AutoContr(Controller):
                     },
                     active_batch_number=None
                 )
+                if callable(resolve_workbook_request):
+                    resolve_workbook_request(
+                        requested_action=action,
+                        operator_note=(
+                            workbook_response['operator_note']
+                            if workbook_response is not None else ''
+                        ),
+                        response_channel=(
+                            workbook_response['channel']
+                            if workbook_response is not None else 'terminal'
+                        ),
+                        resolution='ended run'
+                    )
                 error = RuntimeError(
                     'Auto run ended by operator while batch {} was held '
                     'before liquid handling.'.format(
@@ -7009,6 +7288,19 @@ class AutoContr(Controller):
                     },
                     active_batch_number=batch_payload['batch_number']
                 )
+                if callable(resolve_workbook_request):
+                    resolve_workbook_request(
+                        requested_action=action,
+                        operator_note=(
+                            workbook_response['operator_note']
+                            if workbook_response is not None else ''
+                        ),
+                        response_channel=(
+                            workbook_response['channel']
+                            if workbook_response is not None else 'terminal'
+                        ),
+                        resolution='preflight retry requested'
+                    )
                 return True
 
             if action != 'refill_same_container':
@@ -7026,9 +7318,14 @@ class AutoContr(Controller):
                 )
                 continue
 
-            selection_text = self._get_auto_preflight_hold_input(
-                'Select a listed refill option by number: '
-            )
+            if workbook_response is not None:
+                selection_text = str(
+                    workbook_response['candidate_index'] + 1
+                )
+            else:
+                selection_text = self._get_auto_preflight_hold_input(
+                    'Select a listed refill option by number: '
+                )
             try:
                 selected_index = int(str(selection_text).strip()) - 1
                 candidate = candidates[selected_index]
@@ -7052,14 +7349,17 @@ class AutoContr(Controller):
                 'shown above; do not change reagent, concentration, or '
                 'location.'
             )
-            mass_text = self._get_auto_preflight_hold_input(
-                'Enter its measured total tube-plus-liquid mass (g) for '
-                '{} at deck {} {}: '.format(
-                    candidate['source_chemical_name'],
-                    candidate['source_deck_pos'],
-                    candidate['source_loc']
+            if workbook_response is not None:
+                mass_text = str(workbook_response['measured_total_mass_g'])
+            else:
+                mass_text = self._get_auto_preflight_hold_input(
+                    'Enter its measured total tube-plus-liquid mass (g) for '
+                    '{} at deck {} {}: '.format(
+                        candidate['source_chemical_name'],
+                        candidate['source_deck_pos'],
+                        candidate['source_loc']
+                    )
                 )
-            )
             try:
                 measured_mass_g = float(str(mass_text).strip())
             except (TypeError, ValueError):
@@ -7133,6 +7433,21 @@ class AutoContr(Controller):
                 },
                 active_batch_number=batch_payload['batch_number']
             )
+            if callable(resolve_workbook_request):
+                resolve_workbook_request(
+                    requested_action=action,
+                    candidate_index=selected_index,
+                    measured_total_mass_g=measured_mass_g,
+                    operator_note=(
+                        workbook_response['operator_note']
+                        if workbook_response is not None else ''
+                    ),
+                    response_channel=(
+                        workbook_response['channel']
+                        if workbook_response is not None else 'terminal'
+                    ),
+                    resolution='same-container refill accepted'
+                )
             print(
                 '<<controller>> Pi accepted the same-container mass update. '
                 'Rechecking the unchanged batch before liquid handling.'
@@ -7731,8 +8046,8 @@ class AutoContr(Controller):
                     )
                 )
             except AutoLiveRunOperatorActionWorkbookError as exc:
-                # This Stage 11C1 shell is informational only. A failure to
-                # create it cannot alter current Auto execution or recoveries.
+                # A missing optional workbook must not prevent the existing
+                # terminal-only source-refill recovery path from operating.
                 print(
                     '<<controller warning>> Auto operator-action workbook '
                     'was not initialized; terminal recovery remains the only '
@@ -7742,7 +8057,8 @@ class AutoContr(Controller):
                 if self.auto_live_run_operator_action_workbook['created']:
                     print(
                         '<<controller>> initialized separate Auto operator-action '
-                        'workbook at {} (response intake is not active yet)'.format(
+                        'workbook at {} (intake activates only during an '
+                        'eligible safe hold)'.format(
                             self.auto_live_run_operator_action_workbook[
                                 'workbook_path'
                             ]
