@@ -1,10 +1,9 @@
 # Auto Live-Run Recovery and Performance Plan
 
-**Status:** Stages 0–4 implemented and hardware-free validated. Stages 1–4
-have passed their respective controlled dry-debug checkpoints. Stage 5 Part 1
-(vectorized feasibility evaluation) is implemented and synthetically
-validated; Stage 5 Part 2 (progress reporting and bounded pair-level workers)
-remains next.
+**Status:** Stages 0–6, 8–10C, and the offline Stage 11A
+remote-publication boundary are implemented. Stage 7 remains intentionally
+deferred. A remote service adapter and remote operator-action intake remain
+future, separately reviewed work.
 **Working branch:** `Auto-RTG` on the lab computer.  
 **Pi deployment policy:** use a separate `Auto-main` checkout/branch on the Raspberry Pi. Do not modify the protected Pi `main` checkout.
 
@@ -39,6 +38,26 @@ The remote workbook contains a read-only status mirror plus a deliberately small
 For every state-changing operation: persist a local request event; validate it against controller and Pi state; apply it and receive an acknowledgement/snapshot; persist acknowledged state and increment its revision; queue (rather than require) remote synchronization; then rebuild and preflight the unchanged next batch.
 
 ## Implementation stages
+
+### Stage 11 — remote Live workbook boundary
+
+#### Stage 11A — immutable publication contract (implemented, offline only)
+
+`auto_live_run_remote.py` defines a dependency-free contract for a future
+remote publisher. It derives a content-addressed, per-run, per-revision target
+from an already queued local workbook snapshot and permits only
+`create_immutable_snapshot` with `overwrite: false`. The contract validates a
+publisher receipt against the exact run ID, state revision, SHA-256 digest, and
+derived target path. It does not import a cloud SDK, access credentials or a
+network, call the controller, change Auto-main/Pi behavior, or contact Google
+Drive. Focused fake-publisher tests cover deterministic paths, checksum drift,
+and receipt tampering.
+
+The original workbook and all existing remote files remain outside this
+contract. The later Stage 11B publisher may only create a new snapshot under
+the designated `Auto_Live_Runs/` namespace; Stage 11C will define read-only
+operator action-request intake with the existing terminal workflow retained as
+the offline fallback.
 
 ### Stage 0 — protocol and data-contract specification
 
