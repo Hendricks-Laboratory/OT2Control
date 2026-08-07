@@ -169,7 +169,10 @@ class AutoLiveRunStage2Tests(unittest.TestCase):
         result = self._render()
         with zipfile.ZipFile(result['workbook_path']) as workbook:
             workbook_xml = workbook.read('xl/workbook.xml')
-            fault_sheet_xml = workbook.read('xl/worksheets/sheet6.xml')
+            # The status workbook no longer contains the separate operator
+            # action shell, so the appended fault sheet is now fifth rather
+            # than sixth.  The action shell has its own non-overwritten file.
+            fault_sheet_xml = workbook.read('xl/worksheets/sheet5.xml')
 
         self.assertIn(b'Fault Disposition', workbook_xml)
         self.assertIn(b'AUTO IS FROZEN', fault_sheet_xml)

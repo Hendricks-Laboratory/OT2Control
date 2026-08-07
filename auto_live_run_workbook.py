@@ -287,20 +287,11 @@ class AutoLiveRunWorkbookRenderer:
             ['Run manifest', cls._json_text(manifest)],
             ['Runtime baseline', cls._json_text(runtime_baseline)]
         ]
-        action_rows = [
-            ['__TITLE__', 'Operator Action Request'],
-            ['__NOTE__', 'Reserved for a later recovery stage. No value entered here is read or acted upon by Auto.'],
-            ['__HEADER__', 'Field', 'Value'],
-            ['Status', 'Not available in Stage 2'],
-            ['Required run ID', run_id],
-            ['Expected state revision', current_state['revision']]
-        ]
         sheets = [
             ('Live Status', status_rows, [28, 88]),
             ('Current State', current_state_rows, [28, 88]),
             ('Event Journal', event_rows, [12, 26, 32, 16, 88]),
-            ('Run Baseline', baseline_rows, [24, 120]),
-            ('Operator Action Request', action_rows, [30, 88])
+            ('Run Baseline', baseline_rows, [24, 120])
         ]
         if current_state['lifecycle_state'] not in (
                 LIFECYCLE_FAULTED_PREPARATION,
@@ -398,6 +389,17 @@ class AutoLiveRunWorkbookRenderer:
                 os.close(file_descriptor)
             if temporary_path is not None and os.path.exists(temporary_path):
                 os.remove(temporary_path)
+
+    @classmethod
+    def write_local_workbook(cls, destination_path, sheet_payloads):
+        '''Writes one local workbook through the shared atomic OOXML writer.
+
+        The Live status workbook and the separate operator-action workbook use
+        the same deliberately small, standard-library-only XLSX writer.  The
+        caller remains responsible for its own file identity and overwrite
+        policy; this method only supplies an atomic local write.
+        '''
+        cls._atomic_write_workbook(destination_path, sheet_payloads)
 
     @classmethod
     def render(

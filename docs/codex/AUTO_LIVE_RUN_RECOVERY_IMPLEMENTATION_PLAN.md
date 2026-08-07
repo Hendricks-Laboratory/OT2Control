@@ -81,6 +81,24 @@ intake will add a separate operator-written workbook in this same `Live_Run`
 directory, leaving the controller-written status mirror immutable from the
 operator perspective and preserving terminal entry as the offline fallback.
 
+#### Stage 11C1 — separate local operator-action workbook shell (implemented)
+
+At live-run journal initialization, the controller creates one local,
+non-overwriting workbook beside the status mirror:
+
+```text
+<Protocol_Outputs>/<effective-data-dir>/Live_Run/
+    <run>_LIVE.xlsx
+    <run>_OPERATOR_ACTIONS.xlsx
+```
+
+The action workbook contains `Instructions`, `Active Request`, and `Operator
+Response` sheets. It carries the run ID and initial state revision, explicitly
+states that response intake is inactive, and is never regenerated after its
+initial atomic creation. This prevents status refreshes from overwriting a
+future operator edit. No response is read, no recovery action is accepted, and
+no Pi, recipe, model, or execution behavior changes in this stage.
+
 ### Stage 0 — protocol and data-contract specification
 
 Document exact JSON schemas, event types, state revisions, allowed actions, failure responses, and controller/Pi command payloads before either side is edited.

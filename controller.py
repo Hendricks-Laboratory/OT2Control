@@ -108,6 +108,10 @@ from auto_live_run_workbook import (
     AutoLiveRunWorkbookError,
     AutoLiveRunWorkbookRenderer
 )
+from auto_live_run_operator_actions import (
+    AutoLiveRunOperatorActionWorkbook,
+    AutoLiveRunOperatorActionWorkbookError
+)
 from auto_output_directory import (
     AutoOutputDirectoryConflictError,
     resolve_auto_output_directory
@@ -5434,6 +5438,10 @@ class AutoContr(Controller):
         # Stage 2 creates these only for a real configured Auto model. They
         # are derived monitoring artifacts and never feed back into Auto.
         self.auto_live_run_sync_queue = None
+        # Stage 11C1 creates a separate, non-overwriting action-workbook shell
+        # beside the regenerated status workbook. It has no response intake or
+        # execution effect until a later hold-specific stage is approved.
+        self.auto_live_run_operator_action_workbook = None
         self.auto_main_robot_state_snapshot = None
         # Physical plates may be replaced only at a completed-batch boundary.
         # Logical Auto well names remain globally unique; this state records
@@ -7706,6 +7714,40 @@ class AutoContr(Controller):
         '''
         if self.auto_live_run_journal is None:
             return None
+        if self.auto_live_run_operator_action_workbook is None:
+            try:
+                self.auto_live_run_operator_action_workbook = (
+                    AutoLiveRunOperatorActionWorkbook.initialize(
+                        run_directory=self.out_path,
+                        run_display_name=getattr(
+                            self,
+                            'effective_output_data_dir',
+                            self.rxn_sheet_name
+                        ),
+                        run_id=self.auto_live_run_journal.current_state['run_id'],
+                        initial_state_revision=(
+                            self.auto_live_run_journal.current_state['revision']
+                        )
+                    )
+                )
+            except AutoLiveRunOperatorActionWorkbookError as exc:
+                # This Stage 11C1 shell is informational only. A failure to
+                # create it cannot alter current Auto execution or recoveries.
+                print(
+                    '<<controller warning>> Auto operator-action workbook '
+                    'was not initialized; terminal recovery remains the only '
+                    'available path: {}'.format(exc)
+                )
+            else:
+                if self.auto_live_run_operator_action_workbook['created']:
+                    print(
+                        '<<controller>> initialized separate Auto operator-action '
+                        'workbook at {} (response intake is not active yet)'.format(
+                            self.auto_live_run_operator_action_workbook[
+                                'workbook_path'
+                            ]
+                        )
+                    )
         if self.auto_live_run_sync_queue is None:
             try:
                 self.auto_live_run_sync_queue = AutoLiveRunSyncQueue.initialize(
