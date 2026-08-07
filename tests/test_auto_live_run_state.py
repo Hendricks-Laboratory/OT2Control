@@ -9,9 +9,11 @@ from auto_live_run_state import (
     EVENT_TYPES,
     LIFECYCLE_CREATED,
     LIFECYCLE_EXECUTING_BATCH,
+    LIFECYCLE_FAULTED_PREPARATION,
     LIFECYCLE_FAULTED_PARTIAL_BATCH,
     LIFECYCLE_FINALIZED,
     LIFECYCLE_HELD_FOR_OPERATOR,
+    LIFECYCLE_PREFLIGHTING_BATCH,
     LIFECYCLE_READY_FOR_BATCH,
     MANIFEST_RECORD_TYPE,
     LIVE_RUN_STATE_SCHEMA_VERSION,
@@ -151,6 +153,48 @@ class AutoLiveRunStateContractTests(unittest.TestCase):
 
         finalized = self._next_state(faulted, LIFECYCLE_FINALIZED)
         assert_valid_lifecycle_transition(faulted, finalized)
+
+        repeated_fault = self._next_state(
+            faulted,
+            LIFECYCLE_FAULTED_PARTIAL_BATCH
+        )
+        with self.assertRaisesRegex(LiveRunStateContractError, 'terminal'):
+            assert_valid_lifecycle_transition(faulted, repeated_fault)
+
+    def test_faulted_preparation_is_terminal_and_has_no_batch_number(self):
+        created = make_initial_current_state(self.RUN_ID)
+        ready = self._next_state(created, LIFECYCLE_READY_FOR_BATCH)
+        faulted = self._next_state(
+            ready,
+            LIFECYCLE_FAULTED_PREPARATION,
+            fault_id='preparation-interrupted-001'
+        )
+        assert_valid_lifecycle_transition(ready, faulted)
+
+        invalid_batch_claim = copy.deepcopy(faulted)
+        invalid_batch_claim['active_batch_number'] = 0
+        with self.assertRaisesRegex(
+                LiveRunStateContractError,
+                'must not retain active_batch_number'):
+            validate_current_state(invalid_batch_claim)
+
+        resumed = self._next_state(
+            faulted,
+            LIFECYCLE_PREFLIGHTING_BATCH,
+            active_batch_number=0
+        )
+        with self.assertRaisesRegex(LiveRunStateContractError, 'Invalid lifecycle'):
+            assert_valid_lifecycle_transition(faulted, resumed)
+
+        finalized = self._next_state(faulted, LIFECYCLE_FINALIZED)
+        assert_valid_lifecycle_transition(faulted, finalized)
+
+        repeated_fault = self._next_state(
+            faulted,
+            LIFECYCLE_FAULTED_PREPARATION
+        )
+        with self.assertRaisesRegex(LiveRunStateContractError, 'terminal'):
+            assert_valid_lifecycle_transition(faulted, repeated_fault)
 
     def test_event_requires_monotonic_nonzero_sequence_and_object_payload(self):
         event = self._event()

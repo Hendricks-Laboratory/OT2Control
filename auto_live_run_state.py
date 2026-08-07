@@ -26,6 +26,10 @@ LIFECYCLE_EXECUTING_BATCH = 'executing_batch'
 LIFECYCLE_MEASURING_BATCH = 'measuring_batch'
 LIFECYCLE_PROCESSING_BATCH = 'processing_batch'
 LIFECYCLE_HELD_FOR_OPERATOR = 'held_for_operator'
+# Preparation can physically begin before an experimental batch exists.  It
+# therefore needs a separate terminal fault state rather than incorrectly
+# claiming that a numbered batch was only partially completed.
+LIFECYCLE_FAULTED_PREPARATION = 'faulted_preparation'
 LIFECYCLE_FAULTED_PARTIAL_BATCH = 'faulted_partial_batch'
 LIFECYCLE_FINALIZED = 'finalized'
 
@@ -37,6 +41,16 @@ LIFECYCLE_STATES = frozenset({
     LIFECYCLE_MEASURING_BATCH,
     LIFECYCLE_PROCESSING_BATCH,
     LIFECYCLE_HELD_FOR_OPERATOR,
+    LIFECYCLE_FAULTED_PREPARATION,
+    LIFECYCLE_FAULTED_PARTIAL_BATCH,
+    LIFECYCLE_FINALIZED
+})
+
+# These states describe a run that must never silently resume.  A final
+# archival transition remains permitted, but no same-phase durable milestone
+# may reopen a faulted or finalized run.
+TERMINAL_LIFECYCLE_STATES = frozenset({
+    LIFECYCLE_FAULTED_PREPARATION,
     LIFECYCLE_FAULTED_PARTIAL_BATCH,
     LIFECYCLE_FINALIZED
 })
@@ -59,6 +73,10 @@ ALLOWED_LIFECYCLE_TRANSITIONS = {
         # the next unchanged batch.  That is a pre-execution operator hold,
         # not a partial batch fault.
         LIFECYCLE_HELD_FOR_OPERATOR,
+        # Auto preparation may have begun before the first batch exists.  A
+        # disconnect or unacknowledged failure there must be terminal and
+        # must not fabricate an active experimental batch number.
+        LIFECYCLE_FAULTED_PREPARATION,
         LIFECYCLE_FINALIZED
     }),
     LIFECYCLE_PREFLIGHTING_BATCH: frozenset({
@@ -83,6 +101,7 @@ ALLOWED_LIFECYCLE_TRANSITIONS = {
         LIFECYCLE_PREFLIGHTING_BATCH,
         LIFECYCLE_FINALIZED
     }),
+    LIFECYCLE_FAULTED_PREPARATION: frozenset({LIFECYCLE_FINALIZED}),
     LIFECYCLE_FAULTED_PARTIAL_BATCH: frozenset({LIFECYCLE_FINALIZED}),
     LIFECYCLE_FINALIZED: frozenset()
 }
@@ -321,7 +340,8 @@ def validate_current_state(state):
     if (
         lifecycle_state in {
             LIFECYCLE_CREATED,
-            LIFECYCLE_READY_FOR_BATCH
+            LIFECYCLE_READY_FOR_BATCH,
+            LIFECYCLE_FAULTED_PREPARATION
         }
         and active_batch_number is not None
     ):
@@ -346,11 +366,14 @@ def validate_current_state(state):
         )
 
     if (
-        lifecycle_state == LIFECYCLE_FAULTED_PARTIAL_BATCH
+        lifecycle_state in {
+            LIFECYCLE_FAULTED_PREPARATION,
+            LIFECYCLE_FAULTED_PARTIAL_BATCH
+        }
         and state['fault_id'] is None
     ):
         raise LiveRunStateContractError(
-            'faulted_partial_batch requires a fault_id.'
+            '{} requires a fault_id.'.format(lifecycle_state)
         )
 
 
@@ -427,6 +450,12 @@ def assert_valid_lifecycle_transition(previous_state, next_state):
     # milestones such as a successful preflight while the run remains in the
     # preflighting phase. It does not permit execution to resume from a fault.
     if previous_lifecycle == next_lifecycle:
+        if previous_lifecycle in TERMINAL_LIFECYCLE_STATES:
+            raise LiveRunStateContractError(
+                '{} is terminal and cannot accept another lifecycle record.'.format(
+                    previous_lifecycle
+                )
+            )
         return
 
     if next_lifecycle not in ALLOWED_LIFECYCLE_TRANSITIONS[
