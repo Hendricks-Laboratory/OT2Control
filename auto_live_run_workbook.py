@@ -93,7 +93,15 @@ class AutoLiveRunWorkbookRenderer:
         )
 
     @classmethod
-    def _sheet_xml(cls, rows, column_widths):
+    def _sheet_xml(cls, rows, column_widths, sheet_options=None):
+        '''Renders one small, static table with optional constrained inputs.
+
+        The writer intentionally remains a narrow standard-library OOXML
+        renderer.  ``sheet_options`` is used only by the separate operator
+        action workbook for visible list choices; normal Live status sheets
+        remain read-only tables.
+        '''
+        sheet_options = sheet_options or {}
         column_xml = ''.join(
             '<col min="{0}" max="{0}" width="{1}" customWidth="1"/>'.format(
                 index + 1,
@@ -104,17 +112,37 @@ class AutoLiveRunWorkbookRenderer:
         row_xml = []
         for row_index, row in enumerate(rows, start=1):
             style_index = 0
+            row_height = None
             if row and row[0] == '__TITLE__':
                 style_index = 1
                 values = row[1:]
+                row_height = 24
             elif row and row[0] == '__HEADER__':
                 style_index = 2
                 values = row[1:]
             elif row and row[0] == '__NOTE__':
                 style_index = 3
                 values = row[1:]
+                row_height = 30
             elif row and row[0] == '__WARNING__':
                 style_index = 4
+                values = row[1:]
+                row_height = 36
+            elif row and row[0] == '__ACTION__':
+                style_index = 5
+                values = row[1:]
+                row_height = 34
+            elif row and row[0] == '__SECTION__':
+                style_index = 6
+                values = row[1:]
+            elif row and row[0] == '__INPUT__':
+                # Keep the label visibly distinct from the one intentionally
+                # editable value cell.  The action workbook uses this style
+                # rather than relying on prose alone to identify inputs.
+                style_index = 7
+                values = row[1:]
+            elif row and row[0] == '__READONLY__':
+                style_index = 9
                 values = row[1:]
             else:
                 values = row
@@ -124,42 +152,90 @@ class AutoLiveRunWorkbookRenderer:
                     row_index,
                     column_index,
                     value,
-                    style_index=style_index
+                    style_index=(
+                        8 if row and row[0] == '__INPUT__'
+                        and column_index == 1 else style_index
+                    )
                 )
                 for column_index, value in enumerate(values)
             )
-            row_xml.append('<row r="{}">{}</row>'.format(row_index, cells))
+            height_xml = (
+                ' ht="{}" customHeight="1"'.format(row_height)
+                if row_height is not None else ''
+            )
+            row_xml.append(
+                '<row r="{}"{}>{}</row>'.format(
+                    row_index, height_xml, cells
+                )
+            )
+
+        data_validation_xml = []
+        for validation in sheet_options.get('data_validations', []):
+            cell = str(validation.get('cell', '')).strip()
+            values = validation.get('values', [])
+            if not cell or not isinstance(values, list) or not values:
+                raise AutoLiveRunWorkbookError(
+                    'Live workbook contains an invalid list validation.'
+                )
+            choices = ','.join(str(value) for value in values)
+            if len(choices) > 255 or ',' in ''.join(str(value) for value in values):
+                raise AutoLiveRunWorkbookError(
+                    'Live workbook list validation is too large or ambiguous.'
+                )
+            data_validation_xml.append(
+                '<dataValidation type="list" allowBlank="0" '
+                'showErrorMessage="1" showInputMessage="1" '
+                'sqref="{0}"><formula1>&quot;{1}&quot;</formula1>'
+                '</dataValidation>'.format(escape(cell), escape(choices))
+            )
+        validations_xml = (
+            '<dataValidations count="{}">{}</dataValidations>'.format(
+                len(data_validation_xml), ''.join(data_validation_xml)
+            ) if data_validation_xml else ''
+        )
 
         return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <cols>{}</cols>
   <sheetData>{}</sheetData>
-</worksheet>'''.format(column_xml, ''.join(row_xml))
+  {}
+</worksheet>'''.format(column_xml, ''.join(row_xml), validations_xml)
 
     @staticmethod
     def _styles_xml():
         return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="4">
+  <fonts count="6">
     <font><sz val="11"/><name val="Calibri"/></font>
     <font><b/><sz val="14"/><name val="Calibri"/></font>
     <font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>
     <font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><color rgb="FFFFFFFF"/><sz val="12"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><name val="Calibri"/></font>
   </fonts>
-  <fills count="4">
+  <fills count="8">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFC00000"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF2F75B5"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFD9EAF7"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
-  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FF808080"/></left><right style="thin"><color rgb="FF808080"/></right><top style="thin"><color rgb="FF808080"/></top><bottom style="thin"><color rgb="FF808080"/></bottom><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="5">
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0"/>
+  <cellXfs count="10">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="4" fillId="4" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="5" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="7" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
   </cellXfs>
 </styleSheet>'''
 
@@ -355,7 +431,7 @@ class AutoLiveRunWorkbookRenderer:
                 'w',
                 compression=zipfile.ZIP_DEFLATED
             ) as archive:
-                sheet_names = [sheet_name for sheet_name, _, _ in sheet_payloads]
+                sheet_names = [sheet_payload[0] for sheet_payload in sheet_payloads]
                 archive.writestr(
                     '[Content_Types].xml',
                     cls._content_types_xml(len(sheet_names))
@@ -367,13 +443,19 @@ class AutoLiveRunWorkbookRenderer:
                     cls._workbook_relationships_xml(len(sheet_names))
                 )
                 archive.writestr('xl/styles.xml', cls._styles_xml())
-                for index, (_, rows, column_widths) in enumerate(
-                    sheet_payloads,
-                    start=1
-                ):
+                for index, sheet_payload in enumerate(sheet_payloads, start=1):
+                    if len(sheet_payload) == 3:
+                        _, rows, column_widths = sheet_payload
+                        sheet_options = {}
+                    elif len(sheet_payload) == 4:
+                        _, rows, column_widths, sheet_options = sheet_payload
+                    else:
+                        raise AutoLiveRunWorkbookError(
+                            'Live workbook has an invalid sheet payload.'
+                        )
                     archive.writestr(
                         'xl/worksheets/sheet{}.xml'.format(index),
-                        cls._sheet_xml(rows, column_widths)
+                        cls._sheet_xml(rows, column_widths, sheet_options)
                     )
             os.replace(temporary_path, destination_path)
             temporary_path = None

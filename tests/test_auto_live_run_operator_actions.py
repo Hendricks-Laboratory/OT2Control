@@ -1,10 +1,11 @@
-'''Hardware-free tests for the Stage 11C1 local action-workbook shell.'''
+'''Hardware-free tests for the local source-refill action workbook.'''
 
 import ast
 import os
 import tempfile
 import unittest
 import zipfile
+import xml.etree.ElementTree as ElementTree
 
 from auto_live_run_operator_actions import (
     AutoLiveRunOperatorActionWorkbook,
@@ -59,10 +60,20 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
         sheet_payloads = (
             AutoLiveRunOperatorActionWorkbook._active_sheet_payloads(request)
         )
-        response_rows = sheet_payloads[2][1]
+        response_rows = sheet_payloads[0][1]
         for row in response_rows:
-            if row and row[0] in response_values:
-                row[1] = response_values[row[0]]
+            if (
+                    len(row) >= 3
+                    and row[0] == '__INPUT__'
+                    and row[1] in response_values):
+                row[2] = response_values[row[1]]
+            elif (
+                    len(row) >= 3
+                    and row[0] == '__READONLY__'
+                    and row[1] in response_values):
+                # Deliberately simulate a tampered request-identity field.
+                # Google Sheets users are not expected to edit these cells.
+                row[2] = response_values[row[1]]
         AutoLiveRunWorkbookRenderer.write_local_workbook(
             workbook_path, sheet_payloads
         )
@@ -80,12 +91,12 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
 
         with zipfile.ZipFile(result['workbook_path'], 'r') as archive:
             workbook_xml = archive.read('xl/workbook.xml').decode('utf-8')
-            sheet_xml = archive.read('xl/worksheets/sheet3.xml').decode('utf-8')
+            sheet_xml = archive.read('xl/worksheets/sheet1.xml').decode('utf-8')
 
         self.assertIn('Instructions', workbook_xml)
         self.assertIn('Active Request', workbook_xml)
         self.assertIn('Operator Response', workbook_xml)
-        self.assertIn('NOT READ OR ACTED UPON BY AUTO', sheet_xml)
+        self.assertIn('NO ACTION REQUIRED YET', sheet_xml)
 
     def test_second_initialization_preserves_existing_operator_file(self):
         first = self._initialize()
@@ -105,9 +116,9 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
                 'RTG_018-abc123', 4
             )
         )
-        for row in sheet_payloads[2][1]:
-            if row and row[0] == 'Operator note':
-                row[1] = 'Do not overwrite this inactive operator edit.'
+        for row in sheet_payloads[0][1]:
+            if len(row) >= 3 and row[1] == 'Operator note':
+                row[2] = 'Do not overwrite this inactive operator edit.'
         AutoLiveRunWorkbookRenderer.write_local_workbook(
             initialized['workbook_path'], sheet_payloads
         )
@@ -177,7 +188,7 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
             'same-container refill accepted via terminal',
             active_fields['Resolution']
         )
-        self.assertEqual('14.25', response_fields['Measured total mass (g)'])
+        self.assertEqual('14.25', response_fields['New total mass (g)'])
 
         replacement = self._source_refill_request(expected_state_revision=6)
         replacement['request_id'] = 'source-refill-request-002'
@@ -211,10 +222,10 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
             initialized['workbook_path'],
             request,
             {
-                'Requested action': 'refill_same_container',
-                'Candidate number': '1',
-                'Measured total mass (g)': '14.25',
-                'Confirmation': 'REFILL',
+                'Action to take': 'Refill this same container',
+                'Tube you refilled': 'silver nitrate | deck 2 | A1',
+                'New total mass (g)': '14.25',
+                'Confirm action': 'Confirm refill',
                 'Operator note': 'Measured after refill.'
             }
         )
@@ -230,6 +241,44 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
         self.assertEqual(response['measured_total_mass_g'], 14.25)
         self.assertEqual(response['hold_action_id'], 'hold-source-refill-001')
 
+    def test_legacy_active_response_labels_remain_readable(self):
+        initialized = self._initialize()
+        request = self._source_refill_request()
+        sheet_payloads = (
+            AutoLiveRunOperatorActionWorkbook._active_sheet_payloads(request)
+        )
+        sheet_payloads[0] = (
+            'Operator Response',
+            [
+                ['__TITLE__', 'Legacy Operator Response'],
+                ['__HEADER__', 'Field', 'Value'],
+                ['Run ID', request['run_id']],
+                ['Request ID', request['request_id']],
+                [
+                    'Expected state revision',
+                    request['expected_state_revision']
+                ],
+                ['Requested action', 'refill_same_container'],
+                ['Candidate number', '1'],
+                ['Measured total mass (g)', '14.25'],
+                ['Confirmation', 'REFILL'],
+                ['Operator note', 'Legacy form response.']
+            ],
+            [34, 86]
+        )
+        AutoLiveRunWorkbookRenderer.write_local_workbook(
+            initialized['workbook_path'], sheet_payloads
+        )
+
+        response = (
+            AutoLiveRunOperatorActionWorkbook.read_source_refill_response(
+                initialized['workbook_path'], request
+            )
+        )
+        self.assertEqual('refill_same_container', response['requested_action'])
+        self.assertEqual(0, response['candidate_index'])
+        self.assertEqual(14.25, response['measured_total_mass_g'])
+
     def test_stale_or_unconfirmed_response_is_rejected_without_acceptance(self):
         initialized = self._initialize()
         request = self._source_refill_request()
@@ -241,10 +290,10 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
             request,
             {
                 'Expected state revision': '4',
-                'Requested action': 'refill_same_container',
-                'Candidate number': '1',
-                'Measured total mass (g)': '14.25',
-                'Confirmation': 'REFILL'
+                'Action to take': 'Refill this same container',
+                'Tube you refilled': 'silver nitrate | deck 2 | A1',
+                'New total mass (g)': '14.25',
+                'Confirm action': 'Confirm refill'
             }
         )
         with self.assertRaisesRegex(
@@ -258,10 +307,10 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
             initialized['workbook_path'],
             request,
             {
-                'Requested action': 'refill_same_container',
-                'Candidate number': '1',
-                'Measured total mass (g)': '14.25',
-                'Confirmation': 'NO'
+                'Action to take': 'Refill this same container',
+                'Tube you refilled': 'silver nitrate | deck 2 | A1',
+                'New total mass (g)': '14.25',
+                'Confirm action': 'Confirm retry'
             }
         )
         with self.assertRaisesRegex(
@@ -270,6 +319,27 @@ class AutoLiveRunOperatorActionWorkbookTests(unittest.TestCase):
             AutoLiveRunOperatorActionWorkbook.read_source_refill_response(
                 initialized['workbook_path'], request
             )
+
+    def test_active_form_uses_plain_labels_and_dropdowns(self):
+        initialized = self._initialize()
+        request = self._source_refill_request()
+        AutoLiveRunOperatorActionWorkbook.activate_source_refill_request(
+            initialized['workbook_path'], request
+        )
+
+        with zipfile.ZipFile(initialized['workbook_path'], 'r') as archive:
+            response_xml = archive.read(
+                'xl/worksheets/sheet1.xml'
+            ).decode('utf-8')
+
+        self.assertIn('Action to take', response_xml)
+        self.assertIn('Tube you refilled', response_xml)
+        self.assertIn('New total mass (g)', response_xml)
+        self.assertIn('Confirm action', response_xml)
+        self.assertIn('dataValidations', response_xml)
+        self.assertIn('Refill this same container', response_xml)
+        self.assertIn('silver nitrate | deck 2 | A1', response_xml)
+        ElementTree.fromstring(response_xml)
 
     def test_source_remains_local_and_dependency_free(self):
         source_path = os.path.join(
