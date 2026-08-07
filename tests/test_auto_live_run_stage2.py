@@ -14,6 +14,7 @@ from auto_live_run_sync import (
     AutoLiveRunSyncQueue,
     AutoLiveRunSyncQueueError
 )
+from auto_live_run_state import LIFECYCLE_FAULTED_PREPARATION
 from auto_live_run_workbook import AutoLiveRunWorkbookRenderer
 
 
@@ -100,11 +101,13 @@ class AutoLiveRunStage2Tests(unittest.TestCase):
             self.assertIn('xl/workbook.xml', names)
             self.assertIn('xl/worksheets/sheet1.xml', names)
             live_status_xml = workbook.read('xl/worksheets/sheet1.xml')
+            workbook_xml = workbook.read('xl/workbook.xml')
             for name in names:
                 if name.endswith('.xml'):
                     ElementTree.fromstring(workbook.read(name))
         self.assertIn(b'Auto Live Run Status', live_status_xml)
         self.assertIn(b'RTG-stage2-test', live_status_xml)
+        self.assertNotIn(b'Fault Disposition', workbook_xml)
         self.assertEqual(queued_item['state_revision'], 2)
         self.assertEqual(len(self.queue.read_pending()), 1)
 
@@ -144,6 +147,36 @@ class AutoLiveRunStage2Tests(unittest.TestCase):
             [first_item['queue_id'], second_item['queue_id']]
         )
         self.assertEqual(self.queue.read_pending(), [])
+
+    def test_renderer_adds_read_only_fault_disposition_after_terminal_fault(self):
+        fault_id = 'auto-fault-stage2-display'
+        self.journal.record_transition(
+            LIFECYCLE_FAULTED_PREPARATION,
+            'fault_recorded',
+            {
+                'fault_id': fault_id,
+                'fault_scope': 'auto_preparation',
+                'certainty': 'preparation_execution_unknown_or_partial',
+                'disposition': 'human_review_required_no_automatic_resume',
+                'evidence_directory': '/tmp/fault-evidence',
+                'evidence_write_error': None,
+                'last_known_event_sequence': 1
+            },
+            active_batch_number=None,
+            fault_id=fault_id
+        )
+
+        result = self._render()
+        with zipfile.ZipFile(result['workbook_path']) as workbook:
+            workbook_xml = workbook.read('xl/workbook.xml')
+            fault_sheet_xml = workbook.read('xl/worksheets/sheet6.xml')
+
+        self.assertIn(b'Fault Disposition', workbook_xml)
+        self.assertIn(b'AUTO IS FROZEN', fault_sheet_xml)
+        self.assertIn(b'auto-fault-stage2-display', fault_sheet_xml)
+        self.assertIn(b'preparation_execution_unknown_or_partial',
+                      fault_sheet_xml)
+        self.assertIn(b'DO NOT RESUME OR RE-RUN THIS BATCH', fault_sheet_xml)
 
     def test_failed_replay_preserves_the_failed_item_and_later_order(self):
         first_item = self.queue.enqueue_rendered_workbook(self._render())

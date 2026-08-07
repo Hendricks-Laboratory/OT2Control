@@ -86,6 +86,19 @@ class AutoLiveRunFaultControllerContractTests(unittest.TestCase):
         self.assertNotIn('_save_auto_model_checkpoint(', record_source)
         self.assertNotIn('_finalize_auto_run(', record_source)
 
+    def test_fault_display_follows_terminal_journal_transition(self):
+        record_source = self._method_source('_record_auto_live_run_fault')
+        self.assertLess(
+            record_source.index("event_type='fault_recorded'"),
+            record_source.index('_render_auto_live_run_fault_mirror()')
+        )
+        display_source = self._method_source(
+            '_render_auto_live_run_fault_mirror'
+        )
+        self.assertIn('_refresh_auto_live_run_mirror()', display_source)
+        self.assertNotIn('_save_auto_model_checkpoint(', display_source)
+        self.assertNotIn('_finalize_auto_run(', display_source)
+
     def test_preparation_marker_precedes_physical_request(self):
         phase_source = self._method_source('_execute_auto_preparation_phase')
         marker = phase_source.index(
@@ -124,6 +137,7 @@ class AutoLiveRunFaultControllerIntegrationTests(unittest.TestCase):
         requested_names = {
             '_get_auto_live_run_fault_descriptor',
             '_get_auto_live_run_fault_protocol_evidence',
+            '_render_auto_live_run_fault_mirror',
             '_record_auto_live_run_fault'
         }
         namespace = {
@@ -191,6 +205,9 @@ class AutoLiveRunFaultControllerIntegrationTests(unittest.TestCase):
         controller._auto_live_run_active_protocol_dataframe = pd.DataFrame([
             {'op': 'transfer', 'chemical_name': 'silver_nitrate', 'A1': 10.0}
         ])
+        controller._refresh_auto_live_run_mirror = lambda: {
+            'workbook_path': '/tmp/stage-10b-fault-live.xlsx'
+        }
 
         record = controller._record_auto_live_run_fault(
             ConnectionError('robot acknowledgement lost')
@@ -209,6 +226,10 @@ class AutoLiveRunFaultControllerIntegrationTests(unittest.TestCase):
             record['evidence_directory'],
             'planned_protocol_dataframe.csv'
         )))
+        self.assertEqual(
+            '/tmp/stage-10b-fault-live.xlsx',
+            record['fault_live_workbook']['workbook_path']
+        )
         with open(self.journal.events_path, 'r', encoding='utf-8') as events_file:
             final_event = events_file.read().strip().splitlines()[-1]
         self.assertIn('"event_type":"fault_recorded"', final_event)

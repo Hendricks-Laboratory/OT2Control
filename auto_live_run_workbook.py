@@ -20,6 +20,11 @@ import tempfile
 import zipfile
 from xml.sax.saxutils import escape
 
+from auto_live_run_state import (
+    LIFECYCLE_FAULTED_PARTIAL_BATCH,
+    LIFECYCLE_FAULTED_PREPARATION
+)
+
 
 class AutoLiveRunWorkbookError(RuntimeError):
     '''Raised when a local Live workbook cannot be rendered safely.'''
@@ -108,6 +113,9 @@ class AutoLiveRunWorkbookRenderer:
             elif row and row[0] == '__NOTE__':
                 style_index = 3
                 values = row[1:]
+            elif row and row[0] == '__WARNING__':
+                style_index = 4
+                values = row[1:]
             else:
                 values = row
 
@@ -132,23 +140,26 @@ class AutoLiveRunWorkbookRenderer:
     def _styles_xml():
         return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="3">
+  <fonts count="4">
     <font><sz val="11"/><name val="Calibri"/></font>
     <font><b/><sz val="14"/><name val="Calibri"/></font>
     <font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>
   </fonts>
-  <fills count="3">
+  <fills count="4">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFC00000"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="4">
+  <cellXfs count="5">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0"/>
   </cellXfs>
 </styleSheet>'''
 
@@ -216,6 +227,18 @@ class AutoLiveRunWorkbookRenderer:
             separators=(',', ':')
         )
 
+    @staticmethod
+    def _fault_event_payload(current_state, events):
+        '''Returns the durable terminal-fault payload matching current state.'''
+        fault_id = current_state.get('fault_id')
+        for event in reversed(events):
+            if (
+                event.get('event_type') == 'fault_recorded'
+                and event.get('payload', {}).get('fault_id') == fault_id
+            ):
+                return dict(event.get('payload', {}))
+        return {}
+
     @classmethod
     def _build_sheet_payloads(
         cls,
@@ -272,13 +295,56 @@ class AutoLiveRunWorkbookRenderer:
             ['Required run ID', run_id],
             ['Expected state revision', current_state['revision']]
         ]
-        return [
+        sheets = [
             ('Live Status', status_rows, [28, 88]),
             ('Current State', current_state_rows, [28, 88]),
             ('Event Journal', event_rows, [12, 26, 32, 16, 88]),
             ('Run Baseline', baseline_rows, [24, 120]),
             ('Operator Action Request', action_rows, [30, 88])
         ]
+        if current_state['lifecycle_state'] not in (
+                LIFECYCLE_FAULTED_PREPARATION,
+                LIFECYCLE_FAULTED_PARTIAL_BATCH):
+            return sheets
+
+        fault_payload = cls._fault_event_payload(current_state, events)
+        fault_rows = [
+            ['__TITLE__', 'Terminal Fault Disposition'],
+            [
+                '__WARNING__',
+                'AUTO IS FROZEN — HUMAN REVIEW REQUIRED. DO NOT RESUME OR RE-RUN THIS BATCH.'
+            ],
+            [
+                '__NOTE__',
+                'This read-only display is derived from the durable local journal. It cannot issue recovery actions or establish the physical outcome of an interrupted operation.'
+            ],
+            ['__HEADER__', 'Field', 'Value'],
+            ['Fault ID', current_state['fault_id']],
+            ['Terminal lifecycle state', current_state['lifecycle_state']],
+            ['Fault scope', fault_payload.get('fault_scope', 'not recorded')],
+            [
+                'Physical outcome certainty',
+                fault_payload.get('certainty', 'not recorded')
+            ],
+            [
+                'Last known durable event sequence',
+                fault_payload.get('last_known_event_sequence', 'not recorded')
+            ],
+            [
+                'Local fault evidence directory',
+                fault_payload.get('evidence_directory', 'not recorded')
+            ],
+            [
+                'Evidence publication status',
+                fault_payload.get('evidence_write_error') or 'published'
+            ],
+            [
+                'Required disposition',
+                'Inspect the physical system and the immutable evidence package. Start a separately identified run only after human review; no automatic continuation is available.'
+            ]
+        ]
+        sheets.append(('Fault Disposition', fault_rows, [34, 118]))
+        return sheets
 
     @classmethod
     def _atomic_write_workbook(cls, destination_path, sheet_payloads):

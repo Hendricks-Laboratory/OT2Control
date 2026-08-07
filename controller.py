@@ -7865,6 +7865,28 @@ class AutoContr(Controller):
         ]
         return columns, rows
 
+    def _render_auto_live_run_fault_mirror(self):
+        '''Renders a read-only terminal-fault display after durable recording.
+
+        Stage 10C deliberately reuses the existing local Live workbook and
+        future-sync queue only after the journal has entered its terminal
+        fault state. The display is observational: no workbook input is read,
+        no controller state is changed, and a rendering failure must never
+        replace the original physical-interruption exception.
+        '''
+        try:
+            return self._refresh_auto_live_run_mirror()
+        except Exception as exc:
+            # This narrowly scoped presentation boundary is intentionally
+            # best-effort. The durable local journal and original exception
+            # remain authoritative if a derived workbook cannot be rendered.
+            print(
+                '<<controller warning>> Auto terminal-fault display could '
+                'not be refreshed; immutable local evidence remains '
+                'available: {}'.format(exc)
+            )
+            return None
+
     def _record_auto_live_run_fault(self, error):
         '''Publishes Stage 10B fault evidence and terminally freezes the journal.
 
@@ -7966,12 +7988,20 @@ class AutoContr(Controller):
                 'could not be recorded: {}'.format(exc)
             )
 
+        # Render only from an already-durable terminal state. This is not a
+        # normal completion artifact: it is a read-only human disposition
+        # display and cannot resume, retrain, checkpoint, or finalize Auto.
+        fault_live_workbook = None
+        if transition_error is None:
+            fault_live_workbook = self._render_auto_live_run_fault_mirror()
+
         self.auto_live_run_fault_handled = True
         self.auto_live_run_fault_record = {
             'fault_record': fault_record,
             'evidence_directory': evidence_directory,
             'evidence_write_error': evidence_error,
-            'transition_error': transition_error
+            'transition_error': transition_error,
+            'fault_live_workbook': fault_live_workbook
         }
         print(
             '<<controller>> Auto run entered a terminal fault disposition '
