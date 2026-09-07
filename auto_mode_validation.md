@@ -144,7 +144,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 11B Lab-PC synchronized Live output | Revised direction; no direct cloud integration | The uncommitted Drive-API publisher prototype was removed. The supported Drive-visible path is the existing desktop synchronization of `/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs`; the controller-written status workbook already renders below each normal run folder in `Live_Run/`. A later operator-action workflow will use a separate workbook in that same directory and retain terminal entry as the offline fallback. No API client, credential access, network call, second cloud namespace, or original-workbook modification is part of this design. |
 | Stage 11C1 separate local operator-action workbook shell | Implemented; hardware-free validation passed | At local live-journal initialization, Auto atomically creates one non-overwriting `Live_Run/<run>_OPERATOR_ACTIONS.xlsx` beside the regenerated status workbook. Its instructions, inactive request metadata, and response fields establish the future synchronized-action schema without accepting any response. Status refreshes never overwrite this separate file. No Drive API, network, credential access, original-workbook change, Pi action, recovery action, recipe, model, or execution behavior is added. |
 | Stage 11C2 active same-container source-refill workbook response | Implemented; hardware-free validation passed; controlled dry debug required | Only the existing source-volume pre-batch hold may activate the separate action workbook. A request binds the run ID, fresh request ID, held batch/action, expected post-activation journal revision, permitted terminal-equivalent actions, and exact preflight candidates. The standard-library XLSX reader accepts only a matching, explicitly confirmed response (`REFILL` plus listed candidate and finite measured mass; `RETRY`; or `END`). Invalid/stale/mismatched responses write a durable rejection and receive a new request identity without changing Pi state. A valid refill still uses the existing Pi mass-refresh and unchanged-batch preflight path; terminal recovery remains the offline fallback. No Drive API, credentials, remote calls, recipe/model changes, new Pi command, or unattended continuation is added. |
-| Stage 12 optical nanocrystal-stability mode | Planned only; no code implemented | The agreed initial design is a monitoring-first, timestamped active-well scan pathway with `plate_shake` mixing and an explicitly configured trigger reagent. It will calculate a post-peak absorbance-loss-over-time stability metric from retained scans, preserve raw scan/time provenance, and keep target-λmax and stability decisions separate. The intended scientific policy is `target_then_stability`: first apply defined λmax eligibility, then compare stability, rather than combining incompatible units with an arbitrary weight. `pipette_mix`, dual-objective GP selection, and autonomous stability acquisition are deferred to later Stage 12 sub-stages. |
+| Stage 12 optical nanocrystal-stability mode | Planned only; no code implemented | The agreed design is a monitoring-first, timestamped active-well scan pathway with an explicit trigger reagent, a fixed-reference-wavelength primary metric, low-signal exclusion, and `plate_shake` as the initial mixing method. `target_then_stability` is a future lexicographic policy: first apply defined λmax eligibility, then compare lower loss rates. The detailed Stage 12A–12G plan below is authoritative. `pipette_mix`, stability-aware `core3`, stability-aware target-EI/Pareto selection, and `stability_only` selection remain deferred. |
 
 ### Stage 12 optical-stability planning record — pending Stage 12A approval
 
@@ -153,32 +153,100 @@ not merely its initial wavelength. It is intentionally a separate staged
 development effort; none of the behavior below is present in the current
 controller or Pi protocol.
 
-1. A named trigger reagent completes a well. During the initial implementation,
-   the robot uses the available plate shaker rather than in-well pipette mixing.
-   After the trigger addition and shake, it scans the newly complete well and
-   every earlier complete well in the active batch. This avoids leaving the
-   earliest wells unobserved while later wells are prepared.
-2. Every scan must retain the well identity, an acquisition timestamp, and the
-   absorbance trace needed to calculate stability. The intended condition-level
-   metric is post-peak absorbance loss per elapsed time: identify the maximum
-   absorbance, consider only later scans, and calculate the decrease from that
-   maximum to the lowest valid later absorbance value divided by the
-   corresponding elapsed time. Insufficient post-peak evidence is recorded as
-   ineligible rather than
-   silently assigned a favorable stability value.
-3. A configured monitoring deadline ends repeated scans for the current batch
-   before Auto proposes and executes a later batch. Raw traces, timestamps,
-   peak/endpoint choices, units, and ineligibility reasons remain auditable.
-4. The scientific default is `target_then_stability`: apply an explicit
-   λmax-target eligibility rule first, then prefer lower post-peak loss rates
-   among eligible conditions. Stability-only optimization and arbitrary weighted
-   mixtures of λmax error with absorbance/time are not the initial policy.
-5. Stage 12A is configuration, validation, and pure metric logic only. It must
-   not change the existing protocol sequence, initiate scans, shake a plate,
-   fit a new model, or alter acquisition. Later stages separately add the
-   protocol manifest, active-well scheduler, logging/QC/plots, stability model,
-   and finally target-then-stability candidate selection. `pipette_mix` remains
-   a later selectable implementation option, not a prerequisite.
+#### Scientific data contract
+
+For every completed physical well, Auto will ultimately collect a timestamped
+UV–Vis trajectory after an explicit trigger reagent has completed the reaction.
+The trigger is usually sodium borohydride but must never be hard-coded; it must
+be validated as a final chemistry-defining addition for the specific recipe.
+A well enters the active scan set only when every required reaction component
+is complete.
+
+The primary stability response is a fixed-window post-peak loss rate:
+
+```text
+loss_rate = (A_peak - A_tail_min) / (t_tail_min - t_peak)
+```
+
+`A_tail_min` is the lowest valid value after `A_peak` within the configured
+post-peak observation window. Times come from actual reader acquisition
+timestamps rather than assumed scan intervals. Lower loss rate means greater
+optical stability. A trajectory with no valid post-peak follow-up is
+scientifically insufficient, not silently favorable.
+
+The primary optimization signal will use absorbance at a fixed reference
+wavelength for that physical well, established from its first valid
+post-trigger λmax. This prevents ordinary λmax drift from being mislabeled as
+absorbance loss. Each scan must additionally preserve peak absorbance, peak
+wavelength, λmax drift, time since trigger addition, time since its relevant
+shake event, raw scan filename, reader timestamp, and the raw trace. Peak
+envelope loss remains an audit measurement. A configurable minimum peak
+absorbance excludes blank or low-signal wells from stability training and
+stability-directed selection.
+
+#### Modes, mixing, and scan scheduling
+
+`off` preserves exact legacy Auto behavior. `monitor` records trajectories,
+logs, and plots without changing recipe selection. The future recommended active
+mode is `target_then_stability`; `stability_only` is deferred advanced behavior
+that would still require the signal floor. Before Stage 12F implements active
+selection, choosing either future active mode must fail clearly rather than
+silently behaving as `monitor` or changing acquisition semantics.
+
+`target_then_stability` is lexicographic rather than a weighted sum of
+nanometers and absorbance/time:
+
+1. retain every existing physical-feasibility, mask, exact-zero, executable
+   transfer, water, overflow, and source constraint;
+2. first favor candidates predicted to meet the λmax target tolerance;
+3. among target-compatible candidates, prefer lower predicted loss rates; and
+4. if no candidate is target-compatible, retain the λmax-target objective rather
+   than select a spectrally stable blank.
+
+The initial supported mixing method is `plate_shake`, accurately described as
+a whole-plate reader shake. Future `pipette_mix` and `none` options are
+reserved but are unavailable until their own implementation and dry-debug
+validation. The scheduler must record the actual mixing policy and event time.
+It must use a scientifically standardized shake policy so earlier wells are
+not incidentally shaken more than later wells; deciding the exact cohort/batch
+shake cadence belongs to the scheduler stage, not to Stage 12A parsing.
+
+Two scan schedules are planned:
+
+| Schedule | Behavior | Intended use |
+|---|---|---|
+| `each_completion` | After every trigger completion, scan the newly complete well and all earlier complete wells. | Small kinetic batches; maximum density. |
+| `cadenced_active_set` | Immediately scan the new well, then rescan all complete wells at a fixed cadence. | Recommended default; scalable, temporally cleaner. |
+
+Strict `each_completion` would produce 2,628 well-spectrum observations for
+72 completed wells before follow-up scans. Both schedules therefore preserve
+real timestamps, but `cadenced_active_set` is the default design for larger
+batches. A bounded monitoring deadline must complete or explicitly mark each
+trajectory insufficient before the controller selects a later batch.
+
+`target_ei` and `core3` remain λ-only while stability is in `monitor` mode.
+They must be rejected clearly—not silently repurposed—when active stability
+selection is first introduced, until separately designed stability-aware
+acquisition behavior exists. Trigger-reagent true-zero masks must be excluded
+when active stability is enabled because an untriggered condition has no
+meaningful stability trajectory.
+
+#### Staged implementation and validation gates
+
+| Stage | Scope | Validation gate |
+|---|---|---|
+| **12A** | Backward-compatible Header parsing and validation; trigger validation; timestamped trajectory records; pure metric, low-signal, λmax-drift, and condition-level aggregation functions. Planned settings are `auto_stability_mode`, `auto_stability_trigger_reagent`, `auto_stability_scan_schedule`, `auto_stability_observation_window_s`, `auto_stability_scan_interval_s`, `auto_stability_min_peak_absorbance`, and `auto_stability_mixing_mode`. No robot, scan, shake, model, or acquisition behavior changes. | Python 3.9 compilation; Header and synthetic trajectory tests; source-level proof that `off` retains the legacy path. No dry debug. |
+| **12B** | Auto-only timestamped scan manifest and active-completed-well observer; unique unmerged raw scan files; raw scan and manifest paths under `pr_data/stability/` and `pr_data/auto_stability_scan_manifest.csv`. Preserve ordinary callbacks. | Controller-side synthetic/structure checks. No scheduling-enabled dry debug yet. |
+| **12C** | Plate-shake active-well scheduler: activation, standardized shake policy, immediate/cadenced scans, bounded post-batch observation, real timestamps, and clear failure if reader data are unavailable. No later batch selection until each trajectory has completed its window or is marked insufficient. | First controlled dry debug: verify trigger timing, active-well membership, shake and scan sequence, raw scan preservation, manifest accuracy, and absence of merged kinetic scans. |
+| **12D** | Separate stability QC; raw per-well trajectories; condition-level aggregation; CSV exports; stability plots and report sections. λmax QC and stability QC remain separate. | Second controlled dry debug: review CSVs, manifest, plot timing, exclusions, and report wording. |
+| **12E** | A separate cumulative stability GP trained only on valid QC-approved condition-level stability observations. The λmax GP and its history remain unchanged. | Synthetic model/history validation; no dry debug required at this point. |
+| **12F** | Lexicographic `target_then_stability` selection with two-GP ranking, target compatibility first, meaningful-signal eligibility, trigger-mask exclusion, and explicit rejection of unsupported acquisition combinations. | Third controlled dry debug before any chemistry use with active stability selection. |
+| **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, and replicate agreement before enabling active selection. |
+
+Later follow-ons are targeted plate-well pipette mixing through Auto-main/Pi,
+stability-aware `core3`, stability-aware target-EI or Pareto selection,
+alternative spectral metrics such as integrated area, and special handling for
+intentionally stable low-signal conditions.
 
 ### Current acquisition semantics
 
