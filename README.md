@@ -59,6 +59,9 @@ named *run* that is already in the directory)
 ## Documentation
 Documentation for the code can be found here https://hendricks-laboratory.github.io/OT2Control/
 
+The branch-local Pi Auto validation and deployment record is maintained in
+[`auto_main_validation.md`](auto_main_validation.md).
+
 ## Guide For Contributing
 ### Style
 The code follows an object oriented model, and global functions should be used only for the
