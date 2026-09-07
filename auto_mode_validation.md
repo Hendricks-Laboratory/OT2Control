@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-08-06
+**Updated through:** 2026-09-07
 
 ---
 
@@ -28,7 +28,7 @@ It is intended as a branch-specific record of:
 
 ---
 
-# Current Auto-RTG Development Record — Complete Reconciliation, August 6, 2026
+# Current Auto-RTG Development Record — Complete Reconciliation, September 7, 2026
 
 > [!IMPORTANT]
 > The older sections below preserve historical `Auto-RTG-v1` validation
@@ -48,12 +48,12 @@ recent feature commit only.
 |---|---|
 | Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
 | Initial reconciliation snapshot | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
-| Last reviewed Auto-RTG code commit | `882b1d1` (`Fix Auto preparation source activation contract`) |
-| Paired Pi development revision | `origin/Auto-main` at `d81235d` (`Fix Auto-main preparation response acknowledgement`) |
+| Last reviewed Auto-RTG code commit | `1878ea8` (`Simplify live Auto recovery workbook actions`) |
+| Paired Pi development revision | `origin/Auto-main` at `65aad07` (`Validate temperature-controlled Auto preparation water on the Pi`) |
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | At `882b1d1`, Python 3.9.6 compilation passed for the controller, preparation planner, and focused tests; all 12 preparation planner/controller-contract tests passed |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stage 12 optical-stability mode remains planned only, with no implementation or validation claim. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -136,7 +136,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Pairwise/parallel label and higher-dimensional atlas layout | Implemented | Pairwise and parallel-coordinate condition labels move text only through deterministic non-overlapping positions while plotted recipes remain exact. Shared title/legend headers and higher-dimensional atlas spacing are compacted without changing 300-DPI export or GP/feasibility grid density. Standalone slices retain their centered axis-label/colorbar group and compact annotation band. Source-level layout regression tests and synthetic Matplotlib rendering passed. |
 | Stage 9.0/9A grouped Auto preparation schema and planner | Implemented; hardware-free validation complete | `auto_preparation` now describes one stock source group, a working concentration, a destination labware/container type, and `tube_count × final_volume_per_tube_uL`. The pure `C_stock × V_stock = C_working × V_final` manifest expands deterministic per-tube and group-total transfers, rejects invalid dilution or 0–5 uL transfers, and fails closed for unknown stocks or output-name collisions. Physical capacity is deliberately deferred to Auto-main runtime geometry; the misleading legacy `Tube20000uL` identifier is not used as a capacity authority. |
 | Stage 9B Auto-main group reservation | Implemented; static/synthetic contract validation complete | `auto_preparation_mode=required` performs a versioned, read-only Auto-main reservation handshake before seed generation. Auto-main validates stock-group and selected-water availability using its whole-aspiration backup-source simulation, checks runtime destination-tube capacity, and reserves distinct empty locations in a copied deck view. Explicit ordered `destination_locs` and `destination_deck_positions` bind a group to declared `empty` locations; blank retains compatible-empty allocation. Per-row `water_source_policy` defaults to location-based `auto`, while `temperature_controlled` requires water physically placed on the temperature module and `ambient` requires ordinary water outside it. The internal key `ColdWaterC1.0` remains a compatibility name only; Header temperature controls heating or cooling. |
-| Stage 9C grouped preparation execution and activation | Implemented; initial controlled dry debug reached physical preparation; repeat required after `882b1d1` | Auto-main rebuilds and compares the reservation against current source state before the first liquid move, claims all reserved destinations, then performs water → stock → mix once per tube. In the first controlled run, that physical sequence completed and the Pi acknowledged it, but controller activation then failed closed on a stale manifest key (`stock_reagent`). Commit `882b1d1` aligns activation with the planner’s canonical `stock_source_group` and per-tube volume fields; focused Python 3.9 compilation and 12 planner/controller tests pass. A fresh-destination controlled repeat must confirm source activation and subsequent seed generation. Completed same-name working tubes are registered as a `MultiContainer` for normal automatic source switching. |
+| Stage 9C grouped preparation execution and activation | Implemented; controlled-debug closure accepted | Auto-main rebuilds and compares the reservation against current source state before the first liquid move, claims all reserved destinations, then performs water → stock → mix once per tube. The early controlled run completed the physical sequence and Pi acknowledgement but controller activation failed closed on a stale manifest key (`stock_reagent`). Commit `882b1d1` aligned activation with the planner’s canonical `stock_source_group` and per-tube volume fields; later controlled-debug review and configuration refinements closed Stage 9 for project planning. Completed same-name working tubes are registered as a `MultiContainer` for normal automatic source switching. This closure does not claim exhaustive physical validation of every optional preparation topology; those remain targeted future checks when used. |
 | Stage 10A interrupted-run fault evidence contract | Implemented; hardware-free validation passed | Adds terminal preparation-fault and partial-batch-fault contracts plus an atomic local `Run_State/Fault_Evidence/<fault_id>/` package writer. Records retain the last durable event, explicit physical-outcome uncertainty, exception summary/trace, batch context, and optional planned protocol CSV. Duplicate evidence is refused and an interrupted package is never exposed at its final path. This stage does not yet catch controller faults, alter Auto-main/Pi behavior, synchronize a Live workbook, retry, resume, train a model, or finalize a normal report after a fault. |
 | Stage 10B controller fault classification and evidence capture | Implemented; hardware-free validation passed | The real Auto controller now classifies only failures after preparation dispatch or a durable executing/measuring/processing batch boundary. It writes immutable local evidence before recording the terminal fault lifecycle state, preserves the original exception, and bypasses generic `close_connection()` completion saving so it cannot create a normal checkpoint, report, model update, retry, or continuation after a potentially partial operation. Earlier setup/preflight failures retain legacy handling. No Auto-main/Pi behavior, physical stop command, Live-workbook fault display, or recovery action is added. |
 | Stage 10C terminal-fault Live workbook display | Implemented; hardware-free validation passed | After the Stage 10B terminal transition is durable, the local `Live_Run/*_LIVE.xlsx` mirror receives a read-only `Fault Disposition` sheet. It prominently identifies the fault ID, scope, physical-outcome certainty, last durable event, local evidence location, and required human review. It queues the rendered mirror for the existing future-sync mechanism only; it accepts no operator input and does not resume, retry, update a model, create completion output, or alter Auto-main/Pi behavior. |
@@ -144,6 +144,41 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 11B Lab-PC synchronized Live output | Revised direction; no direct cloud integration | The uncommitted Drive-API publisher prototype was removed. The supported Drive-visible path is the existing desktop synchronization of `/mnt/c/Users/science_356_lab/Robot_Files/Protocol_Outputs`; the controller-written status workbook already renders below each normal run folder in `Live_Run/`. A later operator-action workflow will use a separate workbook in that same directory and retain terminal entry as the offline fallback. No API client, credential access, network call, second cloud namespace, or original-workbook modification is part of this design. |
 | Stage 11C1 separate local operator-action workbook shell | Implemented; hardware-free validation passed | At local live-journal initialization, Auto atomically creates one non-overwriting `Live_Run/<run>_OPERATOR_ACTIONS.xlsx` beside the regenerated status workbook. Its instructions, inactive request metadata, and response fields establish the future synchronized-action schema without accepting any response. Status refreshes never overwrite this separate file. No Drive API, network, credential access, original-workbook change, Pi action, recovery action, recipe, model, or execution behavior is added. |
 | Stage 11C2 active same-container source-refill workbook response | Implemented; hardware-free validation passed; controlled dry debug required | Only the existing source-volume pre-batch hold may activate the separate action workbook. A request binds the run ID, fresh request ID, held batch/action, expected post-activation journal revision, permitted terminal-equivalent actions, and exact preflight candidates. The standard-library XLSX reader accepts only a matching, explicitly confirmed response (`REFILL` plus listed candidate and finite measured mass; `RETRY`; or `END`). Invalid/stale/mismatched responses write a durable rejection and receive a new request identity without changing Pi state. A valid refill still uses the existing Pi mass-refresh and unchanged-batch preflight path; terminal recovery remains the offline fallback. No Drive API, credentials, remote calls, recipe/model changes, new Pi command, or unattended continuation is added. |
+| Stage 12 optical nanocrystal-stability mode | Planned only; no code implemented | The agreed initial design is a monitoring-first, timestamped active-well scan pathway with `plate_shake` mixing and an explicitly configured trigger reagent. It will calculate a post-peak absorbance-loss-over-time stability metric from retained scans, preserve raw scan/time provenance, and keep target-λmax and stability decisions separate. The intended scientific policy is `target_then_stability`: first apply defined λmax eligibility, then compare stability, rather than combining incompatible units with an arbitrary weight. `pipette_mix`, dual-objective GP selection, and autonomous stability acquisition are deferred to later Stage 12 sub-stages. |
+
+### Stage 12 optical-stability planning record — pending Stage 12A approval
+
+The next planned feature measures the time stability of a nanocrystal response,
+not merely its initial wavelength. It is intentionally a separate staged
+development effort; none of the behavior below is present in the current
+controller or Pi protocol.
+
+1. A named trigger reagent completes a well. During the initial implementation,
+   the robot uses the available plate shaker rather than in-well pipette mixing.
+   After the trigger addition and shake, it scans the newly complete well and
+   every earlier complete well in the active batch. This avoids leaving the
+   earliest wells unobserved while later wells are prepared.
+2. Every scan must retain the well identity, an acquisition timestamp, and the
+   absorbance trace needed to calculate stability. The intended condition-level
+   metric is post-peak absorbance loss per elapsed time: identify the maximum
+   absorbance, consider only later scans, and calculate the decrease from that
+   maximum to the lowest valid later absorbance value divided by the
+   corresponding elapsed time. Insufficient post-peak evidence is recorded as
+   ineligible rather than
+   silently assigned a favorable stability value.
+3. A configured monitoring deadline ends repeated scans for the current batch
+   before Auto proposes and executes a later batch. Raw traces, timestamps,
+   peak/endpoint choices, units, and ineligibility reasons remain auditable.
+4. The scientific default is `target_then_stability`: apply an explicit
+   λmax-target eligibility rule first, then prefer lower post-peak loss rates
+   among eligible conditions. Stability-only optimization and arbitrary weighted
+   mixtures of λmax error with absorbance/time are not the initial policy.
+5. Stage 12A is configuration, validation, and pure metric logic only. It must
+   not change the existing protocol sequence, initiate scans, shake a plate,
+   fit a new model, or alter acquisition. Later stages separately add the
+   protocol manifest, active-well scheduler, logging/QC/plots, stability model,
+   and finally target-then-stability candidate selection. `pipette_mix` remains
+   a later selectable implementation option, not a prerequisite.
 
 ### Current acquisition semantics
 
@@ -760,12 +795,13 @@ not broaden same-container source refill.
 - a Drive adapter and editable remote workbook action surface; the local Live
   workbook and durable offline queue exist, but no network dependency is
   configured;
-- a controlled repeat of grouped Auto preparation after the `882b1d1`
-  activation-contract repair, using a fresh or explicitly reset destination;
-- a controlled repeat of explicit destination reservations and
-  temperature-controlled/ambient
-  preparation-water policy after their paired Auto-main `v8` deployment;
+- targeted controlled checks of grouped Auto preparation topologies when they
+  are used (for example, explicit destinations or each preparation-water
+  policy); Stage 9 itself is closed under the accepted controlled-debug review;
 - imported-model reconciliation with required Auto preparation;
+- Stage 12 optical nanocrystal-stability mode: monitoring-first scan
+  scheduling and metric validation, then stability modeling and acquisition
+  only after staged dry-debug evidence;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;
 - unattended or large-scale chemistry optimization;
 - promotion of `Auto-RTG` into `Auto-RTG-v1`.
