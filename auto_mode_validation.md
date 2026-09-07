@@ -62,6 +62,26 @@ launcher, robot, plate reader, credential workflow, or live protocol.
 Controlled dry-debug observations cited below are human-supervised lab evidence
 and do not establish real-chemistry or unattended-run clearance.
 
+## Pre-stability checkpoint — `Auto-RTG-v1.2.0`
+
+On 2026-09-07, the local branch `Auto-RTG-v1.2.0` was created at commit
+`5feb18f` (`Document Stage 12 stability-mode plan`). It is the preserved
+pre-implementation checkpoint for the nanocrystal optical-stability project.
+`Auto-RTG` remains the sole working branch for all later Stage 12 work.
+
+The checkpoint contains the current Auto-RTG behavior through the completed
+Stage 9 preparation work, Stage 10 fault-evidence contracts, and Stage 11
+local Live-Run workbook/recovery work. It also contains the initial Stage 12
+planning record, but **no Stage 12 stability code**: it does not add stability
+Header parsing, reader scans, shaking behavior, manifests, metrics, QC, a
+second GP, or stability-directed recipe selection.
+
+This checkpoint is a rollback and comparison baseline, not a claim of new
+physical validation. Its documented evidence remains the stage-specific
+hardware-free and controlled-debug evidence already recorded below; it does
+not establish real-chemistry clearance, unattended-run clearance, or physical
+validation of the planned stability feature.
+
 ## Current branch purpose
 
 `Auto-RTG` is a target-seeking, physically constrained Bayesian-optimization
