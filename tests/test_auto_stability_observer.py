@@ -100,6 +100,83 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(rows[-1]['event_type'], 'raw_scan_reserved')
         self.assertEqual(rows[-1]['raw_scan_id'], '0002')
 
+    def test_active_set_scan_records_one_file_and_a_cadence_deadline(self):
+        monotonic_time = [100.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-CADENCE',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-09-09T11:00:00+00:00',
+            monotonic_clock=lambda: monotonic_time[0]
+        )
+        for wellname in ('autowell0C1.0', 'autowell1C1.0'):
+            observer.record_trigger_transfer_dispatched(
+                0, wellname, 20.0, 20
+            )
+            observer.confirm_trigger_transfer_completed(wellname)
+
+        reservation = observer.reserve_raw_scan(
+            0,
+            ['autowell0C1.0', 'autowell1C1.0']
+        )
+        completion = observer.record_raw_scan_completed(
+            reservation=reservation,
+            scan_started_at_utc='2026-09-09T11:00:01+00:00',
+            scan_completed_at_utc='2026-09-09T11:00:05+00:00',
+            scan_started_monotonic_s=101.0
+        )
+
+        self.assertEqual(completion['event_type'], 'raw_scan_completed')
+        self.assertEqual(
+            completion['active_wellnames'], 'autowell0C1.0;autowell1C1.0'
+        )
+        self.assertEqual(
+            observer.get_next_cadence_deadline(60, 10), 111.0
+        )
+
+        observer.complete_expired_observation_windows(
+            60,
+            now_monotonic_s=160.0
+        )
+        self.assertEqual(observer.get_active_wells(), [])
+        self.assertEqual(
+            self._manifest_rows()[-1]['event_type'],
+            'observation_window_completed'
+        )
+
+    def test_cadence_never_schedules_a_reader_start_after_window_end(self):
+        monotonic_time = [10.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-WINDOW',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-09-09T12:00:00+00:00',
+            monotonic_clock=lambda: monotonic_time[0]
+        )
+        observer.record_trigger_transfer_dispatched(0, 'autowell0C3.0', 12, 3)
+        observer.confirm_trigger_transfer_completed('autowell0C3.0')
+        reservation = observer.reserve_raw_scan(0, 'autowell0C3.0')
+        observer.record_raw_scan_completed(
+            reservation,
+            '2026-09-09T12:00:01+00:00',
+            '2026-09-09T12:00:02+00:00',
+            scan_started_monotonic_s=55.0
+        )
+
+        # 10 + 60 is the window endpoint. The next 15-second cadence would
+        # begin at 70, so Stage 12C must not create an out-of-window scan.
+        self.assertIsNone(observer.get_next_cadence_deadline(60, 15))
+        observer.complete_expired_observation_windows(
+            60,
+            now_monotonic_s=69.9
+        )
+        self.assertEqual(len(observer.get_active_wells()), 1)
+        observer.complete_expired_observation_windows(
+            60,
+            now_monotonic_s=70.0
+        )
+        self.assertEqual(observer.get_active_wells(), [])
+
     def test_invalid_transition_cannot_create_a_false_active_well(self):
         with self.assertRaises(AutoStabilityObserverError):
             self.observer.confirm_trigger_transfer_completed('missing-well')

@@ -127,6 +127,7 @@ from auto_preparation import (
 )
 from auto_stability import (
     STABILITY_MODE_MONITOR,
+    STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET,
     canonical_reagent_name,
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
@@ -5630,6 +5631,233 @@ class AutoContr(Controller):
         for wellname in pending_wellnames:
             self.auto_stability_observer.confirm_trigger_transfer_completed(
                 wellname
+            )
+        if pending_wellnames:
+            # A trigger completion is the only point at which a newly made
+            # well may enter the active set. The standardized shake is applied
+            # once to the whole plate, then one unmerged scan captures every
+            # complete well currently being observed.
+            self._run_auto_stability_observation(
+                reason='trigger_completion',
+                shake_before_scan=True
+            )
+
+    @staticmethod
+    def _auto_stability_utc_now():
+        '''Create a timezone-aware controller timestamp for a reader interval.'''
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _get_auto_stability_scan_protocol(self):
+        '''Use the normal batch UV–Vis protocol without adding a spreadsheet row.'''
+        scan_rows = self.rxn_df.loc[
+            self.rxn_df['op'].isin(['scan', 'scan_until_complete'])
+        ]
+        if scan_rows.empty:
+            raise RuntimeError(
+                'Auto stability monitoring requires an existing Auto scan '
+                'row with a scan protocol. No reader command was sent.'
+            )
+        scan_protocol = scan_rows.iloc[-1].get('scan_protocol')
+        if pd.isna(scan_protocol) or not str(scan_protocol).strip():
+            raise RuntimeError(
+                'Auto stability monitoring requires the existing Auto scan '
+                'row to name a scan protocol. No reader command was sent.'
+            )
+        return str(scan_protocol).strip()
+
+    def _get_auto_stability_reader_locations(self, wellnames):
+        '''Resolve active logical wells into the reader layout with scan checks.'''
+        self._update_cached_locs(wellnames)
+        well_locations = []
+        for wellname in wellnames:
+            entry = self._cached_reader_locs[wellname]
+            if entry.deck_pos not in [4, 7]:
+                raise RuntimeError(
+                    'Auto stability monitoring cannot scan {} because it is '
+                    'not on a plate reader (deck position {}).'.format(
+                        wellname,
+                        entry.deck_pos
+                    )
+                )
+            if (
+                    wellname in self.tot_vols
+                    and not math.isclose(
+                        entry.vol,
+                        self.tot_vols[wellname],
+                        rel_tol=0,
+                        abs_tol=1e-3
+                    )):
+                raise RuntimeError(
+                    'Auto stability monitoring cannot scan {} because its '
+                    'cached volume {} uL does not match the expected {} uL.'
+                    .format(wellname, entry.vol, self.tot_vols[wellname])
+                )
+            well_locations.append(entry.loc)
+        return well_locations
+
+    def _run_auto_stability_observation(self, reason, shake_before_scan):
+        '''Shake when requested, then save one raw active-set reader scan.
+
+        This is deliberately independent of ordinary spreadsheet callbacks:
+        it uses the same established reader protocol, retains a unique raw
+        CSV, and never calls ``merge_scans``. The resulting manifest records
+        the reader-run interval rather than inventing a per-well timestamp.
+        '''
+        observer = self.auto_stability_observer
+        if observer is None:
+            return None
+
+        active_records = observer.get_active_wells()
+        if not active_records:
+            return None
+        wellnames = [record['wellname'] for record in active_records]
+        batch_numbers = {record['batch_number'] for record in active_records}
+        if len(batch_numbers) != 1:
+            raise RuntimeError(
+                'Auto stability monitoring refuses to combine active wells '
+                'from multiple batches in one reader scan.'
+            )
+        batch_number = batch_numbers.pop()
+        scan_protocol = self._get_auto_stability_scan_protocol()
+        well_locations = self._get_auto_stability_reader_locations(wellnames)
+        reservation = observer.reserve_raw_scan(batch_number, wellnames)
+
+        print(
+            '<<controller>> Auto stability observation {}: {} active well(s), '
+            'raw scan {}.'.format(
+                reason,
+                len(wellnames),
+                reservation['raw_scan_basename']
+            )
+        )
+
+        plate_is_in_reader = False
+        try:
+            # The transfer path's existing save/FTP barrier has already
+            # completed before this method is called. Home/burn here follows
+            # the established reader-access safety sequence before PlateIn.
+            self.portal.send_pack('home')
+            self.portal.burn_pipe()
+            self.pr.exec_macro('PlateIn')
+            plate_is_in_reader = True
+            if shake_before_scan:
+                # Match the repository's ordinary default plate-reader shake
+                # duration. Cadence-only observations intentionally do not
+                # re-mix the chemistry, avoiding repeated perturbation of a
+                # stability trajectory.
+                self.pr.shake(30)
+            # Timestamp the reader acquisition itself, not the preceding home
+            # or standardized shake setup.
+            scan_started_at_utc = self._auto_stability_utc_now()
+            scan_started_monotonic_s = time.monotonic()
+            self.pr.run_protocol(
+                scan_protocol,
+                reservation['raw_scan_basename'],
+                layout=well_locations
+            )
+            scan_completed_at_utc = self._auto_stability_utc_now()
+            scan_completed_monotonic_s = time.monotonic()
+        finally:
+            if plate_is_in_reader:
+                self.pr.exec_macro('PlateOut')
+
+        source_path = os.path.join(
+            self.pr.data_path,
+            reservation['raw_scan_basename'] + '.csv'
+        )
+        destination_path = os.path.join(
+            self.pr.data_path,
+            reservation['raw_scan_relative_path']
+        )
+        if not os.path.exists(source_path):
+            raise RuntimeError(
+                'Auto stability reader scan completed without producing its '
+                'expected raw file {}.'.format(source_path)
+            )
+        if os.path.exists(destination_path):
+            raise RuntimeError(
+                'Auto stability raw-scan destination already exists: {}.'
+                .format(destination_path)
+            )
+        shutil.move(source_path, destination_path)
+        observer.record_raw_scan_completed(
+            reservation=reservation,
+            scan_started_at_utc=scan_started_at_utc,
+            scan_completed_at_utc=scan_completed_at_utc,
+            scan_started_monotonic_s=scan_started_monotonic_s,
+            scan_completed_monotonic_s=scan_completed_monotonic_s
+        )
+        return reservation
+
+    @staticmethod
+    def _wait_for_auto_stability_deadline(deadline_monotonic_s, active_count):
+        '''Wait with a single updating terminal line rather than log spam.'''
+        while True:
+            remaining_s = deadline_monotonic_s - time.monotonic()
+            if remaining_s <= 0:
+                print()
+                return
+            print(
+                '\r<<controller>> stability observation window: {} active '
+                'well(s); next scheduler boundary in {:.0f} s'.format(
+                    active_count,
+                    remaining_s
+                ),
+                end='',
+                flush=True
+            )
+            time.sleep(min(1.0, remaining_s))
+
+    def _complete_auto_stability_observation_window(self):
+        '''Run the bounded post-batch cadence and mark all windows complete.
+
+        `each_completion` has already captured its observations on trigger
+        completion; it waits only for the configured window endpoints. The
+        cadenced schedule adds raw scans at its configured interval while a
+        well remains in-window. Either way no later Auto batch can be selected
+        before every active well is marked complete or this method fails.
+        '''
+        observer = self.auto_stability_observer
+        if observer is None:
+            return
+
+        settings = self.robo_params
+        observation_window_s = settings['auto_stability_observation_window_s']
+        scan_schedule = settings['auto_stability_scan_schedule']
+        scan_interval_s = settings['auto_stability_scan_interval_s']
+
+        while observer.get_active_wells():
+            now_monotonic_s = time.monotonic()
+            observer.complete_expired_observation_windows(
+                observation_window_s,
+                now_monotonic_s=now_monotonic_s
+            )
+            active_records = observer.get_active_wells()
+            if not active_records:
+                break
+
+            cadence_deadline = None
+            if scan_schedule == STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
+                cadence_deadline = observer.get_next_cadence_deadline(
+                    observation_window_s,
+                    scan_interval_s
+                )
+                if cadence_deadline is not None and cadence_deadline <= now_monotonic_s:
+                    self._run_auto_stability_observation(
+                        reason='cadenced_active_set',
+                        shake_before_scan=False
+                    )
+                    continue
+
+            window_deadline = observer.get_next_window_expiration_deadline(
+                observation_window_s
+            )
+            next_deadline = window_deadline
+            if cadence_deadline is not None:
+                next_deadline = min(next_deadline, cadence_deadline)
+            self._wait_for_auto_stability_deadline(
+                next_deadline,
+                len(active_records)
             )
 
     @staticmethod
@@ -29006,6 +29234,11 @@ class AutoContr(Controller):
             )
 
         self.execute_protocol_df(model)
+        # Stage 12C keeps a stability-monitor batch closed until its active
+        # wells complete the configured observation window. This runs after
+        # the ordinary protocol (including its normal scan) and therefore
+        # cannot replace or merge that existing data path.
+        self._complete_auto_stability_observation_window()
         if hasattr(self, '_record_auto_plate_batch_execution'):
             self._record_auto_plate_batch_execution(len(wellnames))
 

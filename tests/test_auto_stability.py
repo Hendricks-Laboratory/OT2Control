@@ -320,6 +320,40 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         self.assertIn('return []', base_dispatch_source)
         self.assertIn('return None', base_completion_source)
 
+    def test_stage_12c_uses_unmerged_active_set_scans_after_completion(self):
+        for method_name in (
+                '_run_auto_stability_observation',
+                '_complete_auto_stability_observation_window',
+                '_get_auto_stability_scan_protocol',
+                '_get_auto_stability_reader_locations'):
+            self.assertIn(method_name, self.auto_methods)
+
+        confirmation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_confirm_auto_stability_trigger_completion']
+        )
+        self.assertIn('self._run_auto_stability_observation(', confirmation_source)
+        self.assertIn('shake_before_scan=True', confirmation_source)
+
+        observation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_run_auto_stability_observation']
+        )
+        self.assertIn("self.pr.shake(30)", observation_source)
+        self.assertIn('self.pr.run_protocol(', observation_source)
+        self.assertIn('shutil.move(source_path, destination_path)', observation_source)
+        self.assertNotIn('merge_scans(', observation_source)
+
+        create_samples_source = ast.get_source_segment(
+            self.source, self.auto_methods['_create_samples']
+        )
+        self.assertLess(
+            create_samples_source.index('self.execute_protocol_df(model)'),
+            create_samples_source.index(
+                'self._complete_auto_stability_observation_window()'
+            )
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

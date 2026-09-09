@@ -15,12 +15,14 @@ import datetime
 import math
 import os
 import tempfile
+import time
 
 
 STABILITY_OBSERVER_SCHEMA_VERSION = 1
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
+ACTIVATION_STATUS_WINDOW_COMPLETE = 'observation_window_complete'
 
 
 MANIFEST_COLUMNS = (
@@ -41,6 +43,10 @@ MANIFEST_COLUMNS = (
     'raw_scan_id',
     'raw_scan_basename',
     'raw_scan_relative_path',
+    'active_wellnames',
+    'scan_started_at_utc',
+    'scan_completed_at_utc',
+    'scan_time_basis',
     'notes',
 )
 
@@ -51,9 +57,7 @@ class AutoStabilityObserverError(RuntimeError):
 
 def _utc_now_string():
     '''Return an explicit, timezone-aware UTC timestamp for durable records.'''
-    return datetime.datetime.now(datetime.timezone.utc).replace(
-        microsecond=0
-    ).isoformat()
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _safe_filename_component(value):
@@ -73,16 +77,24 @@ class AutoStabilityObserver:
     ``record_trigger_transfer_dispatched`` records a robot command as pending.
     ``confirm_trigger_transfer_completed`` is intentionally separate so a
     controller cannot confuse a socket dispatch timestamp with physical work.
-    Stage 12C will use the active registry to schedule scans; Stage 12B merely
-    establishes it and reserves deterministic raw-scan names without creating
-    or merging any scan files.
+    Stage 12C uses the same registry to schedule scans. Its raw scans are
+    whole-active-set files rather than per-well files: one plate-reader file
+    can contain many well trajectories, while each well remains separately
+    timestamped in the manifest event that references that file.
     '''
 
-    def __init__(self, pr_data_path, run_id, trigger_reagent, now=None):
+    def __init__(
+            self,
+            pr_data_path,
+            run_id,
+            trigger_reagent,
+            now=None,
+            monotonic_clock=None):
         self.pr_data_path = os.path.abspath(str(pr_data_path))
         self.run_id = str(run_id).strip()
         self.trigger_reagent = str(trigger_reagent).strip()
         self._now = now or _utc_now_string
+        self._monotonic_clock = monotonic_clock or time.monotonic
         self._event_sequence = 0
         self._scan_sequence = 0
         self._active_wells = {}
@@ -206,6 +218,13 @@ class AutoStabilityObserver:
             'trigger_transfer_dispatched_at_utc': dispatched_at_utc,
             'trigger_transfer_completion_observed_at_utc': None,
             'trigger_completion_time_basis': 'unconfirmed_dispatch',
+            # Monotonic timing is intentionally in-memory only. Stage 10's
+            # fail-closed interruption behavior does not resume a partially
+            # observed trajectory, so it never needs to survive a restart.
+            'activation_monotonic_s': None,
+            'last_observation_monotonic_s': None,
+            'last_scan_completed_monotonic_s': None,
+            'observation_count': 0,
         }
         return self._append_event(
             'trigger_transfer_dispatched',
@@ -241,6 +260,10 @@ class AutoStabilityObserver:
         record['trigger_completion_time_basis'] = (
             'controller_observed_save_ftp_barrier'
         )
+        record['activation_monotonic_s'] = self._monotonic_clock()
+        record['last_observation_monotonic_s'] = None
+        record['last_scan_completed_monotonic_s'] = None
+        record['observation_count'] = 0
         return self._append_event(
             'trigger_transfer_completed',
             batch_number=record['batch_number'],
@@ -263,40 +286,64 @@ class AutoStabilityObserver:
         )
 
     def get_active_wells(self):
-        '''Return a stable, serializable active-well snapshot for a later scheduler.'''
+        '''Return the currently observable wells in trigger-completion order.'''
         return [
             dict(record)
-            for _, record in sorted(self._active_wells.items())
+            for record in self._active_wells.values()
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
 
-    def reserve_raw_scan(self, batch_number, wellname):
-        '''Reserve a unique, unmerged future raw-scan path for an active well.
+    def _normalize_active_wellnames(self, wellnames):
+        if isinstance(wellnames, str):
+            wellnames = [wellnames]
+        try:
+            normalized = [self._require_wellname(value) for value in wellnames]
+        except TypeError:
+            raise AutoStabilityObserverError(
+                'Active wellnames must be a wellname or an iterable of wellnames.'
+            )
+        if not normalized:
+            raise AutoStabilityObserverError(
+                'At least one active well is required for a stability scan.'
+            )
+        if len(set(normalized)) != len(normalized):
+            raise AutoStabilityObserverError(
+                'A stability scan cannot list the same well more than once.'
+            )
+        for wellname in normalized:
+            record = self._active_wells.get(wellname)
+            if record is None or record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
+                raise AutoStabilityObserverError(
+                    'Stability scans can include only active wells: {}.'.format(
+                        wellname
+                    )
+                )
+        return normalized
+
+    def reserve_raw_scan(self, batch_number, wellnames):
+        '''Reserve one unique, unmerged raw path for an active-well scan.
 
         This method only writes a manifest entry. It does not create a scan
-        file, invoke the reader, or alter ordinary reader callbacks.
+        file, invoke the reader, or alter ordinary reader callbacks.  The
+        later Stage 12C reader call writes one file for the full active set.
         '''
-        wellname = self._require_wellname(wellname)
-        record = self._active_wells.get(wellname)
-        if record is None or record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
-            raise AutoStabilityObserverError(
-                'Raw stability scans can be reserved only for an active well: {}.'
-                .format(wellname)
-            )
-        if int(batch_number) != record['batch_number']:
-            raise AutoStabilityObserverError(
-                'Raw-scan batch {} does not match active well {} batch {}.'.format(
-                    batch_number,
-                    wellname,
-                    record['batch_number']
+        wellnames = self._normalize_active_wellnames(wellnames)
+        batch_number = int(batch_number)
+        records = [self._active_wells[wellname] for wellname in wellnames]
+        for record in records:
+            if batch_number != record['batch_number']:
+                raise AutoStabilityObserverError(
+                    'Raw-scan batch {} does not match active well {} batch {}.'.format(
+                        batch_number,
+                        record['wellname'],
+                        record['batch_number']
+                    )
                 )
-            )
 
         self._scan_sequence += 1
         scan_id = '{:04d}'.format(self._scan_sequence)
-        basename = 'stability_batch_{:03d}_{}_scan_{}'.format(
-            int(batch_number),
-            _safe_filename_component(wellname),
+        basename = 'stability_batch_{:03d}_active_set_scan_{}'.format(
+            batch_number,
             scan_id
         )
         relative_path = os.path.join(
@@ -306,25 +353,205 @@ class AutoStabilityObserver:
         )
         return self._append_event(
             'raw_scan_reserved',
-            batch_number=int(batch_number),
-            wellname=wellname,
-            transfer_volume_uL=record['transfer_volume_uL'],
-            trigger_command_id=record['trigger_command_id'],
+            batch_number=batch_number,
+            wellname='__active_set__',
             activation_status=ACTIVATION_STATUS_ACTIVE,
-            trigger_transfer_dispatched_at_utc=(
-                record['trigger_transfer_dispatched_at_utc']
-            ),
-            trigger_transfer_completion_observed_at_utc=(
-                record['trigger_transfer_completion_observed_at_utc']
-            ),
-            trigger_completion_time_basis=(
-                record['trigger_completion_time_basis']
-            ),
             raw_scan_id=scan_id,
             raw_scan_basename=basename,
             raw_scan_relative_path=relative_path,
+            active_wellnames=';'.join(wellnames),
             notes=(
-                'Reserved for a later Stage 12C unmerged raw scan. No reader '
-                'operation occurred during this Stage 12B reservation.'
+                'Reserved for one unmerged active-well raw scan. The reader '
+                'has not yet been invoked.'
             )
         )
+
+    def record_raw_scan_completed(
+            self,
+            reservation,
+            scan_started_at_utc,
+            scan_completed_at_utc,
+            scan_started_monotonic_s,
+            scan_completed_monotonic_s=None):
+        '''Record one durable active-set observation after its raw file exists.'''
+        if not isinstance(reservation, dict):
+            raise AutoStabilityObserverError(
+                'Raw-scan reservation must be the manifest event dictionary.'
+            )
+        if reservation.get('event_type') != 'raw_scan_reserved':
+            raise AutoStabilityObserverError(
+                'Only a raw_scan_reserved event can be completed.'
+            )
+        wellnames = self._normalize_active_wellnames(
+            reservation.get('active_wellnames', '').split(';')
+        )
+        try:
+            scan_started_monotonic_s = float(scan_started_monotonic_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'scan_started_monotonic_s must be numeric.'
+            )
+        if not math.isfinite(scan_started_monotonic_s):
+            raise AutoStabilityObserverError(
+                'scan_started_monotonic_s must be finite.'
+            )
+        if scan_completed_monotonic_s is None:
+            scan_completed_monotonic_s = scan_started_monotonic_s
+        try:
+            scan_completed_monotonic_s = float(scan_completed_monotonic_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'scan_completed_monotonic_s must be numeric.'
+            )
+        if (
+                not math.isfinite(scan_completed_monotonic_s)
+                or scan_completed_monotonic_s < scan_started_monotonic_s):
+            raise AutoStabilityObserverError(
+                'scan_completed_monotonic_s must be finite and no earlier '
+                'than scan_started_monotonic_s.'
+            )
+
+        for wellname in wellnames:
+            record = self._active_wells[wellname]
+            record['last_observation_monotonic_s'] = scan_started_monotonic_s
+            record['last_scan_completed_monotonic_s'] = (
+                scan_completed_monotonic_s
+            )
+            record['observation_count'] += 1
+
+        return self._append_event(
+            'raw_scan_completed',
+            batch_number=reservation['batch_number'],
+            wellname='__active_set__',
+            activation_status=ACTIVATION_STATUS_ACTIVE,
+            raw_scan_id=reservation['raw_scan_id'],
+            raw_scan_basename=reservation['raw_scan_basename'],
+            raw_scan_relative_path=reservation['raw_scan_relative_path'],
+            active_wellnames=';'.join(wellnames),
+            scan_started_at_utc=str(scan_started_at_utc),
+            scan_completed_at_utc=str(scan_completed_at_utc),
+            scan_time_basis=(
+                'controller_plate_reader_run_protocol_interval'
+            ),
+            notes=(
+                'Unmerged active-well scan completed and its raw file was '
+                'moved into the stability raw-scan directory.'
+            )
+        )
+
+    def get_next_cadence_deadline(
+            self, observation_window_s, scan_interval_s):
+        '''Return the next in-window cadence deadline, or ``None`` if absent.'''
+        try:
+            observation_window_s = float(observation_window_s)
+            scan_interval_s = float(scan_interval_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Observation window and cadence interval must be numeric.'
+            )
+        if observation_window_s <= 0 or scan_interval_s <= 0:
+            raise AutoStabilityObserverError(
+                'Observation window and cadence interval must be positive.'
+            )
+
+        deadlines = []
+        for record in self.get_active_wells():
+            activation_time = record['activation_monotonic_s']
+            last_observation = record['last_observation_monotonic_s']
+            if activation_time is None:
+                raise AutoStabilityObserverError(
+                    'Active well {} has no monotonic activation time.'.format(
+                        record['wellname']
+                    )
+                )
+            window_end = activation_time + observation_window_s
+            if last_observation is None:
+                deadlines.append(activation_time)
+                continue
+            # Cadence begins after reader completion, not reader start. A
+            # slow shake/read therefore cannot cause an immediate catch-up
+            # scan that would repeatedly perturb the plate without spacing.
+            last_completed = record['last_scan_completed_monotonic_s']
+            if last_completed is None:
+                last_completed = last_observation
+            next_deadline = last_completed + scan_interval_s
+            # Do not start a scan after the bounded window solely to meet a
+            # cadence. A scan triggered by another currently active well may
+            # still add an earlier valid observation for this well.
+            if next_deadline < window_end:
+                deadlines.append(next_deadline)
+        return min(deadlines) if deadlines else None
+
+    def get_next_window_expiration_deadline(self, observation_window_s):
+        '''Return the earliest remaining active observation-window endpoint.'''
+        try:
+            observation_window_s = float(observation_window_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Observation window must be numeric.'
+            )
+        if observation_window_s <= 0:
+            raise AutoStabilityObserverError(
+                'Observation window must be positive.'
+            )
+        deadlines = []
+        for record in self.get_active_wells():
+            activation_time = record['activation_monotonic_s']
+            if activation_time is None:
+                raise AutoStabilityObserverError(
+                    'Active well {} has no monotonic activation time.'.format(
+                        record['wellname']
+                    )
+                )
+            deadlines.append(activation_time + observation_window_s)
+        return min(deadlines) if deadlines else None
+
+    def complete_expired_observation_windows(
+            self, observation_window_s, now_monotonic_s=None):
+        '''Mark bounded windows complete without pretending an extra scan occurred.'''
+        try:
+            observation_window_s = float(observation_window_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Observation window must be numeric.'
+            )
+        if observation_window_s <= 0:
+            raise AutoStabilityObserverError(
+                'Observation window must be positive.'
+            )
+        if now_monotonic_s is None:
+            now_monotonic_s = self._monotonic_clock()
+        completed = []
+        for record in list(self._active_wells.values()):
+            if record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
+                continue
+            if now_monotonic_s < (
+                    record['activation_monotonic_s'] + observation_window_s):
+                continue
+            record['activation_status'] = ACTIVATION_STATUS_WINDOW_COMPLETE
+            completed.append(record['wellname'])
+            self._append_event(
+                'observation_window_completed',
+                batch_number=record['batch_number'],
+                wellname=record['wellname'],
+                transfer_volume_uL=record['transfer_volume_uL'],
+                trigger_command_id=record['trigger_command_id'],
+                activation_status=ACTIVATION_STATUS_WINDOW_COMPLETE,
+                trigger_transfer_dispatched_at_utc=(
+                    record['trigger_transfer_dispatched_at_utc']
+                ),
+                trigger_transfer_completion_observed_at_utc=(
+                    record['trigger_transfer_completion_observed_at_utc']
+                ),
+                trigger_completion_time_basis=(
+                    record['trigger_completion_time_basis']
+                ),
+                notes=(
+                    'Configured stability observation window elapsed after {} '
+                    'recorded stability scan(s). No additional scan was '
+                    'invented at the window boundary.'.format(
+                        record['observation_count']
+                    )
+                )
+            )
+        return completed
