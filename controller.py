@@ -125,6 +125,11 @@ from auto_preparation import (
     build_variable_source_bindings,
     validate_manifest_source_names
 )
+from auto_stability import (
+    STABILITY_MODE_MONITOR,
+    parse_auto_stability_header_settings,
+    validate_stability_trigger_reagent
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -5395,6 +5400,7 @@ class AutoContr(Controller):
         self._resolve_true_zero_reagents()
         #print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
+        self._initialize_auto_stability_configuration()
         self.y_shape = len(self.variable_reagents)
         #print(f"y-shape is {self.y_shape}")
         if (
@@ -5459,6 +5465,60 @@ class AutoContr(Controller):
         # reset itself to the original starting well instead of entering the
         # controlled replacement hold.
         self._auto_plate_cursor_initialized = False
+
+    def _initialize_auto_stability_configuration(self):
+        '''Parse the inert Stage-12 stability configuration before prechecks.
+
+        Stage 12A intentionally stores and validates a monitor-only request
+        without scheduling a scan, invoking the plate reader/shaker, changing
+        protocol rows, or changing optimizer selection.  The trigger is
+        checked against the input-template execution order now, before the
+        controller has a robot connection, so an unsafe ordering cannot reach
+        later physical stages.
+        '''
+        header_dict = {
+            row[0]: row[1]
+            for row in self.header_data[1:]
+        }
+        stability_settings = parse_auto_stability_header_settings(header_dict)
+
+        if (
+                stability_settings['auto_stability_mode']
+                == STABILITY_MODE_MONITOR):
+            transfer_reagents = list(
+                self.rxn_df.loc[
+                    (self.rxn_df['op'] == 'transfer')
+                    & (self.rxn_df['reagent'].astype(str).str.lower() != 'water'),
+                    'reagent'
+                ]
+            )
+            trigger_reagent = validate_stability_trigger_reagent(
+                stability_settings['auto_stability_trigger_reagent'],
+                transfer_reagents
+            )
+            stability_settings['auto_stability_trigger_reagent'] = (
+                trigger_reagent
+            )
+
+        self.robo_params.update(stability_settings)
+
+        if (
+                stability_settings['auto_stability_mode']
+                == STABILITY_MODE_MONITOR):
+            print(
+                '<<controller>> Auto stability monitoring configured: '
+                'trigger={}, schedule={}, window={} s, interval={} s, '
+                'minimum peak absorbance={}, mixing={}. Stage 12A stores '
+                'this configuration only; it does not yet change scanning, '
+                'mixing, QC, GP training, or recipe selection.'.format(
+                    stability_settings['auto_stability_trigger_reagent'],
+                    stability_settings['auto_stability_scan_schedule'],
+                    stability_settings['auto_stability_observation_window_s'],
+                    stability_settings['auto_stability_scan_interval_s'],
+                    stability_settings['auto_stability_min_peak_absorbance'],
+                    stability_settings['auto_stability_mixing_mode']
+                )
+            )
 
     @staticmethod
     def _auto_preparation_source_base_name(chemical_name):
