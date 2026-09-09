@@ -127,9 +127,11 @@ from auto_preparation import (
 )
 from auto_stability import (
     STABILITY_MODE_MONITOR,
+    canonical_reagent_name,
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
 )
+from auto_stability_observer import AutoStabilityObserver
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -4415,6 +4417,20 @@ class Controller(ABC):
         return vol
     
     
+    def _record_auto_stability_trigger_dispatch(
+            self, row, transfer_steps, command_id):
+        '''No-op extension hook for non-Auto controllers.
+
+        ``_send_transfer_command`` is shared by manual and Auto execution.
+        AutoContr overrides this hook in Stage 12B; keeping the base behavior
+        inert preserves the legacy manual-protocol path exactly.
+        '''
+        return []
+
+    def _confirm_auto_stability_trigger_completion(self, pending_wellnames):
+        '''No-op completion hook for non-Auto controllers.'''
+        return None
+
     def _send_transfer_command(self, row, i):
         '''
         params:  
@@ -4449,7 +4465,12 @@ class Controller(ABC):
         if not transfer_steps:
             print(f"<<controller>> skipping transfer from {src}: all destination volumes are 0 uL")
             return
-        
+
+        # Stage 12B only records trigger transfers that this existing method
+        # already dispatches. A well remains pending until the unchanged
+        # save/FTP barrier below returns; no new wait, scan, or shake is added.
+        pending_stability_wellnames = []
+
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
         if callbacks:
@@ -4457,7 +4478,16 @@ class Controller(ABC):
             #iterate through each transfer_step we're doing.
             for callback_num, transfer_step in enumerate(transfer_steps):
                 #send just that transfer step
-                self.portal.send_pack('transfer', src, [transfer_step])
+                command_id = self.portal.send_pack(
+                    'transfer', src, [transfer_step]
+                )
+                pending_stability_wellnames.extend(
+                    self._record_auto_stability_trigger_dispatch(
+                        row,
+                        [transfer_step],
+                        command_id
+                    )
+                )
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
                     self._send_callback(callback, transfer_step[0], callback_num, row, i)
@@ -4474,9 +4504,19 @@ class Controller(ABC):
                     callback_alph = chr(callback_num + ord('a')) + chr(callback_num + ord('a')) #convert the number to alpha
                 self.pr.merge_scans(scan_names, dst)
         else:
-            self.portal.send_pack('transfer', src, transfer_steps)
-        
+            command_id = self.portal.send_pack('transfer', src, transfer_steps)
+            pending_stability_wellnames.extend(
+                self._record_auto_stability_trigger_dispatch(
+                    row,
+                    transfer_steps,
+                    command_id
+                )
+            )
+
         self.save()
+        self._confirm_auto_stability_trigger_completion(
+            pending_stability_wellnames
+        )
 
     def _send_callback(self, callback, product, callback_num, row, i):
         '''
@@ -5432,6 +5472,10 @@ class AutoContr(Controller):
         # The ordinary preflight simulation deliberately writes no live-run
         # recovery records.
         self.auto_live_run_journal = None
+        # Stage 12B creates this passive observer only for a real configured
+        # monitor-mode run. It records existing transfer/save completion facts
+        # and never schedules a reader action by itself.
+        self.auto_stability_observer = None
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
         # authorize automatic retry, continuation, or model updates.
@@ -5518,6 +5562,74 @@ class AutoContr(Controller):
                     stability_settings['auto_stability_min_peak_absorbance'],
                     stability_settings['auto_stability_mixing_mode']
                 )
+            )
+
+    def _initialize_auto_stability_observer(self):
+        '''Initialize Stage 12B's passive observer for a real monitor run.
+
+        The ordinary preflight simulation has no live-run journal and must not
+        create durability artifacts in the eventual run directory. The
+        observer is initialized only after the journal establishes the unique
+        real-run identity, still before connection or any physical work.
+        '''
+        if self.auto_live_run_journal is None:
+            return None
+        if self.auto_stability_observer is not None:
+            return self.auto_stability_observer
+        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+            return None
+
+        self.auto_stability_observer = AutoStabilityObserver(
+            pr_data_path=os.path.join(self.out_path, 'pr_data'),
+            run_id=self.auto_live_run_journal.current_state['run_id'],
+            trigger_reagent=self.robo_params[
+                'auto_stability_trigger_reagent'
+            ]
+        )
+        print(
+            '<<controller>> initialized passive Auto stability observer at {}. '
+            'Stage 12B adds no stability scan, shake, or scheduler.'.format(
+                self.auto_stability_observer.manifest_path
+            )
+        )
+        return self.auto_stability_observer
+
+    def _is_auto_stability_trigger_row(self, row):
+        '''Return whether an ordinary transfer row supplies the configured trigger.'''
+        if self.auto_stability_observer is None:
+            return False
+        if str(row.get('op', '')).strip().lower() != 'transfer':
+            return False
+        row_reagent = canonical_reagent_name(row.get('reagent', '')).lower()
+        trigger_reagent = canonical_reagent_name(
+            self.robo_params['auto_stability_trigger_reagent']
+        ).lower()
+        return bool(row_reagent) and row_reagent == trigger_reagent
+
+    def _record_auto_stability_trigger_dispatch(
+            self, row, transfer_steps, command_id):
+        '''Record dispatched trigger steps without claiming physical completion.'''
+        if not self._is_auto_stability_trigger_row(row):
+            return []
+
+        pending_wellnames = []
+        for wellname, transfer_volume_uL in transfer_steps:
+            self.auto_stability_observer.record_trigger_transfer_dispatched(
+                batch_number=self.batch_num,
+                wellname=wellname,
+                transfer_volume_uL=transfer_volume_uL,
+                trigger_command_id=command_id
+            )
+            pending_wellnames.append(wellname)
+        return pending_wellnames
+
+    def _confirm_auto_stability_trigger_completion(self, pending_wellnames):
+        '''Promote pending wells only after the existing save/FTP barrier returns.'''
+        if self.auto_stability_observer is None:
+            return
+        for wellname in pending_wellnames:
+            self.auto_stability_observer.confirm_trigger_transfer_completed(
+                wellname
             )
 
     @staticmethod
@@ -28081,6 +28193,7 @@ class AutoContr(Controller):
         # begins.  The journal is enabled only for the real configured model,
         # never for launch_auto()'s preflight simulation.
         self._initialize_auto_live_run_journal(model)
+        self._initialize_auto_stability_observer()
         self.create_connection(simulate, no_pr, port)
         if self.auto_main_robot_state_snapshot is not None:
             self._record_auto_live_run_event(

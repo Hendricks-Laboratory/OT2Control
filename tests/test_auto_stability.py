@@ -228,9 +228,18 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
         )
+        cls.controller_class = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'Controller'
+        )
         cls.auto_methods = {
             node.name: node
             for node in cls.auto_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        cls.controller_methods = {
+            node.name: node
+            for node in cls.controller_class.body
             if isinstance(node, ast.FunctionDef)
         }
 
@@ -263,6 +272,53 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             self.assertNotIn(forbidden_text, method_source)
         self.assertIn('parse_auto_stability_header_settings(', method_source)
         self.assertIn('validate_stability_trigger_reagent(', method_source)
+
+    def test_stage_12b_observer_is_passive_and_uses_existing_save_barrier(self):
+        for method_name in (
+                '_initialize_auto_stability_observer',
+                '_record_auto_stability_trigger_dispatch',
+                '_confirm_auto_stability_trigger_completion'):
+            self.assertIn(method_name, self.auto_methods)
+
+        run_source = ast.get_source_segment(
+            self.source, self.auto_methods['_run']
+        )
+        self.assertLess(
+            run_source.index('self._initialize_auto_live_run_journal(model)'),
+            run_source.index('self._initialize_auto_stability_observer()')
+        )
+        self.assertLess(
+            run_source.index('self._initialize_auto_stability_observer()'),
+            run_source.index('self.create_connection(simulate, no_pr, port)')
+        )
+
+        transfer_source = ast.get_source_segment(
+            self.source, self.controller_methods['_send_transfer_command']
+        )
+        self.assertIn(
+            'self._record_auto_stability_trigger_dispatch(', transfer_source
+        )
+        self.assertLess(
+            transfer_source.index('self.save()'),
+            transfer_source.index(
+                'self._confirm_auto_stability_trigger_completion('
+            )
+        )
+        for forbidden_text in ('_execute_scan(', '_mix(', 'burn_pipe('):
+            self.assertNotIn(forbidden_text, transfer_source)
+
+        # The transfer method belongs to the shared Controller base class;
+        # verify manual protocol execution retains an inert extension hook.
+        base_dispatch_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_record_auto_stability_trigger_dispatch']
+        )
+        base_completion_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_confirm_auto_stability_trigger_completion']
+        )
+        self.assertIn('return []', base_dispatch_source)
+        self.assertIn('return None', base_completion_source)
 
 
 if __name__ == '__main__':
