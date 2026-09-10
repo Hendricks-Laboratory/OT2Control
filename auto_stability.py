@@ -90,10 +90,10 @@ def parse_auto_stability_header_settings(header_values):
 
     Missing stability rows return the exact inert ``off`` configuration, so
     older workbooks retain their existing Auto behavior.  ``monitor`` is the
-    only enabled Stage-12A mode.  It records an explicit future intent but
-    starts no scans and changes no physical or optimizer behavior in this
-    stage.  Active ranking modes are rejected clearly until their separate GP
-    and selection stages exist.
+    only enabled Stage-12 mode.  Parsing itself has no physical or optimizer
+    side effect; the Stage-12C scheduler consumes a valid monitor
+    configuration during a real run.  Active ranking modes are rejected
+    clearly until their separate GP and selection stages exist.
     '''
     if not isinstance(header_values, dict):
         raise AutoStabilityValidationError(

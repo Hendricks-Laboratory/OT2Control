@@ -5509,9 +5509,9 @@ class AutoContr(Controller):
         # The ordinary preflight simulation deliberately writes no live-run
         # recovery records.
         self.auto_live_run_journal = None
-        # Stage 12B creates this passive observer only for a real configured
-        # monitor-mode run. It records existing transfer/save completion facts
-        # and never schedules a reader action by itself.
+        # The observer is created only for a real configured monitor-mode
+        # run. It records trigger completion and is later consumed by the
+        # Stage-12C scheduler; construction itself does not access the reader.
         self.auto_stability_observer = None
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
@@ -5789,9 +5789,9 @@ class AutoContr(Controller):
         shake_duration_s = 0.0
         mixing_mode = 'none'
         try:
-            # The transfer path's existing save/FTP barrier has already
-            # completed before this method is called. Home/burn here follows
-            # the established reader-access safety sequence before PlateIn.
+            # The final trigger transfer has already received its own Pi
+            # ``ready`` acknowledgement. Home/burn here follows the
+            # established reader-access safety sequence before PlateIn.
             self.portal.send_pack('home')
             self.portal.burn_pipe()
             self.pr.exec_macro('PlateIn')
@@ -5880,11 +5880,11 @@ class AutoContr(Controller):
     def _complete_auto_stability_observation_window(self):
         '''Run the bounded post-batch cadence and mark all windows complete.
 
-        `each_completion` has already captured its observations on trigger
-        completion; it waits only for the configured window endpoints. The
-        cadenced schedule adds raw scans at its configured interval while a
-        well remains in-window. Either way no later Auto batch can be selected
-        before every active well is marked complete or this method fails.
+        The currently supported cadenced schedule adds raw scans at its
+        configured interval while a well remains in-window. No later Auto
+        batch can be selected before every active well is marked complete or
+        this method fails. ``each_completion`` is rejected at Header parsing
+        until a separately validated nonperturbing policy exists.
         '''
         observer = self.auto_stability_observer
         if observer is None:

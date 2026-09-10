@@ -1,10 +1,12 @@
-'''Passive, controller-side audit state for Auto stability monitoring.
+'''Controller-side audit state for Auto stability monitoring.
 
 Stage 12B deliberately records only facts already observable from the normal
 Auto execution path.  In particular, a transfer dispatch is *not* treated as
-physical completion.  The controller promotes a well to the active set only
-after its existing save/FTP barrier returns, which is the first point at which
-the controller can honestly establish that the preceding robot work completed.
+physical completion. The controller promotes a well to the active set only
+after an explicitly recorded controller completion point. Stage 12C uses the
+Pi's existing transfer ``ready`` acknowledgement for a per-well
+controller-observed timing reference; the manifest records that limited but
+auditable time basis rather than claiming a direct dispense timestamp.
 
 This module has no robot, plate-reader, pandas, or optimizer dependencies so
 its state transitions can be tested without laboratory hardware.
@@ -18,7 +20,10 @@ import tempfile
 import time
 
 
-STABILITY_OBSERVER_SCHEMA_VERSION = 1
+# Version 2 adds observation reason and mixing/shake provenance, and makes the
+# per-well trigger-completion time basis part of the practical Stage-12C data
+# contract. Every manifest is run-local, so no in-place migration is needed.
+STABILITY_OBSERVER_SCHEMA_VERSION = 2
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -122,8 +127,9 @@ class AutoStabilityObserver:
         self._append_event(
             'observer_initialized',
             notes=(
-                'Stage 12B passive observer initialized; no stability scan, '
-                'shake, or scheduler was started.'
+                'Stage-12 stability observer initialized. A valid active '
+                'trigger completion may subsequently schedule a Stage-12C '
+                'reader observation.'
             )
         )
 
@@ -242,7 +248,7 @@ class AutoStabilityObserver:
             trigger_completion_time_basis='unconfirmed_dispatch',
             notes=(
                 'Command was dispatched only. The well is not active until '
-                'the controller observes its existing save/FTP barrier.'
+                'the controller records an explicit completion point.'
             )
         )
 

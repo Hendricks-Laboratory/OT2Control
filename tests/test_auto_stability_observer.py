@@ -10,6 +10,7 @@ from auto_stability_observer import (
     ACTIVATION_STATUS_PENDING,
     AutoStabilityObserver,
     AutoStabilityObserverError,
+    STABILITY_OBSERVER_SCHEMA_VERSION,
 )
 
 
@@ -55,6 +56,10 @@ class AutoStabilityObserverTests(unittest.TestCase):
             event['activation_status'], ACTIVATION_STATUS_PENDING
         )
         self.assertEqual(self.observer.get_active_wells(), [])
+        self.assertEqual(
+            event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
+        )
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 2)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
