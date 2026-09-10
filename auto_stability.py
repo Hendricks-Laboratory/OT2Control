@@ -205,20 +205,18 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_min_peak_absorbance'
     )
 
-    if scan_schedule == STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
-        scan_interval_s = _parse_positive_finite(
-            header_values.get('auto_stability_scan_interval_s'),
-            'auto_stability_scan_interval_s'
+    if scan_schedule != STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
+        raise AutoStabilityValidationError(
+            'Header value auto_stability_scan_schedule=each_completion is '
+            'not scientifically supported with the current whole-plate '
+            'plate_shake implementation. It would produce only an immediate '
+            'cohort observation, not a time-resolved post-peak trajectory. '
+            'Use cadenced_active_set for monitor mode.'
         )
-    else:
-        raw_interval = header_values.get('auto_stability_scan_interval_s')
-        scan_interval_s = (
-            None if _is_blank(raw_interval)
-            else _parse_positive_finite(
-                raw_interval,
-                'auto_stability_scan_interval_s'
-            )
-        )
+    scan_interval_s = _parse_positive_finite(
+        header_values.get('auto_stability_scan_interval_s'),
+        'auto_stability_scan_interval_s'
+    )
 
     return {
         'auto_stability_mode': STABILITY_MODE_MONITOR,

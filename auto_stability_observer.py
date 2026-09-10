@@ -44,6 +44,11 @@ MANIFEST_COLUMNS = (
     'raw_scan_basename',
     'raw_scan_relative_path',
     'active_wellnames',
+    'observation_reason',
+    'mixing_mode',
+    'shake_duration_s',
+    'shake_started_at_utc',
+    'shake_completed_at_utc',
     'scan_started_at_utc',
     'scan_completed_at_utc',
     'scan_time_basis',
@@ -241,8 +246,10 @@ class AutoStabilityObserver:
             )
         )
 
-    def confirm_trigger_transfer_completed(self, wellname):
-        '''Promote a pending well after an existing controller completion barrier.'''
+    def confirm_trigger_transfer_completed(
+            self, wellname,
+            completion_time_basis='controller_observed_save_ftp_barrier'):
+        '''Promote a pending well after an explicit controller completion point.'''
         wellname = self._require_wellname(wellname)
         record = self._active_wells.get(wellname)
         if record is None:
@@ -254,12 +261,19 @@ class AutoStabilityObserver:
                 'Well {} is not awaiting trigger completion.'.format(wellname)
             )
 
+        if completion_time_basis not in (
+                'controller_observed_save_ftp_barrier',
+                'controller_observed_transfer_ready'):
+            raise AutoStabilityObserverError(
+                'Unsupported trigger completion time basis: {}.'.format(
+                    completion_time_basis
+                )
+            )
+
         completed_at_utc = self._now()
         record['activation_status'] = ACTIVATION_STATUS_ACTIVE
         record['trigger_transfer_completion_observed_at_utc'] = completed_at_utc
-        record['trigger_completion_time_basis'] = (
-            'controller_observed_save_ftp_barrier'
-        )
+        record['trigger_completion_time_basis'] = completion_time_basis
         record['activation_monotonic_s'] = self._monotonic_clock()
         record['last_observation_monotonic_s'] = None
         record['last_scan_completed_monotonic_s'] = None
@@ -275,13 +289,12 @@ class AutoStabilityObserver:
                 record['trigger_transfer_dispatched_at_utc']
             ),
             trigger_transfer_completion_observed_at_utc=completed_at_utc,
-            trigger_completion_time_basis=(
-                'controller_observed_save_ftp_barrier'
-            ),
+            trigger_completion_time_basis=completion_time_basis,
             notes=(
-                'The pre-existing controller save/FTP barrier returned after '
-                'the trigger command. This establishes completion before '
-                'Stage 12C schedules any active-well observation.'
+                'The controller observed the configured completion point '
+                'after the trigger command. This establishes a per-well '
+                'timing reference before Stage 12C schedules any active-well '
+                'observation.'
             )
         )
 
@@ -372,7 +385,12 @@ class AutoStabilityObserver:
             scan_started_at_utc,
             scan_completed_at_utc,
             scan_started_monotonic_s,
-            scan_completed_monotonic_s=None):
+            scan_completed_monotonic_s=None,
+            observation_reason=None,
+            mixing_mode='none',
+            shake_duration_s=0.0,
+            shake_started_at_utc=None,
+            shake_completed_at_utc=None):
         '''Record one durable active-set observation after its raw file exists.'''
         if not isinstance(reservation, dict):
             raise AutoStabilityObserverError(
@@ -410,6 +428,26 @@ class AutoStabilityObserver:
                 'scan_completed_monotonic_s must be finite and no earlier '
                 'than scan_started_monotonic_s.'
             )
+        try:
+            shake_duration_s = float(shake_duration_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'shake_duration_s must be numeric.'
+            )
+        if not math.isfinite(shake_duration_s) or shake_duration_s < 0:
+            raise AutoStabilityObserverError(
+                'shake_duration_s must be finite and nonnegative.'
+            )
+        mixing_mode = str(mixing_mode).strip() or 'none'
+        observation_reason = str(observation_reason).strip()
+        if not observation_reason:
+            raise AutoStabilityObserverError(
+                'observation_reason cannot be blank.'
+            )
+        if shake_duration_s > 0 and mixing_mode == 'none':
+            raise AutoStabilityObserverError(
+                'A positive shake duration requires a mixing mode.'
+            )
 
         for wellname in wellnames:
             record = self._active_wells[wellname]
@@ -428,6 +466,15 @@ class AutoStabilityObserver:
             raw_scan_basename=reservation['raw_scan_basename'],
             raw_scan_relative_path=reservation['raw_scan_relative_path'],
             active_wellnames=';'.join(wellnames),
+            observation_reason=observation_reason,
+            mixing_mode=mixing_mode,
+            shake_duration_s=shake_duration_s,
+            shake_started_at_utc=(
+                '' if shake_started_at_utc is None else str(shake_started_at_utc)
+            ),
+            shake_completed_at_utc=(
+                '' if shake_completed_at_utc is None else str(shake_completed_at_utc)
+            ),
             scan_started_at_utc=str(scan_started_at_utc),
             scan_completed_at_utc=str(scan_completed_at_utc),
             scan_time_basis=(
@@ -435,7 +482,8 @@ class AutoStabilityObserver:
             ),
             notes=(
                 'Unmerged active-well scan completed and its raw file was '
-                'moved into the stability raw-scan directory.'
+                'moved into the stability raw-scan directory. Mixing and '
+                'reader timing fields describe this exact observation.'
             )
         )
 

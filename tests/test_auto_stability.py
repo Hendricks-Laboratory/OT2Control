@@ -73,19 +73,14 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             with self.assertRaises(AutoStabilityValidationError):
                 parse_auto_stability_header_settings(header)
 
-    def test_each_completion_does_not_require_an_unused_cadence(self):
+    def test_each_completion_fails_closed_until_a_nonperturbing_policy_exists(self):
         header = _monitor_header(
             auto_stability_scan_schedule='each_completion'
         )
         del header['auto_stability_scan_interval_s']
 
-        settings = parse_auto_stability_header_settings(header)
-
-        self.assertEqual(
-            settings['auto_stability_scan_schedule'],
-            'each_completion'
-        )
-        self.assertIsNone(settings['auto_stability_scan_interval_s'])
+        with self.assertRaises(AutoStabilityValidationError):
+            parse_auto_stability_header_settings(header)
 
     def test_future_modes_and_unimplemented_mixing_fail_closed(self):
         with self.assertRaises(AutoStabilityValidationError):
@@ -232,6 +227,10 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == 'Controller'
         )
+        cls.plate_reader_class = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'PlateReader'
+        )
         cls.auto_methods = {
             node.name: node
             for node in cls.auto_class.body
@@ -273,7 +272,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         self.assertIn('parse_auto_stability_header_settings(', method_source)
         self.assertIn('validate_stability_trigger_reagent(', method_source)
 
-    def test_stage_12b_observer_is_passive_and_uses_existing_save_barrier(self):
+    def test_stability_observer_preserves_legacy_completion_boundary(self):
         for method_name in (
                 '_initialize_auto_stability_observer',
                 '_record_auto_stability_trigger_dispatch',
@@ -304,7 +303,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 'self._confirm_auto_stability_trigger_completion('
             )
         )
-        for forbidden_text in ('_execute_scan(', '_mix(', 'burn_pipe('):
+        for forbidden_text in ('_execute_scan(', '_mix('):
             self.assertNotIn(forbidden_text, transfer_source)
 
         # The transfer method belongs to the shared Controller base class;
@@ -339,10 +338,37 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             self.source,
             self.auto_methods['_run_auto_stability_observation']
         )
-        self.assertIn("self.pr.shake(30)", observation_source)
+        self.assertIn('shake_duration_s = 30.0', observation_source)
+        self.assertIn('self.pr.shake(shake_duration_s)', observation_source)
         self.assertIn('self.pr.run_protocol(', observation_source)
+        self.assertIn('record_in_aggregate=False', observation_source)
         self.assertIn('shutil.move(source_path, destination_path)', observation_source)
         self.assertNotIn('merge_scans(', observation_source)
+
+        plate_reader_methods = {
+            node.name: node
+            for node in self.plate_reader_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        reader_run_source = ast.get_source_segment(
+            self.source, plate_reader_methods['run_protocol']
+        )
+        self.assertIn('if record_in_aggregate:', reader_run_source)
+        self.assertIn('self.data.AddToDF(', reader_run_source)
+        self.assertIn('self.data.df.to_csv(', reader_run_source)
+
+        transfer_source = ast.get_source_segment(
+            self.source, self.controller_methods['_send_transfer_command']
+        )
+        self.assertIn(
+            'self._requires_auto_stability_per_well_completion(',
+            transfer_source
+        )
+        self.assertIn('self.portal.burn_pipe()', transfer_source)
+        self.assertIn(
+            'self._confirm_auto_stability_trigger_step_completion(',
+            transfer_source
+        )
 
         create_samples_source = ast.get_source_segment(
             self.source, self.auto_methods['_create_samples']

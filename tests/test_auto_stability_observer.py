@@ -71,6 +71,21 @@ class AutoStabilityObserverTests(unittest.TestCase):
             ['autowell0C1.0']
         )
 
+    def test_per_well_transfer_ready_is_an_explicit_completion_basis(self):
+        self.observer.record_trigger_transfer_dispatched(
+            0, 'autowell0C2.0', 12.0, 21
+        )
+
+        completion = self.observer.confirm_trigger_transfer_completed(
+            'autowell0C2.0',
+            completion_time_basis='controller_observed_transfer_ready'
+        )
+
+        self.assertEqual(
+            completion['trigger_completion_time_basis'],
+            'controller_observed_transfer_ready'
+        )
+
     def test_raw_scan_reservations_are_unique_and_create_no_scan_file(self):
         self.observer.record_trigger_transfer_dispatched(
             2, 'autowell2C1.0', 15.0, 31
@@ -123,13 +138,21 @@ class AutoStabilityObserverTests(unittest.TestCase):
             reservation=reservation,
             scan_started_at_utc='2026-09-09T11:00:01+00:00',
             scan_completed_at_utc='2026-09-09T11:00:05+00:00',
-            scan_started_monotonic_s=101.0
+            scan_started_monotonic_s=101.0,
+            observation_reason='trigger_completion',
+            mixing_mode='plate_shake',
+            shake_duration_s=30.0,
+            shake_started_at_utc='2026-09-09T11:00:00+00:00',
+            shake_completed_at_utc='2026-09-09T11:00:01+00:00'
         )
 
         self.assertEqual(completion['event_type'], 'raw_scan_completed')
         self.assertEqual(
             completion['active_wellnames'], 'autowell0C1.0;autowell1C1.0'
         )
+        self.assertEqual(completion['observation_reason'], 'trigger_completion')
+        self.assertEqual(completion['mixing_mode'], 'plate_shake')
+        self.assertEqual(completion['shake_duration_s'], 30.0)
         self.assertEqual(
             observer.get_next_cadence_deadline(60, 10), 111.0
         )
@@ -160,7 +183,8 @@ class AutoStabilityObserverTests(unittest.TestCase):
             reservation,
             '2026-09-09T12:00:01+00:00',
             '2026-09-09T12:00:02+00:00',
-            scan_started_monotonic_s=55.0
+            scan_started_monotonic_s=55.0,
+            observation_reason='cadenced_active_set'
         )
 
         # 10 + 60 is the window endpoint. The next 15-second cadence would

@@ -4428,7 +4428,21 @@ class Controller(ABC):
         '''
         return []
 
-    def _confirm_auto_stability_trigger_completion(self, pending_wellnames):
+    def _requires_auto_stability_per_well_completion(self, row):
+        '''Return whether this transfer needs a per-well completion barrier.
+
+        The legacy/manual controller remains inert.  Auto monitor mode
+        overrides this only for the configured final trigger reagent, so its
+        per-well reader timing never changes ordinary transfer grouping.
+        '''
+        return False
+
+    def _confirm_auto_stability_trigger_step_completion(self, pending_wellnames):
+        '''No-op per-step completion hook for non-Auto controllers.'''
+        return False
+
+    def _confirm_auto_stability_trigger_completion(
+            self, pending_wellnames, observe_completed_wells=False):
         '''No-op completion hook for non-Auto controllers.'''
         return None
 
@@ -4467,14 +4481,21 @@ class Controller(ABC):
             print(f"<<controller>> skipping transfer from {src}: all destination volumes are 0 uL")
             return
 
-        # Stage 12B only records trigger transfers that this existing method
-        # already dispatches. A well remains pending until the unchanged
-        # save/FTP barrier below returns; no new wait, scan, or shake is added.
+        # Stage 12B records only existing trigger transfers.  In Stage 12C,
+        # the final reaction-defining reagent is sent one well at a time only
+        # for an enabled Auto stability monitor run.  The robot's ordinary
+        # ready acknowledgement then gives each physical well its own durable
+        # controller-observed completion time without changing legacy/manual
+        # grouping, source selection, transfer volumes, or tip policy.
         pending_stability_wellnames = []
+        observed_stability_well_completion = False
+        requires_per_well_stability_completion = (
+            self._requires_auto_stability_per_well_completion(row)
+        )
 
         #temporarilly just the raw callbacks
         callbacks = row['callbacks'].replace(' ', '').split(',') if row['callbacks'] else []
-        if callbacks:
+        if callbacks or requires_per_well_stability_completion:
             #if there were callbacks, you must send transfer one at a time, breaking up into
             #iterate through each transfer_step we're doing.
             for callback_num, transfer_step in enumerate(transfer_steps):
@@ -4482,13 +4503,27 @@ class Controller(ABC):
                 command_id = self.portal.send_pack(
                     'transfer', src, [transfer_step]
                 )
-                pending_stability_wellnames.extend(
+                newly_pending_stability_wellnames = (
                     self._record_auto_stability_trigger_dispatch(
                         row,
                         [transfer_step],
                         command_id
                     )
                 )
+                pending_stability_wellnames.extend(
+                    newly_pending_stability_wellnames
+                )
+                if newly_pending_stability_wellnames:
+                    # ``ready`` is emitted by the Pi after this one transfer
+                    # packet has executed.  This is intentionally stronger
+                    # and more precise than assigning every well in a large
+                    # trigger cohort one later common save/FTP timestamp.
+                    self.portal.burn_pipe()
+                    if self._confirm_auto_stability_trigger_step_completion(
+                            newly_pending_stability_wellnames):
+                        observed_stability_well_completion = True
+                    for wellname in newly_pending_stability_wellnames:
+                        pending_stability_wellnames.remove(wellname)
                 #then send a callback for each callback you've got 
                 for callback in callbacks:
                     self._send_callback(callback, transfer_step[0], callback_num, row, i)
@@ -4516,7 +4551,8 @@ class Controller(ABC):
 
         self.save()
         self._confirm_auto_stability_trigger_completion(
-            pending_stability_wellnames
+            pending_stability_wellnames,
+            observe_completed_wells=observed_stability_well_completion
         )
 
     def _send_callback(self, callback, product, callback_num, row, i):
@@ -5512,14 +5548,13 @@ class AutoContr(Controller):
         self._auto_plate_cursor_initialized = False
 
     def _initialize_auto_stability_configuration(self):
-        '''Parse the inert Stage-12 stability configuration before prechecks.
+        '''Validate Stage-12 monitor settings before the normal prechecks.
 
-        Stage 12A intentionally stores and validates a monitor-only request
-        without scheduling a scan, invoking the plate reader/shaker, changing
-        protocol rows, or changing optimizer selection.  The trigger is
-        checked against the input-template execution order now, before the
-        controller has a robot connection, so an unsafe ordering cannot reach
-        later physical stages.
+        The configuration is parsed before a robot connection exists, so an
+        unsafe trigger order cannot reach physical execution.  In a real
+        monitor-mode run, the separately initialized Stage-12C scheduler will
+        later perform its documented shake and reader observations; this
+        method itself does not access hardware or change optimizer selection.
         '''
         header_dict = {
             row[0]: row[1]
@@ -5553,9 +5588,9 @@ class AutoContr(Controller):
             print(
                 '<<controller>> Auto stability monitoring configured: '
                 'trigger={}, schedule={}, window={} s, interval={} s, '
-                'minimum peak absorbance={}, mixing={}. Stage 12A stores '
-                'this configuration only; it does not yet change scanning, '
-                'mixing, QC, GP training, or recipe selection.'.format(
+                'minimum peak absorbance={}, mixing={}. A real monitor-mode '
+                'run will use the Stage 12C shake/scan scheduler; QC, GP '
+                'training, and recipe selection remain unchanged.'.format(
                     stability_settings['auto_stability_trigger_reagent'],
                     stability_settings['auto_stability_scan_schedule'],
                     stability_settings['auto_stability_observation_window_s'],
@@ -5566,7 +5601,7 @@ class AutoContr(Controller):
             )
 
     def _initialize_auto_stability_observer(self):
-        '''Initialize Stage 12B's passive observer for a real monitor run.
+        '''Initialize the Stage-12 observer for a real monitor run.
 
         The ordinary preflight simulation has no live-run journal and must not
         create durability artifacts in the eventual run directory. The
@@ -5588,8 +5623,9 @@ class AutoContr(Controller):
             ]
         )
         print(
-            '<<controller>> initialized passive Auto stability observer at {}. '
-            'Stage 12B adds no stability scan, shake, or scheduler.'.format(
+            '<<controller>> initialized Auto stability observer at {}. '
+            'Stability scans begin only after a confirmed trigger transfer.'
+            .format(
                 self.auto_stability_observer.manifest_path
             )
         )
@@ -5624,15 +5660,31 @@ class AutoContr(Controller):
             pending_wellnames.append(wellname)
         return pending_wellnames
 
-    def _confirm_auto_stability_trigger_completion(self, pending_wellnames):
-        '''Promote pending wells only after the existing save/FTP barrier returns.'''
+    def _requires_auto_stability_per_well_completion(self, row):
+        '''Use a Pi ready acknowledgement for each monitor-mode trigger well.'''
+        return self._is_auto_stability_trigger_row(row)
+
+    def _confirm_auto_stability_trigger_step_completion(self, pending_wellnames):
+        '''Promote one trigger well after its own Pi transfer acknowledgement.'''
+        if self.auto_stability_observer is None:
+            return False
+        for wellname in pending_wellnames:
+            self.auto_stability_observer.confirm_trigger_transfer_completed(
+                wellname,
+                completion_time_basis='controller_observed_transfer_ready'
+            )
+        return bool(pending_wellnames)
+
+    def _confirm_auto_stability_trigger_completion(
+            self, pending_wellnames, observe_completed_wells=False):
+        '''Finish legacy pending promotion, then observe the completed cohort.'''
         if self.auto_stability_observer is None:
             return
         for wellname in pending_wellnames:
             self.auto_stability_observer.confirm_trigger_transfer_completed(
                 wellname
             )
-        if pending_wellnames:
+        if pending_wellnames or observe_completed_wells:
             # A trigger completion is the only point at which a newly made
             # well may enter the active set. The standardized shake is applied
             # once to the whole plate, then one unmerged scan captures every
@@ -5732,6 +5784,10 @@ class AutoContr(Controller):
         )
 
         plate_is_in_reader = False
+        shake_started_at_utc = None
+        shake_completed_at_utc = None
+        shake_duration_s = 0.0
+        mixing_mode = 'none'
         try:
             # The transfer path's existing save/FTP barrier has already
             # completed before this method is called. Home/burn here follows
@@ -5744,8 +5800,15 @@ class AutoContr(Controller):
                 # Match the repository's ordinary default plate-reader shake
                 # duration. Cadence-only observations intentionally do not
                 # re-mix the chemistry, avoiding repeated perturbation of a
-                # stability trajectory.
-                self.pr.shake(30)
+                # stability trajectory. Record the actual controller-side
+                # interval so later stability analysis never infers it.
+                mixing_mode = self.robo_params[
+                    'auto_stability_mixing_mode'
+                ]
+                shake_duration_s = 30.0
+                shake_started_at_utc = self._auto_stability_utc_now()
+                self.pr.shake(shake_duration_s)
+                shake_completed_at_utc = self._auto_stability_utc_now()
             # Timestamp the reader acquisition itself, not the preceding home
             # or standardized shake setup.
             scan_started_at_utc = self._auto_stability_utc_now()
@@ -5753,7 +5816,8 @@ class AutoContr(Controller):
             self.pr.run_protocol(
                 scan_protocol,
                 reservation['raw_scan_basename'],
-                layout=well_locations
+                layout=well_locations,
+                record_in_aggregate=False
             )
             scan_completed_at_utc = self._auto_stability_utc_now()
             scan_completed_monotonic_s = time.monotonic()
@@ -5785,7 +5849,12 @@ class AutoContr(Controller):
             scan_started_at_utc=scan_started_at_utc,
             scan_completed_at_utc=scan_completed_at_utc,
             scan_started_monotonic_s=scan_started_monotonic_s,
-            scan_completed_monotonic_s=scan_completed_monotonic_s
+            scan_completed_monotonic_s=scan_completed_monotonic_s,
+            observation_reason=reason,
+            mixing_mode=mixing_mode,
+            shake_duration_s=shake_duration_s,
+            shake_started_at_utc=shake_started_at_utc,
+            shake_completed_at_utc=shake_completed_at_utc
         )
         return reservation
 
@@ -31408,13 +31477,17 @@ class AbstractPlateReader(ABC):
         '''
         pass
 
-    def run_protocol(self, protocol_name, filename, layout=None):
+    def run_protocol(
+            self, protocol_name, filename, layout=None,
+            record_in_aggregate=True):
         r'''
         In the abstract version, a dummy file will be written.  
         params:  
             str protocol_name: the name of the protocol that will be edited  
             list<str> layout: the wells that you want to be used for the protocol ordered.
               (first will be X1, second X2 etc. If not specified will not alter layout)  
+            bool record_in_aggregate: retained for interface compatibility with
+              PlateReader. Dummy scans have no aggregate reader dataframe.
         '''
         
         filename = '{}.csv'.format(filename)
@@ -31681,7 +31754,9 @@ class PlateReader(AbstractPlateReader):
         self.exec_macro('ImportLayout', protocol_name, self.PROTOCOL_PATH, filepath_win)
         os.remove(filepath_lin)
 
-    def run_protocol(self, protocol_name, filename,layout=None):
+    def run_protocol(
+            self, protocol_name, filename, layout=None,
+            record_in_aggregate=True):
         r'''
         params:  
             str protocol_name: the name of the protocol that will be edited  
@@ -31696,17 +31771,22 @@ class PlateReader(AbstractPlateReader):
         #Note, here I am clearly passing in a save path for the file, but BMG tends to ignore
         #that, so we move it from the default landing zone to where I actually want it
         if self.simulate:
-            super().run_protocol(protocol_name, filename, layout)
+            super().run_protocol(
+                protocol_name,
+                filename,
+                layout,
+                record_in_aggregate=record_in_aggregate
+            )
         else:
             shutil.copyfile(os.path.join(self.SPECTRO_DATA_PATH, "{}.csv".format(filename)), 
                     os.path.join(self.data_path, "{}.csv".format(filename)))
-        
-       
-            self.data.AddToDF("{}.csv".format(filename))
 
-            self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.experiment_name, 'full_df')))
-            
-            self.data.AddReagentInfo()
+            if record_in_aggregate:
+                self.data.AddToDF("{}.csv".format(filename))
+
+                self.data.df.to_csv(os.path.join(self.data_path, "{}{}.csv".format(self.experiment_name, 'full_df')))
+
+                self.data.AddReagentInfo()
         
 
 
