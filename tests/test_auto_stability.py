@@ -3,6 +3,8 @@
 import ast
 import math
 import os
+import shutil
+import tempfile
 import textwrap
 import unittest
 
@@ -346,6 +348,16 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         self.assertIn('record_in_aggregate=False', observation_source)
         self.assertIn('shutil.move(source_path, destination_path)', observation_source)
         self.assertNotIn('merge_scans(', observation_source)
+        self.assertIn(
+            'get_active_wells_within_observation_window(', observation_source
+        )
+        self.assertLess(
+            observation_source.index('get_active_wells_within_observation_window('),
+            observation_source.index('observer.reserve_raw_scan(')
+        )
+        self.assertIn(
+            'record_raw_scan_skipped_expired(', observation_source
+        )
 
         plate_reader_methods = {
             node.name: node
@@ -410,6 +422,143 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         for invalid_time in (0, -1, 30.5, 'not-a-time', float('nan')):
             with self.assertRaises(ValueError):
                 shake(fake_reader, invalid_time)
+
+    def test_stage_12c_excludes_expired_wells_at_reader_scan_start(self):
+        '''Reader staging must narrow the raw layout before it is reserved.'''
+        observation_source = textwrap.dedent(ast.get_source_segment(
+            self.source,
+            self.auto_methods['_run_auto_stability_observation']
+        ))
+
+        class FakeTime(object):
+            def __init__(self):
+                self.values = iter((50.0, 75.0, 76.0))
+
+            def monotonic(self):
+                return next(self.values)
+
+        class FakePortal(object):
+            def send_pack(self, command):
+                self.last_command = command
+
+            def burn_pipe(self):
+                self.burned = True
+
+        class FakeReader(object):
+            def __init__(self, data_path):
+                self.data_path = data_path
+                self.layouts = []
+
+            def exec_macro(self, command):
+                self.last_macro = command
+
+            def run_protocol(self, protocol, basename, layout,
+                             record_in_aggregate):
+                self.layouts.append(list(layout))
+                self.record_in_aggregate = record_in_aggregate
+                with open(os.path.join(self.data_path, basename + '.csv'),
+                          'w', encoding='utf-8') as output_file:
+                    output_file.write('synthetic raw scan')
+
+        class FakeObserver(object):
+            def __init__(self, data_path):
+                self.records = [
+                    {'wellname': 'well_a', 'batch_number': 0,
+                     'activation_monotonic_s': 10.0},
+                    {'wellname': 'well_b', 'batch_number': 0,
+                     'activation_monotonic_s': 25.0},
+                ]
+                self.data_path = data_path
+                self.reserved_wellnames = None
+                self.completed = None
+                self.skips = []
+
+            def get_active_wells(self):
+                return [dict(record) for record in self.records]
+
+            def get_active_wells_within_observation_window(
+                    self, window_s, now_monotonic_s=None):
+                return [
+                    dict(record) for record in self.records
+                    if now_monotonic_s < (
+                        record['activation_monotonic_s'] + window_s
+                    )
+                ]
+
+            def reserve_raw_scan(self, batch_number, wellnames):
+                self.reserved_wellnames = list(wellnames)
+                return {
+                    'event_type': 'raw_scan_reserved',
+                    'batch_number': batch_number,
+                    'raw_scan_basename': 'synthetic_raw_scan',
+                    'raw_scan_relative_path': os.path.join(
+                        'stability', 'raw_scans', 'synthetic_raw_scan.csv'
+                    ),
+                }
+
+            def record_raw_scan_completed(self, **kwargs):
+                self.completed = kwargs
+
+            def record_raw_scan_skipped_expired(self, *args):
+                self.skips.append(args)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            os.makedirs(os.path.join(
+                temporary_directory, 'stability', 'raw_scans'
+            ))
+            fake_time = FakeTime()
+            namespace = {
+                'os': os,
+                'shutil': shutil,
+                'time': fake_time,
+            }
+            exec(observation_source, namespace)
+            observation_method = namespace['_run_auto_stability_observation']
+
+            class FakeController(object):
+                def __init__(self):
+                    self.auto_stability_observer = FakeObserver(
+                        temporary_directory
+                    )
+                    self.robo_params = {
+                        'auto_stability_observation_window_s': 60.0,
+                    }
+                    self.portal = FakePortal()
+                    self.pr = FakeReader(temporary_directory)
+                    self.reader_wellnames = None
+
+                @staticmethod
+                def _auto_stability_utc_now():
+                    return '2026-09-11T00:00:00+00:00'
+
+                @staticmethod
+                def _get_auto_stability_scan_protocol():
+                    return 'NC_synthesis'
+
+                def _get_auto_stability_reader_locations(self, wellnames):
+                    self.reader_wellnames = list(wellnames)
+                    return ['B01']
+
+            fake_controller = FakeController()
+            result = observation_method(
+                fake_controller,
+                reason='cadenced_active_set',
+                shake_before_scan=False
+            )
+
+            self.assertEqual(result['raw_scan_basename'], 'synthetic_raw_scan')
+            self.assertEqual(
+                fake_controller.auto_stability_observer.reserved_wellnames,
+                ['well_b']
+            )
+            self.assertEqual(fake_controller.reader_wellnames, ['well_b'])
+            self.assertEqual(fake_controller.pr.layouts, [['B01']])
+            self.assertFalse(fake_controller.pr.record_in_aggregate)
+            self.assertEqual(fake_controller.auto_stability_observer.skips, [])
+            self.assertTrue(os.path.exists(os.path.join(
+                temporary_directory,
+                'stability', 'raw_scans', 'synthetic_raw_scan.csv'
+            )))
 
 
 if __name__ == '__main__':

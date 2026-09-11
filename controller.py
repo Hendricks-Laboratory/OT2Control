@@ -5759,29 +5759,21 @@ class AutoContr(Controller):
         if observer is None:
             return None
 
-        active_records = observer.get_active_wells()
-        if not active_records:
+        candidate_records = observer.get_active_wells()
+        if not candidate_records:
             return None
-        wellnames = [record['wellname'] for record in active_records]
-        batch_numbers = {record['batch_number'] for record in active_records}
+        candidate_wellnames = [
+            record['wellname'] for record in candidate_records
+        ]
+        batch_numbers = {
+            record['batch_number'] for record in candidate_records
+        }
         if len(batch_numbers) != 1:
             raise RuntimeError(
                 'Auto stability monitoring refuses to combine active wells '
                 'from multiple batches in one reader scan.'
             )
         batch_number = batch_numbers.pop()
-        scan_protocol = self._get_auto_stability_scan_protocol()
-        well_locations = self._get_auto_stability_reader_locations(wellnames)
-        reservation = observer.reserve_raw_scan(batch_number, wellnames)
-
-        print(
-            '<<controller>> Auto stability observation {}: {} active well(s), '
-            'raw scan {}.'.format(
-                reason,
-                len(wellnames),
-                reservation['raw_scan_basename']
-            )
-        )
 
         plate_is_in_reader = False
         shake_started_at_utc = None
@@ -5796,6 +5788,29 @@ class AutoContr(Controller):
             self.portal.burn_pipe()
             self.pr.exec_macro('PlateIn')
             plate_is_in_reader = True
+
+            # Reader staging itself can consume a meaningful part of a short
+            # stability window. Do not shake an already expired set.
+            staged_monotonic_s = time.monotonic()
+            staged_records = observer.get_active_wells_within_observation_window(
+                self.robo_params['auto_stability_observation_window_s'],
+                now_monotonic_s=staged_monotonic_s
+            )
+            if not staged_records:
+                observer.record_raw_scan_skipped_expired(
+                    batch_number,
+                    candidate_wellnames,
+                    reason,
+                    self.robo_params['auto_stability_observation_window_s'],
+                    staged_monotonic_s
+                )
+                print(
+                    '<<controller>> Auto stability observation {} skipped: '
+                    'reader staging reached no in-window active wells.'.format(
+                        reason
+                    )
+                )
+                return None
             if shake_before_scan:
                 # Match the repository's ordinary default plate-reader shake
                 # duration. Cadence-only observations intentionally do not
@@ -5809,10 +5824,51 @@ class AutoContr(Controller):
                 shake_started_at_utc = self._auto_stability_utc_now()
                 self.pr.shake(shake_duration_s)
                 shake_completed_at_utc = self._auto_stability_utc_now()
-            # Timestamp the reader acquisition itself, not the preceding home
-            # or standardized shake setup.
-            scan_started_at_utc = self._auto_stability_utc_now()
+
+            # Define window eligibility at the actual reader-run boundary,
+            # after all home/PlateIn/shake staging. A physical reader scan can
+            # still finish later; its full interval is retained for audit, but
+            # no well is included if its scan starts outside its own window.
             scan_started_monotonic_s = time.monotonic()
+            active_records = observer.get_active_wells_within_observation_window(
+                self.robo_params['auto_stability_observation_window_s'],
+                now_monotonic_s=scan_started_monotonic_s
+            )
+            if not active_records:
+                observer.record_raw_scan_skipped_expired(
+                    batch_number,
+                    candidate_wellnames,
+                    reason,
+                    self.robo_params['auto_stability_observation_window_s'],
+                    scan_started_monotonic_s
+                )
+                print(
+                    '<<controller>> Auto stability observation {} skipped: '
+                    'no active well remained in-window at reader scan start.'
+                    .format(reason)
+                )
+                return None
+            wellnames = [record['wellname'] for record in active_records]
+            active_batch_numbers = {
+                record['batch_number'] for record in active_records
+            }
+            if active_batch_numbers != {batch_number}:
+                raise RuntimeError(
+                    'Auto stability monitoring detected a changed active '
+                    'batch while staging a reader scan.'
+                )
+            scan_protocol = self._get_auto_stability_scan_protocol()
+            well_locations = self._get_auto_stability_reader_locations(wellnames)
+            reservation = observer.reserve_raw_scan(batch_number, wellnames)
+            scan_started_at_utc = self._auto_stability_utc_now()
+            print(
+                '<<controller>> Auto stability observation {}: {} in-window '
+                'active well(s), raw scan {}.'.format(
+                    reason,
+                    len(wellnames),
+                    reservation['raw_scan_basename']
+                )
+            )
             self.pr.run_protocol(
                 scan_protocol,
                 reservation['raw_scan_basename'],

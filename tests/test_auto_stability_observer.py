@@ -206,6 +206,61 @@ class AutoStabilityObserverTests(unittest.TestCase):
         )
         self.assertEqual(observer.get_active_wells(), [])
 
+    def test_reader_start_eligibility_excludes_stale_wells_without_mutation(self):
+        monotonic_time = [10.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-STAGING',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-09-09T12:00:00+00:00',
+            monotonic_clock=lambda: monotonic_time[0]
+        )
+        for wellname, activation_time in (
+                ('autowell0C3.0', 10.0),
+                ('autowell1C3.0', 25.0)):
+            monotonic_time[0] = activation_time
+            observer.record_trigger_transfer_dispatched(0, wellname, 12, 3)
+            observer.confirm_trigger_transfer_completed(wellname)
+
+        # At scan start 75, the 60 s window is closed for the first well but
+        # still open for the second. Reader staging must not keep the first
+        # well in the active-set layout merely because it was active earlier.
+        eligible = observer.get_active_wells_within_observation_window(
+            60,
+            now_monotonic_s=75.0
+        )
+        self.assertEqual(
+            [record['wellname'] for record in eligible],
+            ['autowell1C3.0']
+        )
+        self.assertEqual(
+            [record['wellname'] for record in observer.get_active_wells()],
+            ['autowell0C3.0', 'autowell1C3.0']
+        )
+
+        with self.assertRaises(AutoStabilityObserverError):
+            observer.record_raw_scan_skipped_expired(
+                0,
+                ['autowell0C3.0', 'autowell1C3.0'],
+                'cadenced_active_set',
+                60,
+                75.0
+            )
+
+        skipped = observer.record_raw_scan_skipped_expired(
+            0,
+            ['autowell0C3.0', 'autowell1C3.0'],
+            'cadenced_active_set',
+            60,
+            85.0
+        )
+        self.assertEqual(skipped['event_type'], 'raw_scan_skipped_expired')
+        self.assertEqual(skipped['raw_scan_id'], '')
+        self.assertEqual(
+            self._manifest_rows()[-1]['active_wellnames'],
+            'autowell0C3.0;autowell1C3.0'
+        )
+
     def test_invalid_transition_cannot_create_a_false_active_well(self):
         with self.assertRaises(AutoStabilityObserverError):
             self.observer.confirm_trigger_transfer_completed('missing-well')

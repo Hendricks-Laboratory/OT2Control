@@ -312,6 +312,98 @@ class AutoStabilityObserver:
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
 
+    def get_active_wells_within_observation_window(
+            self, observation_window_s, now_monotonic_s=None):
+        '''Return active wells whose window remains open at reader-scan start.
+
+        A plate-reader acquisition has a measurable interval, not an invented
+        per-well instantaneous timestamp.  Stage 12C therefore uses the
+        controller's ``run_protocol`` start boundary as the eligibility
+        decision and retains both reader interval endpoints in the manifest.
+        This helper is intentionally non-mutating: the scheduler separately
+        records expired windows after reader access has been released.
+        '''
+        try:
+            observation_window_s = float(observation_window_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Observation window must be numeric.'
+            )
+        if not math.isfinite(observation_window_s) or observation_window_s <= 0:
+            raise AutoStabilityObserverError(
+                'Observation window must be finite and positive.'
+            )
+        if now_monotonic_s is None:
+            now_monotonic_s = self._monotonic_clock()
+        try:
+            now_monotonic_s = float(now_monotonic_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Observation time must be numeric.'
+            )
+        if not math.isfinite(now_monotonic_s):
+            raise AutoStabilityObserverError(
+                'Observation time must be finite.'
+            )
+
+        eligible_records = []
+        for record in self.get_active_wells():
+            activation_time = record['activation_monotonic_s']
+            if activation_time is None:
+                raise AutoStabilityObserverError(
+                    'Active well {} has no monotonic activation time.'.format(
+                        record['wellname']
+                    )
+                )
+            if now_monotonic_s < activation_time + observation_window_s:
+                eligible_records.append(record)
+        return eligible_records
+
+    def record_raw_scan_skipped_expired(
+            self,
+            batch_number,
+            wellnames,
+            observation_reason,
+            observation_window_s,
+            now_monotonic_s):
+        '''Record why reader staging produced no in-window raw measurement.'''
+        wellnames = self._normalize_active_wellnames(wellnames)
+        batch_number = int(batch_number)
+        for wellname in wellnames:
+            if self._active_wells[wellname]['batch_number'] != batch_number:
+                raise AutoStabilityObserverError(
+                    'Skipped raw-scan batch {} does not match active well {}.'
+                    .format(batch_number, wellname)
+                )
+        observation_reason = str(observation_reason).strip()
+        if not observation_reason:
+            raise AutoStabilityObserverError(
+                'observation_reason cannot be blank.'
+            )
+        remaining_records = self.get_active_wells_within_observation_window(
+            observation_window_s,
+            now_monotonic_s=now_monotonic_s
+        )
+        if remaining_records:
+            raise AutoStabilityObserverError(
+                'A raw stability scan cannot be marked skipped as expired '
+                'while an active well remains in-window.'
+            )
+        return self._append_event(
+            'raw_scan_skipped_expired',
+            batch_number=batch_number,
+            wellname='__active_set__',
+            activation_status=ACTIVATION_STATUS_ACTIVE,
+            active_wellnames=';'.join(wellnames),
+            observation_reason=observation_reason,
+            scan_time_basis='reader_scan_start_window_eligibility',
+            notes=(
+                'No raw stability scan was reserved or run because reader '
+                'staging reached the scan-start boundary after every '
+                'candidate well\'s configured observation window had closed.'
+            )
+        )
+
     def _normalize_active_wellnames(self, wellnames):
         if isinstance(wellnames, str):
             wellnames = [wellnames]
