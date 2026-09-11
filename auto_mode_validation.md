@@ -53,7 +53,7 @@ recent feature commit only.
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12C are implemented with hardware-free validation; Stage 12C changes real monitor-mode reader behavior and requires a controlled dry debug before chemistry use. |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12C are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. Stage 12C is closed only as a monitoring foundation; it is not clearance for large-cohort stability chemistry or stability-directed selection. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -166,7 +166,43 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 11C2 active same-container source-refill workbook response | Implemented; hardware-free validation passed; controlled dry debug required | Only the existing source-volume pre-batch hold may activate the separate action workbook. A request binds the run ID, fresh request ID, held batch/action, expected post-activation journal revision, permitted terminal-equivalent actions, and exact preflight candidates. The standard-library XLSX reader accepts only a matching, explicitly confirmed response (`REFILL` plus listed candidate and finite measured mass; `RETRY`; or `END`). Invalid/stale/mismatched responses write a durable rejection and receive a new request identity without changing Pi state. A valid refill still uses the existing Pi mass-refresh and unchanged-batch preflight path; terminal recovery remains the offline fallback. No Drive API, credentials, remote calls, recipe/model changes, new Pi command, or unattended continuation is added. |
 | Stage 12A optical-stability configuration and metric contract | Implemented; Python 3.9 compilation and hardware-free synthetic tests passed; no dry debug required | `auto_stability.py` provides a pure, monitor-only Header parser and deterministic fixed-window post-peak metric. Missing settings remain inert (`off`). Monitor mode requires an explicit final non-water trigger reagent, positive observation window, signal floor, and cadence interval for the currently supported `cadenced_active_set` schedule; only `plate_shake` is accepted as the reserved future mixing policy. This configuration component itself does not access hardware, QC, GP, or acquisition behavior; Stage 12C consumes it in real monitor-mode execution. Future active modes fail closed. |
 | Stage 12B observer and scan-manifest foundation | Implemented; Python 3.9 compilation and hardware-free transition/source-contract tests passed; no dry debug required in isolation | For a real monitor-mode run only, the controller initializes an atomic `pr_data/auto_stability_scan_manifest.csv` plus `pr_data/stability/raw_scans/`. It records each configured-trigger transfer as **pending** at dispatch, then promotes that well only after a recorded controller completion point. Stage 12C uses the existing Pi transfer `ready` acknowledgement to establish a per-well controller-observed completion reference; it remains explicitly distinct from a direct dispense timestamp. The observer reserves deterministic unique raw-scan paths without creating a scan file. Stage 12B itself introduced no reader call, plate shake, new Pi packet, model update, or recipe-selection behavior. |
-| Stage 12C active-set shake/scan scheduler | Implemented; hardware-free scheduler/source-contract tests passed; controlled dry debug required | In monitor mode, the final trigger reagent is dispatched one well at a time so each well receives an explicit Pi `ready`-acknowledged controller timestamp; source choice, transfer volume, and tip policy remain unchanged. After the completed cohort, Auto performs one standard 30 s whole-plate shake followed by one unmerged scan of every active well. Each raw CSV moves to its reserved `pr_data/stability/raw_scans/` path without entering the legacy aggregate reader file. The manifest records per-well completion basis plus observation reason, mixing mode, shake duration/interval, and reader start/end UTC interval. `cadenced_active_set` adds unshaken scans only while wells remain within their configured window; `each_completion` is deliberately rejected because it cannot create a time-resolved trajectory with the current nonperturbing whole-plate policy. Every batch waits until active windows are closed before later selection. Missing reader output, mixed-batch scans, or invalid reader locations fail closed. This changes Lab-PC reader behavior only; no new Pi packet or Auto-main change is introduced. |
+| Stage 12C active-set shake/scan scheduler | Implemented; hardware-free scheduler/source-contract tests and controlled dry debug passed; closed as bounded plate-shake monitoring only | In monitor mode, the final trigger reagent is dispatched one well at a time so each well receives an explicit Pi `ready`-acknowledged controller timestamp; source choice, transfer volume, and tip policy remain unchanged. After the completed trigger cohort, Auto performs one standard 30 s whole-plate shake followed by one unmerged scan of every eligible active well. Each raw CSV moves to its reserved `pr_data/stability/raw_scans/` path without entering the legacy aggregate reader file. Manifest schema v2 records per-well completion basis plus observation reason, mixing mode, shake duration/interval, and reader start/end UTC interval. `cadenced_active_set` adds unshaken scans only while wells remain within their configured window; `each_completion` is deliberately rejected because it cannot create a time-resolved trajectory with the current nonperturbing whole-plate policy. Every batch waits until active windows are closed before later selection. Missing reader output, mixed-batch scans, or invalid reader locations fail closed. This changes Lab-PC reader behavior only; no new Pi packet or Auto-main change is introduced. |
+
+### Stage 12C controlled dry-debug closure — 2026-09-11
+
+The controlled dry debug in
+`DEBUGRTG_STAGE12C_STABILITYcorrection2` completed normally after the
+reader-shake integer-normalization correction. It validates the bounded
+Stage 12C scheduler contract, not real chemistry or long-cohort throughput:
+
+- two independent sodium-borohydride trigger completions were durably
+  recorded before either well became active;
+- the reader accepted one standardized 30 s whole-plate shake;
+- raw scan `0001` retained both active reader wells (`A01`, `B01`) without
+  entering the legacy aggregate scan;
+- raw scan `0002` retained only `B01`, correctly excluding `A01` after its
+  own 180 s observation window elapsed;
+- the ordinary Auto scan remained a separate compatibility acquisition; and
+- the manifest, raw files, terminal transcript, and final run journal all
+  completed without a controller/reader fault.
+
+The run also establishes important bounded-mode limitations. The first raw
+scan began 69.1–85.6 s after the two trigger acknowledgements because reader
+staging and the whole-plate shake precede it; it is therefore a timestamped
+first post-trigger observation, not a per-well `t0` measurement. The second
+raw scan began within B01's 180 s window but its full reader interval ended
+after that boundary. The current manifest correctly preserves the interval,
+but Stage 12D must classify interval/window relationships explicitly before
+using a scan in a stability metric. Likewise, a requested cadence is a
+minimum scheduler target rather than a guaranteed physical interval while
+the single reader also services the ordinary Auto scan and protocol work.
+
+Stage 12C is consequently closed only for the following controlled policy:
+one shake per completed trigger cohort, subsequent unshaken cadence scans,
+and no later batch until every active window closes. It must not be presented
+as large-batch stability-optimization clearance. The targeted pipette-mixing
+follow-on below is the required route to efficient overlapping active cohorts
+without repeatedly perturbing older trajectories.
 
 ### Stage 12 optical-stability planning record — future stages after 12C
 
@@ -225,25 +261,30 @@ nanometers and absorbance/time:
    than select a spectrally stable blank.
 
 The initial supported mixing method is `plate_shake`, accurately described as
-a whole-plate reader shake. Future `pipette_mix` and `none` options are
-reserved but are unavailable until their own implementation and dry-debug
-validation. The scheduler must record the actual mixing policy and event time.
-It must use a scientifically standardized shake policy so earlier wells are
-not incidentally shaken more than later wells; deciding the exact cohort/batch
-shake cadence belongs to the scheduler stage, not to Stage 12A parsing.
+a whole-plate reader shake. Current Stage 12C applies it once after a completed
+trigger cohort and then blocks a later batch until every active window closes.
+This avoids repeated shake perturbation of older trajectories, but makes its
+first observations increasingly distant from the trigger for long cohorts.
+Future `pipette_mix` and `none` options are reserved but unavailable until
+their own implementation and dry-debug validation. The scheduler must record
+the actual mixing policy and event time; it must never claim a cohort-level
+post-shake scan is a per-well `t0` measurement.
 
 Two scan schedules are planned:
 
 | Schedule | Behavior | Intended use |
 |---|---|---|
-| `each_completion` | After every trigger completion, scan the newly complete well and all earlier complete wells. | Small kinetic batches; maximum density. |
-| `cadenced_active_set` | Immediately scan the new well, then rescan all complete wells at a fixed cadence. | Recommended default; scalable, temporally cleaner. |
+| `each_completion` | Proposed future targeted-mix policy: after each trigger completion, scan the newly complete well and any earlier eligible active wells. | Small kinetic batches; unavailable with current plate-shake policy. |
+| `cadenced_active_set` | Current bounded policy: after a completed trigger cohort, take one whole-plate-shaken active-set scan, then take unshaken active-set scans at requested cadence boundaries while in-window. | Current monitor-only default; actual timing is retained rather than assumed. |
 
 Strict `each_completion` would produce 2,628 well-spectrum observations for
 72 completed wells before follow-up scans. Both schedules therefore preserve
 real timestamps, but `cadenced_active_set` is the default design for larger
 batches. A bounded monitoring deadline must complete or explicitly mark each
-trajectory insufficient before the controller selects a later batch.
+trajectory insufficient before the controller selects a later batch. The
+current reader is serial, so a requested cadence is a target; Stage 12D will
+export requested-versus-achieved timing and interval-boundary status rather
+than infer a regular sampling interval.
 
 `target_ei` and `core3` remain λ-only while stability is in `monitor` mode.
 They must be rejected clearly—not silently repurposed—when active stability
@@ -258,16 +299,21 @@ meaningful stability trajectory.
 |---|---|---|
 | **12A** | Backward-compatible Header parsing and validation; trigger validation; fixed-window trajectory metrics, low-signal handling, λmax drift, and condition-level aggregation functions. Settings are `auto_stability_mode`, `auto_stability_trigger_reagent`, `auto_stability_scan_schedule`, `auto_stability_observation_window_s`, `auto_stability_scan_interval_s`, `auto_stability_min_peak_absorbance`, and `auto_stability_mixing_mode`. No robot, scan, shake, model, or acquisition behavior changes. | **Implemented.** Python 3.9 compilation and Header/synthetic trajectory tests passed, including a source-level contract that the configuration method does not invoke physical or optimizer methods. No dry debug is needed. |
 | **12B** | Auto-only timestamped scan manifest and active-completed-well observer; unique unmerged raw scan reservations; raw scan and manifest paths under `pr_data/stability/` and `pr_data/auto_stability_scan_manifest.csv`. A trigger dispatch is recorded as pending, then becomes active only after a recorded controller completion point. Stage 12C uses the existing Pi transfer `ready` acknowledgement as a per-well controller-observed timing reference. Ordinary callbacks are preserved. | **Implemented.** Python 3.9 compilation and controller-free observer/source-contract tests passed. No scheduling-enabled dry debug was needed for this foundation alone. |
-| **12C** | Plate-shake active-well scheduler: after a trigger-completed cohort, one 30 s whole-plate shake and one unmerged active-set scan are performed. `cadenced_active_set` adds unshaken in-window scans; `each_completion` is rejected until a separately validated nonperturbing policy exists. Raw CSVs move to `pr_data/stability/raw_scans/`, manifest schema v2 records trigger basis, observation reason, mixing/shake provenance, and reader start/end UTC timestamps, and a batch blocks until every window ends. Missing raw output, invalid reader location/volume, or active wells from multiple batches fail closed. | **Implemented; controlled dry debug required.** Verify trigger timing, active-well membership, shake and scan sequence, raw scan preservation, manifest accuracy, and absence of merged kinetic scans before chemistry use. |
-| **12D** | Separate stability QC; raw per-well trajectories; condition-level aggregation; CSV exports; stability plots and report sections. λmax QC and stability QC remain separate. | Second controlled dry debug: review CSVs, manifest, plot timing, exclusions, and report wording. |
+| **12C** | Plate-shake active-well scheduler: after a trigger-completed cohort, one 30 s whole-plate shake and one unmerged active-set scan are performed. `cadenced_active_set` adds unshaken scans while a well is eligible; `each_completion` is rejected until a separately validated nonperturbing policy exists. Raw CSVs move to `pr_data/stability/raw_scans/`, manifest schema v2 records trigger basis, observation reason, mixing/shake provenance, and reader start/end UTC timestamps, and a batch blocks until every window ends. Missing raw output, invalid reader location/volume, or active wells from multiple batches fail closed. | **Implemented and controlled dry-debug closed.** The 2026-09-11 dry debug verified trigger timing, active-well membership, shake/scan sequence, raw-scan preservation, manifest accuracy, no merged kinetic scans, and correct post-window exclusion. It does not clear long-cohort chemistry or stability-directed selection. |
+| **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | Second controlled dry debug: review trajectories, membership, timing labels, exclusions, replicate aggregation, plots, and report wording. |
 | **12E** | A separate cumulative stability GP trained only on valid QC-approved condition-level stability observations. The λmax GP and its history remain unchanged. | Synthetic model/history validation; no dry debug required at this point. |
 | **12F** | Lexicographic `target_then_stability` selection with two-GP ranking, target compatibility first, meaningful-signal eligibility, trigger-mask exclusion, and explicit rejection of unsupported acquisition combinations. | Third controlled dry debug before any chemistry use with active stability selection. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, and replicate agreement before enabling active selection. |
+| **13A** | Targeted pipette-mixing design and safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum volume, tip/contamination policy, and unsupported-labware rejection. | Hardware-free protocol and safety-contract review. |
+| **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
+| **13C** | Lab-PC overlapping-active-set scheduler: targeted mix only the newly triggered well; coalesce reader scans over the union of eligible new and older active wells; preserve per-well trigger/batch provenance; avoid whole-plate re-shaking of older trajectories. | Supervised dry debug confirming correct mix target, active-set membership, no duplicate scans, and no re-mixing of prior wells. |
+| **13D** | Reader-acquisition consolidation: after compatibility validation, one immutable reader acquisition supplies both ordinary λmax processing and stability extraction, eliminating validated duplicate reader passes without merging or losing provenance. | Regression and supervised dry debug comparing legacy λmax results and stability outputs. |
+| **13E** | Small chemistry comparison of plate shake versus targeted pipette mixing, followed by the decision whether large-batch stability-directed selection is scientifically supported. | Human review of trajectory reproducibility, time-to-first-observation, λmax impact, and practical reader throughput. |
 
-Later follow-ons are targeted plate-well pipette mixing through Auto-main/Pi,
-stability-aware `core3`, stability-aware target-EI or Pareto selection,
-alternative spectral metrics such as integrated area, and special handling for
-intentionally stable low-signal conditions.
+Later follow-ons after the staged targeted-mixing work are stability-aware
+`core3`, stability-aware target-EI or Pareto selection, alternative spectral
+metrics such as integrated area, and special handling for intentionally stable
+low-signal conditions.
 
 ### Current acquisition semantics
 
@@ -888,9 +934,9 @@ not broaden same-container source refill.
   are used (for example, explicit destinations or each preparation-water
   policy); Stage 9 itself is closed under the accepted controlled-debug review;
 - imported-model reconciliation with required Auto preparation;
-- Stage 12 optical nanocrystal-stability mode: monitoring-first scan
-  scheduling and metric validation, then stability modeling and acquisition
-  only after staged dry-debug evidence;
+- Stage 12D–13 optical nanocrystal-stability work: interval-aware trajectory
+  QC/reporting, separate stability modeling and lexicographic selection, then
+  validated targeted pipette mixing and reader-acquisition consolidation;
 - broader model changes such as heteroscedastic/noise-aware GP fitting;
 - unattended or large-scale chemistry optimization;
 - promotion of `Auto-RTG` into `Auto-RTG-v1`.
