@@ -59,7 +59,7 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(
             event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
         )
-        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 2)
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 3)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
@@ -119,6 +119,30 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(rows[0]['event_type'], 'observer_initialized')
         self.assertEqual(rows[-1]['event_type'], 'raw_scan_reserved')
         self.assertEqual(rows[-1]['raw_scan_id'], '0002')
+
+    def test_reservation_persists_one_explicit_reader_location_per_well(self):
+        self.observer.record_trigger_transfer_dispatched(
+            2, 'autowell2C1.0', 15.0, 31
+        )
+        self.observer.confirm_trigger_transfer_completed('autowell2C1.0')
+
+        reservation = self.observer.reserve_raw_scan(
+            2, 'autowell2C1.0', reader_locations=['B7']
+        )
+        completed = self.observer.record_raw_scan_completed(
+            reservation, '2026-09-09T10:00:06+00:00',
+            '2026-09-09T10:00:07+00:00', 12.0,
+            observation_reason='trigger_completion'
+        )
+
+        self.assertEqual(
+            reservation['active_well_locations'], 'autowell2C1.0=B7'
+        )
+        self.assertEqual(
+            completed['active_well_locations'], 'autowell2C1.0=B7'
+        )
+        with self.assertRaises(AutoStabilityObserverError):
+            self.observer.reserve_raw_scan(2, 'autowell2C1.0', ['B7', 'C7'])
 
     def test_active_set_scan_records_one_file_and_a_cadence_deadline(self):
         monotonic_time = [100.0]

@@ -23,6 +23,7 @@ from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import as_completed
 import copy
+import csv
 import socket
 import json
 import dill
@@ -133,6 +134,7 @@ from auto_stability import (
     validate_stability_trigger_reagent
 )
 from auto_stability_observer import AutoStabilityObserver
+from auto_stability_reporting import build_stability_reporting_records
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -5513,6 +5515,10 @@ class AutoContr(Controller):
         # run. It records trigger completion and is later consumed by the
         # Stage-12C scheduler; construction itself does not access the reader.
         self.auto_stability_observer = None
+        # Filled only after Stage-12D has derived reporting artifacts from the
+        # immutable manifest/raw scans. This state is report-only and never
+        # feeds a model, recipe, or physical command.
+        self.auto_stability_reporting_summary = None
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
         # authorize automatic retry, continuation, or model updates.
@@ -5859,7 +5865,11 @@ class AutoContr(Controller):
                 )
             scan_protocol = self._get_auto_stability_scan_protocol()
             well_locations = self._get_auto_stability_reader_locations(wellnames)
-            reservation = observer.reserve_raw_scan(batch_number, wellnames)
+            reservation = observer.reserve_raw_scan(
+                batch_number,
+                wellnames,
+                reader_locations=well_locations
+            )
             scan_started_at_utc = self._auto_stability_utc_now()
             print(
                 '<<controller>> Auto stability observation {}: {} in-window '
@@ -21140,6 +21150,63 @@ class AutoContr(Controller):
                 )
         lines.append('')
 
+        stability_summary = getattr(
+            self, 'auto_stability_reporting_summary', None
+        )
+        if self.robo_params.get('auto_stability_mode') == STABILITY_MODE_MONITOR:
+            lines.append('## Optical-Stability Monitoring (Stage 12D)')
+            lines.append('')
+            lines.append(
+                'Stability monitoring remained report-only in this run: it '
+                'did not alter the GP, recipe selection, target stopping, or '
+                'physical robot execution.'
+            )
+            if not isinstance(stability_summary, dict):
+                lines.append(
+                    'No Stage-12D reporting summary was retained; consult '
+                    '`Debug/terminal_output.txt` for any export warning.'
+                )
+            elif stability_summary.get('error'):
+                lines.append(
+                    'Derived stability artifacts were not generated: `{}`.'
+                    .format(stability_summary['error'])
+                )
+            else:
+                lines.append(
+                    '- Per-well trajectory rows: {}.'.format(
+                        stability_summary.get('trajectory_row_count', 0)
+                    )
+                )
+                lines.append(
+                    '- Eligible well-level stability metrics: {} of {}.'
+                    .format(
+                        stability_summary.get('eligible_well_count', 0),
+                        stability_summary.get('well_metric_count', 0)
+                    )
+                )
+                lines.append(
+                    '- Condition-level stability summaries: {}.'.format(
+                        stability_summary.get('condition_summary_count', 0)
+                    )
+                )
+                lines.append(
+                    '- Metric rule: only scans whose complete reader interval '
+                    'fell inside a well\'s observation window were eligible; '
+                    'intervals that crossed the window endpoint remain in the '
+                    'trajectory/timing audit but are excluded from the rate.'
+                )
+                lines.append(
+                    '- Derived files: `pr_data/stability/` contains timing, '
+                    'trajectory, well-metric, condition-summary, and QC CSVs.'
+                )
+                for plot_path in stability_summary.get('plot_paths', []):
+                    lines.append(
+                        '- Stability plot: `{}`.'.format(
+                            os.path.relpath(plot_path, self.out_path)
+                        )
+                    )
+            lines.append('')
+
         imported_checkpoint = getattr(
             self,
             'imported_auto_model_checkpoint',
@@ -26468,6 +26535,11 @@ class AutoContr(Controller):
                 self._generate_imported_auto_cross_run_plot_suite
             )
 
+            _run_output_step(
+                'final Stage-12D stability plots',
+                self._plot_auto_stability_reporting_artifacts
+            )
+
             # Generate the report last so it can detect and embed every final
             # plot that was successfully written.
             _run_output_step(
@@ -26497,6 +26569,97 @@ class AutoContr(Controller):
                 )
 
         return generated_output_paths
+
+    def _plot_auto_stability_reporting_artifacts(self):
+        '''Plot Stage-12D derived trajectories without fitting or smoothing.'''
+        summary = getattr(self, 'auto_stability_reporting_summary', None)
+        if not isinstance(summary, dict) or 'records' not in summary:
+            return []
+        records = summary['records']
+        plot_dir = os.path.join(self.out_path, 'Plots', 'stability')
+        os.makedirs(plot_dir, exist_ok=True)
+        output_paths = []
+        trajectories = records.get('trajectory_rows', [])
+        grouped = {}
+        for row in trajectories:
+            if (
+                    row.get('elapsed_s_from_trigger_to_scan_start') is None
+                    or row.get('reference_absorbance') is None):
+                continue
+            grouped.setdefault(row.get('wellname', 'unknown'), []).append(row)
+        if grouped:
+            figure, axis = plt.subplots(figsize=(10, 6))
+            for wellname, rows in sorted(grouped.items()):
+                rows = sorted(
+                    rows,
+                    key=lambda row: row['elapsed_s_from_trigger_to_scan_start']
+                )
+                eligible = [
+                    row for row in rows if row.get('metric_eligible_interval')
+                ]
+                excluded = [
+                    row for row in rows if not row.get('metric_eligible_interval')
+                ]
+                if eligible:
+                    axis.plot(
+                        [row['elapsed_s_from_trigger_to_scan_start'] for row in eligible],
+                        [row['reference_absorbance'] for row in eligible],
+                        marker='o', linewidth=1.5, label=str(wellname)
+                    )
+                if excluded:
+                    axis.scatter(
+                        [row['elapsed_s_from_trigger_to_scan_start'] for row in excluded],
+                        [row['reference_absorbance'] for row in excluded],
+                        marker='x', color='0.4', zorder=3
+                    )
+            axis.set_title('Optical-stability trajectories (fixed per-well reference)')
+            axis.set_xlabel('Elapsed time from trigger to reader scan start (s)')
+            axis.set_ylabel('Blank-corrected absorbance')
+            axis.grid(True, alpha=0.25)
+            axis.text(
+                0.01, 0.01,
+                'Circle/line: full reader interval within window. X: retained for audit, excluded from metric.',
+                transform=axis.transAxes, fontsize=8, va='bottom'
+            )
+            axis.legend(loc='best', fontsize=8)
+            trajectory_path = os.path.join(
+                plot_dir, 'stability_per_well_trajectories_final.png'
+            )
+            figure.savefig(trajectory_path, dpi=300, bbox_inches='tight')
+            plt.close(figure)
+            output_paths.append(trajectory_path)
+        summaries = [
+            row for row in records.get('condition_summaries', [])
+            if row.get('condition_loss_rate_mean_absorbance_per_s') is not None
+        ]
+        if summaries:
+            figure, axis = plt.subplots(figsize=(10, 6))
+            labels = [
+                'condition {}'.format(row.get('reaction_number', '?'))
+                for row in summaries
+            ]
+            values = [
+                row['condition_loss_rate_mean_absorbance_per_s']
+                for row in summaries
+            ]
+            errors = [
+                row.get('condition_loss_rate_sample_sd_absorbance_per_s')
+                or 0.0 for row in summaries
+            ]
+            axis.bar(range(len(values)), values, yerr=errors, capsize=4)
+            axis.set_xticks(range(len(labels)))
+            axis.set_xticklabels(labels, rotation=30, ha='right')
+            axis.set_ylabel('Post-peak absorbance loss rate (absorbance/s)')
+            axis.set_title('Condition-level optical-stability summary')
+            axis.grid(axis='y', alpha=0.25)
+            condition_path = os.path.join(
+                plot_dir, 'stability_condition_loss_rate_final.png'
+            )
+            figure.savefig(condition_path, dpi=300, bbox_inches='tight')
+            plt.close(figure)
+            output_paths.append(condition_path)
+        summary['plot_paths'] = output_paths
+        return output_paths
     
     def _apply_auto_lambda_plot_lab_frame_style(self, ax):
         '''
@@ -29060,6 +29223,202 @@ class AutoContr(Controller):
         self._run_auto_optimizer_batches(model, normalize)
         self._finalize_auto_run(model)
 
+    @staticmethod
+    def _parse_auto_stability_active_well_locations(value):
+        '''Parse the immutable ``logical=physical`` raw-scan layout mapping.'''
+        mapping = {}
+        for item in str(value or '').split(';'):
+            item = item.strip()
+            if not item or '=' not in item:
+                continue
+            wellname, location = item.split('=', 1)
+            wellname = wellname.strip()
+            location = location.strip()
+            if wellname and location and wellname not in mapping:
+                mapping[wellname] = location
+        return mapping
+
+    @staticmethod
+    def _write_auto_stability_reporting_csv(output_path, rows):
+        '''Atomically write a derived Stage-12D CSV without touching raw data.'''
+        rows = [dict(row) for row in (rows or [])]
+        column_names = []
+        for row in rows:
+            for column_name in row:
+                if column_name not in column_names:
+                    column_names.append(column_name)
+        if not column_names:
+            column_names = ['status']
+            rows = [{'status': 'no_rows'}]
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                    mode='w', newline='', encoding='utf-8',
+                    dir=os.path.dirname(output_path), delete=False) as handle:
+                temporary_path = handle.name
+                writer = csv.DictWriter(
+                    handle, fieldnames=column_names, extrasaction='ignore'
+                )
+                writer.writeheader()
+                writer.writerows(rows)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        return output_path
+
+    def _load_auto_stability_reporting_spectra(self, manifest_rows):
+        '''Load raw reader files using their saved historical layouts.
+
+        The normal PlateReader parser and existing Auto blank correction are
+        reused. A raw file without a persisted layout is reported as
+        unavailable rather than guessed from later plate state.
+        '''
+        spectra_by_raw_scan = {}
+        qc_rows = []
+        for row in manifest_rows:
+            if row.get('event_type') != 'raw_scan_completed':
+                continue
+            raw_scan_id = str(row.get('raw_scan_id', '')).strip()
+            if not raw_scan_id:
+                continue
+            layout_by_well = self._parse_auto_stability_active_well_locations(
+                row.get('active_well_locations')
+            )
+            active_wells = [
+                well.strip() for well in str(
+                    row.get('active_wellnames', '')
+                ).split(';') if well.strip()
+            ]
+            if set(active_wells) != set(layout_by_well):
+                for wellname in active_wells:
+                    qc_rows.append({
+                        'wellname': wellname,
+                        'raw_scan_id': raw_scan_id,
+                        'qc_status': 'missing_historical_reader_layout',
+                        'qc_reason': (
+                            'The raw scan has no complete immutable logical '
+                            'well to physical reader-location mapping. Stage '
+                            '12D will not infer a layout from later state.'
+                        ),
+                    })
+                continue
+            location_to_well = {
+                location: wellname
+                for wellname, location in layout_by_well.items()
+            }
+            relative_path = str(row.get('raw_scan_relative_path', '')).strip()
+            basename, extension = os.path.splitext(relative_path)
+            if extension.lower() != '.csv' or not basename:
+                for wellname in active_wells:
+                    qc_rows.append({
+                        'wellname': wellname,
+                        'raw_scan_id': raw_scan_id,
+                        'qc_status': 'invalid_raw_scan_path',
+                        'qc_reason': 'Manifest raw scan path is missing or invalid.',
+                    })
+                continue
+            try:
+                scan_data, _metadata = self.pr.load_reader_data(
+                    basename, location_to_well
+                )
+                # The existing extractor carries the lab's established blank
+                # correction semantics and mutates only this deep copy.
+                corrected_scan_data = scan_data.copy(deep=True)
+                self._extract_auto_lambda_maxima(corrected_scan_data)
+                spectra_by_raw_scan[raw_scan_id] = {}
+                for wellname in active_wells:
+                    if wellname not in corrected_scan_data.columns:
+                        raise ValueError(
+                            'Reader output did not contain logical well {}.'
+                            .format(wellname)
+                        )
+                    spectra_by_raw_scan[raw_scan_id][wellname] = {
+                        'spectrum_by_wavelength_nm': {
+                            float(wavelength): float(absorbance)
+                            for wavelength, absorbance in
+                            corrected_scan_data[wellname].items()
+                            if math.isfinite(float(wavelength))
+                            and math.isfinite(float(absorbance))
+                        }
+                    }
+            except Exception as exc:
+                for wellname in active_wells:
+                    qc_rows.append({
+                        'wellname': wellname,
+                        'raw_scan_id': raw_scan_id,
+                        'qc_status': 'raw_scan_load_failed',
+                        'qc_reason': str(exc),
+                    })
+        return spectra_by_raw_scan, qc_rows
+
+    def _generate_auto_stability_reporting_exports(self):
+        '''Generate Stage-12D data artifacts only after an Auto run completes.'''
+        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+            return []
+        observer = getattr(self, 'auto_stability_observer', None)
+        if observer is None or not os.path.exists(observer.manifest_path):
+            raise RuntimeError(
+                'Stability monitor mode completed without a readable '
+                'Stage-12 manifest.'
+            )
+        with open(observer.manifest_path, newline='', encoding='utf-8') as handle:
+            manifest_rows = list(csv.DictReader(handle))
+        spectra_by_raw_scan, load_qc_rows = (
+            self._load_auto_stability_reporting_spectra(manifest_rows)
+        )
+        records = build_stability_reporting_records(
+            manifest_rows=manifest_rows,
+            spectra_by_raw_scan=spectra_by_raw_scan,
+            condition_rows=self.auto_model_performance_rows,
+            observation_window_s=self.robo_params[
+                'auto_stability_observation_window_s'
+            ],
+            scan_interval_s=self.robo_params['auto_stability_scan_interval_s'],
+            min_peak_absorbance=self.robo_params[
+                'auto_stability_min_peak_absorbance'
+            ],
+        )
+        records['qc_rows'].extend(load_qc_rows)
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        output_specs = (
+            ('stability_scan_timing_audit.csv', records['timing_rows']),
+            ('stability_well_trajectories.csv', records['trajectory_rows']),
+            ('stability_well_metrics.csv', records['well_metrics']),
+            ('condition_stability_summary.csv', records['condition_summaries']),
+            ('stability_qc_audit.csv', records['qc_rows']),
+        )
+        output_paths = []
+        for filename, rows in output_specs:
+            output_paths.append(self._write_auto_stability_reporting_csv(
+                os.path.join(stability_path, filename), rows
+            ))
+        self.auto_stability_reporting_summary = {
+            'paths': output_paths,
+            'timing_row_count': len(records['timing_rows']),
+            'trajectory_row_count': len(records['trajectory_rows']),
+            'well_metric_count': len(records['well_metrics']),
+            'eligible_well_count': sum(
+                row.get('status') == 'eligible'
+                for row in records['well_metrics']
+            ),
+            'condition_summary_count': len(records['condition_summaries']),
+            'records': records,
+        }
+        print(
+            '<<controller>> exported Stage-12D stability reporting: {} '
+            'trajectory rows, {} well metrics ({} eligible).'.format(
+                self.auto_stability_reporting_summary['trajectory_row_count'],
+                self.auto_stability_reporting_summary['well_metric_count'],
+                self.auto_stability_reporting_summary['eligible_well_count'],
+            )
+        )
+        return output_paths
+
     def _finalize_auto_run(self, model):
         '''Exports final Auto artifacts after seed or imported continuation.'''
         # Save the row-per-well experiment data used for raw output and model
@@ -29073,6 +29432,22 @@ class AutoContr(Controller):
         # Save the row-per-condition Auto performance log used for reporting,
         # plotting, and future notebook-ready summaries.
         self._export_auto_model_performance_log()
+
+        # Stage 12D derives audit artifacts from the immutable raw scans and
+        # manifest after physical work is already complete. A reporting issue
+        # is disclosed but can never alter a recipe, model, or robot action.
+        if self.robo_params.get('auto_stability_mode') == STABILITY_MODE_MONITOR:
+            try:
+                self._generate_auto_stability_reporting_exports()
+            except Exception as exc:
+                self.auto_stability_reporting_summary = {
+                    'error': str(exc),
+                    'paths': [],
+                }
+                print(
+                    '<<controller warning>> Stage-12D stability reporting '
+                    'exports were not generated: {}'.format(exc)
+                )
 
         if getattr(model, '_auto_model_checkpoint_imported', False):
             try:

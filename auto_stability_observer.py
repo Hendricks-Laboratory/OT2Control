@@ -20,10 +20,10 @@ import tempfile
 import time
 
 
-# Version 2 adds observation reason and mixing/shake provenance, and makes the
-# per-well trigger-completion time basis part of the practical Stage-12C data
-# contract. Every manifest is run-local, so no in-place migration is needed.
-STABILITY_OBSERVER_SCHEMA_VERSION = 2
+# Version 3 adds the logical-well -> physical-reader-location mapping used by
+# Stage 12D to reload each immutable raw scan without guessing from a later
+# plate state. Every manifest is run-local, so no in-place migration is needed.
+STABILITY_OBSERVER_SCHEMA_VERSION = 3
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -49,6 +49,7 @@ MANIFEST_COLUMNS = (
     'raw_scan_basename',
     'raw_scan_relative_path',
     'active_wellnames',
+    'active_well_locations',
     'observation_reason',
     'mixing_mode',
     'shake_duration_s',
@@ -431,7 +432,43 @@ class AutoStabilityObserver:
                 )
         return normalized
 
-    def reserve_raw_scan(self, batch_number, wellnames):
+    @staticmethod
+    def _normalize_active_well_locations(wellnames, reader_locations):
+        '''Serialize one explicit logical-well -> reader-location mapping.
+
+        The Stage-12C scan layout is positional.  Persisting the resolved
+        physical locations at reservation time prevents Stage 12D from
+        attempting to reconstruct a historical layout after a plate swap.
+        Older direct callers may omit the optional mapping; that remains
+        backward compatible but is deliberately blank/auditable rather than
+        guessed later.
+        '''
+        if reader_locations is None:
+            return ''
+        if isinstance(reader_locations, str):
+            reader_locations = [reader_locations]
+        try:
+            locations = [str(value).strip() for value in reader_locations]
+        except TypeError:
+            raise AutoStabilityObserverError(
+                'Reader locations must be an iterable matching active wells.'
+            )
+        if len(locations) != len(wellnames) or any(not value for value in locations):
+            raise AutoStabilityObserverError(
+                'Reader locations must contain one nonblank coordinate for '
+                'each active well.'
+            )
+        if len(set(locations)) != len(locations):
+            raise AutoStabilityObserverError(
+                'A stability scan cannot map two active wells to one reader '
+                'location.'
+            )
+        return ';'.join(
+            '{}={}'.format(wellname, location)
+            for wellname, location in zip(wellnames, locations)
+        )
+
+    def reserve_raw_scan(self, batch_number, wellnames, reader_locations=None):
         '''Reserve one unique, unmerged raw path for an active-well scan.
 
         This method only writes a manifest entry. It does not create a scan
@@ -439,6 +476,9 @@ class AutoStabilityObserver:
         later Stage 12C reader call writes one file for the full active set.
         '''
         wellnames = self._normalize_active_wellnames(wellnames)
+        active_well_locations = self._normalize_active_well_locations(
+            wellnames, reader_locations
+        )
         batch_number = int(batch_number)
         records = [self._active_wells[wellname] for wellname in wellnames]
         for record in records:
@@ -471,6 +511,7 @@ class AutoStabilityObserver:
             raw_scan_basename=basename,
             raw_scan_relative_path=relative_path,
             active_wellnames=';'.join(wellnames),
+            active_well_locations=active_well_locations,
             notes=(
                 'Reserved for one unmerged active-well raw scan. The reader '
                 'has not yet been invoked.'
@@ -564,6 +605,7 @@ class AutoStabilityObserver:
             raw_scan_basename=reservation['raw_scan_basename'],
             raw_scan_relative_path=reservation['raw_scan_relative_path'],
             active_wellnames=';'.join(wellnames),
+            active_well_locations=reservation.get('active_well_locations', ''),
             observation_reason=observation_reason,
             mixing_mode=mixing_mode,
             shake_duration_s=shake_duration_s,

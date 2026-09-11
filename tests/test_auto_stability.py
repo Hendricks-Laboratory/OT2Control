@@ -485,8 +485,10 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                     )
                 ]
 
-            def reserve_raw_scan(self, batch_number, wellnames):
+            def reserve_raw_scan(
+                    self, batch_number, wellnames, reader_locations=None):
                 self.reserved_wellnames = list(wellnames)
+                self.reserved_reader_locations = list(reader_locations or [])
                 return {
                     'event_type': 'raw_scan_reserved',
                     'batch_number': batch_number,
@@ -552,6 +554,10 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 ['well_b']
             )
             self.assertEqual(fake_controller.reader_wellnames, ['well_b'])
+            self.assertEqual(
+                fake_controller.auto_stability_observer.reserved_reader_locations,
+                ['B01']
+            )
             self.assertEqual(fake_controller.pr.layouts, [['B01']])
             self.assertFalse(fake_controller.pr.record_in_aggregate)
             self.assertEqual(fake_controller.auto_stability_observer.skips, [])
@@ -559,6 +565,41 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 temporary_directory,
                 'stability', 'raw_scans', 'synthetic_raw_scan.csv'
             )))
+
+    def test_stage_12d_is_final_report_only_and_does_not_select_recipes(self):
+        for method_name in (
+                '_generate_auto_stability_reporting_exports',
+                '_load_auto_stability_reporting_spectra',
+                '_plot_auto_stability_reporting_artifacts'):
+            self.assertIn(method_name, self.auto_methods)
+        finalize_source = ast.get_source_segment(
+            self.source, self.auto_methods['_finalize_auto_run']
+        )
+        self.assertLess(
+            finalize_source.index('self._export_auto_model_performance_log()'),
+            finalize_source.index(
+                'self._generate_auto_stability_reporting_exports()'
+            )
+        )
+        reporting_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_generate_auto_stability_reporting_exports']
+        )
+        for forbidden_text in (
+                'update_experiment_data(', 'getNextReaction(',
+                'send_pack(', 'run_protocol(', 'execute_protocol_df('):
+            self.assertNotIn(forbidden_text, reporting_source)
+        self.assertIn('build_stability_reporting_records(', reporting_source)
+
+    def test_stage_12d_uses_saved_reader_locations_not_current_plate_lookup(self):
+        load_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_load_auto_stability_reporting_spectra']
+        )
+        self.assertIn('active_well_locations', load_source)
+        self.assertIn('self.pr.load_reader_data(', load_source)
+        self.assertIn('self._extract_auto_lambda_maxima(', load_source)
+        self.assertNotIn('_get_auto_stability_reader_locations(', load_source)
 
 
 if __name__ == '__main__':
