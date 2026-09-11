@@ -1,7 +1,9 @@
 '''Stage-12A unit and source-contract tests without hardware imports.'''
 
 import ast
+import math
 import os
+import textwrap
 import unittest
 
 from auto_stability import (
@@ -379,6 +381,35 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 'self._complete_auto_stability_observation_window()'
             )
         )
+
+    def test_plate_reader_shake_normalizes_whole_seconds_for_dde(self):
+        '''The DDE macro rejects decimal strings such as ``'30.0'``.'''
+        plate_reader_methods = {
+            node.name: node
+            for node in self.plate_reader_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        shake_source = textwrap.dedent(ast.get_source_segment(
+            self.source, plate_reader_methods['shake']
+        ))
+        namespace = {'math': math}
+        exec(shake_source, namespace)
+        shake = namespace['shake']
+
+        class FakePlateReader(object):
+            def __init__(self):
+                self.calls = []
+
+            def exec_macro(self, *args):
+                self.calls.append(args)
+
+        fake_reader = FakePlateReader()
+        shake(fake_reader, 30.0)
+        self.assertEqual(fake_reader.calls, [('Shake', 2, 300, 30)])
+
+        for invalid_time in (0, -1, 30.5, 'not-a-time', float('nan')):
+            with self.assertRaises(ValueError):
+                shake(fake_reader, invalid_time)
 
 
 if __name__ == '__main__':

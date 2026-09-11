@@ -31685,11 +31685,31 @@ class PlateReader(AbstractPlateReader):
     def shake(self, shake_time):
         '''
         executes a shake
+
+        The reader's DDE ``Shake`` macro accepts a positive whole number of
+        seconds.  Keep that device-specific representation at this boundary:
+        controller code may record a duration as ``30.0`` for audit purposes,
+        but the macro must receive ``30`` rather than the rejected ``30.0``.
         '''
+        try:
+            duration_s = float(shake_time)
+        except (TypeError, ValueError):
+            raise ValueError(
+                'Plate-reader shake time must be a positive whole number of '
+                'seconds; received {!r}.'.format(shake_time)
+            )
+        if (
+                not math.isfinite(duration_s)
+                or duration_s <= 0
+                or not duration_s.is_integer()):
+            raise ValueError(
+                'Plate-reader shake time must be a positive whole number of '
+                'seconds; received {!r}.'.format(shake_time)
+            )
         macro = "Shake"
         shake_type = 2
         shake_freq = 300
-        self.exec_macro(macro, shake_type, shake_freq, shake_time)
+        self.exec_macro(macro, shake_type, shake_freq, int(duration_s))
 
     def load_reader_data(self, filename, loc_to_name):
         '''
