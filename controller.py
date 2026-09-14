@@ -5926,21 +5926,35 @@ class AutoContr(Controller):
 
     @staticmethod
     def _wait_for_auto_stability_deadline(deadline_monotonic_s, active_count):
-        '''Wait with a single updating terminal line rather than log spam.'''
+        '''Wait with one readable updating terminal line rather than log spam.
+
+        A carriage return alone does not erase a prior, longer status line.
+        For example, a transition from ``10 s`` to ``9 s`` can leave the
+        trailing ``s`` rendered by terminals that retain the prior character.
+        Pad a shorter update through the previous visible width, then always
+        render an explicit zero-second boundary before returning.  This is
+        terminal presentation only: the monotonic deadline and scheduler
+        behavior remain unchanged.
+        '''
+        previous_message_length = 0
         while True:
             remaining_s = deadline_monotonic_s - time.monotonic()
+            displayed_remaining_s = max(0.0, remaining_s)
+            message = (
+                '<<controller>> stability observation window: {} active '
+                'well(s); next scheduler boundary in {:.0f} s'.format(
+                    active_count,
+                    displayed_remaining_s
+                )
+            )
+            padding = ' ' * max(
+                0, previous_message_length - len(message)
+            )
+            print('\r{}{}'.format(message, padding), end='', flush=True)
+            previous_message_length = len(message)
             if remaining_s <= 0:
                 print()
                 return
-            print(
-                '\r<<controller>> stability observation window: {} active '
-                'well(s); next scheduler boundary in {:.0f} s'.format(
-                    active_count,
-                    remaining_s
-                ),
-                end='',
-                flush=True
-            )
             time.sleep(min(1.0, remaining_s))
 
     def _complete_auto_stability_observation_window(self):

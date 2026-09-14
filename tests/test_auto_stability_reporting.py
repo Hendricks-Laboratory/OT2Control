@@ -168,6 +168,35 @@ class AutoStabilityReportingTests(unittest.TestCase):
             for row in records['qc_rows']
         ))
 
+    def test_final_metric_qc_reason_identifies_low_signal_not_interval_gate(self):
+        records = build_stability_reporting_records(
+            [_event(
+                'trigger_transfer_completed', wellname='well1',
+                trigger_transfer_completion_observed_at_utc='2026-09-10T10:00:00+00:00'
+            ), _event(
+                'raw_scan_completed', raw_scan_id='x', active_wellnames='well1',
+                scan_started_at_utc='2026-09-10T10:00:10+00:00',
+                scan_completed_at_utc='2026-09-10T10:00:20+00:00',
+                observation_reason='trigger_completion'
+            ), _event(
+                'raw_scan_completed', raw_scan_id='y', active_wellnames='well1',
+                scan_started_at_utc='2026-09-10T10:00:30+00:00',
+                scan_completed_at_utc='2026-09-10T10:00:40+00:00',
+                observation_reason='cadenced_active_set'
+            )],
+            {'x': {'well1': {'spectrum_by_wavelength_nm': _spectra((620, .05))}},
+             'y': {'well1': {'spectrum_by_wavelength_nm': _spectra((620, .02))}}},
+            [], 60, 20, .1
+        )
+        metric_qc = next(
+            row for row in records['qc_rows']
+            if row['wellname'] == 'well1' and row['raw_scan_id'] == ''
+        )
+        self.assertEqual(metric_qc['qc_status'], 'low_signal')
+        self.assertIn('Peak blank-corrected absorbance 0.05',
+                      metric_qc['qc_reason'])
+        self.assertNotIn('complete reader interval', metric_qc['qc_reason'])
+
     def test_imported_conditions_do_not_become_false_missing_current_run_wells(self):
         records = build_stability_reporting_records(
             [], {}, [{

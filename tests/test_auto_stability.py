@@ -423,6 +423,41 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 shake(fake_reader, invalid_time)
 
+    def test_countdown_clears_shorter_status_and_emits_zero_boundary(self):
+        '''Terminal rendering must not leave ``10 s`` residue at ``9 s``.'''
+        wait_source = textwrap.dedent(ast.get_source_segment(
+            self.source,
+            self.auto_methods['_wait_for_auto_stability_deadline']
+        ))
+
+        class FakeTime(object):
+            def __init__(self):
+                self.values = iter((0.2, 1.2, 10.0))
+                self.sleeps = []
+
+            def monotonic(self):
+                return next(self.values)
+
+            def sleep(self, duration_s):
+                self.sleeps.append(duration_s)
+
+        printed = []
+
+        def fake_print(*args, **kwargs):
+            printed.append((args, kwargs))
+
+        fake_time = FakeTime()
+        namespace = {'time': fake_time, 'print': fake_print}
+        exec(wait_source, namespace)
+        wait = namespace['_wait_for_auto_stability_deadline']
+        wait(10.0, 2)
+
+        messages = [args[0] for args, _ in printed if args]
+        self.assertTrue(messages[0].endswith('in 10 s'))
+        self.assertTrue(messages[1].endswith('in 9 s '))
+        self.assertTrue(messages[-1].endswith('in 0 s'))
+        self.assertEqual(fake_time.sleeps, [1.0, 1.0])
+
     def test_stage_12c_excludes_expired_wells_at_reader_scan_start(self):
         '''Reader staging must narrow the raw layout before it is reserved.'''
         observation_source = textwrap.dedent(ast.get_source_segment(

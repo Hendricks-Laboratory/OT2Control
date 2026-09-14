@@ -22,6 +22,9 @@ import math
 from auto_stability import (
     AutoStabilityValidationError,
     METRIC_STATUS_ELIGIBLE,
+    METRIC_STATUS_INSUFFICIENT_OBSERVATIONS,
+    METRIC_STATUS_LOW_SIGNAL,
+    METRIC_STATUS_NO_POST_PEAK_DECLINE,
     aggregate_condition_stability_metrics,
     compute_stability_metrics,
 )
@@ -96,6 +99,51 @@ def _finite_float(value):
     except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
+
+
+def _stability_metric_qc_reason(metrics, minimum_peak_absorbance):
+    '''Explain a final per-well metric status without conflating QC gates.
+
+    Interval eligibility is recorded independently for every raw scan. The
+    final metric can also be excluded for low signal, too few usable
+    observations, or no measured post-peak decline. Its QC explanation must
+    identify the gate that actually determined the final status.
+    '''
+    status = str(metrics.get('status', 'invalid_trajectory')).strip()
+    if status == METRIC_STATUS_ELIGIBLE:
+        return (
+            'The fixed-reference post-peak loss rate was computed from '
+            'metric-eligible reader intervals.'
+        )
+    if status == METRIC_STATUS_LOW_SIGNAL:
+        peak_absorbance = _finite_float(metrics.get('peak_absorbance'))
+        if peak_absorbance is None:
+            return (
+                'The metric was excluded because its peak absorbance was '
+                'below the configured minimum signal threshold.'
+            )
+        return (
+            'Peak blank-corrected absorbance {:.6g} was below the configured '
+            'minimum peak absorbance {:.6g}.'.format(
+                peak_absorbance, minimum_peak_absorbance
+            )
+        )
+    if status == METRIC_STATUS_INSUFFICIENT_OBSERVATIONS:
+        return (
+            'Fewer than two metric-eligible reader observations had a valid '
+            'fixed-reference absorbance for this well.'
+        )
+    if status == METRIC_STATUS_NO_POST_PEAK_DECLINE:
+        return (
+            'No lower absorbance was observed after the measured peak among '
+            'metric-eligible reader observations.'
+        )
+    metric_error = str(metrics.get('metric_error', '')).strip()
+    if metric_error:
+        return 'Stability metric calculation was invalid: {}.'.format(
+            metric_error
+        )
+    return 'Stability metric calculation was invalid for this trajectory.'
 
 
 def _condition_index(condition_rows):
@@ -417,10 +465,7 @@ def build_stability_reporting_records(
             'wellname': wellname,
             'raw_scan_id': '',
             'qc_status': metrics.get('status', 'invalid_trajectory'),
-            'qc_reason': (
-                'Stability metric is eligible only when the complete reader '
-                'interval is inside the configured observation window.'
-            ),
+            'qc_reason': _stability_metric_qc_reason(metrics, minimum_peak),
         })
 
     # A condition-level result must distinguish a partial replicate trajectory

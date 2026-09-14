@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-09-07
+**Updated through:** 2026-09-14
 
 ---
 
@@ -48,12 +48,12 @@ recent feature commit only.
 |---|---|
 | Baseline branch and commit | `Auto` at `356971a` (`Last TODO`) |
 | Initial reconciliation snapshot | `Auto-RTG` at `b152ed1` (`Update Auto-RTG validation record for current report features`) |
-| Last reviewed Auto-RTG code commit | `1878ea8` (`Simplify live Auto recovery workbook actions`) |
+| Last reviewed Auto-RTG code commit | `9c83b94` (`Add audited optical-stability reporting and QC exports`) |
 | Paired Pi development revision | `origin/Auto-main` at `65aad07` (`Validate temperature-controlled Auto preparation water on the Pi`) |
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12D are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. Stage 12D has passed Python 3.9 compilation plus synthetic manifest/trajectory/condition-reporting tests and awaits its dedicated controlled dry debug. Neither stage clears large-cohort stability chemistry or stability-directed selection. |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12D are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. A narrow closeout patch corrects countdown rendering and metric-status wording only; neither stage clears large-cohort stability chemistry or stability-directed selection. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -167,7 +167,7 @@ duplicate count and returns through the usual QC/model-update pathway.
 | Stage 12A optical-stability configuration and metric contract | Implemented; Python 3.9 compilation and hardware-free synthetic tests passed; no dry debug required | `auto_stability.py` provides a pure, monitor-only Header parser and deterministic fixed-window post-peak metric. Missing settings remain inert (`off`). Monitor mode requires an explicit final non-water trigger reagent, positive observation window, signal floor, and cadence interval for the currently supported `cadenced_active_set` schedule; only `plate_shake` is accepted as the reserved future mixing policy. This configuration component itself does not access hardware, QC, GP, or acquisition behavior; Stage 12C consumes it in real monitor-mode execution. Future active modes fail closed. |
 | Stage 12B observer and scan-manifest foundation | Implemented; Python 3.9 compilation and hardware-free transition/source-contract tests passed; no dry debug required in isolation | For a real monitor-mode run only, the controller initializes an atomic `pr_data/auto_stability_scan_manifest.csv` plus `pr_data/stability/raw_scans/`. It records each configured-trigger transfer as **pending** at dispatch, then promotes that well only after a recorded controller completion point. Stage 12C uses the existing Pi transfer `ready` acknowledgement to establish a per-well controller-observed completion reference; it remains explicitly distinct from a direct dispense timestamp. The observer reserves deterministic unique raw-scan paths without creating a scan file. Stage 12B itself introduced no reader call, plate shake, new Pi packet, model update, or recipe-selection behavior. |
 | Stage 12C active-set shake/scan scheduler | Implemented; hardware-free scheduler/source-contract tests and controlled dry debug passed; closed as bounded plate-shake monitoring only | In monitor mode, the final trigger reagent is dispatched one well at a time so each well receives an explicit Pi `ready`-acknowledged controller timestamp; source choice, transfer volume, and tip policy remain unchanged. After the completed trigger cohort, Auto performs one standard 30 s whole-plate shake followed by one unmerged scan of every eligible active well. Each raw CSV moves to its reserved `pr_data/stability/raw_scans/` path without entering the legacy aggregate reader file. Manifest schema v3 records the immutable logical-well→physical-reader-location mapping in addition to the per-well completion basis, observation reason, mixing mode, shake duration/interval, and reader start/end UTC interval. `cadenced_active_set` adds unshaken scans only while wells remain within their configured window; `each_completion` is deliberately rejected because it cannot create a time-resolved trajectory with the current nonperturbing whole-plate policy. Every batch waits until active windows are closed before later selection. Missing reader output, mixed-batch scans, or invalid reader locations fail closed. This changes Lab-PC reader behavior only; no new Pi packet or Auto-main change is introduced. |
-| Stage 12D stability reporting and QC | Implemented; Python 3.9 compilation and synthetic manifest/trajectory/condition tests passed; controlled dry debug required | `auto_stability_reporting.py` is a pure post-run analysis layer. It classifies each reader interval, retains every manifest-linked observation in the trajectory/timing audit, and allows a stability metric only when the full reader interval lies within the well’s window. It reports requested-versus-observed cadence without claiming a serial reader met a fixed cadence. The controller reloads immutable raw scans only through the saved logical-well→reader-location mapping, applies the established Auto blank correction to a deep in-memory copy, and refuses to infer a missing historical layout. It exports timing, trajectory, well-metric, condition-summary, and QC CSVs under `pr_data/stability/`; condition summaries preserve missing replicates rather than shrinking a denominator. Optional final plots and the final report explicitly state that monitor-mode stability data do not affect λmax GP training, recipe selection, target stopping, or robot behavior. |
+| Stage 12D stability reporting and QC | Implemented; controlled dry-debug closed for the bounded monitor/reporting contract | `auto_stability_reporting.py` is a pure post-run analysis layer. It classifies reader intervals, retains every manifest-linked observation in the trajectory/timing audit, and allows a stability metric only when the full reader interval lies within the well’s window. It reports requested-versus-observed cadence without claiming a serial reader met a fixed cadence. The controller reloads immutable raw scans only through the saved logical-well→reader-location mapping, applies the established Auto blank correction to a deep in-memory copy, and refuses to infer a missing historical layout. It exports timing, trajectory, well-metric, condition-summary, and QC CSVs under `pr_data/stability/`; condition summaries preserve missing replicates rather than shrinking a denominator. The 2026-09-14 controlled dry debug recorded two trigger wells, three raw scans, six fully in-window trajectory rows, two correctly excluded low-signal metrics, one no-eligible-wells condition summary, and the final plot/report. The closeout patch makes the live countdown erase shorter prior text and makes QC explanations identify the actual metric gate. Monitor-mode stability data do not affect λmax GP training, recipe selection, target stopping, or robot behavior. |
 
 ### Stage 12C controlled dry-debug closure — 2026-09-11
 
@@ -204,6 +204,40 @@ and no later batch until every active window closes. It must not be presented
 as large-batch stability-optimization clearance. The targeted pipette-mixing
 follow-on below is the required route to efficient overlapping active cohorts
 without repeatedly perturbing older trajectories.
+
+### Stage 12D controlled dry-debug closure — 2026-09-14
+
+The controlled dry debug in `DEBUGRTG_STAGE12D_REPORTING` finalized normally
+with a two-well trigger cohort, a 360 s observation window, a requested 60 s
+cadence, and plate-shake monitoring. It validates the bounded reporting/QC
+contract, not real nanocrystal stability or stability-directed selection:
+
+- both sodium-borohydride trigger transfers were durably recorded before the
+  wells became active;
+- three unmerged raw active-set scans were retained under
+  `pr_data/stability/raw_scans/`, with immutable logical-well to reader-location
+  mapping for both wells;
+- all six reader intervals were wholly inside their respective observation
+  windows and were therefore retained as metric-eligible trajectories;
+- the serial reader deferred the two cadence scans by about 24.5 s and 24.3 s;
+  the timing audit accurately labels that observed behavior instead of claiming
+  a fixed 60 s cadence;
+- the dry blank-corrected peaks were below the configured 0.1 absorbance
+  threshold, so both well metrics were correctly excluded as `low_signal` and
+  the condition summary preserved its two-well denominator as
+  `no_eligible_wells`; no artificial stability rate was created; and
+- the stability trajectory plot, final report, run journal, and all five
+  stability CSV exports were present with no controller/reader fault.
+
+The human-visible countdown initially left duplicate terminal characters when
+its text shortened (for example, `10 s` to `9 s`) and could end at `1 s` when
+the deadline arrived during a sleep interval. The Stage 12D closeout patch
+clears the trailing text and prints an explicit `0 s` boundary without altering
+the monotonic deadline or reader scheduler. It also corrects the final
+`low_signal` QC explanation so it names the signal threshold rather than the
+separate interval-eligibility gate. These presentation/audit-text corrections
+do not alter physical execution, raw data, timing eligibility, metric
+calculation, λmax QC, model training, recipe selection, or target stopping.
 
 ### Stage 12 optical-stability planning record — future stages after 12C
 
@@ -302,7 +336,7 @@ meaningful stability trajectory.
 | **12A** | Backward-compatible Header parsing and validation; trigger validation; fixed-window trajectory metrics, low-signal handling, λmax drift, and condition-level aggregation functions. Settings are `auto_stability_mode`, `auto_stability_trigger_reagent`, `auto_stability_scan_schedule`, `auto_stability_observation_window_s`, `auto_stability_scan_interval_s`, `auto_stability_min_peak_absorbance`, and `auto_stability_mixing_mode`. No robot, scan, shake, model, or acquisition behavior changes. | **Implemented.** Python 3.9 compilation and Header/synthetic trajectory tests passed, including a source-level contract that the configuration method does not invoke physical or optimizer methods. No dry debug is needed. |
 | **12B** | Auto-only timestamped scan manifest and active-completed-well observer; unique unmerged raw scan reservations; raw scan and manifest paths under `pr_data/stability/` and `pr_data/auto_stability_scan_manifest.csv`. A trigger dispatch is recorded as pending, then becomes active only after a recorded controller completion point. Stage 12C uses the existing Pi transfer `ready` acknowledgement as a per-well controller-observed timing reference. Ordinary callbacks are preserved. | **Implemented.** Python 3.9 compilation and controller-free observer/source-contract tests passed. No scheduling-enabled dry debug was needed for this foundation alone. |
 | **12C** | Plate-shake active-well scheduler: after a trigger-completed cohort, one 30 s whole-plate shake and one unmerged active-set scan are performed. `cadenced_active_set` adds unshaken scans while a well is eligible; `each_completion` is rejected until a separately validated nonperturbing policy exists. Raw CSVs move to `pr_data/stability/raw_scans/`, manifest schema v3 records the immutable active logical-well→physical-reader-location mapping as well as trigger basis, observation reason, mixing/shake provenance, and reader start/end UTC timestamps, and a batch blocks until every window ends. Missing raw output, invalid reader location/volume, or active wells from multiple batches fail closed. | **Implemented and controlled dry-debug closed.** The 2026-09-11 dry debug verified trigger timing, active-well membership, shake/scan sequence, raw-scan preservation, manifest accuracy, no merged kinetic scans, and correct post-window exclusion. It does not clear long-cohort chemistry or stability-directed selection. |
-| **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | **Implemented; controlled dry debug now required.** Python 3.9 compilation and pure synthetic tests cover interval exclusion, observed cadence, fixed per-well reference wavelength, missing raw spectrum QC, and preservation of incomplete replicate denominators. The next dry debug must review the CSVs, raw-layout mapping, timing labels, exclusion behavior, optional plots, and final report wording. |
+| **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | **Implemented and controlled dry-debug closed.** The 2026-09-14 dry debug verified CSV/report/plot export, immutable raw-layout mapping, full-interval eligibility, observed cadence labeling, low-signal exclusion without a fabricated rate, stable condition denominators, and the report-only boundary. Countdown/QC-text closeout regressions are covered by hardware-free tests. It does not clear chemistry-derived stability performance, long cohorts, or stability-directed selection. |
 | **12E** | A separate cumulative stability GP trained only on valid QC-approved condition-level stability observations. The λmax GP and its history remain unchanged. | Synthetic model/history validation; no dry debug required at this point. |
 | **12F** | Lexicographic `target_then_stability` selection with two-GP ranking, target compatibility first, meaningful-signal eligibility, trigger-mask exclusion, and explicit rejection of unsupported acquisition combinations. | Third controlled dry debug before any chemistry use with active stability selection. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, and replicate agreement before enabling active selection. |
