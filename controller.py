@@ -135,6 +135,10 @@ from auto_stability import (
 )
 from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
+from auto_stability_model import (
+    AutoStabilityModel,
+    build_stability_model_training_records
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -5519,6 +5523,17 @@ class AutoContr(Controller):
         # immutable manifest/raw scans. This state is report-only and never
         # feeds a model, recipe, or physical command.
         self.auto_stability_reporting_summary = None
+        # Stage 12E owns a separate companion GP for completed condition-level
+        # optical-stability observations. It is observational at this stage:
+        # it never mutates the primary lambda GP, selection, stopping, or any
+        # robot/reader command.
+        self.auto_stability_model = (
+            AutoStabilityModel(self.variable_reagents)
+            if self.robo_params.get('auto_stability_mode') ==
+            STABILITY_MODE_MONITOR else None
+        )
+        self.auto_stability_model_training_records = []
+        self.auto_stability_model_summary = None
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
         # authorize automatic retry, continuation, or model updates.
@@ -21167,13 +21182,17 @@ class AutoContr(Controller):
         stability_summary = getattr(
             self, 'auto_stability_reporting_summary', None
         )
+        stability_model_summary = getattr(
+            self, 'auto_stability_model_summary', None
+        )
         if self.robo_params.get('auto_stability_mode') == STABILITY_MODE_MONITOR:
-            lines.append('## Optical-Stability Monitoring (Stage 12D)')
+            lines.append('## Optical-Stability Monitoring (Stages 12D–12E)')
             lines.append('')
             lines.append(
-                'Stability monitoring remained report-only in this run: it '
-                'did not alter the GP, recipe selection, target stopping, or '
-                'physical robot execution.'
+                'Stability monitoring did not alter the primary wavelength '
+                'GP, recipe selection, target stopping, or physical robot '
+                'execution. Stage 12E may fit a separate observational '
+                'stability GP from complete condition-level trajectories.'
             )
             if not isinstance(stability_summary, dict):
                 lines.append(
@@ -21219,6 +21238,38 @@ class AutoContr(Controller):
                             os.path.relpath(plot_path, self.out_path)
                         )
                     )
+            if not isinstance(stability_model_summary, dict):
+                lines.append(
+                    '- Stage-12E companion stability-model status: not '
+                    'retained; consult `Debug/terminal_output.txt`.'
+                )
+            elif stability_model_summary.get('error'):
+                lines.append(
+                    '- Stage-12E companion stability-model status: `{}`. '
+                    'The ordinary wavelength workflow continued unchanged.'
+                    .format(stability_model_summary['error'])
+                )
+            else:
+                lines.append(
+                    '- Stage-12E companion stability GP: {} from {} '
+                    'accepted condition-level stability observation(s).'
+                    .format(
+                        stability_model_summary.get('status', 'not recorded'),
+                        stability_model_summary.get(
+                            'accepted_condition_count', 0
+                        )
+                    )
+                )
+                lines.append(
+                    '- Stability-model target: `log10(post-peak absorbance '
+                    'loss rate in absorbance/s)`; raw rates remain in the '
+                    'training audit.'
+                )
+                lines.append(
+                    '- Stage-12E files: `pr_data/stability/'
+                    'stability_model_training_audit.csv` and '
+                    '`stability_model_state.csv`.'
+                )
             lines.append('')
 
         imported_checkpoint = getattr(
@@ -28848,6 +28899,12 @@ class AutoContr(Controller):
             replicate_wellnames=wellnames
         )
 
+        # The Stage-12C observation window has already closed inside
+        # _create_samples(), and the condition rows now supply immutable
+        # recipe/replicate provenance. Refresh only the independent,
+        # observational stability GP; the primary lambda model remains below.
+        self._refresh_auto_stability_model_from_reporting()
+
         # Boundary-aware runs maintain a separate passive reliability model
         # from every assessed replicate.  It never changes primary lambda-GP
         # training or recipe selection at this implementation stage.
@@ -29086,6 +29143,11 @@ class AutoContr(Controller):
                 scan_quality_by_replicate=new_scan_quality,
                 replicate_wellnames=wellnames
             )
+
+            # As in the seed path, this uses only completed stability windows
+            # and already-recorded condition provenance. It cannot change the
+            # lambda GP update or the next selection in Stage 12E.
+            self._refresh_auto_stability_model_from_reporting()
 
             # Rebuild from the entire immutable performance history rather
             # than attempting GPy classifier in-place growth.  This includes
@@ -29369,10 +29431,16 @@ class AutoContr(Controller):
                     })
         return spectra_by_raw_scan, qc_rows
 
-    def _generate_auto_stability_reporting_exports(self):
-        '''Generate Stage-12D data artifacts only after an Auto run completes.'''
+    def _build_auto_stability_reporting_records(self):
+        '''Derive current Stage-12D records from immutable completed scans.
+
+        This shared, read-only helper lets Stage 12E use the exact same
+        manifest, historical reader-layout, blank-correction, and
+        condition-denominator contract as final reporting. It does not write
+        an export, fit a model, schedule a scan, or communicate with the Pi.
+        '''
         if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
-            return []
+            return None
         observer = getattr(self, 'auto_stability_observer', None)
         if observer is None or not os.path.exists(observer.manifest_path):
             raise RuntimeError(
@@ -29397,6 +29465,135 @@ class AutoContr(Controller):
             ],
         )
         records['qc_rows'].extend(load_qc_rows)
+        return records
+
+    def _write_auto_stability_model_exports(self):
+        '''Atomically export Stage-12E model-input and state audit records.'''
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        audit_rows = []
+        for row in self.auto_stability_model_training_records:
+            export_row = dict(row)
+            if export_row.get('normalized_recipe') is not None:
+                export_row['normalized_recipe'] = (
+                    self._serialize_auto_audit_value(
+                        export_row['normalized_recipe']
+                    )
+                )
+            audit_rows.append(export_row)
+        summary = dict(self.auto_stability_model_summary or {})
+        summary['variable_reagents'] = self._serialize_auto_audit_value(
+            list(self.variable_reagents)
+        )
+        output_paths = [
+            self._write_auto_stability_reporting_csv(
+                os.path.join(
+                    stability_path, 'stability_model_training_audit.csv'
+                ),
+                audit_rows
+            ),
+            self._write_auto_stability_reporting_csv(
+                os.path.join(stability_path, 'stability_model_state.csv'),
+                [summary]
+            ),
+        ]
+        self.auto_stability_model_summary['paths'] = output_paths
+        return output_paths
+
+    def _refresh_auto_stability_model_from_reporting(self):
+        '''Refresh the Stage-12E companion GP after a completed batch.
+
+        This is deliberately called only after ordinary condition rows exist
+        and the Stage-12C observation window has closed. It reconstructs the
+        complete current-run stability history from immutable files on every
+        refresh, so no partial/incremental model state can silently forget an
+        earlier condition. Any reporting or numerical failure is report-only
+        in monitor mode and cannot interrupt the existing lambda workflow.
+        '''
+        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+            return {'enabled': False, 'fitted': False}
+        stability_model = getattr(self, 'auto_stability_model', None)
+        if stability_model is None:
+            raise RuntimeError(
+                'Stability monitor mode has no initialized Stage-12E model.'
+            )
+        try:
+            records = self._build_auto_stability_reporting_records()
+            training_records = build_stability_model_training_records(
+                condition_summaries=records['condition_summaries'],
+                condition_rows=self.auto_model_performance_rows,
+                variable_reagents=self.variable_reagents,
+                min_concentrations=self.min_conc,
+                max_concentrations=self.max_conc,
+            )
+            model_summary = stability_model.refresh_from_training_records(
+                training_records
+            )
+            model_summary.update({
+                'enabled': True,
+                'reporting_condition_count': len(
+                    records['condition_summaries']
+                ),
+                'eligible_condition_count': sum(
+                    row.get('stability_model_training_status') == 'accepted'
+                    for row in training_records
+                ),
+                'rejected_condition_count': sum(
+                    row.get('stability_model_training_status') != 'accepted'
+                    for row in training_records
+                ),
+            })
+            self.auto_stability_model_training_records = training_records
+            self.auto_stability_model_summary = model_summary
+            self._write_auto_stability_model_exports()
+        except Exception as exc:
+            # Stage 12E is observational. Do not let a derived model or audit
+            # failure alter the primary lambda GP, recipe selection, stopping,
+            # or physical workflow. Stage 12F will require this state to be
+            # healthy before allowing stability-directed selection.
+            self.auto_stability_model_summary = {
+                'enabled': True,
+                'fitted': False,
+                'status': 'reporting_or_model_refresh_failed',
+                'error': str(exc),
+                'accepted_condition_count': 0,
+                'minimum_condition_count': 2,
+                'model_target_transform': (
+                    'log10_loss_rate_absorbance_per_s'
+                ),
+            }
+            print(
+                '<<controller warning>> Stage-12E stability-model refresh '
+                'was not completed; ordinary Auto execution continues '
+                'unchanged. Error: {}'.format(exc)
+            )
+            try:
+                self._write_auto_stability_model_exports()
+            except Exception as export_exc:
+                print(
+                    '<<controller warning>> Stage-12E stability-model audit '
+                    'exports were not generated: {}'.format(export_exc)
+                )
+            return self.auto_stability_model_summary
+
+        if self.robo_params.get('auto_terminal_verbosity', 'standard') in {
+                'standard', 'diagnostic'}:
+            print(
+                '<<controller>> Stage-12E stability model: {} accepted '
+                'condition(s), status {}.'.format(
+                    self.auto_stability_model_summary[
+                        'accepted_condition_count'
+                    ],
+                    self.auto_stability_model_summary['status'],
+                )
+            )
+        return self.auto_stability_model_summary
+
+    def _generate_auto_stability_reporting_exports(self):
+        '''Generate Stage-12D data artifacts only after an Auto run completes.'''
+        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+            return []
+        records = self._build_auto_stability_reporting_records()
         stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
         os.makedirs(stability_path, exist_ok=True)
         output_specs = (

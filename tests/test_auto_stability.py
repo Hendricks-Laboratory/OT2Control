@@ -601,8 +601,9 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 'stability', 'raw_scans', 'synthetic_raw_scan.csv'
             )))
 
-    def test_stage_12d_is_final_report_only_and_does_not_select_recipes(self):
+    def test_stage_12d_final_exports_remain_read_only(self):
         for method_name in (
+                '_build_auto_stability_reporting_records',
                 '_generate_auto_stability_reporting_exports',
                 '_load_auto_stability_reporting_spectra',
                 '_plot_auto_stability_reporting_artifacts'):
@@ -618,13 +619,54 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         )
         reporting_source = ast.get_source_segment(
             self.source,
-            self.auto_methods['_generate_auto_stability_reporting_exports']
+            self.auto_methods['_build_auto_stability_reporting_records']
         )
         for forbidden_text in (
                 'update_experiment_data(', 'getNextReaction(',
                 'send_pack(', 'run_protocol(', 'execute_protocol_df('):
             self.assertNotIn(forbidden_text, reporting_source)
         self.assertIn('build_stability_reporting_records(', reporting_source)
+
+    def test_stage_12e_companion_model_is_observational_and_precedes_selection(self):
+        for method_name in (
+                '_refresh_auto_stability_model_from_reporting',
+                '_write_auto_stability_model_exports'):
+            self.assertIn(method_name, self.auto_methods)
+        refresh_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_refresh_auto_stability_model_from_reporting']
+        )
+        for forbidden_text in (
+                'getNextReaction(', 'update_experiment_data(',
+                'execute_protocol_df(', 'send_pack(', 'run_protocol('):
+            self.assertNotIn(forbidden_text, refresh_source)
+        self.assertIn('build_stability_model_training_records(', refresh_source)
+        self.assertIn('refresh_from_training_records(', refresh_source)
+
+        run_source = ast.get_source_segment(
+            self.source, self.auto_methods['_run']
+        )
+        seed_source = ast.get_source_segment(
+            self.source, self.auto_methods['_run_auto_optimizer_batches']
+        )
+        self.assertIn(
+            'self._refresh_auto_stability_model_from_reporting()', run_source
+        )
+        self.assertIn(
+            'self._refresh_auto_stability_model_from_reporting()', seed_source
+        )
+        self.assertLess(
+            run_source.index(
+                'self._refresh_auto_stability_model_from_reporting()'
+            ),
+            run_source.index('model.initialize_optimizer(')
+        )
+        self.assertLess(
+            seed_source.index(
+                'self._refresh_auto_stability_model_from_reporting()'
+            ),
+            seed_source.index('model.update_experiment_data(')
+        )
 
     def test_stage_12d_uses_saved_reader_locations_not_current_plate_lookup(self):
         load_source = ast.get_source_segment(

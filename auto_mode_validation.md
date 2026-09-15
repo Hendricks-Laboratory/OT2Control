@@ -53,7 +53,7 @@ recent feature commit only.
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12D are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. A narrow closeout patch corrects countdown rendering and metric-status wording only; neither stage clears large-cohort stability chemistry or stability-directed selection. |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12E are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. Stage 12E adds a separate, cumulative, condition-level stability GP with synthetic model/history validation only; it does not change physical execution or recipe selection. Neither stage clears large-cohort stability chemistry or stability-directed selection. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -239,12 +239,52 @@ separate interval-eligibility gate. These presentation/audit-text corrections
 do not alter physical execution, raw data, timing eligibility, metric
 calculation, λmax QC, model training, recipe selection, or target stopping.
 
+### Stage 12E companion stability-model implementation — 2026-09-14
+
+Stage 12E introduces `auto_stability_model.py`, a separate cumulative
+`GPy.models.GPRegression` over **condition-level** optical-stability outcomes.
+It does not reuse, replace, or mutate the primary target-wavelength
+`OptimizationModel`, its `optimizer.X/Y` history, λmax QC, target stopping,
+acquisition scoring, or any robot/reader command.
+
+- The physical response remains the Stage-12A/12D post-peak loss rate in
+  absorbance/s. Eligible positive rates are transformed internally to
+  `log10(loss_rate_absorbance_per_s)` for regression; the raw rate and the
+  normalized recipe remain in the training audit.
+- A condition is accepted only when Stage-12D classifies it `complete`:
+  every expected physical replicate has an eligible stability metric, the
+  condition mean loss rate is finite and positive, and every executed variable
+  concentration maps into the current normalized bounds. Ordinary λmax QC is
+  intentionally independent rather than being misapplied as stability QC.
+- Imported λmax-history conditions, partial/no-signal trajectories, missing
+  condition provenance, invalid rates, and invalid/out-of-bounds recipes are
+  retained as explicit rejections in
+  `pr_data/stability/stability_model_training_audit.csv`; they cannot become
+  stability evidence by implication.
+- The controller refreshes this companion model only after the Stage-12C
+  observation window is closed and ordinary condition provenance has been
+  recorded. It rebuilds from complete current-run history, writes a companion
+  `stability_model_state.csv`, and refuses a refresh that would regress the
+  accepted cumulative count. A load, export, or numerical failure is
+  report-only in `monitor` mode and cannot interrupt the existing λmax run.
+- At least two accepted conditions are required before the companion GP is
+  labeled fitted. The one-condition state is retained as audit history but is
+  honestly labeled insufficient. No prediction drives an Auto recipe in this
+  stage; Stage 12F must add and validate that explicit selection contract.
+
+Hardware-free Python 3.9 compilation and 41 focused Stage-12A–E unit/source
+tests passed, including condition eligibility/provenance, log-target mapping,
+import exclusion, cumulative fitting, atomic numerical failure, prevention of
+history regression, and source-level proof that the refresh path does not
+invoke selection, λmax-model update, Pi communication, or execution. No dry
+debug is required for Stage 12E alone.
+
 ### Stage 12 optical-stability planning record — future stages after 12C
 
-The remaining planned work extends the implemented Stage 12A–12D monitoring,
-trajectory-reporting, and stability-QC foundation into stability modeling and
-selection. Stages 12E and later are not present in the current controller or
-Pi protocol.
+The remaining planned work extends the implemented Stage 12A–12E monitoring,
+trajectory-reporting, stability-QC, and companion-model foundation into
+stability-directed selection. Stages 12F and later are not present in the
+current controller or Pi protocol.
 
 #### Scientific data contract
 
@@ -337,7 +377,7 @@ meaningful stability trajectory.
 | **12B** | Auto-only timestamped scan manifest and active-completed-well observer; unique unmerged raw scan reservations; raw scan and manifest paths under `pr_data/stability/` and `pr_data/auto_stability_scan_manifest.csv`. A trigger dispatch is recorded as pending, then becomes active only after a recorded controller completion point. Stage 12C uses the existing Pi transfer `ready` acknowledgement as a per-well controller-observed timing reference. Ordinary callbacks are preserved. | **Implemented.** Python 3.9 compilation and controller-free observer/source-contract tests passed. No scheduling-enabled dry debug was needed for this foundation alone. |
 | **12C** | Plate-shake active-well scheduler: after a trigger-completed cohort, one 30 s whole-plate shake and one unmerged active-set scan are performed. `cadenced_active_set` adds unshaken scans while a well is eligible; `each_completion` is rejected until a separately validated nonperturbing policy exists. Raw CSVs move to `pr_data/stability/raw_scans/`, manifest schema v3 records the immutable active logical-well→physical-reader-location mapping as well as trigger basis, observation reason, mixing/shake provenance, and reader start/end UTC timestamps, and a batch blocks until every window ends. Missing raw output, invalid reader location/volume, or active wells from multiple batches fail closed. | **Implemented and controlled dry-debug closed.** The 2026-09-11 dry debug verified trigger timing, active-well membership, shake/scan sequence, raw-scan preservation, manifest accuracy, no merged kinetic scans, and correct post-window exclusion. It does not clear long-cohort chemistry or stability-directed selection. |
 | **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | **Implemented and controlled dry-debug closed.** The 2026-09-14 dry debug verified CSV/report/plot export, immutable raw-layout mapping, full-interval eligibility, observed cadence labeling, low-signal exclusion without a fabricated rate, stable condition denominators, and the report-only boundary. Countdown/QC-text closeout regressions are covered by hardware-free tests. It does not clear chemistry-derived stability performance, long cohorts, or stability-directed selection. |
-| **12E** | A separate cumulative stability GP trained only on valid QC-approved condition-level stability observations. The λmax GP and its history remain unchanged. | Synthetic model/history validation; no dry debug required at this point. |
+| **12E** | A separate cumulative stability GP trained only on complete, QC-approved condition-level stability observations. It uses `log10(loss rate in absorbance/s)` internally while preserving raw rates and recipe provenance in an audit export. Imported λmax-only history is explicitly excluded; the λmax GP and its history remain unchanged. | **Implemented; hardware-free validation passed.** Python 3.9 compilation and focused synthetic/source-contract tests verify eligibility/provenance, cumulative/atomic model refresh, no-history-regression, and observational controller placement. No dry debug is required at this point. |
 | **12F** | Lexicographic `target_then_stability` selection with two-GP ranking, target compatibility first, meaningful-signal eligibility, trigger-mask exclusion, and explicit rejection of unsupported acquisition combinations. | Third controlled dry debug before any chemistry use with active stability selection. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, and replicate agreement before enabling active selection. |
 | **13A** | Targeted pipette-mixing design and safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum volume, tip/contamination policy, and unsupported-labware rejection. | Hardware-free protocol and safety-contract review. |
