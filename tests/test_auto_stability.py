@@ -509,8 +509,11 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             'acquisition_modes': ['exploit'],
             'using_acquisition_portfolio': False,
             'num_duplicates': 3,
+            'initial_data': 2,
             'target': None,
             'target_tolerance_nm': None,
+            'auto_model_checkpoint_mode': 'off',
+            'auto_plot_profile': 'off',
         }
 
         initialize(fake_controller)
@@ -522,7 +525,20 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         self.assertIsNone(fake_controller.robo_params['target'])
         self.assertIsNone(fake_controller.robo_params['target_tolerance_nm'])
 
-    def test_stability_only_launcher_stops_before_legacy_target_model(self):
+        fake_controller.robo_params['auto_model_checkpoint_mode'] = 'save'
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError,
+                'checkpoint_mode=OFF'):
+            initialize(fake_controller)
+
+        fake_controller.robo_params['auto_model_checkpoint_mode'] = 'off'
+        fake_controller.robo_params['auto_plot_profile'] = 'standard'
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError,
+                'plot_profile=off'):
+            initialize(fake_controller)
+
+    def test_stability_only_launcher_constructs_but_never_simulates_the_target_free_model(self):
         launch_function = next(
             node for node in ast.parse(
                 self.source, filename=CONTROLLER_PATH
@@ -532,10 +548,14 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         launch_source = ast.get_source_segment(self.source, launch_function)
 
         self.assertIn('STABILITY_MODE_STABILITY_ONLY', launch_source)
-        self.assertIn('stability-only protocol path', launch_source)
+        self.assertIn('legacy Auto preflight simulator uses DummyMLModel',
+                      launch_source)
+        self.assertIn('Stability-only runs must use --no-sim', launch_source)
+        self.assertIn('model = OptimizationModel(', launch_source)
+        self.assertIn('auto.run_simulation(no_pr=no_pr)', launch_source)
         self.assertLess(
-            launch_source.index('STABILITY_MODE_STABILITY_ONLY'),
-            launch_source.index('model = OptimizationModel(')
+            launch_source.index('model = OptimizationModel('),
+            launch_source.index('legacy Auto preflight simulator uses DummyMLModel')
         )
 
     def test_active_selection_has_a_pre_recipe_model_health_gate(self):

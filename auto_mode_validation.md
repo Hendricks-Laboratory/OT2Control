@@ -442,6 +442,49 @@ Auto mode. Stage 12F-F must explicitly instantiate/refresh both models,
 connect this selector at the safe next-batch boundary, and export its
 provenance before a controlled dry debug is appropriate.
 
+### Stage 12F-F target-free stability-only controller lifecycle — 2026-09-18
+
+Stage 12F-F completes the Lab-PC-only controller path for
+`auto_stability_mode=stability_only`. It is intentionally a distinct
+execution route rather than a variation of ordinary wavelength-target Auto.
+
+- Each run begins with the existing volume-feasible maximin seed design. It
+  requires at least two unique seed conditions and three physical duplicates
+  per condition. After each completed batch, the Stage-12D immutable
+  trajectory/reporting data rebuild both current-run companion GPs: one for
+  log10 post-peak loss rate and one for reference-peak absorbance.
+- Subsequent batches call only `getNextStabilityOnlyReaction`. It retains the
+  complete pre-existing mask, true-zero, executable-transfer, water top-off,
+  overflow, source, and controller recipe checks. The trigger variable, when
+  variable, remains ON through mask generation. A candidate must place its
+  full predicted reference-peak interval (`mean ± z × SD`) within the Header
+  absorbance bounds; among eligible candidates, the predicted log loss rate is
+  minimized. A missing, insufficient, or failed companion model, or no
+  eligible candidate, blocks before a new recipe/well/robot command.
+- Ordinary λmax scans remain required raw protocol evidence, but are labeled
+  `audit_only`. They are not used to initialize or update the ordinary lambda
+  GP, calculate target error, select recipes, synchronize target-EI, stop the
+  run, produce lambda-GP plots, or create/import checkpoints. The raw export
+  names this column `lambda_max_nm_audit_only`.
+- This mode requires `auto_model_checkpoint_mode=OFF` and
+  `auto_plot_profile=off`; its final report and the stability CSV suite record
+  the target-free selection contract and both companion model states. The
+  existing λmax workflow, `off`, `monitor`, and `target_then_stability` routes
+  are unchanged. Auto-main/Pi code is unchanged.
+- The legacy `DummyMLModel` preflight simulator has no target-free
+  companion-model lifecycle, so this mode fails clearly before physical work
+  when simulation is requested. Use `--no-sim` for the controlled physical dry
+  debug; this is a limitation of the old simulator, not a model fallback.
+
+Hardware-free validation used Python 3.9.6. Python compilation, AST and
+duplicate-method checks, synthetic controller-lifecycle tests, target-free
+selection/model tests, backward-compatible controller extraction tests, and
+the complete 399-test suite passed. This is not chemistry clearance. The next
+required gate is a controlled `--no-sim` dry debug that verifies the seed
+batch, active-well stability scans, both model-refresh audits, target-free
+selection provenance, ordinary wavelength audit labeling, and the fail-closed
+no-candidate/model-failure paths.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 The remaining planned work extends the implemented Stage 12A–12E monitoring,
@@ -490,9 +533,10 @@ mode is `stability_only`: it has no wavelength target and will minimize the
 post-peak loss-rate response only among candidates predicted to remain within
 the configured usable reference-peak absorbance range. The separately
 implemented `target_then_stability` mode remains the later lexicographic
-hybrid. Until Stage 12F-F completes, `stability_only` fails
-clearly before any model, simulation, or physical work rather than silently
-behaving as `monitor` or reusing a hidden wavelength target.
+hybrid. Stage 12F-F now provides its separate target-free controller route;
+it never silently behaves as `monitor` or reuses a hidden wavelength target.
+Its legacy dummy preflight simulation remains explicitly unavailable, so its
+controlled dry-debug workflow uses `--no-sim`.
 
 `target_then_stability` is lexicographic rather than a weighted sum of
 nanometers and absorbance/time:
@@ -547,10 +591,10 @@ meaningful stability trajectory.
 | **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | **Implemented and controlled dry-debug closed.** The 2026-09-14 dry debug verified CSV/report/plot export, immutable raw-layout mapping, full-interval eligibility, observed cadence labeling, low-signal exclusion without a fabricated rate, stable condition denominators, and the report-only boundary. Countdown/QC-text closeout regressions are covered by hardware-free tests. It does not clear chemistry-derived stability performance, long cohorts, or stability-directed selection. |
 | **12E** | A separate cumulative stability GP trained only on complete, QC-approved condition-level stability observations. It uses `log10(loss rate in absorbance/s)` internally while preserving raw rates and recipe provenance in an audit export. Imported λmax-only history is explicitly excluded; the λmax GP and its history remain unchanged. | **Implemented; hardware-free validation passed.** Python 3.9 compilation and focused synthetic/source-contract tests verify eligibility/provenance, cumulative/atomic model refresh, no-history-regression, and observational controller placement. No dry debug is required at this point. |
 | **12F-A/B** | Target-then-stability Header contract and lexicographic λmax-first hybrid selection. It is retained as the later optional combined mode. | Hardware-free validation passed; controlled dry debug remains required before any chemistry use in this hybrid mode. |
-| **12F-C** | Target-free `stability_only` Header contract: blank/omitted target and target tolerance; required user-selected minimum/maximum reference-peak absorbance, signal-confidence multiplier, and replicate log-loss-rate variability bounds; pre-model fail-closed launch boundary. | **Implemented; hardware-free validation passed.** No dry debug yet because no stability-only model, selection, simulation, or protocol execution is enabled. |
-| **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | **Implemented; hardware-free validation passed.** Python 3.9 compilation plus synthetic aggregation, provenance, cumulative/atomic refresh, prediction, and legacy-regression tests passed. No dry debug is useful until controller lifecycle/selection work exists. |
-| **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | **Implemented; hardware-free validation passed.** Python 3.9 compilation plus source-contract, target-free ranking, signal-bound, physical-feasibility, trigger-mask, no-candidate, model-failure, and state-preservation tests passed. Controller dispatch remains deliberately absent. |
-| **12F-F** | Controller lifecycle, model-refresh gate, selection provenance, exports, plots, and report wording for stability-only selection. λmax remains raw observational provenance only; target stopping and target plots are inapplicable. | Combined-file review and a controlled dry debug for lifecycle, manifests, logs, and fail-closed behavior. |
+| **12F-C** | Target-free `stability_only` Header contract: blank/omitted target and target tolerance; required user-selected minimum/maximum reference-peak absorbance, signal-confidence multiplier, and replicate log-loss-rate variability bounds. | **Implemented; incorporated into 12F-F lifecycle validation.** |
+| **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | **Implemented; incorporated into 12F-F lifecycle validation.** |
+| **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | **Implemented; incorporated into 12F-F lifecycle validation.** |
+| **12F-F** | Controller lifecycle, current-run companion-model refresh gate, target-free selection provenance, stability-only CSV/report exports, and explicit ordinary-wavelength audit labeling. λmax remains raw observational provenance only; target stopping, target plots, checkpoint import/save, and target-EI are inapplicable. | **Implemented; hardware-free validation passed.** Required next gate: controlled `--no-sim` dry debug for lifecycle, manifests, logs, and fail-closed behavior. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before enabling stability-only chemistry selection. |
 | **13A** | Targeted pipette-mixing design and safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum volume, tip/contamination policy, and unsupported-labware rejection. | Hardware-free protocol and safety-contract review. |
 | **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |

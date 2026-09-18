@@ -143,6 +143,11 @@ from auto_stability_model import (
     STABILITY_MODEL_STATUS_FIT_FAILED,
     build_stability_model_training_records
 )
+from auto_stability_signal_model import (
+    AutoStabilitySignalModel,
+    STABILITY_SIGNAL_MODEL_STATUS_FIT_FAILED,
+    build_stability_signal_model_training_records
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -342,24 +347,6 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         my_ip = socket.gethostbyname(socket.gethostname())
         auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
-        # Stage 12F-C accepts the target-free
-        # ``stability_only`` workbook contract. The pure companion models and
-        # candidate selector exist, but the controller lifecycle which builds
-        # their current-run evidence and dispatches a result is deliberately
-        # introduced only in Stage 12F-F. Stop before constructing the legacy
-        # target-seeking OptimizationModel, simulation, connection, or any
-        # physical work rather than substituting a hidden wavelength target.
-        if (
-                auto.robo_params.get('auto_stability_mode')
-                == STABILITY_MODE_STABILITY_ONLY):
-            raise AutoStabilityValidationError(
-                'auto_stability_mode=stability_only has a valid target-free '
-                'Header contract, but its controller lifecycle and '
-                'stability-only protocol path are not enabled yet. '
-                'No model, simulation, robot, or plate-reader work was '
-                'started.'
-            )
-
         #note shorter iterations for testing
         #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
         #print(auto.rxn_df.describe())
@@ -465,9 +452,25 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
                 "validated."
             )
         
-        print(f"Target: {target_value}")
+        if auto.robo_params.get('auto_stability_mode') == (
+                STABILITY_MODE_STABILITY_ONLY):
+            print(
+                '<<controller>> target-free stability-only selection: '
+                'wavelength scans are retained for audit only.'
+            )
+        else:
+            print(f"Target: {target_value}")
 
         if not no_sim:
+            if auto.robo_params.get('auto_stability_mode') == (
+                    STABILITY_MODE_STABILITY_ONLY):
+                raise AutoStabilityValidationError(
+                    'The legacy Auto preflight simulator uses DummyMLModel, '
+                    'which has no target-free stability companion-model '
+                    'lifecycle. Stability-only runs must use --no-sim and '
+                    'be validated through the controlled physical dry-debug '
+                    'workflow; no robot or plate-reader command has started.'
+                )
             auto.run_simulation(no_pr=no_pr)
 
         # The ordinary dry preflight uses DummyMLModel and can mutate legacy
@@ -5595,11 +5598,23 @@ class AutoContr(Controller):
             AutoStabilityModel(self.variable_reagents)
             if self.robo_params.get('auto_stability_mode') in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY
             ) else None
         )
         self.auto_stability_model_training_records = []
         self.auto_stability_model_summary = None
+        # The reference-peak signal GP is required only by target-free
+        # stability-only selection. It remains physically and statistically
+        # separate from the loss-rate GP and the legacy lambda-max model.
+        self.auto_stability_signal_model = (
+            AutoStabilitySignalModel(self.variable_reagents)
+            if self.robo_params.get('auto_stability_mode') == (
+                STABILITY_MODE_STABILITY_ONLY
+            ) else None
+        )
+        self.auto_stability_signal_model_training_records = []
+        self.auto_stability_signal_model_summary = None
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
         # authorize automatic retry, continuation, or model updates.
@@ -5712,6 +5727,30 @@ class AutoContr(Controller):
             if (
                     stability_settings['auto_stability_mode']
                     == STABILITY_MODE_STABILITY_ONLY):
+                if self.robo_params.get('initial_data', 0) < 2:
+                    raise AutoStabilityValidationError(
+                        'auto_stability_mode=stability_only requires at '
+                        'least two initial seed conditions because both the '
+                        'loss-rate and reference-peak companion GPs require '
+                        'two accepted condition-level observations before '
+                        'selection can begin.'
+                    )
+                if self.robo_params.get('auto_model_checkpoint_mode') != 'off':
+                    raise AutoStabilityValidationError(
+                        'auto_stability_mode=stability_only currently '
+                        'requires auto_model_checkpoint_mode=OFF. Existing '
+                        'checkpoints contain lambda-max history but not the '
+                        'immutable current-run trajectories required by both '
+                        'stability companion models.'
+                    )
+                if self.robo_params.get('auto_plot_profile') != 'off':
+                    raise AutoStabilityValidationError(
+                        'auto_stability_mode=stability_only currently '
+                        'requires auto_plot_profile=off because the ordinary '
+                        'plot suite visualizes the intentionally absent '
+                        'lambda-max GP. Stage-12D stability exports and the '
+                        'stability-only run report remain enabled.'
+                    )
                 print(
                     '<<controller>> Auto stability-only selection '
                     'configured: reference-peak absorbance bounds=[{}, {}], '
@@ -5760,6 +5799,7 @@ class AutoContr(Controller):
             return self.auto_stability_observer
         if self.robo_params.get('auto_stability_mode') not in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY):
             return None
 
@@ -10851,7 +10891,13 @@ class AutoContr(Controller):
         }
 
         if 'Experiment_result' in export_dataframe.columns:
-            renamed_columns['Experiment_result'] = 'lambda_max_nm'
+            renamed_columns['Experiment_result'] = (
+                'lambda_max_nm_audit_only'
+                if getattr(self, 'robo_params', {}).get(
+                    'auto_stability_mode'
+                ) == 'stability_only'
+                else 'lambda_max_nm'
+            )
 
         return export_dataframe.rename(columns=renamed_columns)
 
@@ -12042,7 +12088,15 @@ class AutoContr(Controller):
 
             return first_balance if isinstance(first_balance, dict) else None
 
-        target_lambda = self.getModelInfo()["target"]
+        stability_only_mode = (
+            self.robo_params.get('auto_stability_mode')
+            # Use the canonical literal here because this large method is
+            # source-extracted by legacy controller tests without Auto imports.
+            == 'stability_only'
+        )
+        target_lambda = (
+            None if stability_only_mode else self.getModelInfo()['target']
+        )
 
         for recipe_i, recipe in enumerate(unique_recipes):
             prediction_metadata = prediction_metadata_by_recipe[recipe_i]
@@ -12130,11 +12184,23 @@ class AutoContr(Controller):
                 spectral_observations=replicate_spectral_observations
             )
 
-            model_training_decision = (
-                self._get_auto_model_training_decision_from_replicate_qc(
-                    replicate_qc
+            if stability_only_mode:
+                model_training_decision = {
+                    'use_for_model_training': False,
+                    'model_training_status': 'not_applicable_stability_only',
+                    'n_replicates_used_for_model_training': 0,
+                    'model_training_reason': (
+                        'Target-free stability-only mode retains lambda-max '
+                        'observations as audit data only; it does not train '
+                        'the ordinary wavelength GP.'
+                    ),
+                }
+            else:
+                model_training_decision = (
+                    self._get_auto_model_training_decision_from_replicate_qc(
+                        replicate_qc
+                    )
                 )
-            )
 
             qc_mean, qc_sd, qc_sem = (
                 self._summarize_duplicate_lambda_values(
@@ -12142,13 +12208,26 @@ class AutoContr(Controller):
                 )
             )
 
-            target_eligibility_decision = (
-                self._get_auto_target_eligibility_decision(
-                    replicate_qc=replicate_qc,
-                    model_training_decision=model_training_decision,
-                    qc_replicate_sd_nm=qc_sd
+            if stability_only_mode:
+                target_eligibility_decision = {
+                    'eligible_for_target_incumbent': False,
+                    'eligible_for_target_stop': False,
+                    'target_eligibility_status': 'not_applicable_stability_only',
+                    'target_eligibility_reason': (
+                        'Target-free stability-only mode has no wavelength '
+                        'incumbent or target stopping rule.'
+                    ),
+                    'replicate_sd_tolerance_nm': None,
+                    'n_finite_qc_replicates_for_target_validation': 0,
+                }
+            else:
+                target_eligibility_decision = (
+                    self._get_auto_target_eligibility_decision(
+                        replicate_qc=replicate_qc,
+                        model_training_decision=model_training_decision,
+                        qc_replicate_sd_nm=qc_sd
+                    )
                 )
-            )
 
             if replicate_qc['n_replicates_excluded'] > 0:
                 print(
@@ -12193,6 +12272,30 @@ class AutoContr(Controller):
                     'predicted_stability_loss_rate_absorbance_per_s'
                 )
             )
+            predicted_reference_peak_absorbance = self._safe_float_or_none(
+                prediction_metadata.get('predicted_reference_peak_absorbance')
+            )
+            predicted_reference_peak_absorbance_std = (
+                self._safe_float_or_none(
+                    prediction_metadata.get(
+                        'predicted_reference_peak_absorbance_std'
+                    )
+                )
+            )
+            predicted_reference_peak_interval_lower = (
+                self._safe_float_or_none(
+                    prediction_metadata.get(
+                        'predicted_reference_peak_absorbance_interval_lower'
+                    )
+                )
+            )
+            predicted_reference_peak_interval_upper = (
+                self._safe_float_or_none(
+                    prediction_metadata.get(
+                        'predicted_reference_peak_absorbance_interval_upper'
+                    )
+                )
+            )
             selected_normalized_recipe = prediction_metadata.get(
                 'selected_normalized_recipe'
             )
@@ -12218,6 +12321,8 @@ class AutoContr(Controller):
             # Derive the predicted target error when older callers provide a
             # mean prediction but not the newer explicit audit field.
             if (
+                    not stability_only_mode
+                    and
                 predicted_target_error is None
                 and predicted_mean is not None
             ):
@@ -12225,7 +12330,7 @@ class AutoContr(Controller):
                     abs(predicted_mean - target_lambda)
                 )
 
-            if qc_mean is None:
+            if stability_only_mode or qc_mean is None:
                 target_error = None
                 prediction_error = None
             else:
@@ -12331,7 +12436,9 @@ class AutoContr(Controller):
                         selected_mask
                     )
                 ),
-                'target_lambda_max_nm': float(target_lambda),
+                'target_lambda_max_nm': (
+                    None if target_lambda is None else float(target_lambda)
+                ),
                 'predicted_target_error_nm': predicted_target_error,
                 'predicted_lambda_mean_nm': predicted_mean,
                 'predicted_lambda_std_nm': predicted_std,
@@ -12380,6 +12487,43 @@ class AutoContr(Controller):
                 ),
                 'predicted_stability_loss_rate_absorbance_per_s': (
                     predicted_stability_loss_rate
+                ),
+                'signal_model_status': prediction_metadata.get(
+                    'signal_model_status'
+                ),
+                'signal_model_accepted_condition_count': (
+                    prediction_metadata.get(
+                        'signal_model_accepted_condition_count'
+                    )
+                ),
+                'minimum_peak_absorbance': self._safe_float_or_none(
+                    prediction_metadata.get('minimum_peak_absorbance')
+                ),
+                'maximum_peak_absorbance': self._safe_float_or_none(
+                    prediction_metadata.get('maximum_peak_absorbance')
+                ),
+                'signal_confidence_z': self._safe_float_or_none(
+                    prediction_metadata.get('signal_confidence_z')
+                ),
+                'signal_compatible_optimizer_result_count': (
+                    prediction_metadata.get(
+                        'signal_compatible_optimizer_result_count'
+                    )
+                ),
+                'predicted_reference_peak_absorbance': (
+                    predicted_reference_peak_absorbance
+                ),
+                'predicted_reference_peak_absorbance_std': (
+                    predicted_reference_peak_absorbance_std
+                ),
+                'predicted_reference_peak_absorbance_interval_lower': (
+                    predicted_reference_peak_interval_lower
+                ),
+                'predicted_reference_peak_absorbance_interval_upper': (
+                    predicted_reference_peak_interval_upper
+                ),
+                'wavelength_observation_role': (
+                    'audit_only' if stability_only_mode else 'target_model'
                 ),
                 'stability_mask_results': (
                     self._serialize_auto_audit_value(
@@ -28319,6 +28463,15 @@ class AutoContr(Controller):
         Returns:  
             bool: True if all tests were passed  
         '''
+        if self.robo_params.get('auto_stability_mode') == (
+                STABILITY_MODE_STABILITY_ONLY):
+            raise AutoStabilityValidationError(
+                'The legacy Auto simulator cannot validate target-free '
+                'stability-only selection because it uses DummyMLModel. Use '
+                '--no-sim and the controlled physical dry-debug workflow; '
+                'no robot or plate-reader command has started.'
+            )
+
         #cache some things before you overwrite them for the simulation
         stored_server_ip = self.server_ip
         stored_simulate = self.simulate
@@ -28361,6 +28514,15 @@ class AutoContr(Controller):
           simulate changes some things about how code is run from the controller
         '''
         print('<<controller>> RUNNING')
+        if (
+                self.robo_params.get('auto_stability_mode') ==
+                STABILITY_MODE_STABILITY_ONLY
+                and model is None):
+            raise AutoStabilityValidationError(
+                'Stability-only execution requires the configured '
+                'OptimizationModel from launch_auto(); DummyMLModel cannot '
+                'perform target-free companion-model selection.'
+            )
         if model == None:
             #you're simulating with a dummy model.
             print('<<controller>> running with dummy ml')
@@ -28770,9 +28932,18 @@ class AutoContr(Controller):
                 'stability_selection_status'
             ),
             'stability_model_status': metadata.get('stability_model_status'),
+            'signal_model_status': metadata.get('signal_model_status'),
             'predicted_stability_log10_loss_rate': metadata.get(
                 'predicted_stability_log10_loss_rate'
             ),
+            'predicted_reference_peak_absorbance_interval': [
+                metadata.get(
+                    'predicted_reference_peak_absorbance_interval_lower'
+                ),
+                metadata.get(
+                    'predicted_reference_peak_absorbance_interval_upper'
+                ),
+            ],
             'target_compatibility_tolerance_nm': metadata.get(
                 'target_compatibility_tolerance_nm'
             ),
@@ -29014,6 +29185,10 @@ class AutoContr(Controller):
                 copy.deepcopy(self.auto_main_robot_state_snapshot)
             )
         self._execute_auto_preparation_phase(model, simulate)
+        if self.robo_params.get('auto_stability_mode') == (
+                STABILITY_MODE_STABILITY_ONLY):
+            self._run_auto_stability_only(model)
+            return
         # An imported checkpoint already contains a fitted cumulative GP.  It
         # must continue directly with new optimizer-selected batches instead
         # of spending wells on a second seed design.
@@ -29534,6 +29709,315 @@ class AutoContr(Controller):
 
             self.batch_num += 1    
             
+    def _execute_auto_stability_only_batch(
+            self,
+            model,
+            unique_recipes,
+            condition_type,
+            prediction_metadata):
+        '''Execute one target-free batch and refresh only companion evidence.
+
+        The ordinary full-plate scan is retained as raw/audit output because
+        it is part of the established protocol contract.  Its lambda maxima
+        are never used to initialize, update, score, or stop a stability-only
+        run.  Stage-12D manifest-linked trajectories remain the sole source
+        of both companion-model training responses.
+        '''
+        unique_recipes = np.asarray(unique_recipes, dtype=float)
+        if unique_recipes.ndim == 1:
+            unique_recipes = unique_recipes.reshape(1, -1)
+        if unique_recipes.shape[0] == 0:
+            raise AutoStabilityValidationError(
+                'Stability-only mode cannot execute an empty batch.'
+            )
+
+        recipes = self.duplicate_list_elements(
+            unique_recipes,
+            self.num_duplicates
+        )
+        print(
+            '<<controller>> preparing {} stability-only recipe wells with '
+            '{} variable reagents'.format(
+                recipes.shape[0], recipes.shape[1]
+            )
+        )
+        wellnames = [self._generate_wellname() for _ in range(recipes.shape[0])]
+        self._ensure_auto_plate_capacity_for_batch(len(wellnames))
+        self._create_samples(wellnames, recipes, model)
+
+        filenames = self.rxn_df[
+            (self.rxn_df['op'] == 'scan') |
+            (self.rxn_df['op'] == 'scan_until_complete')
+        ].reset_index()
+        last_filename = filenames.loc[
+            filenames['index'].idxmax(), 'scan_filename'
+        ]
+        scan_data = self._get_sample_data(wellnames, last_filename)
+        lambda_values, scan_quality = self._extract_auto_lambda_maxima(scan_data)
+
+        self._record_auto_live_run_transition(
+            LIFECYCLE_PROCESSING_BATCH,
+            'stability_only_batch_measurement_completed',
+            {
+                'batch_number': int(self.batch_num),
+                'physical_well_count': int(len(wellnames)),
+                'wellnames': list(wellnames),
+                'scan_filename': str(last_filename),
+                'wavelength_observation_role': 'audit_only',
+            },
+            active_batch_number=int(self.batch_num)
+        )
+
+        self._append_auto_model_performance_rows(
+            unique_recipes=unique_recipes,
+            lambda_max_values=lambda_values,
+            condition_type=condition_type,
+            batch_number=self.batch_num,
+            prediction_metadata=prediction_metadata,
+            scan_quality_by_replicate=scan_quality,
+            replicate_wellnames=wellnames
+        )
+        self._refresh_auto_stability_model_from_reporting()
+        self._refresh_auto_stability_signal_model_from_reporting()
+        self._update_experiment_data(recipes, lambda_values, axis=0)
+
+        self._record_auto_live_run_event(
+            'stability_only_companion_models_refreshed',
+            {
+                'batch_number': int(self.batch_num),
+                'loss_rate_model': copy.deepcopy(
+                    self.auto_stability_model_summary
+                ),
+                'signal_model': copy.deepcopy(
+                    self.auto_stability_signal_model_summary
+                ),
+            }
+        )
+        self._record_auto_live_run_transition(
+            LIFECYCLE_READY_FOR_BATCH,
+            'stability_only_batch_completed',
+            {
+                'batch_number': int(self.batch_num),
+                'condition_type': str(condition_type),
+                'wavelength_target_used': False,
+            },
+            active_batch_number=None
+        )
+
+    def _run_auto_stability_only(self, model):
+        '''Run a target-free stability-only Auto lifecycle.
+
+        This intentionally bypasses every primary-lambda-GP lifecycle action:
+        no lambda initialization/update, target-EI synchronization, target
+        stopping, checkpoint package, or lambda-GP plot suite is used.  The
+        shared constrained maximin seed generator and physical execution path
+        remain unchanged.
+        '''
+        if getattr(model, '_auto_model_checkpoint_imported', False):
+            raise AutoStabilityValidationError(
+                'Stability-only mode cannot continue from an Auto model '
+                'checkpoint because imported lambda history lacks the '
+                'immutable current-run stability trajectories required for '
+                'both companion models.'
+            )
+        if self.robo_params.get('auto_model_checkpoint_mode') != 'off':
+            raise AutoStabilityValidationError(
+                'Stability-only mode requires Auto model checkpoints to be '
+                'OFF; this run will not create or import a lambda checkpoint.'
+            )
+
+        self.batch_num = 0
+        print('<<controller>> executing target-free stability seed batch 0')
+        print('<<controller>> generating volume-feasible maximin initial design')
+        normalized_seed = model.generate_initial_design()
+        physical_seed = self.Normalize_Denormalize_Recipes(
+            normalized_seed.copy(), normalize_flag=False
+        )
+        seed_before_repair = physical_seed.copy()
+        physical_seed = self._apply_true_zero_transfer_rule_to_recipes(
+            physical_seed
+        )
+        self._validate_auto_recipe_volume_feasibility(
+            physical_seed,
+            context_label='stability-only initial seed batch 0'
+        )
+        self._export_auto_batch_recipe_design(
+            repaired_recipes=physical_seed,
+            original_recipes=seed_before_repair,
+            batch_label='batch_0',
+            selection_metadata={
+                'acquisition_mode': 'stability_only_seed',
+                'stability_selection_mode': 'stability_only',
+                'stability_selection_status': 'seed_evidence_collection',
+                'notes': (
+                    'Target-free stability seed design. No lambda-max GP, '
+                    'target score, or target stopping rule is configured.'
+                ),
+            }
+        )
+        self._execute_auto_stability_only_batch(
+            model=model,
+            unique_recipes=physical_seed,
+            condition_type='seed',
+            prediction_metadata={
+                'acquisition_mode': 'stability_only_seed',
+                'stability_selection_mode': 'stability_only',
+                'stability_selection_status': 'seed_evidence_collection',
+                'notes': (
+                    'Initial target-free stability evidence collection; no '
+                    'pre-experiment companion-model prediction was available.'
+                ),
+            }
+        )
+        self.batch_num += 1
+
+        while model.curr_iter < model.max_iters:
+            print(
+                '<<controller>> selecting next stability-only reaction from '
+                'updated companion models'
+            )
+            (
+                stability_model,
+                signal_model,
+                trigger_variable_index
+            ) = self._get_auto_stability_only_selection_context()
+            normalized_recipe = model.getNextStabilityOnlyReaction(
+                stability_model=stability_model,
+                signal_model=signal_model,
+                min_peak_absorbance=self.robo_params[
+                    'auto_stability_min_peak_absorbance'
+                ],
+                max_peak_absorbance=self.robo_params[
+                    'auto_stability_max_peak_absorbance'
+                ],
+                signal_confidence_z=self.robo_params[
+                    'auto_stability_signal_confidence_z'
+                ],
+                trigger_reagent_index=trigger_variable_index,
+            )
+            selection_metadata = copy.deepcopy(
+                getattr(model, 'last_stability_only_selection_metadata', {})
+            )
+            (
+                physical_recipe,
+                optimizer_metadata
+            ) = self._prepare_auto_optimizer_recipe_for_execution(
+                model=model,
+                normalized_recipes=normalized_recipe,
+                batch_label='batch_{}'.format(self.batch_num),
+                additional_selection_metadata=selection_metadata,
+            )
+            self._execute_auto_stability_only_batch(
+                model=model,
+                unique_recipes=physical_recipe,
+                condition_type='optimizer_selected',
+                prediction_metadata=optimizer_metadata,
+            )
+            model.curr_iter += 1
+            self.batch_num += 1
+
+        model.quit = True
+        self._finalize_auto_stability_only_run(model)
+
+    def _finalize_auto_stability_only_run(self, model):
+        '''Finalize target-free stability-only artifacts without lambda output.'''
+        self._build_labeled_auto_experiment_data_export().to_csv(
+            os.path.join(self.out_path, 'pr_data', 'experiment_data.csv'),
+            index=False
+        )
+        self._export_auto_model_performance_log()
+        try:
+            self._generate_auto_stability_reporting_exports()
+        except Exception as exc:
+            self.auto_stability_reporting_summary = {
+                'error': str(exc),
+                'paths': [],
+            }
+            print(
+                '<<controller warning>> final stability-only reporting '
+                'exports were not generated: {}'.format(exc)
+            )
+
+        report_path = os.path.join(self.out_path, 'auto_run_report.md')
+        lines = [
+            '# Auto Stability-Only Run Report',
+            '',
+            'This run was target-free: it did not initialize, train, or use '
+            'the ordinary lambda-max GP; it did not apply a wavelength '
+            'target, target-EI, target stopping, or lambda-GP plots.',
+            '',
+            '## Selection contract',
+            '',
+            '- Objective: minimize predicted `log10(post-peak absorbance '
+            'loss rate in absorbance/s)` among physically executable recipes.',
+            '- Signal gate: the complete predicted reference-peak interval '
+            '`mean ± z × SD` had to remain within the configured absorbance '
+            'bounds.',
+            '- Signal bounds: [{}, {}]; confidence z: {}.'.format(
+                self.robo_params['auto_stability_min_peak_absorbance'],
+                self.robo_params['auto_stability_max_peak_absorbance'],
+                self.robo_params['auto_stability_signal_confidence_z'],
+            ),
+            '- Completed unique conditions: {}.'.format(
+                len(self.auto_model_performance_rows)
+            ),
+            '- Seed conditions: {}; stability-selected conditions: {}.'.format(
+                sum(
+                    row.get('condition_type') == 'seed'
+                    for row in self.auto_model_performance_rows
+                ),
+                sum(
+                    row.get('condition_type') == 'optimizer_selected'
+                    for row in self.auto_model_performance_rows
+                ),
+            ),
+            '',
+            '## Companion models',
+            '',
+            '- Loss-rate GP: `{}` from {} accepted condition(s).'.format(
+                (self.auto_stability_model_summary or {}).get(
+                    'status', 'not recorded'
+                ),
+                (self.auto_stability_model_summary or {}).get(
+                    'accepted_condition_count', 0
+                ),
+            ),
+            '- Reference-peak signal GP: `{}` from {} accepted condition(s).'
+            .format(
+                (self.auto_stability_signal_model_summary or {}).get(
+                    'status', 'not recorded'
+                ),
+                (self.auto_stability_signal_model_summary or {}).get(
+                    'accepted_condition_count', 0
+                ),
+            ),
+            '- Stability artifacts: `pr_data/stability/`.',
+            '- Selection/condition audit: `pr_data/auto_model_performance_log.csv`.',
+            '',
+        ]
+        with open(report_path, 'w', encoding='utf-8') as report_file:
+            report_file.write('\n'.join(lines))
+        print('<<controller>> exported stability-only run report to {}'.format(
+            report_path
+        ))
+
+        self._record_auto_live_run_transition(
+            LIFECYCLE_FINALIZED,
+            'stability_only_run_finalized',
+            {
+                'completed_batch_count': int(self.batch_num),
+                'lambda_target_used': False,
+                'model_checkpoint_created': False,
+            },
+            active_batch_number=None
+        )
+        print(
+            '<<controller>> stability-only Auto run completed; target-free '
+            'condition, trajectory, and companion-model artifacts exported.'
+        )
+        self.close_connection()
+        self.pr.shutdown()
+
     def _run_imported_auto_continuation(self, model, normalize):
         '''Runs a new Auto continuation from an already rebuilt model.'''
         # Imported observations remain model history and report provenance,
@@ -29771,6 +30255,7 @@ class AutoContr(Controller):
         '''
         if self.robo_params.get('auto_stability_mode') not in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY):
             return {'enabled': False, 'fitted': False}
         stability_model = getattr(self, 'auto_stability_model', None)
@@ -29791,7 +30276,9 @@ class AutoContr(Controller):
                         'auto_stability_replicate_log10_loss_rate_sd_max'
                     )
                     if self.robo_params.get('auto_stability_mode') ==
-                    STABILITY_MODE_TARGET_THEN_STABILITY else None
+                    STABILITY_MODE_TARGET_THEN_STABILITY or
+                    self.robo_params.get('auto_stability_mode') ==
+                    STABILITY_MODE_STABILITY_ONLY else None
                 ),
             )
             model_summary = stability_model.refresh_from_training_records(
@@ -29834,7 +30321,7 @@ class AutoContr(Controller):
                 'ordinary Auto execution continues unchanged'
                 if self.robo_params.get('auto_stability_mode') ==
                 STABILITY_MODE_MONITOR else
-                'the next target-then-stability selection will fail closed'
+                'the next stability-directed selection will fail closed'
             )
             print(
                 '<<controller warning>> Stage-12E stability-model refresh '
@@ -29863,6 +30350,121 @@ class AutoContr(Controller):
                 )
             )
         return self.auto_stability_model_summary
+
+    def _write_auto_stability_signal_model_exports(self):
+        '''Atomically export the Stage-12F-D signal-model audit records.'''
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        audit_rows = []
+        for row in self.auto_stability_signal_model_training_records:
+            export_row = dict(row)
+            if export_row.get('normalized_recipe') is not None:
+                export_row['normalized_recipe'] = (
+                    self._serialize_auto_audit_value(
+                        export_row['normalized_recipe']
+                    )
+                )
+            audit_rows.append(export_row)
+        summary = dict(self.auto_stability_signal_model_summary or {})
+        summary['variable_reagents'] = self._serialize_auto_audit_value(
+            list(self.variable_reagents)
+        )
+        output_paths = [
+            self._write_auto_stability_reporting_csv(
+                os.path.join(
+                    stability_path,
+                    'stability_signal_model_training_audit.csv'
+                ),
+                audit_rows
+            ),
+            self._write_auto_stability_reporting_csv(
+                os.path.join(
+                    stability_path, 'stability_signal_model_state.csv'
+                ),
+                [summary]
+            ),
+        ]
+        self.auto_stability_signal_model_summary['paths'] = output_paths
+        return output_paths
+
+    def _refresh_auto_stability_signal_model_from_reporting(self):
+        '''Refresh the target-free stability signal GP from immutable reports.'''
+        if self.robo_params.get('auto_stability_mode') != (
+                STABILITY_MODE_STABILITY_ONLY):
+            return {'enabled': False, 'fitted': False}
+        signal_model = getattr(self, 'auto_stability_signal_model', None)
+        if signal_model is None:
+            raise RuntimeError(
+                'Stability-only mode has no initialized reference-peak '
+                'signal model.'
+            )
+        try:
+            records = self._build_auto_stability_reporting_records()
+            training_records = build_stability_signal_model_training_records(
+                condition_summaries=records['condition_summaries'],
+                condition_rows=self.auto_model_performance_rows,
+                variable_reagents=self.variable_reagents,
+                min_concentrations=self.min_conc,
+                max_concentrations=self.max_conc,
+            )
+            model_summary = signal_model.refresh_from_training_records(
+                training_records
+            )
+            model_summary.update({
+                'enabled': True,
+                'reporting_condition_count': len(
+                    records['condition_summaries']
+                ),
+                'eligible_condition_count': sum(
+                    row.get('stability_signal_model_training_status') ==
+                    'accepted'
+                    for row in training_records
+                ),
+                'rejected_condition_count': sum(
+                    row.get('stability_signal_model_training_status') !=
+                    'accepted'
+                    for row in training_records
+                ),
+            })
+            self.auto_stability_signal_model_training_records = training_records
+            self.auto_stability_signal_model_summary = model_summary
+            self._write_auto_stability_signal_model_exports()
+        except Exception as exc:
+            self.auto_stability_signal_model_summary = {
+                'enabled': True,
+                'fitted': False,
+                'status': 'reporting_or_model_refresh_failed',
+                'error': str(exc),
+                'accepted_condition_count': 0,
+                'minimum_condition_count': 2,
+                'model_target_transform': 'reference_peak_absorbance',
+            }
+            print(
+                '<<controller warning>> Stage-12F-D stability signal-model '
+                'refresh was not completed; the next stability-only '
+                'selection will fail closed. Error: {}'.format(exc)
+            )
+            try:
+                self._write_auto_stability_signal_model_exports()
+            except Exception as export_exc:
+                print(
+                    '<<controller warning>> Stage-12F-D signal-model audit '
+                    'exports were not generated: {}'.format(export_exc)
+                )
+            return self.auto_stability_signal_model_summary
+
+        if self.robo_params.get('auto_terminal_verbosity', 'standard') in {
+                'standard', 'diagnostic'}:
+            print(
+                '<<controller>> Stage-12F-D signal model: {} accepted '
+                'condition(s), status {}.'.format(
+                    self.auto_stability_signal_model_summary[
+                        'accepted_condition_count'
+                    ],
+                    self.auto_stability_signal_model_summary['status'],
+                )
+            )
+        return self.auto_stability_signal_model_summary
 
     def _get_auto_target_then_stability_selection_context(self):
         '''Return the fitted/bootstrapping companion model for Stage 12F.
@@ -29914,10 +30516,86 @@ class AutoContr(Controller):
         # by the optimizer's existing mask pathway, never repaired later.
         return stability_model, trigger_variable_index
 
+    def _get_auto_stability_only_selection_context(self):
+        '''Return both fitted companion models for target-free selection.
+
+        This runs before a new batch is constructed.  A missing, insufficient,
+        or failed model never falls back to wavelength targeting and therefore
+        cannot create an unqualified physical batch.
+        '''
+        if self.robo_params.get('auto_stability_mode') != (
+                STABILITY_MODE_STABILITY_ONLY):
+            return None, None, None
+
+        stability_summary = getattr(self, 'auto_stability_model_summary', None)
+        signal_summary = getattr(
+            self, 'auto_stability_signal_model_summary', None
+        )
+        stability_model = getattr(self, 'auto_stability_model', None)
+        signal_model = getattr(self, 'auto_stability_signal_model', None)
+        if (
+                not isinstance(stability_summary, dict)
+                or not isinstance(signal_summary, dict)
+                or stability_model is None
+                or signal_model is None):
+            raise AutoStabilityValidationError(
+                'Stability-only selection requires completed Stage-12D '
+                'reporting and refreshes of both current-run companion '
+                'models before the next recipe can be proposed.'
+            )
+        failed_statuses = {
+            'reporting_or_model_refresh_failed',
+            STABILITY_MODEL_STATUS_FIT_FAILED,
+            STABILITY_SIGNAL_MODEL_STATUS_FIT_FAILED,
+        }
+        if (
+                stability_summary.get('status') in failed_statuses
+                or signal_summary.get('status') in failed_statuses
+                or getattr(stability_model, 'status', None) in failed_statuses
+                or getattr(signal_model, 'status', None) in failed_statuses):
+            raise AutoStabilityValidationError(
+                'Stability-only selection is blocked because a companion '
+                'model refresh failed: loss-rate={}, signal={}.'.format(
+                    stability_summary.get(
+                        'error',
+                        getattr(stability_model, 'last_error', None)
+                    ),
+                    signal_summary.get(
+                        'error',
+                        getattr(signal_model, 'last_error', None)
+                    ),
+                )
+            )
+        if (
+                stability_summary.get('status') != 'fitted'
+                or signal_summary.get('status') != 'fitted'
+                or getattr(stability_model, 'status', None) != 'fitted'
+                or getattr(signal_model, 'status', None) != 'fitted'):
+            raise AutoStabilityValidationError(
+                'Stability-only selection requires fitted current-run '
+                'loss-rate and reference-peak signal models. Accepted '
+                'conditions: loss-rate={}, signal={}; no wavelength '
+                'fallback is permitted.'.format(
+                    stability_summary.get('accepted_condition_count', 0),
+                    signal_summary.get('accepted_condition_count', 0),
+                )
+            )
+
+        trigger_reagent = canonical_reagent_name(
+            self.robo_params['auto_stability_trigger_reagent']
+        )
+        trigger_variable_index = None
+        for reagent_index, reagent_name in enumerate(self.variable_reagents):
+            if canonical_reagent_name(reagent_name) == trigger_reagent:
+                trigger_variable_index = reagent_index
+                break
+        return stability_model, signal_model, trigger_variable_index
+
     def _generate_auto_stability_reporting_exports(self):
         '''Generate Stage-12D data artifacts only after an Auto run completes.'''
         if self.robo_params.get('auto_stability_mode') not in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY):
             return []
         records = self._build_auto_stability_reporting_records()
@@ -31847,13 +32525,23 @@ class AutoContr(Controller):
                 'stability_selection_status',
                 'stability_model_status',
                 'stability_model_accepted_condition_count',
+                'signal_model_status',
+                'signal_model_accepted_condition_count',
                 'stability_trigger_variable_index',
                 'stability_trigger_required_on',
                 'target_compatibility_tolerance_nm',
                 'target_compatible_optimizer_result_count',
                 'predicted_stability_log10_loss_rate',
                 'predicted_stability_log10_loss_rate_std',
-                'predicted_stability_loss_rate_absorbance_per_s'
+                'predicted_stability_loss_rate_absorbance_per_s',
+                'minimum_peak_absorbance',
+                'maximum_peak_absorbance',
+                'signal_confidence_z',
+                'signal_compatible_optimizer_result_count',
+                'predicted_reference_peak_absorbance',
+                'predicted_reference_peak_absorbance_std',
+                'predicted_reference_peak_absorbance_interval_lower',
+                'predicted_reference_peak_absorbance_interval_upper'
             )
 
             for field_name in selection_scalar_fields:
