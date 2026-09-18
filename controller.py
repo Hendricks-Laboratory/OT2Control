@@ -343,9 +343,10 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
         auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
 
         # Stage 12F-C accepts the target-free
-        # ``stability_only`` workbook contract. Its dedicated optical-signal
-        # model and candidate-selection path are deliberately introduced in
-        # later narrowly reviewed stages. Stop before constructing the legacy
+        # ``stability_only`` workbook contract. The pure companion models and
+        # candidate selector exist, but the controller lifecycle which builds
+        # their current-run evidence and dispatches a result is deliberately
+        # introduced only in Stage 12F-F. Stop before constructing the legacy
         # target-seeking OptimizationModel, simulation, connection, or any
         # physical work rather than substituting a hidden wavelength target.
         if (
@@ -353,8 +354,8 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
                 == STABILITY_MODE_STABILITY_ONLY):
             raise AutoStabilityValidationError(
                 'auto_stability_mode=stability_only has a valid target-free '
-                'Header contract, but its optical-signal model and '
-                'stability-only recipe-selection path are not enabled yet. '
+                'Header contract, but its controller lifecycle and '
+                'stability-only protocol path are not enabled yet. '
                 'No model, simulation, robot, or plate-reader work was '
                 'started.'
             )
@@ -5696,7 +5697,7 @@ class AutoContr(Controller):
                     )
                     or self.robo_params.get('acquisition_modes') != ['exploit']):
                 raise AutoStabilityValidationError(
-                    'auto_stability_mode=target_then_stability requires the '
+                    'active Auto stability selection requires the '
                     'single legacy acquisition interface '
                     '(acquisition_mode=exploit and acquisition_modes=off or '
                     'blank). target_ei, core3, and other portfolios are '
@@ -5714,11 +5715,15 @@ class AutoContr(Controller):
                 print(
                     '<<controller>> Auto stability-only selection '
                     'configured: reference-peak absorbance bounds=[{}, {}], '
-                    'replicate log10 loss-rate SD limit={}, trigger={}. '
+                    'signal confidence z={}, replicate log10 loss-rate SD '
+                    'limit={}, trigger={}. '
                     'No wavelength target, target stopping, or lambda '
                     'selection gate is configured.'.format(
                         stability_settings['auto_stability_min_peak_absorbance'],
                         stability_settings['auto_stability_max_peak_absorbance'],
+                        stability_settings[
+                            'auto_stability_signal_confidence_z'
+                        ],
                         stability_settings[
                             'auto_stability_replicate_log10_loss_rate_sd_max'
                         ],

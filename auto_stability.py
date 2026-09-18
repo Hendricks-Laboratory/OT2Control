@@ -137,6 +137,7 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_scan_interval_s': None,
             'auto_stability_min_peak_absorbance': None,
             'auto_stability_max_peak_absorbance': None,
+            'auto_stability_signal_confidence_z': None,
             'auto_stability_replicate_log10_loss_rate_sd_max': None,
             'auto_stability_mixing_mode': None,
         }
@@ -203,6 +204,7 @@ def parse_auto_stability_header_settings(header_values):
     )
 
     max_peak_absorbance = None
+    signal_confidence_z = None
     if mode == STABILITY_MODE_STABILITY_ONLY:
         max_peak_absorbance = _parse_positive_finite(
             header_values.get('auto_stability_max_peak_absorbance'),
@@ -214,6 +216,10 @@ def parse_auto_stability_header_settings(header_values):
                 'strictly greater than auto_stability_min_peak_absorbance '
                 'for auto_stability_mode=stability_only.'
             )
+        signal_confidence_z = _parse_positive_finite(
+            header_values.get('auto_stability_signal_confidence_z'),
+            'auto_stability_signal_confidence_z'
+        )
 
     if scan_schedule != STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
         raise AutoStabilityValidationError(
@@ -248,6 +254,7 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_scan_interval_s': scan_interval_s,
         'auto_stability_min_peak_absorbance': min_peak_absorbance,
         'auto_stability_max_peak_absorbance': max_peak_absorbance,
+        'auto_stability_signal_confidence_z': signal_confidence_z,
         'auto_stability_replicate_log10_loss_rate_sd_max': (
             replicate_log10_loss_rate_sd_max
         ),

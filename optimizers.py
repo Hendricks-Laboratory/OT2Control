@@ -2877,6 +2877,502 @@ class OptimizationModel():
                 )
             )
         return [selected_x]
+
+    def _get_stability_only_candidate_diagnostics(
+        self,
+        full_x,
+        stability_model,
+        signal_model,
+        min_peak_absorbance,
+        max_peak_absorbance,
+        signal_confidence_z
+    ):
+        '''Evaluate one physically feasible target-free stability candidate.
+
+        The lambda-max GP is intentionally absent from this calculation. A
+        candidate first needs an entire reference-peak predictive interval
+        within the user-selected optical-signal range; only then can its
+        predicted post-peak loss rate rank it. This keeps absorbance bounds
+        as scientific eligibility constraints, not an arbitrary weighted term
+        combined with stability loss rate.
+        '''
+        full_x = np.asarray(full_x, dtype=float).reshape(self._get_dimension())
+        volume_balance = self._get_candidate_volume_balance(full_x)
+        if not volume_balance['volume_feasible']:
+            return None
+
+        (
+            predicted_signal_mean,
+            predicted_signal_std
+        ) = signal_model.predict_reference_peak_absorbance_distribution(full_x)
+        predicted_signal_mean = float(
+            np.asarray(predicted_signal_mean, dtype=float).reshape(-1)[0]
+        )
+        predicted_signal_std = float(
+            np.asarray(predicted_signal_std, dtype=float).reshape(-1)[0]
+        )
+        if (
+                not math.isfinite(predicted_signal_mean)
+                or not math.isfinite(predicted_signal_std)
+                or predicted_signal_std < 0.0):
+            raise ValueError(
+                'Companion stability signal GP returned invalid '
+                'reference-peak prediction diagnostics.'
+            )
+        interval_lower = predicted_signal_mean - (
+            float(signal_confidence_z) * predicted_signal_std
+        )
+        interval_upper = predicted_signal_mean + (
+            float(signal_confidence_z) * predicted_signal_std
+        )
+        if (
+                not math.isfinite(interval_lower)
+                or not math.isfinite(interval_upper)):
+            raise ValueError(
+                'Companion stability signal GP produced a non-finite '
+                'reference-peak confidence interval.'
+            )
+        tolerance = 1e-9
+        signal_compatible = bool(
+            interval_lower >= float(min_peak_absorbance) - tolerance
+            and interval_upper <= float(max_peak_absorbance) + tolerance
+        )
+
+        (
+            predicted_stability_log10_mean,
+            predicted_stability_log10_std
+        ) = stability_model.predict_log10_loss_rate_distribution(full_x)
+        predicted_stability_log10_mean = float(
+            np.asarray(predicted_stability_log10_mean, dtype=float).reshape(-1)[0]
+        )
+        predicted_stability_log10_std = float(
+            np.asarray(predicted_stability_log10_std, dtype=float).reshape(-1)[0]
+        )
+        if (
+                not math.isfinite(predicted_stability_log10_mean)
+                or not math.isfinite(predicted_stability_log10_std)
+                or predicted_stability_log10_std < 0.0):
+            raise ValueError(
+                'Companion stability GP returned invalid log-loss-rate '
+                'prediction diagnostics.'
+            )
+        try:
+            predicted_stability_loss_rate = 10.0 ** (
+                predicted_stability_log10_mean
+            )
+        except OverflowError:
+            predicted_stability_loss_rate = None
+        if (
+                predicted_stability_loss_rate is not None
+                and not math.isfinite(predicted_stability_loss_rate)):
+            predicted_stability_loss_rate = None
+
+        return {
+            'normalized_recipe': full_x.copy(),
+            'volume_balance': volume_balance,
+            'predicted_reference_peak_absorbance': predicted_signal_mean,
+            'predicted_reference_peak_absorbance_std': predicted_signal_std,
+            'predicted_reference_peak_absorbance_interval_lower': (
+                interval_lower
+            ),
+            'predicted_reference_peak_absorbance_interval_upper': (
+                interval_upper
+            ),
+            'signal_compatible': signal_compatible,
+            'predicted_stability_log10_loss_rate': (
+                predicted_stability_log10_mean
+            ),
+            'predicted_stability_log10_loss_rate_std': (
+                predicted_stability_log10_std
+            ),
+            'predicted_stability_loss_rate_absorbance_per_s': (
+                predicted_stability_loss_rate
+            ),
+        }
+
+    def _optimize_single_mask_stability_only(
+        self,
+        mask,
+        stability_model,
+        signal_model,
+        min_peak_absorbance,
+        max_peak_absorbance,
+        signal_confidence_z,
+        n_restarts=25
+    ):
+        '''Minimize loss rate in one mask subject to signal and volume gates.'''
+        mask = np.asarray(mask, dtype=int).reshape(self._get_dimension())
+        bounds = self._get_masked_bounds(mask)
+        starting_points = self._generate_feasible_masked_starting_points(
+            mask, n_restarts
+        )
+        if not starting_points:
+            midpoint = np.asarray([
+                (low + high) / 2.0 for low, high in bounds
+            ], dtype=float)
+            starting_points = [midpoint]
+
+        unique_starts = []
+        for candidate_start in starting_points:
+            candidate_start = np.asarray(candidate_start, dtype=float).reshape(-1)
+            if candidate_start.shape[0] != len(bounds):
+                continue
+            if not any(np.allclose(candidate_start, prior, rtol=0, atol=1e-12)
+                       for prior in unique_starts):
+                unique_starts.append(candidate_start)
+
+        def full_recipe(x_active):
+            x_active = np.asarray(x_active, dtype=float).copy()
+            for index, (low, high) in enumerate(bounds):
+                x_active[index] = np.clip(x_active[index], low, high)
+            return self._expand_masked_candidate_to_full_recipe(x_active, mask)
+
+        def diagnostics_for(x_active):
+            return self._get_stability_only_candidate_diagnostics(
+                full_recipe(x_active),
+                stability_model,
+                signal_model,
+                min_peak_absorbance,
+                max_peak_absorbance,
+                signal_confidence_z,
+            )
+
+        def signal_lower_constraint(x_active):
+            diagnostics = diagnostics_for(x_active)
+            if diagnostics is None:
+                return -1e12
+            return diagnostics[
+                'predicted_reference_peak_absorbance_interval_lower'
+            ] - float(min_peak_absorbance)
+
+        def signal_upper_constraint(x_active):
+            diagnostics = diagnostics_for(x_active)
+            if diagnostics is None:
+                return -1e12
+            return float(max_peak_absorbance) - diagnostics[
+                'predicted_reference_peak_absorbance_interval_upper'
+            ]
+
+        def water_volume(x_active):
+            diagnostics = diagnostics_for(x_active)
+            if diagnostics is None:
+                return -1e12
+            return float(diagnostics['volume_balance']['water_volume'])
+
+        def stability_objective(x_active):
+            diagnostics = diagnostics_for(x_active)
+            if diagnostics is None or not diagnostics['signal_compatible']:
+                return 1e13
+            return diagnostics['predicted_stability_log10_loss_rate']
+
+        branch_constraints = (
+            ('water_at_least_5_uL', [{
+                'type': 'ineq', 'fun': signal_lower_constraint,
+            }, {
+                'type': 'ineq', 'fun': signal_upper_constraint,
+            }, {
+                'type': 'ineq', 'fun': lambda values: water_volume(values) - 5.0,
+            }]),
+            ('water_exactly_0_uL', [{
+                'type': 'ineq', 'fun': signal_lower_constraint,
+            }, {
+                'type': 'ineq', 'fun': signal_upper_constraint,
+            }, {
+                'type': 'eq', 'fun': water_volume,
+            }]),
+        )
+
+        candidate_results = []
+        for branch_name, constraints in branch_constraints:
+            for x0 in unique_starts:
+                result = minimize(
+                    fun=stability_objective,
+                    x0=x0,
+                    bounds=bounds,
+                    constraints=constraints,
+                    method='SLSQP'
+                )
+                x_active = np.asarray(result.x, dtype=float).copy()
+                for index, (low, high) in enumerate(bounds):
+                    x_active[index] = np.clip(x_active[index], low, high)
+                full_x = self._expand_masked_candidate_to_full_recipe(
+                    x_active, mask
+                )
+                diagnostics = self._get_stability_only_candidate_diagnostics(
+                    full_x,
+                    stability_model,
+                    signal_model,
+                    min_peak_absorbance,
+                    max_peak_absorbance,
+                    signal_confidence_z,
+                )
+                if diagnostics is None or not diagnostics['signal_compatible']:
+                    continue
+                if branch_name == 'water_at_least_5_uL':
+                    if diagnostics['volume_balance']['water_volume'] < 5.0 - 1e-9:
+                        continue
+                elif not math.isclose(
+                        diagnostics['volume_balance']['water_volume'],
+                        0.0, rel_tol=0.0, abs_tol=1e-9):
+                    continue
+                candidate_results.append({
+                    'mask': mask.copy(),
+                    'x_active': x_active.copy(),
+                    'x_full': full_x.copy(),
+                    'success': bool(result.success),
+                    'message': str(result.message),
+                    'optimizer_method': 'SLSQP stability-only constrained',
+                    'optimizer_status': getattr(result, 'status', None),
+                    'water_constraint_branch': branch_name,
+                    **diagnostics
+                })
+
+        if not candidate_results:
+            return {
+                'mask': mask.copy(),
+                'x_active': None,
+                'x_full': None,
+                'success': False,
+                'message': (
+                    'No finite, physically executable signal-compatible '
+                    'stability-only result was found for this mask.'
+                ),
+                'optimizer_method': 'SLSQP stability-only constrained',
+                'optimizer_status': None,
+                'signal_compatible': False,
+                'volume_balance': None,
+            }
+
+        return min(
+            candidate_results,
+            key=lambda result: (
+                result['predicted_stability_log10_loss_rate'],
+                result['predicted_stability_log10_loss_rate_std'],
+                result['predicted_reference_peak_absorbance_std'],
+                tuple(result['x_full'].tolist()),
+            )
+        )
+
+    def getNextStabilityOnlyReaction(
+        self,
+        stability_model,
+        signal_model,
+        min_peak_absorbance,
+        max_peak_absorbance,
+        signal_confidence_z,
+        trigger_reagent_index=None,
+        n_restarts_per_mask=25
+    ):
+        '''Return one feasible signal-bounded, minimum-loss-rate recipe.
+
+        Unlike target-then-stability, this method has no lambda bootstrap or
+        fallback.  Inadequate companion evidence, an invalid model, or no
+        candidate inside the entire predicted signal interval fails closed
+        before a recipe is returned.
+        '''
+        if self.acquisition_mode != 'exploit':
+            raise ValueError(
+                'Stability-only selection requires acquisition_mode '
+                "'exploit'; portfolios and wavelength acquisition modes are "
+                'not stability-aware.'
+            )
+        numeric_values = {}
+        for name, value in (
+                ('minimum peak absorbance', min_peak_absorbance),
+                ('maximum peak absorbance', max_peak_absorbance),
+                ('signal confidence z', signal_confidence_z)):
+            try:
+                numeric_values[name] = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    'Stability-only {} must be a finite positive number.'
+                    .format(name)
+                )
+            if (
+                    not math.isfinite(numeric_values[name])
+                    or numeric_values[name] <= 0.0):
+                raise ValueError(
+                    'Stability-only {} must be a finite positive number.'
+                    .format(name)
+                )
+        if (
+                numeric_values['maximum peak absorbance']
+                <= numeric_values['minimum peak absorbance']):
+            raise ValueError(
+                'Stability-only maximum peak absorbance must be strictly '
+                'greater than its minimum.'
+            )
+        if (
+                stability_model is None
+                or getattr(stability_model, 'status', None) != 'fitted'
+                or signal_model is None
+                or getattr(signal_model, 'status', None) != 'fitted'):
+            raise RuntimeError(
+                'Stability-only selection requires fitted current-run '
+                'loss-rate and reference-peak signal companion models; no '
+                'wavelength fallback is permitted.'
+            )
+
+        required_on_indices = []
+        if trigger_reagent_index is not None:
+            try:
+                trigger_reagent_index = int(trigger_reagent_index)
+            except (TypeError, ValueError):
+                raise ValueError('Trigger reagent index must be an integer.')
+            if (
+                    trigger_reagent_index < 0
+                    or trigger_reagent_index >= self._get_dimension()):
+                raise ValueError('Trigger reagent index is outside model dimensionality.')
+            required_on_indices = [trigger_reagent_index]
+
+        masks = self._get_reagent_masks_for_current_settings(
+            required_on_reagent_indices=required_on_indices
+        )
+        mask_results = []
+        for mask in masks:
+            mask_results.append(self._optimize_single_mask_stability_only(
+                mask=mask,
+                stability_model=stability_model,
+                signal_model=signal_model,
+                min_peak_absorbance=numeric_values['minimum peak absorbance'],
+                max_peak_absorbance=numeric_values['maximum peak absorbance'],
+                signal_confidence_z=numeric_values['signal confidence z'],
+                n_restarts=n_restarts_per_mask,
+            ))
+        compatible_results = [
+            result for result in mask_results
+            if (
+                result.get('x_full') is not None
+                and result.get('signal_compatible')
+                and result.get('volume_balance', {}).get('volume_feasible', False)
+            )
+        ]
+        common_metadata = {
+            'stability_selection_mode': 'stability_only',
+            'stability_model_status': getattr(stability_model, 'status', None),
+            'stability_model_accepted_condition_count': int(
+                getattr(stability_model, 'X', np.empty((0,))).shape[0]
+            ),
+            'signal_model_status': getattr(signal_model, 'status', None),
+            'signal_model_accepted_condition_count': int(
+                getattr(signal_model, 'X', np.empty((0,))).shape[0]
+            ),
+            'stability_trigger_variable_index': trigger_reagent_index,
+            'stability_trigger_required_on': bool(required_on_indices),
+            'minimum_peak_absorbance': (
+                numeric_values['minimum peak absorbance']
+            ),
+            'maximum_peak_absorbance': (
+                numeric_values['maximum peak absorbance']
+            ),
+            'signal_confidence_z': numeric_values['signal confidence z'],
+            'signal_compatible_optimizer_result_count': len(compatible_results),
+            'stability_mask_results': copy.deepcopy(mask_results),
+        }
+        if not compatible_results:
+            self.last_mask_results = copy.deepcopy(mask_results)
+            self.last_stability_only_selection_metadata = dict(common_metadata)
+            self.last_stability_only_selection_metadata.update({
+                'stability_selection_status': 'no_signal_compatible_candidate',
+                'predicted_reference_peak_absorbance': None,
+                'predicted_reference_peak_absorbance_std': None,
+                'predicted_reference_peak_absorbance_interval_lower': None,
+                'predicted_reference_peak_absorbance_interval_upper': None,
+                'predicted_stability_log10_loss_rate': None,
+                'predicted_stability_log10_loss_rate_std': None,
+                'predicted_stability_loss_rate_absorbance_per_s': None,
+            })
+            raise RuntimeError(
+                'Stability-only selection found no physically executable '
+                'candidate whose complete predicted reference-peak interval '
+                'lies within the configured absorbance bounds.'
+            )
+
+        selected_result = min(
+            compatible_results,
+            key=lambda result: (
+                result['predicted_stability_log10_loss_rate'],
+                result['predicted_stability_log10_loss_rate_std'],
+                result['predicted_reference_peak_absorbance_std'],
+                tuple(result['x_full'].tolist()),
+            )
+        )
+        for result in mask_results:
+            result['is_selected'] = result is selected_result
+        selected_x = np.asarray(selected_result['x_full'], dtype=float).copy()
+
+        self.last_mask_results = copy.deepcopy(mask_results)
+        self.last_selected_mask = selected_result['mask'].copy()
+        self.last_raw_optimizer_candidate = selected_x.copy()
+        self.last_repaired_optimizer_candidate = selected_x.copy()
+        self.last_optimizer_selected_normalized_recipe = selected_x.copy()
+        self.last_optimizer_objective = float(
+            selected_result['predicted_stability_log10_loss_rate']
+        )
+        self.last_optimizer_volume_balance = copy.deepcopy(
+            selected_result['volume_balance']
+        )
+        self.last_optimizer_method = selected_result['optimizer_method']
+        self.last_optimizer_success = selected_result['success']
+        self.last_optimizer_status = selected_result['optimizer_status']
+        self.last_optimizer_message = selected_result['message']
+        self.last_optimizer_acquisition_mode = self.acquisition_mode
+        self.last_optimizer_acquisition_score = self.last_optimizer_objective
+        self.last_optimizer_balanced_exploration_weight = None
+        self.last_optimizer_incumbent_target_error_nm = None
+        # Explicitly clear target/lambda fields so future controller wiring
+        # cannot accidentally inherit stale wavelength metadata from an
+        # ordinary Auto selection.
+        self.last_optimizer_predicted_lambda_max = None
+        self.last_optimizer_predicted_lambda_mean_nm = None
+        self.last_optimizer_predicted_lambda_std_nm = None
+        self.last_optimizer_predicted_target_error_nm = None
+        self.last_stability_only_selection_metadata = dict(common_metadata)
+        self.last_stability_only_selection_metadata.update({
+            'stability_selection_status': 'stability_ranked_within_signal',
+            'predicted_reference_peak_absorbance': selected_result[
+                'predicted_reference_peak_absorbance'
+            ],
+            'predicted_reference_peak_absorbance_std': selected_result[
+                'predicted_reference_peak_absorbance_std'
+            ],
+            'predicted_reference_peak_absorbance_interval_lower': (
+                selected_result[
+                    'predicted_reference_peak_absorbance_interval_lower'
+                ]
+            ),
+            'predicted_reference_peak_absorbance_interval_upper': (
+                selected_result[
+                    'predicted_reference_peak_absorbance_interval_upper'
+                ]
+            ),
+            'predicted_stability_log10_loss_rate': selected_result[
+                'predicted_stability_log10_loss_rate'
+            ],
+            'predicted_stability_log10_loss_rate_std': selected_result[
+                'predicted_stability_log10_loss_rate_std'
+            ],
+            'predicted_stability_loss_rate_absorbance_per_s': selected_result[
+                'predicted_stability_loss_rate_absorbance_per_s'
+            ],
+        })
+        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+            print(
+                '<<optimizer>> stability-only selection: predicted '
+                'reference peak={:.6g} [{:.6g}, {:.6g}], predicted log10 '
+                'loss rate={:.6f}, signal-compatible mask results={}.'.format(
+                    selected_result['predicted_reference_peak_absorbance'],
+                    selected_result[
+                        'predicted_reference_peak_absorbance_interval_lower'
+                    ],
+                    selected_result[
+                        'predicted_reference_peak_absorbance_interval_upper'
+                    ],
+                    selected_result['predicted_stability_log10_loss_rate'],
+                    len(compatible_results),
+                )
+            )
+        return [selected_x]
     
     def _get_variable_reagent_stock_conc(self, reagent_name):
         '''

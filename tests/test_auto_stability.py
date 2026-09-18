@@ -120,6 +120,7 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
         settings = parse_auto_stability_header_settings(_monitor_header(
             auto_stability_mode='stability_only',
             auto_stability_max_peak_absorbance='0.90',
+            auto_stability_signal_confidence_z='1.96',
             auto_stability_replicate_log10_loss_rate_sd_max='0.20'
         ))
 
@@ -131,6 +132,9 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             settings['auto_stability_max_peak_absorbance'], 0.90
         )
         self.assertAlmostEqual(
+            settings['auto_stability_signal_confidence_z'], 1.96
+        )
+        self.assertAlmostEqual(
             settings['auto_stability_replicate_log10_loss_rate_sd_max'], 0.20
         )
 
@@ -139,11 +143,19 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
                 _monitor_header(
                     auto_stability_mode='stability_only',
                     auto_stability_max_peak_absorbance='0.10',
+                    auto_stability_signal_confidence_z='1.96',
                     auto_stability_replicate_log10_loss_rate_sd_max='0.20'
                 ),
                 _monitor_header(
                     auto_stability_mode='stability_only',
-                    auto_stability_max_peak_absorbance='0.90'
+                    auto_stability_max_peak_absorbance='0.90',
+                    auto_stability_signal_confidence_z='1.96'
+                ),
+                _monitor_header(
+                    auto_stability_mode='stability_only',
+                    auto_stability_max_peak_absorbance='0.90',
+                    auto_stability_signal_confidence_z='0',
+                    auto_stability_replicate_log10_loss_rate_sd_max='0.20'
                 )):
             with self.assertRaises(AutoStabilityValidationError):
                 parse_auto_stability_header_settings(invalid_header)
@@ -480,6 +492,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         header = _monitor_header(
             auto_stability_mode='stability_only',
             auto_stability_max_peak_absorbance='0.90',
+            auto_stability_signal_confidence_z='1.96',
             auto_stability_replicate_log10_loss_rate_sd_max='0.20'
         )
         fake_controller = type('FakeController', (), {})()
@@ -519,7 +532,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         launch_source = ast.get_source_segment(self.source, launch_function)
 
         self.assertIn('STABILITY_MODE_STABILITY_ONLY', launch_source)
-        self.assertIn('stability-only recipe-selection path', launch_source)
+        self.assertIn('stability-only protocol path', launch_source)
         self.assertLess(
             launch_source.index('STABILITY_MODE_STABILITY_ONLY'),
             launch_source.index('model = OptimizationModel(')
