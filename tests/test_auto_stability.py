@@ -115,11 +115,39 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             with self.assertRaises(AutoStabilityValidationError):
                 parse_auto_stability_header_settings(header)
 
-    def test_unimplemented_modes_and_mixing_fail_closed(self):
-        with self.assertRaises(AutoStabilityValidationError):
-            parse_auto_stability_header_settings(_monitor_header(
-                auto_stability_mode='stability_only'
-            ))
+    def test_stability_only_requires_explicit_optical_and_replicate_bounds(self):
+        settings = parse_auto_stability_header_settings(_monitor_header(
+            auto_stability_mode='stability_only',
+            auto_stability_max_peak_absorbance='0.90',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20'
+        ))
+
+        self.assertEqual(settings['auto_stability_mode'], 'stability_only')
+        self.assertAlmostEqual(
+            settings['auto_stability_min_peak_absorbance'], 0.10
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_max_peak_absorbance'], 0.90
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_replicate_log10_loss_rate_sd_max'], 0.20
+        )
+
+        for invalid_header in (
+                _monitor_header(auto_stability_mode='stability_only'),
+                _monitor_header(
+                    auto_stability_mode='stability_only',
+                    auto_stability_max_peak_absorbance='0.10',
+                    auto_stability_replicate_log10_loss_rate_sd_max='0.20'
+                ),
+                _monitor_header(
+                    auto_stability_mode='stability_only',
+                    auto_stability_max_peak_absorbance='0.90'
+                )):
+            with self.assertRaises(AutoStabilityValidationError):
+                parse_auto_stability_header_settings(invalid_header)
+
+    def test_unimplemented_mixing_fails_closed(self):
         with self.assertRaises(AutoStabilityValidationError):
             parse_auto_stability_header_settings(_monitor_header(
                 auto_stability_mixing_mode='pipette_mix'
@@ -315,6 +343,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             self.auto_methods['_initialize_auto_stability_configuration']
         )
         self.assertIn('STABILITY_MODE_TARGET_THEN_STABILITY', method_source)
+        self.assertIn('STABILITY_MODE_STABILITY_ONLY', method_source)
         self.assertIn(
             "self.robo_params.get('acquisition_mode') != 'exploit'",
             method_source
@@ -346,6 +375,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             'STABILITY_MODE_TARGET_THEN_STABILITY': (
                 'target_then_stability'
             ),
+            'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
             'parse_auto_stability_header_settings': (
                 parse_auto_stability_header_settings
             ),
@@ -394,6 +424,77 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 AutoStabilityValidationError,
                 'num_duplicates to be at least 3'):
             initialize(fake_controller)
+
+    def test_stability_only_configuration_has_no_lambda_target_gate(self):
+        '''Exercise the target-free active-mode Header contract without I/O.'''
+        method_source = textwrap.dedent(ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_stability_configuration']
+        ))
+        namespace = {
+            'AutoStabilityValidationError': AutoStabilityValidationError,
+            'STABILITY_MODE_MONITOR': 'monitor',
+            'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
+            'STABILITY_MODE_TARGET_THEN_STABILITY': (
+                'target_then_stability'
+            ),
+            'parse_auto_stability_header_settings': (
+                parse_auto_stability_header_settings
+            ),
+            'validate_stability_trigger_reagent': (
+                validate_stability_trigger_reagent
+            ),
+        }
+        exec(method_source, namespace)
+        initialize = namespace['_initialize_auto_stability_configuration']
+
+        header = _monitor_header(
+            auto_stability_mode='stability_only',
+            auto_stability_max_peak_absorbance='0.90',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20'
+        )
+        fake_controller = type('FakeController', (), {})()
+        fake_controller.header_data = [['Header', 'Comment']] + [
+            [name, value] for name, value in header.items()
+        ]
+        fake_controller.rxn_df = pd.DataFrame([
+            {'op': 'transfer', 'reagent': 'trisodium_citrate'},
+            {'op': 'transfer', 'reagent': 'sodium_borohydride'},
+            {'op': 'transfer', 'reagent': 'Water'},
+        ])
+        fake_controller.robo_params = {
+            'acquisition_mode': 'exploit',
+            'acquisition_modes': ['exploit'],
+            'using_acquisition_portfolio': False,
+            'num_duplicates': 3,
+            'target': None,
+            'target_tolerance_nm': None,
+        }
+
+        initialize(fake_controller)
+
+        self.assertEqual(
+            fake_controller.robo_params['auto_stability_mode'],
+            'stability_only'
+        )
+        self.assertIsNone(fake_controller.robo_params['target'])
+        self.assertIsNone(fake_controller.robo_params['target_tolerance_nm'])
+
+    def test_stability_only_launcher_stops_before_legacy_target_model(self):
+        launch_function = next(
+            node for node in ast.parse(
+                self.source, filename=CONTROLLER_PATH
+            ).body
+            if isinstance(node, ast.FunctionDef) and node.name == 'launch_auto'
+        )
+        launch_source = ast.get_source_segment(self.source, launch_function)
+
+        self.assertIn('STABILITY_MODE_STABILITY_ONLY', launch_source)
+        self.assertIn('stability-only recipe-selection path', launch_source)
+        self.assertLess(
+            launch_source.index('STABILITY_MODE_STABILITY_ONLY'),
+            launch_source.index('model = OptimizationModel(')
+        )
 
     def test_active_selection_has_a_pre_recipe_model_health_gate(self):
         self.assertIn(

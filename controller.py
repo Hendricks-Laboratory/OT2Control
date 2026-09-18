@@ -129,6 +129,7 @@ from auto_preparation import (
 from auto_stability import (
     AutoStabilityValidationError,
     STABILITY_MODE_MONITOR,
+    STABILITY_MODE_STABILITY_ONLY,
     STABILITY_MODE_TARGET_THEN_STABILITY,
     STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET,
     canonical_reagent_name,
@@ -340,6 +341,23 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
 
         my_ip = socket.gethostbyname(socket.gethostname())
         auto = AutoContr(rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache)
+
+        # Stage 12F-C accepts the target-free
+        # ``stability_only`` workbook contract. Its dedicated optical-signal
+        # model and candidate-selection path are deliberately introduced in
+        # later narrowly reviewed stages. Stop before constructing the legacy
+        # target-seeking OptimizationModel, simulation, connection, or any
+        # physical work rather than substituting a hidden wavelength target.
+        if (
+                auto.robo_params.get('auto_stability_mode')
+                == STABILITY_MODE_STABILITY_ONLY):
+            raise AutoStabilityValidationError(
+                'auto_stability_mode=stability_only has a valid target-free '
+                'Header contract, but its optical-signal model and '
+                'stability-only recipe-selection path are not enabled yet. '
+                'No model, simulation, robot, or plate-reader work was '
+                'started.'
+            )
 
         #note shorter iterations for testing
         #final_spectra = np.loadtxt("test_target_1.csv", delimiter=',', dtype=float).reshape(1,-1)
@@ -1306,45 +1324,87 @@ class Controller(ABC):
             float(header_dict['dilution_vol'])
         )
 
-        self.robo_params['target'] = float(
-            header_dict['target']
-        )
+        # ``_init_robo_header_params`` is shared by legacy/manual execution
+        # and runs before AutoContr can perform its fuller stability parsing.
+        # Keep this deliberately small canonical check here so a blank target
+        # can be accepted only for the explicitly target-free stability-only
+        # mode. Every ordinary Auto workbook retains its historical required
+        # numeric target contract.
+        raw_stability_mode = str(
+            header_dict.get('auto_stability_mode', '')
+        ).strip().lower().replace('-', '_').replace(' ', '_')
+        # Use the literal here because this shared base-class parser is also
+        # extracted by hardware-free legacy Header tests without Auto imports.
+        stability_only_mode = raw_stability_mode == 'stability_only'
 
-        # Optional condition-level early-stop threshold. The same canonical
-        # value is also used by the target-probability plots, so their stated
-        # success region always matches the controller's actual stop rule.
-        target_tolerance_value = str(
-            header_dict.get(
-                'target_tolerance_nm',
-                10.0
-            )
-        ).strip()
-
-        try:
-            target_tolerance_nm = float(target_tolerance_value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                "Header value target_tolerance_nm must be a finite, "
-                "nonnegative number in nm. "
-                f"Received: {target_tolerance_value!r}."
-            )
-
-        if (
-            not math.isfinite(target_tolerance_nm)
-            or target_tolerance_nm < 0.0
-        ):
-            raise ValueError(
-                "Header value target_tolerance_nm must be a finite, "
-                "nonnegative number in nm. "
-                f"Received: {target_tolerance_value!r}."
+        def _is_blank_header_value(value):
+            '''Treat an actually blank workbook cell as absent, not ``nan``.'''
+            return (
+                value is None
+                or (
+                    isinstance(value, (float, np.floating))
+                    and math.isnan(float(value))
+                )
+                or str(value).strip() == ''
             )
 
-        self.robo_params['target_tolerance_nm'] = target_tolerance_nm
+        if stability_only_mode:
+            target_value = header_dict.get('target')
+            target_tolerance_value = header_dict.get('target_tolerance_nm')
+            if (
+                    not _is_blank_header_value(target_value)
+                    or not _is_blank_header_value(target_tolerance_value)):
+                raise ValueError(
+                    'auto_stability_mode=stability_only is target-free: '
+                    'Header values target and target_tolerance_nm must be '
+                    'blank or omitted.'
+                )
+            self.robo_params['target'] = None
+            self.robo_params['target_tolerance_nm'] = None
+            print(
+                '<<controller>> Auto stability-only mode has no wavelength '
+                'target or wavelength target tolerance.'
+            )
+        else:
+            self.robo_params['target'] = float(
+                header_dict['target']
+            )
 
-        print(
-            "<<controller>> Auto condition-level target tolerance: "
-            f"{target_tolerance_nm:g} nm"
-        )
+            # Optional condition-level early-stop threshold. The same canonical
+            # value is also used by the target-probability plots, so their stated
+            # success region always matches the controller's actual stop rule.
+            target_tolerance_value = str(
+                header_dict.get(
+                    'target_tolerance_nm',
+                    10.0
+                )
+            ).strip()
+
+            try:
+                target_tolerance_nm = float(target_tolerance_value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Header value target_tolerance_nm must be a finite, "
+                    "nonnegative number in nm. "
+                    f"Received: {target_tolerance_value!r}."
+                )
+
+            if (
+                not math.isfinite(target_tolerance_nm)
+                or target_tolerance_nm < 0.0
+            ):
+                raise ValueError(
+                    "Header value target_tolerance_nm must be a finite, "
+                    "nonnegative number in nm. "
+                    f"Received: {target_tolerance_value!r}."
+                )
+
+            self.robo_params['target_tolerance_nm'] = target_tolerance_nm
+
+            print(
+                "<<controller>> Auto condition-level target tolerance: "
+                f"{target_tolerance_nm:g} nm"
+            )
 
         # Target decisions require both a condition mean near the requested
         # target and sufficiently consistent QC-included replicates. This
@@ -5589,6 +5649,7 @@ class AutoContr(Controller):
 
         if stability_settings['auto_stability_mode'] in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY):
             transfer_reagents = list(
                 self.rxn_df.loc[
@@ -5624,9 +5685,9 @@ class AutoContr(Controller):
                     stability_settings['auto_stability_mixing_mode']
                 )
             )
-        elif (
-                stability_settings['auto_stability_mode']
-                == STABILITY_MODE_TARGET_THEN_STABILITY):
+        elif stability_settings['auto_stability_mode'] in (
+                STABILITY_MODE_STABILITY_ONLY,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             if (
                     self.robo_params.get('acquisition_mode') != 'exploit'
                     or self.robo_params.get(
@@ -5643,24 +5704,42 @@ class AutoContr(Controller):
                 )
             if self.robo_params.get('num_duplicates', 0) < 3:
                 raise AutoStabilityValidationError(
-                    'auto_stability_mode=target_then_stability requires '
+                    'active Auto stability selection requires '
                     'num_duplicates to be at least 3 so stability selection '
                     'can enforce a replicate-variability limit.'
                 )
-            print(
-                '<<controller>> Auto target-then-stability selection '
-                'configured: target tolerance={} nm, replicate log10 '
-                'loss-rate SD limit={}, trigger={}. The ordinary lambda '
-                'model remains the first lexicographic gate; a fitted '
-                'companion stability GP may rank only target-compatible, '
-                'physically feasible candidates.'.format(
-                    self.robo_params.get('target_tolerance_nm'),
-                    stability_settings[
-                        'auto_stability_replicate_log10_loss_rate_sd_max'
-                    ],
-                    stability_settings['auto_stability_trigger_reagent'],
+            if (
+                    stability_settings['auto_stability_mode']
+                    == STABILITY_MODE_STABILITY_ONLY):
+                print(
+                    '<<controller>> Auto stability-only selection '
+                    'configured: reference-peak absorbance bounds=[{}, {}], '
+                    'replicate log10 loss-rate SD limit={}, trigger={}. '
+                    'No wavelength target, target stopping, or lambda '
+                    'selection gate is configured.'.format(
+                        stability_settings['auto_stability_min_peak_absorbance'],
+                        stability_settings['auto_stability_max_peak_absorbance'],
+                        stability_settings[
+                            'auto_stability_replicate_log10_loss_rate_sd_max'
+                        ],
+                        stability_settings['auto_stability_trigger_reagent'],
+                    )
                 )
-            )
+            else:
+                print(
+                    '<<controller>> Auto target-then-stability selection '
+                    'configured: target tolerance={} nm, replicate log10 '
+                    'loss-rate SD limit={}, trigger={}. The ordinary lambda '
+                    'model remains the first lexicographic gate; a fitted '
+                    'companion stability GP may rank only target-compatible, '
+                    'physically feasible candidates.'.format(
+                        self.robo_params.get('target_tolerance_nm'),
+                        stability_settings[
+                            'auto_stability_replicate_log10_loss_rate_sd_max'
+                        ],
+                        stability_settings['auto_stability_trigger_reagent'],
+                    )
+                )
 
     def _initialize_auto_stability_observer(self):
         '''Initialize the Stage-12 observer for a real monitor run.

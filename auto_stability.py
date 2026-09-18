@@ -89,11 +89,12 @@ def parse_auto_stability_header_settings(header_values):
     '''Return canonical Stage-12 stability settings from a Header mapping.
 
     Missing stability rows return the exact inert ``off`` configuration, so
-    older workbooks retain their existing Auto behavior. ``monitor`` and the
-    Stage-12F-A configuration contract for ``target_then_stability`` are
-    accepted here. Parsing itself has no physical or optimizer side effect;
-    the controller keeps target-then-stability fail-closed until its separate
-    ranking stage is implemented. ``stability_only`` remains unavailable.
+    older workbooks retain their existing Auto behavior. ``monitor``,
+    ``stability_only``, and the Stage-12F configuration contract for
+    ``target_then_stability`` are accepted here. Parsing itself has no
+    physical or optimizer side effect. The controller keeps any active
+    selection mode fail-closed until its separate selection implementation
+    has been reached and validated.
     '''
     if not isinstance(header_values, dict):
         raise AutoStabilityValidationError(
@@ -120,16 +121,12 @@ def parse_auto_stability_header_settings(header_values):
     if raw_mode not in mode_aliases:
         raise AutoStabilityValidationError(
             'Header value auto_stability_mode must be off, monitor, or '
-            'target_then_stability. Received: {!r}.'.format(raw_mode)
+            'stability_only, or target_then_stability. Received: {!r}.'.format(
+                raw_mode
+            )
         )
 
     mode = mode_aliases[raw_mode]
-    if mode == STABILITY_MODE_STABILITY_ONLY:
-        raise AutoStabilityValidationError(
-            'Header value auto_stability_mode=stability_only is reserved for '
-            'a later separately validated implementation. Use off, monitor, '
-            'or target_then_stability.'
-        )
 
     if mode == STABILITY_MODE_OFF:
         return {
@@ -139,6 +136,7 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_observation_window_s': None,
             'auto_stability_scan_interval_s': None,
             'auto_stability_min_peak_absorbance': None,
+            'auto_stability_max_peak_absorbance': None,
             'auto_stability_replicate_log10_loss_rate_sd_max': None,
             'auto_stability_mixing_mode': None,
         }
@@ -204,6 +202,19 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_min_peak_absorbance'
     )
 
+    max_peak_absorbance = None
+    if mode == STABILITY_MODE_STABILITY_ONLY:
+        max_peak_absorbance = _parse_positive_finite(
+            header_values.get('auto_stability_max_peak_absorbance'),
+            'auto_stability_max_peak_absorbance'
+        )
+        if max_peak_absorbance <= min_peak_absorbance:
+            raise AutoStabilityValidationError(
+                'Header value auto_stability_max_peak_absorbance must be '
+                'strictly greater than auto_stability_min_peak_absorbance '
+                'for auto_stability_mode=stability_only.'
+            )
+
     if scan_schedule != STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
         raise AutoStabilityValidationError(
             'Header value auto_stability_scan_schedule=each_completion is '
@@ -219,7 +230,9 @@ def parse_auto_stability_header_settings(header_values):
     )
 
     replicate_log10_loss_rate_sd_max = None
-    if mode == STABILITY_MODE_TARGET_THEN_STABILITY:
+    if mode in (
+            STABILITY_MODE_STABILITY_ONLY,
+            STABILITY_MODE_TARGET_THEN_STABILITY):
         replicate_log10_loss_rate_sd_max = _parse_positive_finite(
             header_values.get(
                 'auto_stability_replicate_log10_loss_rate_sd_max'
@@ -234,6 +247,7 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_observation_window_s': observation_window_s,
         'auto_stability_scan_interval_s': scan_interval_s,
         'auto_stability_min_peak_absorbance': min_peak_absorbance,
+        'auto_stability_max_peak_absorbance': max_peak_absorbance,
         'auto_stability_replicate_log10_loss_rate_sd_max': (
             replicate_log10_loss_rate_sd_max
         ),

@@ -3800,6 +3800,38 @@ class AcquisitionHeaderCompatibilityTests(unittest.TestCase):
                         target_tolerance_nm=invalid_tolerance
                     )
 
+    def test_stability_only_header_requires_blank_wavelength_fields(self):
+        controller = self.Controller()
+        controller.robo_params = {}
+        controller.DilutionParams = lambda container, volume: (
+            container,
+            volume
+        )
+        header = self._base_header()
+        for row in header:
+            if row[0] == 'target':
+                row[1] = ''
+        header.append(['auto_stability_mode', 'stability_only'])
+
+        with redirect_stdout(io.StringIO()):
+            controller._init_robo_header_params(header)
+
+        self.assertIsNone(controller.robo_params['target'])
+        self.assertIsNone(controller.robo_params['target_tolerance_nm'])
+
+        invalid_controller = self.Controller()
+        invalid_controller.robo_params = {}
+        invalid_controller.DilutionParams = lambda container, volume: (
+            container,
+            volume
+        )
+        invalid_header = self._base_header()
+        invalid_header.append(['auto_stability_mode', 'stability_only'])
+
+        with self.assertRaisesRegex(ValueError, 'target-free'):
+            with redirect_stdout(io.StringIO()):
+                invalid_controller._init_robo_header_params(invalid_header)
+
     def test_header_replicate_sd_tolerance_is_optional_and_validated(self):
         parsed = self._parse_header(replicate_sd_tolerance_nm=15.0)
         self.assertEqual(parsed['replicate_sd_tolerance_nm'], 15.0)

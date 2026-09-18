@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-09-14
+**Updated through:** 2026-09-18
 
 ---
 
@@ -342,12 +342,48 @@ regression coverage. This is not physical clearance: the required next gate
 is the third human-controlled dry debug with `target_then_stability` enabled
 and a safe small batch before any chemistry run.
 
-### Stage 12 optical-stability planning record — future stages after 12C
+### Stage 12F-C standalone stability-only configuration contract — 2026-09-18
+
+The scientific priority has been refined: standalone optical-stability
+selection precedes the optional target-then-stability hybrid. Stage 12F-C now
+accepts `auto_stability_mode=stability_only` as a deliberately **target-free**
+Header contract on the Lab PC.
+
+- `target` and `target_tolerance_nm` must both be blank or omitted. This is
+  checked in the shared Header parser before Auto-specific configuration, so a
+  blank spreadsheet cell represented internally as `NaN` is handled as blank
+  rather than producing an accidental numeric wavelength objective.
+- It requires explicit user-selected
+  `auto_stability_min_peak_absorbance`,
+  `auto_stability_max_peak_absorbance`, and
+  `auto_stability_replicate_log10_loss_rate_sd_max` values. The upper bound
+  must be strictly above the lower bound. These are scientific run settings,
+  not hidden code defaults.
+- The current protocol validates trigger order, plate-shake cadence, the
+  single `exploit` interface/no portfolio, and at least three physical
+  duplicates exactly as for other active stability modes. It records that no
+  wavelength target, target stopping, or lambda-selection gate is configured.
+- The launcher then fails closed before constructing the legacy
+  target-seeking `OptimizationModel`, starting a simulation, connecting to the
+  Pi, or sending reader/robot work. Stage 12F-D through 12F-F must add the
+  separate optical-signal model and stability-only selector before this mode
+  can execute.
+
+This stage does not alter Auto-main/Pi, reader command syntax, shakes, scan
+scheduling, ordinary λmax optimization, λmax QC, target stopping, source
+preflight, or existing `target_then_stability` behavior. Hardware-free
+validation used Python 3.9.6: compilation, focused Header/controller tests,
+and the complete 378-test suite passed. It is configuration validation only;
+it requires no dry debug and is not physical clearance.
+
+### Stage 12 optical-stability planning record — revised future stages
 
 The remaining planned work extends the implemented Stage 12A–12E monitoring,
 trajectory-reporting, stability-QC, and companion-model foundation into
-stability-directed selection. Stages 12F and later are not present in the
-current controller or Pi protocol.
+standalone stability-directed selection. Stage 12F-A/B separately implements
+the later target-then-stability hybrid, and Stage 12F-C implements only the
+target-free stability-only Header contract; neither establishes standalone
+stability-only execution yet.
 
 #### Scientific data contract
 
@@ -383,11 +419,14 @@ stability-directed selection.
 #### Modes, mixing, and scan scheduling
 
 `off` preserves exact legacy Auto behavior. `monitor` records trajectories,
-logs, and plots without changing recipe selection. The future recommended active
-mode is `target_then_stability`; `stability_only` is deferred advanced behavior
-that would still require the signal floor. Before Stage 12F implements active
-selection, choosing either future active mode must fail clearly rather than
-silently behaving as `monitor` or changing acquisition semantics.
+logs, and plots without changing recipe selection. The first intended active
+mode is `stability_only`: it has no wavelength target and will minimize the
+post-peak loss-rate response only among candidates predicted to remain within
+the configured usable reference-peak absorbance range. The separately
+implemented `target_then_stability` mode remains the later lexicographic
+hybrid. Until Stage 12F-D through 12F-F complete, `stability_only` fails
+clearly before any model, simulation, or physical work rather than silently
+behaving as `monitor` or reusing a hidden wavelength target.
 
 `target_then_stability` is lexicographic rather than a weighted sum of
 nanometers and absorbance/time:
@@ -441,8 +480,12 @@ meaningful stability trajectory.
 | **12C** | Plate-shake active-well scheduler: after a trigger-completed cohort, one 30 s whole-plate shake and one unmerged active-set scan are performed. `cadenced_active_set` adds unshaken scans while a well is eligible; `each_completion` is rejected until a separately validated nonperturbing policy exists. Raw CSVs move to `pr_data/stability/raw_scans/`, manifest schema v3 records the immutable active logical-well→physical-reader-location mapping as well as trigger basis, observation reason, mixing/shake provenance, and reader start/end UTC timestamps, and a batch blocks until every window ends. Missing raw output, invalid reader location/volume, or active wells from multiple batches fail closed. | **Implemented and controlled dry-debug closed.** The 2026-09-11 dry debug verified trigger timing, active-well membership, shake/scan sequence, raw-scan preservation, manifest accuracy, no merged kinetic scans, and correct post-window exclusion. It does not clear long-cohort chemistry or stability-directed selection. |
 | **12D** | Stability data/reporting layer: classify reader intervals as fully in-window, boundary-spanning, or outside; export requested-versus-achieved cadence; parse immutable raw per-well trajectories; apply separate stability QC; aggregate valid physical-well replicates to conditions; export stability CSVs, plots, and report sections. λmax QC and stability QC remain separate. The default metric path excludes boundary-spanning intervals while retaining them as auditable raw evidence. | **Implemented and controlled dry-debug closed.** The 2026-09-14 dry debug verified CSV/report/plot export, immutable raw-layout mapping, full-interval eligibility, observed cadence labeling, low-signal exclusion without a fabricated rate, stable condition denominators, and the report-only boundary. Countdown/QC-text closeout regressions are covered by hardware-free tests. It does not clear chemistry-derived stability performance, long cohorts, or stability-directed selection. |
 | **12E** | A separate cumulative stability GP trained only on complete, QC-approved condition-level stability observations. It uses `log10(loss rate in absorbance/s)` internally while preserving raw rates and recipe provenance in an audit export. Imported λmax-only history is explicitly excluded; the λmax GP and its history remain unchanged. | **Implemented; hardware-free validation passed.** Python 3.9 compilation and focused synthetic/source-contract tests verify eligibility/provenance, cumulative/atomic model refresh, no-history-regression, and observational controller placement. No dry debug is required at this point. |
-| **12F** | **Implemented, awaiting controlled dry debug:** target-then-stability Header contract; replicate-variability limit; lexicographic two-GP ranking; target compatibility first; meaningful-signal eligibility; variable-trigger mask exclusion; explicit bootstrap and no-target-compatible wavelength fallbacks; selection audit/report fields; active-selection enablement. | Third controlled dry debug before any chemistry use with active stability selection. |
-| **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, and replicate agreement before enabling active selection. |
+| **12F-A/B** | Target-then-stability Header contract and lexicographic λmax-first hybrid selection. It is retained as the later optional combined mode. | Hardware-free validation passed; controlled dry debug remains required before any chemistry use in this hybrid mode. |
+| **12F-C** | Target-free `stability_only` Header contract: blank/omitted target and target tolerance; required user-selected minimum/maximum reference-peak absorbance and replicate log-loss-rate variability bounds; pre-model fail-closed launch boundary. | **Implemented; hardware-free validation passed.** No dry debug yet because no stability-only model, selection, simulation, or protocol execution is enabled. |
+| **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | Python 3.9, synthetic model/history, constraint, and regression tests. |
+| **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | Synthetic candidate-ranking, physical-feasibility, signal-bound, no-candidate, trigger-mask, and failure-atomicity tests. |
+| **12F-F** | Controller lifecycle, model-refresh gate, selection provenance, exports, plots, and report wording for stability-only selection. λmax remains raw observational provenance only; target stopping and target plots are inapplicable. | Combined-file review and a controlled dry debug for lifecycle, manifests, logs, and fail-closed behavior. |
+| **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before enabling stability-only chemistry selection. |
 | **13A** | Targeted pipette-mixing design and safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum volume, tip/contamination policy, and unsupported-labware rejection. | Hardware-free protocol and safety-contract review. |
 | **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
 | **13C** | Lab-PC overlapping-active-set scheduler: targeted mix only the newly triggered well; coalesce reader scans over the union of eligible new and older active wells; preserve per-well trigger/batch provenance; avoid whole-plate re-shaking of older trajectories. | Supervised dry debug confirming correct mix target, active-set membership, no duplicate scans, and no re-mixing of prior wells. |
