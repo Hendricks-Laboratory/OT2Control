@@ -16,6 +16,7 @@ from auto_stability import (
     METRIC_STATUS_INSUFFICIENT_OBSERVATIONS,
     METRIC_STATUS_LOW_SIGNAL,
     METRIC_STATUS_NO_POST_PEAK_DECLINE,
+    aggregate_condition_reference_peak_absorbance_metrics,
     aggregate_condition_stability_metrics,
     compute_stability_metrics,
     parse_auto_stability_header_settings,
@@ -273,6 +274,34 @@ class AutoStabilityMetricTests(unittest.TestCase):
         self.assertAlmostEqual(
             summary['condition_log10_loss_rate_sample_sd'],
             math.sqrt(0.5) * abs(math.log10(0.03) - math.log10(0.01))
+        )
+
+    def test_reference_peak_aggregation_is_independent_of_loss_rate_eligibility(self):
+        summary = aggregate_condition_reference_peak_absorbance_metrics([
+            {
+                'status': METRIC_STATUS_NO_POST_PEAK_DECLINE,
+                'peak_absorbance': 0.20,
+                'reference_wavelength_nm': 625.0,
+            },
+            {
+                'status': METRIC_STATUS_LOW_SIGNAL,
+                'peak_absorbance': 0.04,
+                'reference_wavelength_nm': 625.0,
+            },
+            {
+                'status': 'missing_stability_trajectory',
+                'peak_absorbance': None,
+                'reference_wavelength_nm': None,
+            },
+        ])
+        self.assertEqual(summary['total_well_count'], 3)
+        self.assertEqual(summary['reference_peak_eligible_well_count'], 2)
+        self.assertAlmostEqual(
+            summary['condition_reference_peak_absorbance_mean'], 0.12
+        )
+        self.assertAlmostEqual(
+            summary['condition_reference_peak_absorbance_sample_sd'],
+            math.sqrt(0.5) * 0.16
         )
 
 

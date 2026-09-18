@@ -118,6 +118,11 @@ class AutoStabilityReportingTests(unittest.TestCase):
         self.assertAlmostEqual(
             summary['condition_loss_rate_mean_absorbance_per_s'], 0.01
         )
+        self.assertEqual(summary['condition_signal_status'], 'complete')
+        self.assertEqual(summary['reference_peak_eligible_well_count'], 1)
+        self.assertAlmostEqual(
+            summary['condition_reference_peak_absorbance_mean'], 0.8
+        )
 
         # The durable condition denominator is the planned replicate list,
         # not merely the wells which happened to appear in a raw scan.
@@ -145,6 +150,10 @@ class AutoStabilityReportingTests(unittest.TestCase):
         self.assertEqual(partial['condition_summaries'][0]['total_well_count'], 2)
         self.assertEqual(partial['condition_summaries'][0]['eligible_well_count'], 1)
         self.assertEqual(partial['condition_summaries'][0]['condition_stability_status'], 'partial')
+        self.assertEqual(
+            partial['condition_summaries'][0]['condition_signal_status'],
+            'partial'
+        )
 
     def test_missing_spectrum_is_retained_as_qc_not_silently_dropped(self):
         records = build_stability_reporting_records(

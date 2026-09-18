@@ -53,7 +53,7 @@ recent feature commit only.
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12E are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. Stage 12E adds a separate, cumulative, condition-level stability GP with synthetic model/history validation only; it does not change physical execution or recipe selection. Neither stage clears large-cohort stability chemistry or stability-directed selection. |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12E and 12F-C/D are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. Stage 12E adds a cumulative condition-level loss-rate GP; Stage 12F-D adds a separate reference-peak signal GP. Neither changes physical execution or recipe selection. These stages do not clear large-cohort stability chemistry or stability-directed selection. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -376,6 +376,40 @@ validation used Python 3.9.6: compilation, focused Header/controller tests,
 and the complete 378-test suite passed. It is configuration validation only;
 it requires no dry debug and is not physical clearance.
 
+### Stage 12F-D reference-peak signal companion model — 2026-09-18
+
+Stage 12F-D adds the independent optical-signal evidence needed before a
+future stability-only selector can reject blank, weak, or saturated candidates
+without reintroducing a hidden wavelength target.
+
+- Stage-12D condition summaries now separately aggregate finite
+  fixed-reference peak absorbance across the planned physical replicate set.
+  `condition_signal_status` is `complete`, `partial`, or
+  `no_eligible_signal_wells`; it does not alter the established
+  `condition_stability_status` or loss-rate QC.
+- A finite reference peak is retained as signal evidence even if its trajectory
+  was low signal or had no observed post-peak decline. Low and high signal
+  observations are therefore not silently discarded before later candidate
+  bounds are applied.
+- `auto_stability_signal_model.py` provides a distinct cumulative GPy
+  regression from normalized recipe to raw blank-corrected reference-peak
+  absorbance. It has its own state, units, audit fields, and atomic
+  no-history-regression guard; it cannot mutate the lambda-max GP or the
+  Stage-12E loss-rate GP.
+- Training requires complete current-run manifest provenance and an exact
+  recipe mapping. Imported lambda-only history, missing/partial evidence,
+  duplicate identities, orphan summaries, and out-of-bounds recipes receive
+  explicit rejected audit records. Signal bounds are deliberately not training
+  exclusions: they are future user-selected candidate constraints.
+
+This is still a pure model/reporting layer. It adds no controller model
+refresh, candidate selection, simulation, reader/robot command, Auto-main/Pi
+change, target-stopping change, or normal Auto behavior change. Hardware-free
+validation used Python 3.9.6: compilation, aggregation/reporting coverage,
+signal model eligibility/provenance/atomicity/prediction tests, legacy
+loss-model tests, and the complete suite passed. A dry debug is not useful
+until controller lifecycle and selection work exists.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 The remaining planned work extends the implemented Stage 12A–12E monitoring,
@@ -482,7 +516,7 @@ meaningful stability trajectory.
 | **12E** | A separate cumulative stability GP trained only on complete, QC-approved condition-level stability observations. It uses `log10(loss rate in absorbance/s)` internally while preserving raw rates and recipe provenance in an audit export. Imported λmax-only history is explicitly excluded; the λmax GP and its history remain unchanged. | **Implemented; hardware-free validation passed.** Python 3.9 compilation and focused synthetic/source-contract tests verify eligibility/provenance, cumulative/atomic model refresh, no-history-regression, and observational controller placement. No dry debug is required at this point. |
 | **12F-A/B** | Target-then-stability Header contract and lexicographic λmax-first hybrid selection. It is retained as the later optional combined mode. | Hardware-free validation passed; controlled dry debug remains required before any chemistry use in this hybrid mode. |
 | **12F-C** | Target-free `stability_only` Header contract: blank/omitted target and target tolerance; required user-selected minimum/maximum reference-peak absorbance and replicate log-loss-rate variability bounds; pre-model fail-closed launch boundary. | **Implemented; hardware-free validation passed.** No dry debug yet because no stability-only model, selection, simulation, or protocol execution is enabled. |
-| **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | Python 3.9, synthetic model/history, constraint, and regression tests. |
+| **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | **Implemented; hardware-free validation passed.** Python 3.9 compilation plus synthetic aggregation, provenance, cumulative/atomic refresh, prediction, and legacy-regression tests passed. No dry debug is useful until controller lifecycle/selection work exists. |
 | **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | Synthetic candidate-ranking, physical-feasibility, signal-bound, no-candidate, trigger-mask, and failure-atomicity tests. |
 | **12F-F** | Controller lifecycle, model-refresh gate, selection provenance, exports, plots, and report wording for stability-only selection. λmax remains raw observational provenance only; target stopping and target plots are inapplicable. | Combined-file review and a controlled dry debug for lifecycle, manifests, logs, and fail-closed behavior. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before enabling stability-only chemistry selection. |

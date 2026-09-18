@@ -560,3 +560,53 @@ def aggregate_condition_stability_metrics(well_metrics):
                 [math.log10(rate) for rate in eligible_rates]
             )
     return result
+
+
+def aggregate_condition_reference_peak_absorbance_metrics(well_metrics):
+    '''Summarize fixed-reference peak absorbance independently of loss-rate QC.
+
+    A usable signal observation and a usable post-peak loss-rate observation
+    answer different questions.  In particular, a well which has not yet
+    shown a decline can still provide valid evidence about whether a recipe
+    produced measurable optical signal.  Keep that evidence separate from
+    Stage-12D loss-rate eligibility so a later signal GP cannot silently
+    redefine stability QC.
+
+    The result describes only peaks measured at the fixed reference
+    wavelength.  It deliberately does not apply the configured signal bounds:
+    low and high finite observations remain auditable training evidence for
+    the later, independent signal model.
+    '''
+    metric_rows = list(well_metrics or [])
+    peaks = []
+    for metric in metric_rows:
+        if not isinstance(metric, dict):
+            raise AutoStabilityValidationError(
+                'Each condition reference-peak metric must be a dictionary.'
+            )
+        peak = metric.get('peak_absorbance')
+        reference_wavelength = metric.get('reference_wavelength_nm')
+        try:
+            peak = float(peak)
+            reference_wavelength = float(reference_wavelength)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(peak) or not math.isfinite(reference_wavelength):
+            continue
+        peaks.append(peak)
+
+    result = {
+        'total_well_count': len(metric_rows),
+        'reference_peak_eligible_well_count': len(peaks),
+        'condition_reference_peak_absorbance_mean': None,
+        'condition_reference_peak_absorbance_sample_sd': None,
+    }
+    if not peaks:
+        return result
+
+    result['condition_reference_peak_absorbance_mean'] = statistics.mean(peaks)
+    if len(peaks) >= 2:
+        result['condition_reference_peak_absorbance_sample_sd'] = (
+            statistics.stdev(peaks)
+        )
+    return result

@@ -25,6 +25,7 @@ from auto_stability import (
     METRIC_STATUS_INSUFFICIENT_OBSERVATIONS,
     METRIC_STATUS_LOW_SIGNAL,
     METRIC_STATUS_NO_POST_PEAK_DECLINE,
+    aggregate_condition_reference_peak_absorbance_metrics,
     aggregate_condition_stability_metrics,
     compute_stability_metrics,
 )
@@ -523,6 +524,14 @@ def build_stability_reporting_records(
     condition_summaries = []
     for condition_id, metrics in sorted(metrics_by_condition.items()):
         summary = aggregate_condition_stability_metrics(metrics)
+        signal_summary = aggregate_condition_reference_peak_absorbance_metrics(
+            metrics
+        )
+        # The total is calculated from the same planned replicate set in both
+        # summaries.  Preserve one canonical field and merge the separate
+        # signal-evidence fields below it.
+        signal_summary.pop('total_well_count', None)
+        summary.update(signal_summary)
         metadata = metadata_by_condition[condition_id]
         summary.update({
             'condition_id': condition_id,
@@ -534,6 +543,15 @@ def build_stability_reporting_records(
                 summary['total_well_count'] else (
                     'partial' if summary['eligible_well_count'] > 0
                     else 'no_eligible_wells'
+                )
+            ),
+            'condition_signal_status': (
+                'complete' if summary[
+                    'reference_peak_eligible_well_count'
+                ] == summary['total_well_count'] else (
+                    'partial' if summary[
+                        'reference_peak_eligible_well_count'
+                    ] > 0 else 'no_eligible_signal_wells'
                 )
             ),
         })
