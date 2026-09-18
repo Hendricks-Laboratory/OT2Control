@@ -101,6 +101,40 @@ class StabilityModelTrainingRecordTests(unittest.TestCase):
             records[0]['stability_model_training_reason']
         )
 
+    def test_active_selection_rejects_excessive_log_rate_replicate_spread(self):
+        summary = _summary(
+            'RUN', 0, 0, 0.001,
+            condition_log10_loss_rate_sample_sd=0.31,
+        )
+        records = build_stability_model_training_records(
+            condition_summaries=[summary],
+            condition_rows=[_condition('RUN', 0, 0)],
+            variable_reagents=['silver_nitrate', 'potassium_bromide'],
+            min_concentrations=[0.0, 0.0],
+            max_concentrations=[0.20, 0.010],
+            replicate_log10_loss_rate_sd_max=0.20,
+        )
+        self.assertEqual(
+            records[0]['stability_model_training_status'],
+            'rejected_replicate_log10_loss_rate_sd'
+        )
+        self.assertIn('exceeds the configured limit',
+                      records[0]['stability_model_training_reason'])
+
+    def test_active_selection_requires_log_rate_replicate_spread_evidence(self):
+        records = build_stability_model_training_records(
+            condition_summaries=[_summary('RUN', 0, 0, 0.001)],
+            condition_rows=[_condition('RUN', 0, 0)],
+            variable_reagents=['silver_nitrate', 'potassium_bromide'],
+            min_concentrations=[0.0, 0.0],
+            max_concentrations=[0.20, 0.010],
+            replicate_log10_loss_rate_sd_max=0.20,
+        )
+        self.assertEqual(
+            records[0]['stability_model_training_status'],
+            'rejected_missing_replicate_log10_loss_rate_sd'
+        )
+
     def test_unknown_summary_and_bad_recipe_are_rejected_without_guessing(self):
         records = self._records(
             [
@@ -180,6 +214,22 @@ class AutoStabilityModelTests(unittest.TestCase):
         self.assertIn('regress cumulative', summary['error'])
         self.assertIs(model.gp_model, old_model)
         self.assertTrue(np.array_equal(model.X, old_X))
+
+    def test_prediction_returns_log_rate_mean_and_standard_deviation(self):
+        model = AutoStabilityModel(['silver_nitrate', 'potassium_bromide'])
+        model.refresh_from_training_records(self._accepted_records(2))
+        mean, standard_deviation = model.predict_log10_loss_rate_distribution(
+            [[0.3, 0.4], [0.4, 0.5]]
+        )
+        self.assertEqual(mean.shape, (2,))
+        self.assertEqual(standard_deviation.shape, (2,))
+        self.assertTrue(np.all(np.isfinite(mean)))
+        self.assertTrue(np.all(standard_deviation >= 0.0))
+
+    def test_prediction_fails_before_companion_model_is_fitted(self):
+        model = AutoStabilityModel(['silver_nitrate', 'potassium_bromide'])
+        with self.assertRaisesRegex(ValueError, 'before the companion GP is fitted'):
+            model.predict_log10_loss_rate_distribution([[0.3, 0.4]])
 
 
 if __name__ == '__main__':

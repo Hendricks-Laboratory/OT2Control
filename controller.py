@@ -139,6 +139,7 @@ from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
 from auto_stability_model import (
     AutoStabilityModel,
+    STABILITY_MODEL_STATUS_FIT_FAILED,
     build_stability_model_training_records
 )
 
@@ -5531,8 +5532,10 @@ class AutoContr(Controller):
         # robot/reader command.
         self.auto_stability_model = (
             AutoStabilityModel(self.variable_reagents)
-            if self.robo_params.get('auto_stability_mode') ==
-            STABILITY_MODE_MONITOR else None
+            if self.robo_params.get('auto_stability_mode') in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY
+            ) else None
         )
         self.auto_stability_model_training_records = []
         self.auto_stability_model_summary = None
@@ -5574,12 +5577,9 @@ class AutoContr(Controller):
         '''Validate Stage-12 stability settings before the normal prechecks.
 
         The configuration is parsed before a robot connection exists, so an
-        unsafe trigger order cannot reach physical execution.  In a real
-        monitor-mode run, the separately initialized Stage-12C scheduler will
-        later perform its documented shake and reader observations. Stage-12F-A
-        also validates the target-then-stability configuration contract, then
-        fails closed before any selection or hardware work because that active
-        selection behavior is deliberately deferred to Stage 12F-B.
+        unsafe trigger order cannot reach physical execution. In an enabled
+        stability run, the separately initialized Stage-12C scheduler later
+        performs its documented shake and reader observations.
         '''
         header_dict = {
             row[0]: row[1]
@@ -5647,11 +5647,19 @@ class AutoContr(Controller):
                     'num_duplicates to be at least 3 so stability selection '
                     'can enforce a replicate-variability limit.'
                 )
-            raise AutoStabilityValidationError(
-                'auto_stability_mode=target_then_stability is recognized and '
-                'its safety contract has been validated, but active recipe '
-                'selection is not enabled until Stage 12F-B. No robot, '
-                'reader, or optimizer selection has started.'
+            print(
+                '<<controller>> Auto target-then-stability selection '
+                'configured: target tolerance={} nm, replicate log10 '
+                'loss-rate SD limit={}, trigger={}. The ordinary lambda '
+                'model remains the first lexicographic gate; a fitted '
+                'companion stability GP may rank only target-compatible, '
+                'physically feasible candidates.'.format(
+                    self.robo_params.get('target_tolerance_nm'),
+                    stability_settings[
+                        'auto_stability_replicate_log10_loss_rate_sd_max'
+                    ],
+                    stability_settings['auto_stability_trigger_reagent'],
+                )
             )
 
     def _initialize_auto_stability_observer(self):
@@ -5666,7 +5674,9 @@ class AutoContr(Controller):
             return None
         if self.auto_stability_observer is not None:
             return self.auto_stability_observer
-        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+        if self.robo_params.get('auto_stability_mode') not in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             return None
 
         self.auto_stability_observer = AutoStabilityObserver(
@@ -12084,6 +12094,21 @@ class AutoContr(Controller):
             balanced_exploration_weight = self._safe_float_or_none(
                 prediction_metadata.get('balanced_exploration_weight')
             )
+            predicted_stability_log10_loss_rate = self._safe_float_or_none(
+                prediction_metadata.get('predicted_stability_log10_loss_rate')
+            )
+            predicted_stability_log10_loss_rate_std = (
+                self._safe_float_or_none(
+                    prediction_metadata.get(
+                        'predicted_stability_log10_loss_rate_std'
+                    )
+                )
+            )
+            predicted_stability_loss_rate = self._safe_float_or_none(
+                prediction_metadata.get(
+                    'predicted_stability_loss_rate_absorbance_per_s'
+                )
+            )
             selected_normalized_recipe = prediction_metadata.get(
                 'selected_normalized_recipe'
             )
@@ -12227,6 +12252,58 @@ class AutoContr(Controller):
                 'predicted_lambda_mean_nm': predicted_mean,
                 'predicted_lambda_std_nm': predicted_std,
                 'incumbent_target_error_nm': incumbent_target_error,
+                # Stage 12F keeps wavelength targeting and optical-stability
+                # ranking lexicographically separate. These companion-GP
+                # fields are selection-time predictions only; observed
+                # condition stability remains in the Stage-12D CSV suite.
+                'stability_selection_mode': prediction_metadata.get(
+                    'stability_selection_mode'
+                ),
+                'stability_selection_status': prediction_metadata.get(
+                    'stability_selection_status'
+                ),
+                'stability_model_status': prediction_metadata.get(
+                    'stability_model_status'
+                ),
+                'stability_model_accepted_condition_count': (
+                    prediction_metadata.get(
+                        'stability_model_accepted_condition_count'
+                    )
+                ),
+                'stability_trigger_variable_index': prediction_metadata.get(
+                    'stability_trigger_variable_index'
+                ),
+                'stability_trigger_required_on': prediction_metadata.get(
+                    'stability_trigger_required_on'
+                ),
+                'target_compatibility_tolerance_nm': (
+                    self._safe_float_or_none(
+                        prediction_metadata.get(
+                            'target_compatibility_tolerance_nm'
+                        )
+                    )
+                ),
+                'target_compatible_optimizer_result_count': (
+                    prediction_metadata.get(
+                        'target_compatible_optimizer_result_count'
+                    )
+                ),
+                'predicted_stability_log10_loss_rate': (
+                    predicted_stability_log10_loss_rate
+                ),
+                'predicted_stability_log10_loss_rate_std': (
+                    predicted_stability_log10_loss_rate_std
+                ),
+                'predicted_stability_loss_rate_absorbance_per_s': (
+                    predicted_stability_loss_rate
+                ),
+                'stability_mask_results': (
+                    self._serialize_auto_audit_value(
+                        prediction_metadata.get('stability_mask_results')
+                    )
+                    if prediction_metadata.get('stability_mask_results')
+                    is not None else None
+                ),
                 'selected_normalized_recipe': (
                     None
                     if selected_normalized_recipe is None
@@ -21218,15 +21295,40 @@ class AutoContr(Controller):
         stability_model_summary = getattr(
             self, 'auto_stability_model_summary', None
         )
-        if self.robo_params.get('auto_stability_mode') == STABILITY_MODE_MONITOR:
-            lines.append('## Optical-Stability Monitoring (Stages 12D–12E)')
-            lines.append('')
-            lines.append(
-                'Stability monitoring did not alter the primary wavelength '
-                'GP, recipe selection, target stopping, or physical robot '
-                'execution. Stage 12E may fit a separate observational '
-                'stability GP from complete condition-level trajectories.'
+        # Keep this report-only branch self-contained: source-level report
+        # tests intentionally extract it without importing the stability
+        # configuration module.
+        if self.robo_params.get('auto_stability_mode') in (
+                STABILITY_MODE_MONITOR,
+                'target_then_stability'):
+            active_stability_selection = (
+                self.robo_params.get('auto_stability_mode') ==
+                'target_then_stability'
             )
+            lines.append(
+                '## Optical-Stability {} (Stages 12D–12F)'.format(
+                    'Target-Then-Stability Selection'
+                    if active_stability_selection else 'Monitoring'
+                )
+            )
+            lines.append('')
+            if active_stability_selection:
+                lines.append(
+                    'The primary wavelength GP remains the first '
+                    'lexicographic gate. A fitted companion stability GP '
+                    'ranked only target-compatible, physically feasible '
+                    'candidates by predicted log10 post-peak loss rate; '
+                    'target stopping and physical controller validation '
+                    'remain unchanged.'
+                )
+            else:
+                lines.append(
+                    'Stability monitoring did not alter the primary '
+                    'wavelength GP, recipe selection, target stopping, or '
+                    'physical robot execution. Stage 12E may fit a separate '
+                    'observational stability GP from complete '
+                    'condition-level trajectories.'
+                )
             if not isinstance(stability_summary, dict):
                 lines.append(
                     'No Stage-12D reporting summary was retained; consult '
@@ -28577,6 +28679,19 @@ class AutoContr(Controller):
                     'optimizer_recipe_repair_max_transfer_delta_uL'
                 ]
             ),
+            'stability_selection_mode': metadata.get(
+                'stability_selection_mode'
+            ),
+            'stability_selection_status': metadata.get(
+                'stability_selection_status'
+            ),
+            'stability_model_status': metadata.get('stability_model_status'),
+            'predicted_stability_log10_loss_rate': metadata.get(
+                'predicted_stability_log10_loss_rate'
+            ),
+            'target_compatibility_tolerance_nm': metadata.get(
+                'target_compatibility_tolerance_nm'
+            ),
             'selected_controller_volume_balances': (
                 metadata['selected_controller_volume_balances']
             ),
@@ -29077,7 +29192,29 @@ class AutoContr(Controller):
             print("<<controller>> selecting next reaction from updated model")
 
             if len(acquisition_modes) == 1:
-                X_new = model.getNextReaction()
+                target_then_stability_metadata = None
+                if self.robo_params.get('auto_stability_mode') == (
+                        STABILITY_MODE_TARGET_THEN_STABILITY):
+                    (
+                        stability_model,
+                        trigger_variable_index
+                    ) = self._get_auto_target_then_stability_selection_context()
+                    X_new = model.getNextTargetThenStabilityReaction(
+                        stability_model=stability_model,
+                        target_tolerance_nm=(
+                            self._get_auto_target_tolerance_nm()
+                        ),
+                        trigger_reagent_index=trigger_variable_index
+                    )
+                    target_then_stability_metadata = copy.deepcopy(
+                        getattr(
+                            model,
+                            'last_target_then_stability_selection_metadata',
+                            {}
+                        )
+                    )
+                else:
+                    X_new = model.getNextReaction()
                 if (
                     self.robo_params.get(
                         'auto_terminal_verbosity',
@@ -29096,7 +29233,10 @@ class AutoContr(Controller):
                 ) = self._prepare_auto_optimizer_recipe_for_execution(
                     model=model,
                     normalized_recipes=X_new,
-                    batch_label=f"batch_{self.batch_num}"
+                    batch_label=f"batch_{self.batch_num}",
+                    additional_selection_metadata=(
+                        target_then_stability_metadata
+                    )
                 )
             else:
                 selection_records = model.getNextPortfolio(
@@ -29472,7 +29612,9 @@ class AutoContr(Controller):
         condition-denominator contract as final reporting. It does not write
         an export, fit a model, schedule a scan, or communicate with the Pi.
         '''
-        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+        if self.robo_params.get('auto_stability_mode') not in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             return None
         observer = getattr(self, 'auto_stability_observer', None)
         if observer is None or not os.path.exists(observer.manifest_path):
@@ -29543,7 +29685,9 @@ class AutoContr(Controller):
         earlier condition. Any reporting or numerical failure is report-only
         in monitor mode and cannot interrupt the existing lambda workflow.
         '''
-        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+        if self.robo_params.get('auto_stability_mode') not in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             return {'enabled': False, 'fitted': False}
         stability_model = getattr(self, 'auto_stability_model', None)
         if stability_model is None:
@@ -29558,6 +29702,13 @@ class AutoContr(Controller):
                 variable_reagents=self.variable_reagents,
                 min_concentrations=self.min_conc,
                 max_concentrations=self.max_conc,
+                replicate_log10_loss_rate_sd_max=(
+                    self.robo_params.get(
+                        'auto_stability_replicate_log10_loss_rate_sd_max'
+                    )
+                    if self.robo_params.get('auto_stability_mode') ==
+                    STABILITY_MODE_TARGET_THEN_STABILITY else None
+                ),
             )
             model_summary = stability_model.refresh_from_training_records(
                 training_records
@@ -29595,10 +29746,17 @@ class AutoContr(Controller):
                     'log10_loss_rate_absorbance_per_s'
                 ),
             }
+            mode_message = (
+                'ordinary Auto execution continues unchanged'
+                if self.robo_params.get('auto_stability_mode') ==
+                STABILITY_MODE_MONITOR else
+                'the next target-then-stability selection will fail closed'
+            )
             print(
                 '<<controller warning>> Stage-12E stability-model refresh '
-                'was not completed; ordinary Auto execution continues '
-                'unchanged. Error: {}'.format(exc)
+                'was not completed; {}. Error: {}'.format(
+                    mode_message, exc
+                )
             )
             try:
                 self._write_auto_stability_model_exports()
@@ -29622,9 +29780,61 @@ class AutoContr(Controller):
             )
         return self.auto_stability_model_summary
 
+    def _get_auto_target_then_stability_selection_context(self):
+        '''Return the fitted/bootstrapping companion model for Stage 12F.
+
+        This gate runs immediately before a new Auto recipe is proposed. A
+        missing model-refresh audit or a fitting failure stops the run before
+        any new wells, reader work, or robot command are created. A genuinely
+        insufficient model is different: it is retained as an explicit,
+        target-only bootstrap state until two stability-QC-approved conditions
+        are available.
+        '''
+        if self.robo_params.get('auto_stability_mode') != (
+                STABILITY_MODE_TARGET_THEN_STABILITY):
+            return None, None
+
+        summary = getattr(self, 'auto_stability_model_summary', None)
+        stability_model = getattr(self, 'auto_stability_model', None)
+        if not isinstance(summary, dict) or stability_model is None:
+            raise AutoStabilityValidationError(
+                'Target-then-stability selection requires a completed '
+                'Stage-12 stability reporting/model refresh before the next '
+                'recipe can be proposed.'
+            )
+        if (
+                summary.get('status') == 'reporting_or_model_refresh_failed'
+                or summary.get('status') == STABILITY_MODEL_STATUS_FIT_FAILED
+                or getattr(stability_model, 'status', None) ==
+                STABILITY_MODEL_STATUS_FIT_FAILED):
+            raise AutoStabilityValidationError(
+                'Target-then-stability selection is blocked because the '
+                'companion stability model refresh failed: {}.'.format(
+                    summary.get('error') or getattr(
+                        stability_model, 'last_error', 'unknown error'
+                    )
+                )
+            )
+
+        trigger_reagent = canonical_reagent_name(
+            self.robo_params['auto_stability_trigger_reagent']
+        )
+        trigger_variable_index = None
+        for reagent_index, reagent_name in enumerate(self.variable_reagents):
+            if canonical_reagent_name(reagent_name) == trigger_reagent:
+                trigger_variable_index = reagent_index
+                break
+
+        # A fixed trigger is necessarily present in every valid condition, so
+        # no variable mask constraint is needed. A variable trigger is held ON
+        # by the optimizer's existing mask pathway, never repaired later.
+        return stability_model, trigger_variable_index
+
     def _generate_auto_stability_reporting_exports(self):
         '''Generate Stage-12D data artifacts only after an Auto run completes.'''
-        if self.robo_params.get('auto_stability_mode') != STABILITY_MODE_MONITOR:
+        if self.robo_params.get('auto_stability_mode') not in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             return []
         records = self._build_auto_stability_reporting_records()
         stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
@@ -29680,7 +29890,9 @@ class AutoContr(Controller):
         # Stage 12D derives audit artifacts from the immutable raw scans and
         # manifest after physical work is already complete. A reporting issue
         # is disclosed but can never alter a recipe, model, or robot action.
-        if self.robo_params.get('auto_stability_mode') == STABILITY_MODE_MONITOR:
+        if self.robo_params.get('auto_stability_mode') in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             try:
                 self._generate_auto_stability_reporting_exports()
             except Exception as exc:
@@ -31546,7 +31758,18 @@ class AutoContr(Controller):
                 'feasible_mask_result_count',
                 'portfolio_selection_index',
                 'portfolio_min_distance',
-                'portfolio_nearest_distance'
+                'portfolio_nearest_distance',
+                'stability_selection_mode',
+                'stability_selection_status',
+                'stability_model_status',
+                'stability_model_accepted_condition_count',
+                'stability_trigger_variable_index',
+                'stability_trigger_required_on',
+                'target_compatibility_tolerance_nm',
+                'target_compatible_optimizer_result_count',
+                'predicted_stability_log10_loss_rate',
+                'predicted_stability_log10_loss_rate_std',
+                'predicted_stability_loss_rate_absorbance_per_s'
             )
 
             for field_name in selection_scalar_fields:
@@ -31593,6 +31816,12 @@ class AutoContr(Controller):
             export_df['mask_results'] = [
                 self._serialize_auto_audit_value(
                     selection_metadata.get('mask_results')
+                )
+            ] * repeated_value_count
+
+            export_df['stability_mask_results'] = [
+                self._serialize_auto_audit_value(
+                    selection_metadata.get('stability_mask_results')
                 )
             ] * repeated_value_count
 

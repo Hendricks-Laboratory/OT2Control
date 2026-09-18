@@ -242,6 +242,10 @@ class AutoStabilityMetricTests(unittest.TestCase):
             summary['condition_loss_rate_sample_sd_absorbance_per_s'],
             0.0141421356237
         )
+        self.assertAlmostEqual(
+            summary['condition_log10_loss_rate_sample_sd'],
+            math.sqrt(0.5) * abs(math.log10(0.03) - math.log10(0.01))
+        )
 
 
 class AutoStabilityControllerContractTests(unittest.TestCase):
@@ -305,7 +309,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         self.assertIn('parse_auto_stability_header_settings(', method_source)
         self.assertIn('validate_stability_trigger_reagent(', method_source)
 
-    def test_target_then_stability_is_explicitly_pre_hardware_fail_closed(self):
+    def test_target_then_stability_configuration_remains_pre_hardware_only(self):
         method_source = ast.get_source_segment(
             self.source,
             self.auto_methods['_initialize_auto_stability_configuration']
@@ -317,19 +321,21 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
         )
         self.assertIn("self.robo_params.get('num_duplicates', 0) < 3",
                       method_source)
-        self.assertIn('raise AutoStabilityValidationError(', method_source)
-        self.assertIn('No robot, ', method_source)
-        self.assertIn('reader, or optimizer selection has started.',
-                      method_source)
+        self.assertIn('Auto target-then-stability selection', method_source)
+        self.assertIn("'configured: target tolerance={} nm", method_source)
+        for forbidden_text in (
+                '_execute_scan(', '_mix(', 'execute_protocol_df(',
+                'send_pack(', 'run_protocol(', 'getNextReaction('):
+            self.assertNotIn(forbidden_text, method_source)
         self.assertLess(
             method_source.index('self.robo_params.update(stability_settings)'),
             method_source.index(
-                'auto_stability_mode=target_then_stability is recognized'
+                'Auto target-then-stability selection'
             )
         )
 
-    def test_target_then_stability_validates_then_stops_before_preflight(self):
-        '''Exercise the pre-hardware gate with a controller-free fake object.'''
+    def test_target_then_stability_validates_before_preflight(self):
+        '''Exercise the pre-hardware configuration with a controller-free fake.'''
         method_source = textwrap.dedent(ast.get_source_segment(
             self.source,
             self.auto_methods['_initialize_auto_stability_configuration']
@@ -370,10 +376,7 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             'num_duplicates': 3,
         }
 
-        with self.assertRaisesRegex(
-                AutoStabilityValidationError,
-                'not enabled until Stage 12F-B'):
-            initialize(fake_controller)
+        initialize(fake_controller)
 
         self.assertEqual(
             fake_controller.robo_params['auto_stability_mode'],
@@ -391,6 +394,34 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 AutoStabilityValidationError,
                 'num_duplicates to be at least 3'):
             initialize(fake_controller)
+
+    def test_active_selection_has_a_pre_recipe_model_health_gate(self):
+        self.assertIn(
+            '_get_auto_target_then_stability_selection_context',
+            self.auto_methods
+        )
+        context_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods[
+                '_get_auto_target_then_stability_selection_context'
+            ]
+        )
+        self.assertIn('STABILITY_MODEL_STATUS_FIT_FAILED', context_source)
+        self.assertIn('trigger_variable_index', context_source)
+        self.assertNotIn('execute_protocol_df(', context_source)
+
+        run_source = ast.get_source_segment(
+            self.source, self.auto_methods['_run_auto_optimizer_batches']
+        )
+        self.assertIn('getNextTargetThenStabilityReaction(', run_source)
+        self.assertIn(
+            '_get_auto_target_then_stability_selection_context()',
+            run_source
+        )
+        self.assertLess(
+            run_source.index('getNextTargetThenStabilityReaction('),
+            run_source.index('_prepare_auto_optimizer_recipe_for_execution(')
+        )
 
     def test_stability_observer_preserves_legacy_completion_boundary(self):
         for method_name in (

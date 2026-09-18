@@ -69,6 +69,8 @@ def _empty_audit_row(row, condition_id):
         'eligible_well_count': None,
         'total_well_count': None,
         'loss_rate_absorbance_per_s': None,
+        'replicate_log10_loss_rate_sample_sd': None,
+        'replicate_log10_loss_rate_sd_max': None,
         'model_target_transform': STABILITY_MODEL_TARGET_TRANSFORM,
         'model_target_log10_loss_rate': None,
         'normalized_recipe': None,
@@ -82,7 +84,8 @@ def build_stability_model_training_records(
         condition_rows,
         variable_reagents,
         min_concentrations,
-        max_concentrations):
+        max_concentrations,
+        replicate_log10_loss_rate_sd_max=None):
     '''Return one explicit model-training audit row per known condition.
 
     Only a condition with a complete Stage-12D stability summary, every
@@ -105,6 +108,17 @@ def build_stability_model_training_records(
         raise AutoStabilityModelValidationError(
             'Stability model variable reagent names must be unique.'
         )
+
+    replicate_log10_sd_limit = None
+    if replicate_log10_loss_rate_sd_max is not None:
+        replicate_log10_sd_limit = _finite_float(
+            replicate_log10_loss_rate_sd_max
+        )
+        if replicate_log10_sd_limit is None or replicate_log10_sd_limit <= 0.0:
+            raise AutoStabilityModelValidationError(
+                'The stability-model replicate log10 loss-rate SD limit must '
+                'be a finite positive number when supplied.'
+            )
 
     minimums = np.asarray(min_concentrations, dtype=float).reshape(-1)
     maximums = np.asarray(max_concentrations, dtype=float).reshape(-1)
@@ -178,6 +192,10 @@ def build_stability_model_training_records(
             'loss_rate_absorbance_per_s': summary.get(
                 'condition_loss_rate_mean_absorbance_per_s'
             ),
+            'replicate_log10_loss_rate_sample_sd': summary.get(
+                'condition_log10_loss_rate_sample_sd'
+            ),
+            'replicate_log10_loss_rate_sd_max': replicate_log10_sd_limit,
         })
         if audit['condition_stability_status'] != 'complete':
             audit['stability_model_training_status'] = 'rejected_stability_qc'
@@ -197,6 +215,34 @@ def build_stability_model_training_records(
             )
             records.append(audit)
             continue
+
+        if replicate_log10_sd_limit is not None:
+            replicate_log10_sd = _finite_float(
+                audit['replicate_log10_loss_rate_sample_sd']
+            )
+            if replicate_log10_sd is None:
+                audit['stability_model_training_status'] = (
+                    'rejected_missing_replicate_log10_loss_rate_sd'
+                )
+                audit['stability_model_training_reason'] = (
+                    'Active stability selection requires a finite sample SD '
+                    'of replicate log10 post-peak loss rates.'
+                )
+                records.append(audit)
+                continue
+            if replicate_log10_sd > replicate_log10_sd_limit:
+                audit['stability_model_training_status'] = (
+                    'rejected_replicate_log10_loss_rate_sd'
+                )
+                audit['stability_model_training_reason'] = (
+                    'Replicate log10 post-peak loss-rate sample SD {:.6g} '
+                    'exceeds the configured limit {:.6g}.'.format(
+                        replicate_log10_sd,
+                        replicate_log10_sd_limit,
+                    )
+                )
+                records.append(audit)
+                continue
 
         concentrations = []
         for reagent_name in reagent_names:
@@ -254,6 +300,10 @@ def build_stability_model_training_records(
             'loss_rate_absorbance_per_s': summary.get(
                 'condition_loss_rate_mean_absorbance_per_s'
             ),
+            'replicate_log10_loss_rate_sample_sd': summary.get(
+                'condition_log10_loss_rate_sample_sd'
+            ),
+            'replicate_log10_loss_rate_sd_max': replicate_log10_sd_limit,
             'stability_model_training_status': 'rejected_missing_condition_provenance',
             'stability_model_training_reason': (
                 'The manifest-linked stability summary could not be matched '
@@ -393,3 +443,58 @@ class AutoStabilityModel(object):
             'fitted': True,
         })
         return result
+
+    def predict_log10_loss_rate_distribution(self, normalized_recipes):
+        '''Predict log10 loss-rate mean and SD without changing model state.
+
+        Active Stage-12F selection may use this only after the companion GP
+        has been fitted from complete, replicate-QC-approved condition rows.
+        The prediction remains on the model's declared
+        ``log10(absorbance loss / second)`` scale; callers must not mix it
+        numerically with wavelength units.
+        '''
+        if self.status != STABILITY_MODEL_STATUS_FITTED or self.gp_model is None:
+            raise AutoStabilityModelValidationError(
+                'Cannot predict stability before the companion GP is fitted.'
+            )
+        values = np.asarray(normalized_recipes, dtype=float)
+        if values.ndim == 1:
+            values = values.reshape(1, -1)
+        if (
+                values.ndim != 2
+                or values.shape[1] != len(self.variable_reagents)
+                or values.shape[0] == 0
+                or not np.all(np.isfinite(values))
+                or np.any(values < 0.0)
+                or np.any(values > 1.0)):
+            raise AutoStabilityModelValidationError(
+                'Stability predictions require finite normalized recipes in '
+                '[0, 1] with one value per variable reagent.'
+            )
+        try:
+            predicted_mean, predicted_variance = self.gp_model.predict(values)
+        except Exception as exc:
+            raise AutoStabilityModelValidationError(
+                'Companion stability GP prediction failed: {}.'.format(exc)
+            )
+        predicted_mean = np.asarray(predicted_mean, dtype=float).reshape(-1)
+        predicted_variance = np.asarray(
+            predicted_variance, dtype=float
+        ).reshape(-1)
+        if (
+                predicted_mean.shape[0] != values.shape[0]
+                or predicted_variance.shape[0] != values.shape[0]
+                or not np.all(np.isfinite(predicted_mean))
+                or not np.all(np.isfinite(predicted_variance))):
+            raise AutoStabilityModelValidationError(
+                'Companion stability GP returned non-finite or misaligned '
+                'prediction values.'
+            )
+        negative_roundoff_tolerance = 1e-12
+        if np.any(predicted_variance < -negative_roundoff_tolerance):
+            raise AutoStabilityModelValidationError(
+                'Companion stability GP returned a materially negative '
+                'predictive variance.'
+            )
+        predicted_std = np.sqrt(np.maximum(predicted_variance, 0.0))
+        return predicted_mean.copy(), predicted_std.copy()

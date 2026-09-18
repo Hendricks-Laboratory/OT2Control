@@ -1103,7 +1103,10 @@ class OptimizationModel():
 
         return masks
 
-    def _get_reagent_masks_for_current_settings(self):
+    def _get_reagent_masks_for_current_settings(
+        self,
+        required_on_reagent_indices=None
+    ):
         '''
         Gets the reagent ON/OFF masks allowed by the current optimizer settings.
 
@@ -1114,13 +1117,20 @@ class OptimizationModel():
         reagents, so only the all-ON mask is considered.
 
         returns:
+            list[int] required_on_reagent_indices:
+                Optional variable-reagent indices that must be ON in every
+                returned mask. Stage 12F uses this only when its final trigger
+                reagent is itself variable, because an OFF trigger cannot
+                produce a scientifically meaningful stability trajectory.
+
+        returns:
             list[np.ndarray]:
                 List of allowed binary masks.
         '''
         n_dimensions = self._get_dimension()
 
         if self.allow_true_zero:
-            return self._generate_reagent_masks(
+            masks = self._generate_reagent_masks(
                 include_all_off_mask=False,
                 true_zero_reagent_indices=getattr(
                     self,
@@ -1128,10 +1138,34 @@ class OptimizationModel():
                     list(range(n_dimensions))
                 )
             )
+        else:
+            masks = [np.ones(n_dimensions, dtype=int)]
 
-        return [
-            np.ones(n_dimensions, dtype=int)
+        if required_on_reagent_indices is None:
+            return masks
+
+        try:
+            required_indices = sorted(set(
+                int(index) for index in required_on_reagent_indices
+            ))
+        except (TypeError, ValueError):
+            raise ValueError(
+                'Required-ON reagent indices must be integers.'
+            )
+        if any(index < 0 or index >= n_dimensions for index in required_indices):
+            raise ValueError(
+                'Required-ON reagent index is outside optimizer dimensionality.'
+            )
+        constrained_masks = [
+            mask for mask in masks
+            if all(mask[index] == 1 for index in required_indices)
         ]
+        if not constrained_masks:
+            raise RuntimeError(
+                'No permitted reagent masks keep every required stability '
+                'trigger reagent ON.'
+            )
+        return constrained_masks
     
     def _get_active_mask_indices(self, mask):
         '''
@@ -2219,7 +2253,11 @@ class OptimizationModel():
             'predicted_target_error_nm': predicted_target_error_nm
         }
     
-    def _optimize_acquisition_with_masks(self, n_restarts_per_mask=25):
+    def _optimize_acquisition_with_masks(
+        self,
+        n_restarts_per_mask=25,
+        required_on_reagent_indices=None
+    ):
         '''
         Finds the best normalized recipe for the configured acquisition mode
         using mixed discrete/continuous mask optimization.
@@ -2249,7 +2287,15 @@ class OptimizationModel():
                 Best full normalized recipe point found, with shape:
                     n_dimensions
         '''
-        masks = self._get_reagent_masks_for_current_settings()
+        # Preserve the legacy no-argument invocation for existing isolated
+        # callers and test doubles. Stage 12F supplies this argument only
+        # when its variable trigger must be held ON.
+        if required_on_reagent_indices is None:
+            masks = self._get_reagent_masks_for_current_settings()
+        else:
+            masks = self._get_reagent_masks_for_current_settings(
+                required_on_reagent_indices=required_on_reagent_indices
+            )
 
         mask_results = []
 
@@ -2365,6 +2411,472 @@ class OptimizationModel():
         return self._optimize_acquisition_with_masks(
             n_restarts_per_mask=n_restarts_per_mask
         )
+
+    def _get_target_then_stability_candidate_diagnostics(
+        self,
+        full_x,
+        stability_model,
+        target_tolerance_nm
+    ):
+        '''Evaluate one physically executable active-stability candidate.
+
+        This function is intentionally read-only.  It is the one place where
+        the primary wavelength GP and the independent companion stability GP
+        are placed beside each other for Stage 12F's lexicographic ranking.
+        Their values are never summed or otherwise mixed across units.
+        '''
+        full_x = np.asarray(full_x, dtype=float).reshape(self._get_dimension())
+        volume_balance = self._get_candidate_volume_balance(full_x)
+        if not volume_balance['volume_feasible']:
+            return None
+
+        (
+            predicted_lambda_mean_nm,
+            predicted_lambda_std_nm
+        ) = self.predict_lambda_distribution_nm(full_x)
+        predicted_target_error_nm = abs(
+            predicted_lambda_mean_nm - float(self.target_value)
+        )
+        target_compatible = bool(
+            predicted_target_error_nm <= float(target_tolerance_nm) + 1e-9
+        )
+
+        (
+            predicted_stability_log10_mean,
+            predicted_stability_log10_std
+        ) = stability_model.predict_log10_loss_rate_distribution(full_x)
+        predicted_stability_log10_mean = float(
+            np.asarray(predicted_stability_log10_mean, dtype=float).reshape(-1)[0]
+        )
+        predicted_stability_log10_std = float(
+            np.asarray(predicted_stability_log10_std, dtype=float).reshape(-1)[0]
+        )
+        if (
+                not math.isfinite(predicted_stability_log10_mean)
+                or not math.isfinite(predicted_stability_log10_std)
+                or predicted_stability_log10_std < 0.0):
+            raise ValueError(
+                'Companion stability GP returned invalid log-loss-rate '
+                'prediction diagnostics.'
+            )
+        try:
+            predicted_stability_loss_rate = 10.0 ** (
+                predicted_stability_log10_mean
+            )
+        except OverflowError:
+            predicted_stability_loss_rate = None
+        if (
+                predicted_stability_loss_rate is not None
+                and not math.isfinite(predicted_stability_loss_rate)):
+            predicted_stability_loss_rate = None
+
+        return {
+            'normalized_recipe': full_x.copy(),
+            'volume_balance': volume_balance,
+            'predicted_lambda_mean_nm': float(predicted_lambda_mean_nm),
+            'predicted_lambda_std_nm': float(predicted_lambda_std_nm),
+            'predicted_target_error_nm': float(predicted_target_error_nm),
+            'target_compatible': target_compatible,
+            'predicted_stability_log10_loss_rate': (
+                predicted_stability_log10_mean
+            ),
+            'predicted_stability_log10_loss_rate_std': (
+                predicted_stability_log10_std
+            ),
+            'predicted_stability_loss_rate_absorbance_per_s': (
+                predicted_stability_loss_rate
+            ),
+        }
+
+    def _optimize_single_mask_target_then_stability(
+        self,
+        mask,
+        stability_model,
+        target_tolerance_nm,
+        n_restarts=25
+    ):
+        '''Find the lowest predicted loss rate within one target-compatible mask.
+
+        The ordinary active bounds already enforce exact OFF or executable ON
+        transfers.  Two explicit water branches preserve the established
+        chemistry contract: one permits normal water top-off (>= 5 uL), the
+        other retains the physically valid exact-zero-water boundary.  Every
+        candidate is rechecked by the existing full volume-balance helper
+        before it can be considered for selection.
+        '''
+        mask = np.asarray(mask, dtype=int).reshape(self._get_dimension())
+        bounds = self._get_masked_bounds(mask)
+        starting_points = self._generate_feasible_masked_starting_points(
+            mask,
+            n_restarts
+        )
+        if not starting_points:
+            midpoint = np.asarray([
+                (low + high) / 2.0 for low, high in bounds
+            ], dtype=float)
+            starting_points = [midpoint]
+
+        # Seed the constrained stability search with a few direct wavelength
+        # solutions. This gives SLSQP a target-directed starting point without
+        # altering the legacy optimizer's state or acquisition semantics.
+        target_result = self._optimize_single_mask(mask, n_restarts=3)
+        if target_result.get('x_active') is not None:
+            starting_points.append(np.asarray(
+                target_result['x_active'], dtype=float
+            ))
+
+        unique_starts = []
+        for candidate_start in starting_points:
+            candidate_start = np.asarray(candidate_start, dtype=float).reshape(-1)
+            if candidate_start.shape[0] != len(bounds):
+                continue
+            if not any(np.allclose(candidate_start, prior, rtol=0, atol=1e-12)
+                       for prior in unique_starts):
+                unique_starts.append(candidate_start)
+
+        def full_recipe(x_active):
+            x_active = np.asarray(x_active, dtype=float).copy()
+            for index, (low, high) in enumerate(bounds):
+                x_active[index] = np.clip(x_active[index], low, high)
+            return self._expand_masked_candidate_to_full_recipe(x_active, mask)
+
+        def target_constraint(x_active):
+            candidate = full_recipe(x_active)
+            predicted_mean_nm, _ = self.predict_lambda_distribution_nm(candidate)
+            return float(target_tolerance_nm) - abs(
+                predicted_mean_nm - float(self.target_value)
+            )
+
+        def water_volume(x_active):
+            return float(
+                self._get_candidate_volume_balance(
+                    full_recipe(x_active)
+                )['water_volume']
+            )
+
+        def stability_objective(x_active):
+            candidate = full_recipe(x_active)
+            diagnostics = self._get_target_then_stability_candidate_diagnostics(
+                candidate,
+                stability_model,
+                target_tolerance_nm
+            )
+            if diagnostics is None:
+                # The branch constraints should prevent this path. Preserve a
+                # finite penalty as a defensive backstop instead of allowing a
+                # non-executable recipe to appear attractive.
+                return 1e13
+            return diagnostics['predicted_stability_log10_loss_rate']
+
+        branch_constraints = (
+            ('water_at_least_5_uL', [{
+                'type': 'ineq',
+                'fun': target_constraint,
+            }, {
+                'type': 'ineq',
+                'fun': lambda values: water_volume(values) - 5.0,
+            }]),
+            ('water_exactly_0_uL', [{
+                'type': 'ineq',
+                'fun': target_constraint,
+            }, {
+                'type': 'eq',
+                'fun': water_volume,
+            }]),
+        )
+
+        candidate_results = []
+        for branch_name, constraints in branch_constraints:
+            for x0 in unique_starts:
+                result = minimize(
+                    fun=stability_objective,
+                    x0=x0,
+                    bounds=bounds,
+                    constraints=constraints,
+                    method='SLSQP'
+                )
+                x_active = np.asarray(result.x, dtype=float).copy()
+                for index, (low, high) in enumerate(bounds):
+                    x_active[index] = np.clip(x_active[index], low, high)
+                full_x = self._expand_masked_candidate_to_full_recipe(
+                    x_active,
+                    mask
+                )
+                diagnostics = self._get_target_then_stability_candidate_diagnostics(
+                    full_x,
+                    stability_model,
+                    target_tolerance_nm
+                )
+                if diagnostics is None or not diagnostics['target_compatible']:
+                    continue
+                if branch_name == 'water_at_least_5_uL':
+                    if diagnostics['volume_balance']['water_volume'] < 5.0 - 1e-9:
+                        continue
+                elif not math.isclose(
+                        diagnostics['volume_balance']['water_volume'],
+                        0.0, rel_tol=0.0, abs_tol=1e-9):
+                    continue
+                candidate_results.append({
+                    'mask': mask.copy(),
+                    'x_active': x_active.copy(),
+                    'x_full': full_x.copy(),
+                    'success': bool(result.success),
+                    'message': str(result.message),
+                    'optimizer_method': 'SLSQP constrained stability',
+                    'optimizer_status': getattr(result, 'status', None),
+                    'water_constraint_branch': branch_name,
+                    **diagnostics
+                })
+
+        if not candidate_results:
+            return {
+                'mask': mask.copy(),
+                'x_active': None,
+                'x_full': None,
+                'success': False,
+                'message': (
+                    'No finite, physically executable target-compatible '
+                    'stability result was found for this mask.'
+                ),
+                'optimizer_method': 'SLSQP constrained stability',
+                'optimizer_status': None,
+                'target_compatible': False,
+                'volume_balance': None,
+            }
+
+        return min(
+            candidate_results,
+            key=lambda result: (
+                result['predicted_stability_log10_loss_rate'],
+                result['predicted_target_error_nm'],
+                result['predicted_stability_log10_loss_rate_std'],
+                tuple(result['x_full'].tolist()),
+            )
+        )
+
+    def _record_target_then_stability_lambda_fallback(self, best_x):
+        '''Restore complete ordinary-lambda audit fields for a safe fallback.'''
+        best_x = np.asarray(best_x, dtype=float).reshape(self._get_dimension())
+        (
+            predicted_lambda_mean_nm,
+            predicted_lambda_std_nm
+        ) = self.predict_lambda_distribution_nm(best_x)
+        predicted_target_error_nm = abs(
+            predicted_lambda_mean_nm - float(self.target_value)
+        )
+        self.last_optimizer_selected_normalized_recipe = best_x.copy()
+        self.last_optimizer_acquisition_mode = self.acquisition_mode
+        self.last_optimizer_balanced_exploration_weight = None
+        self.last_optimizer_incumbent_target_error_nm = getattr(
+            self, 'incumbent_target_error_nm', None
+        )
+        self.last_optimizer_predicted_lambda_max = predicted_lambda_mean_nm
+        self.last_optimizer_predicted_lambda_mean_nm = predicted_lambda_mean_nm
+        self.last_optimizer_predicted_lambda_std_nm = predicted_lambda_std_nm
+        self.last_optimizer_predicted_target_error_nm = predicted_target_error_nm
+        self.last_optimizer_acquisition_score = self._calculate_acquisition_score(
+            predicted_lambda_mean_nm=predicted_lambda_mean_nm,
+            predicted_lambda_std_nm=predicted_lambda_std_nm,
+            incumbent_target_error_nm=self.last_optimizer_incumbent_target_error_nm
+        )
+
+    def getNextTargetThenStabilityReaction(
+        self,
+        stability_model,
+        target_tolerance_nm,
+        trigger_reagent_index=None,
+        n_restarts_per_mask=25
+    ):
+        '''Return a feasible target-first, stability-second Auto recipe.
+
+        A fitted companion model enables constrained lexicographic selection.
+        Before two complete stability conditions exist, the method safely
+        bootstraps with the ordinary target-distance objective while still
+        requiring a variable trigger reagent to remain ON. A fit or reporting
+        failure is intentionally rejected by the controller before this method
+        is reached.
+        '''
+        if self.acquisition_mode != 'exploit':
+            raise ValueError(
+                'Target-then-stability selection requires acquisition_mode '
+                "'exploit' for its lambda-target fallback."
+            )
+        try:
+            target_tolerance_nm = float(target_tolerance_nm)
+        except (TypeError, ValueError):
+            raise ValueError('Target tolerance must be a finite nonnegative number.')
+        if not math.isfinite(target_tolerance_nm) or target_tolerance_nm < 0.0:
+            raise ValueError('Target tolerance must be a finite nonnegative number.')
+
+        required_on_indices = []
+        if trigger_reagent_index is not None:
+            try:
+                trigger_reagent_index = int(trigger_reagent_index)
+            except (TypeError, ValueError):
+                raise ValueError('Trigger reagent index must be an integer.')
+            if (
+                    trigger_reagent_index < 0
+                    or trigger_reagent_index >= self._get_dimension()):
+                raise ValueError('Trigger reagent index is outside model dimensionality.')
+            required_on_indices = [trigger_reagent_index]
+
+        stability_model_fitted = bool(
+            stability_model is not None
+            and getattr(stability_model, 'status', None) == 'fitted'
+        )
+        if not stability_model_fitted:
+            best_x = self._optimize_acquisition_with_masks(
+                n_restarts_per_mask=n_restarts_per_mask,
+                required_on_reagent_indices=required_on_indices
+            )
+            self._record_target_then_stability_lambda_fallback(best_x)
+            self.last_target_then_stability_selection_metadata = {
+                'stability_selection_mode': 'target_then_stability',
+                'stability_selection_status': (
+                    'lambda_bootstrap_stability_model_insufficient'
+                ),
+                'stability_model_status': (
+                    None if stability_model is None
+                    else getattr(stability_model, 'status', None)
+                ),
+                'stability_model_accepted_condition_count': (
+                    0 if stability_model is None
+                    else int(getattr(stability_model, 'X', np.empty((0,))).shape[0])
+                ),
+                'stability_trigger_variable_index': trigger_reagent_index,
+                'stability_trigger_required_on': bool(required_on_indices),
+                'target_compatibility_tolerance_nm': target_tolerance_nm,
+                'target_compatible_optimizer_result_count': 0,
+                'predicted_stability_log10_loss_rate': None,
+                'predicted_stability_log10_loss_rate_std': None,
+                'predicted_stability_loss_rate_absorbance_per_s': None,
+            }
+            return [np.asarray(best_x, dtype=float)]
+
+        masks = self._get_reagent_masks_for_current_settings(
+            required_on_reagent_indices=required_on_indices
+        )
+        mask_results = []
+        for mask in masks:
+            mask_results.append(self._optimize_single_mask_target_then_stability(
+                mask=mask,
+                stability_model=stability_model,
+                target_tolerance_nm=target_tolerance_nm,
+                n_restarts=n_restarts_per_mask
+            ))
+        target_compatible_results = [
+            result for result in mask_results
+            if (
+                result.get('x_full') is not None
+                and result.get('target_compatible')
+                and result.get('volume_balance', {}).get('volume_feasible', False)
+            )
+        ]
+        if not target_compatible_results:
+            best_x = self._optimize_acquisition_with_masks(
+                n_restarts_per_mask=n_restarts_per_mask,
+                required_on_reagent_indices=required_on_indices
+            )
+            self._record_target_then_stability_lambda_fallback(best_x)
+            self.last_target_then_stability_selection_metadata = {
+                'stability_selection_mode': 'target_then_stability',
+                'stability_selection_status': (
+                    'lambda_fallback_no_target_compatible_optimizer_result'
+                ),
+                'stability_model_status': getattr(stability_model, 'status', None),
+                'stability_model_accepted_condition_count': int(
+                    getattr(stability_model, 'X', np.empty((0,))).shape[0]
+                ),
+                'stability_trigger_variable_index': trigger_reagent_index,
+                'stability_trigger_required_on': bool(required_on_indices),
+                'target_compatibility_tolerance_nm': target_tolerance_nm,
+                'target_compatible_optimizer_result_count': 0,
+                'predicted_stability_log10_loss_rate': None,
+                'predicted_stability_log10_loss_rate_std': None,
+                'predicted_stability_loss_rate_absorbance_per_s': None,
+                'stability_mask_results': copy.deepcopy(mask_results),
+            }
+            return [np.asarray(best_x, dtype=float)]
+
+        selected_result = min(
+            target_compatible_results,
+            key=lambda result: (
+                result['predicted_stability_log10_loss_rate'],
+                result['predicted_target_error_nm'],
+                result['predicted_stability_log10_loss_rate_std'],
+                tuple(result['x_full'].tolist()),
+            )
+        )
+        for result in mask_results:
+            result['is_selected'] = result is selected_result
+        selected_x = np.asarray(selected_result['x_full'], dtype=float).copy()
+
+        self.last_mask_results = copy.deepcopy(mask_results)
+        self.last_optimizer_selected_normalized_recipe = selected_x.copy()
+        self.last_selected_mask = selected_result['mask'].copy()
+        self.last_raw_optimizer_candidate = selected_x.copy()
+        self.last_repaired_optimizer_candidate = selected_x.copy()
+        self.last_optimizer_objective = float(
+            selected_result['predicted_stability_log10_loss_rate']
+        )
+        self.last_optimizer_predicted_lambda_max = selected_result[
+            'predicted_lambda_mean_nm'
+        ]
+        self.last_optimizer_predicted_lambda_mean_nm = selected_result[
+            'predicted_lambda_mean_nm'
+        ]
+        self.last_optimizer_predicted_lambda_std_nm = selected_result[
+            'predicted_lambda_std_nm'
+        ]
+        self.last_optimizer_predicted_target_error_nm = selected_result[
+            'predicted_target_error_nm'
+        ]
+        self.last_optimizer_volume_balance = copy.deepcopy(
+            selected_result['volume_balance']
+        )
+        self.last_optimizer_method = selected_result['optimizer_method']
+        self.last_optimizer_success = selected_result['success']
+        self.last_optimizer_status = selected_result['optimizer_status']
+        self.last_optimizer_message = selected_result['message']
+        self.last_optimizer_acquisition_mode = self.acquisition_mode
+        self.last_optimizer_acquisition_score = None
+        self.last_optimizer_balanced_exploration_weight = None
+        self.last_optimizer_incumbent_target_error_nm = None
+        self.last_target_then_stability_selection_metadata = {
+            'stability_selection_mode': 'target_then_stability',
+            'stability_selection_status': 'stability_ranked_within_target',
+            'stability_model_status': getattr(stability_model, 'status', None),
+            'stability_model_accepted_condition_count': int(
+                getattr(stability_model, 'X', np.empty((0,))).shape[0]
+            ),
+            'stability_trigger_variable_index': trigger_reagent_index,
+            'stability_trigger_required_on': bool(required_on_indices),
+            'target_compatibility_tolerance_nm': target_tolerance_nm,
+            'target_compatible_optimizer_result_count': len(
+                target_compatible_results
+            ),
+            'predicted_stability_log10_loss_rate': selected_result[
+                'predicted_stability_log10_loss_rate'
+            ],
+            'predicted_stability_log10_loss_rate_std': selected_result[
+                'predicted_stability_log10_loss_rate_std'
+            ],
+            'predicted_stability_loss_rate_absorbance_per_s': selected_result[
+                'predicted_stability_loss_rate_absorbance_per_s'
+            ],
+            'stability_mask_results': copy.deepcopy(mask_results),
+        }
+        if getattr(self, 'terminal_verbosity', 'standard') != 'essential':
+            print(
+                '<<optimizer>> target-then-stability selection: target '
+                'error={:.4f} nm, predicted log10 loss rate={:.6f}, '
+                'target-compatible mask results={}.'.format(
+                    selected_result['predicted_target_error_nm'],
+                    selected_result['predicted_stability_log10_loss_rate'],
+                    len(target_compatible_results),
+                )
+            )
+        return [selected_x]
     
     def _get_variable_reagent_stock_conc(self, reagent_name):
         '''

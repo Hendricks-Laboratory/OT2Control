@@ -522,6 +522,11 @@ def aggregate_condition_stability_metrics(well_metrics):
         'eligible_well_count': len(eligible_rates),
         'condition_loss_rate_mean_absorbance_per_s': None,
         'condition_loss_rate_sample_sd_absorbance_per_s': None,
+        # Stage 12F compares condition replicates on the same log10 loss-rate
+        # scale used by the companion GP.  Retain the raw-unit SD above for
+        # scientific reporting; this separate value is deliberately not a
+        # substitute for it.
+        'condition_log10_loss_rate_sample_sd': None,
     }
     if not eligible_rates:
         return result
@@ -533,4 +538,11 @@ def aggregate_condition_stability_metrics(well_metrics):
         result['condition_loss_rate_sample_sd_absorbance_per_s'] = (
             statistics.stdev(eligible_rates)
         )
+        # Eligible Stage-12A loss rates are normally strictly positive.  Keep
+        # aggregation backwards-compatible with a synthetic zero-rate audit
+        # row, but do not fabricate a log-scale dispersion for it.
+        if all(rate > 0.0 for rate in eligible_rates):
+            result['condition_log10_loss_rate_sample_sd'] = statistics.stdev(
+                [math.log10(rate) for rate in eligible_rates]
+            )
     return result
