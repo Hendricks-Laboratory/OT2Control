@@ -182,7 +182,11 @@ def _load_auto_controller_methods(method_names, extra_namespace=None):
         'np': np,
         'os': os,
         'pd': pd,
-        're': re
+        're': re,
+        # Current report rendering emits a distinct stability-mode line.
+        # Keep this extracted, hardware-free fixture aligned with the real
+        # controller module namespace.
+        'STABILITY_MODE_MONITOR': 'monitor'
     }
 
     if extra_namespace is not None:

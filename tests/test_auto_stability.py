@@ -8,6 +8,8 @@ import tempfile
 import textwrap
 import unittest
 
+import pandas as pd
+
 from auto_stability import (
     AutoStabilityValidationError,
     METRIC_STATUS_ELIGIBLE,
@@ -47,6 +49,9 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
         self.assertEqual(settings['auto_stability_mode'], 'off')
         self.assertIsNone(settings['auto_stability_trigger_reagent'])
         self.assertIsNone(settings['auto_stability_observation_window_s'])
+        self.assertIsNone(
+            settings['auto_stability_replicate_log10_loss_rate_sd_max']
+        )
 
     def test_monitor_settings_are_canonicalized(self):
         settings = parse_auto_stability_header_settings(_monitor_header(
@@ -65,6 +70,9 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             'cadenced_active_set'
         )
         self.assertEqual(settings['auto_stability_mixing_mode'], 'plate_shake')
+        self.assertIsNone(
+            settings['auto_stability_replicate_log10_loss_rate_sd_max']
+        )
 
     def test_monitor_requires_explicit_scientific_settings(self):
         for missing_key in (
@@ -86,10 +94,31 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
         with self.assertRaises(AutoStabilityValidationError):
             parse_auto_stability_header_settings(header)
 
-    def test_future_modes_and_unimplemented_mixing_fail_closed(self):
+    def test_target_then_stability_requires_explicit_replicate_limit(self):
+        settings = parse_auto_stability_header_settings(_monitor_header(
+            auto_stability_mode='target_then_stability',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20'
+        ))
+        self.assertEqual(
+            settings['auto_stability_mode'], 'target_then_stability'
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_replicate_log10_loss_rate_sd_max'],
+            0.20
+        )
+
+        for invalid_value in ('', '0', '-0.1', 'nan'):
+            header = _monitor_header(
+                auto_stability_mode='target_then_stability',
+                auto_stability_replicate_log10_loss_rate_sd_max=invalid_value
+            )
+            with self.assertRaises(AutoStabilityValidationError):
+                parse_auto_stability_header_settings(header)
+
+    def test_unimplemented_modes_and_mixing_fail_closed(self):
         with self.assertRaises(AutoStabilityValidationError):
             parse_auto_stability_header_settings(_monitor_header(
-                auto_stability_mode='target_then_stability'
+                auto_stability_mode='stability_only'
             ))
         with self.assertRaises(AutoStabilityValidationError):
             parse_auto_stability_header_settings(_monitor_header(
@@ -275,6 +304,93 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             self.assertNotIn(forbidden_text, method_source)
         self.assertIn('parse_auto_stability_header_settings(', method_source)
         self.assertIn('validate_stability_trigger_reagent(', method_source)
+
+    def test_target_then_stability_is_explicitly_pre_hardware_fail_closed(self):
+        method_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_stability_configuration']
+        )
+        self.assertIn('STABILITY_MODE_TARGET_THEN_STABILITY', method_source)
+        self.assertIn(
+            "self.robo_params.get('acquisition_mode') != 'exploit'",
+            method_source
+        )
+        self.assertIn("self.robo_params.get('num_duplicates', 0) < 3",
+                      method_source)
+        self.assertIn('raise AutoStabilityValidationError(', method_source)
+        self.assertIn('No robot, ', method_source)
+        self.assertIn('reader, or optimizer selection has started.',
+                      method_source)
+        self.assertLess(
+            method_source.index('self.robo_params.update(stability_settings)'),
+            method_source.index(
+                'auto_stability_mode=target_then_stability is recognized'
+            )
+        )
+
+    def test_target_then_stability_validates_then_stops_before_preflight(self):
+        '''Exercise the pre-hardware gate with a controller-free fake object.'''
+        method_source = textwrap.dedent(ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_stability_configuration']
+        ))
+        namespace = {
+            'AutoStabilityValidationError': AutoStabilityValidationError,
+            'STABILITY_MODE_MONITOR': 'monitor',
+            'STABILITY_MODE_TARGET_THEN_STABILITY': (
+                'target_then_stability'
+            ),
+            'parse_auto_stability_header_settings': (
+                parse_auto_stability_header_settings
+            ),
+            'validate_stability_trigger_reagent': (
+                validate_stability_trigger_reagent
+            ),
+        }
+        exec(method_source, namespace)
+        initialize = namespace['_initialize_auto_stability_configuration']
+
+        header = _monitor_header(
+            auto_stability_mode='target_then_stability',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20'
+        )
+        fake_controller = type('FakeController', (), {})()
+        fake_controller.header_data = [['Header', 'Comment']] + [
+            [name, value] for name, value in header.items()
+        ]
+        fake_controller.rxn_df = pd.DataFrame([
+            {'op': 'transfer', 'reagent': 'trisodium_citrate'},
+            {'op': 'transfer', 'reagent': 'sodium_borohydride'},
+            {'op': 'transfer', 'reagent': 'Water'},
+        ])
+        fake_controller.robo_params = {
+            'acquisition_mode': 'exploit',
+            'acquisition_modes': ['exploit'],
+            'using_acquisition_portfolio': False,
+            'num_duplicates': 3,
+        }
+
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError,
+                'not enabled until Stage 12F-B'):
+            initialize(fake_controller)
+
+        self.assertEqual(
+            fake_controller.robo_params['auto_stability_mode'],
+            'target_then_stability'
+        )
+        self.assertAlmostEqual(
+            fake_controller.robo_params[
+                'auto_stability_replicate_log10_loss_rate_sd_max'
+            ],
+            0.20
+        )
+
+        fake_controller.robo_params['num_duplicates'] = 2
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError,
+                'num_duplicates to be at least 3'):
+            initialize(fake_controller)
 
     def test_stability_observer_preserves_legacy_completion_boundary(self):
         for method_name in (

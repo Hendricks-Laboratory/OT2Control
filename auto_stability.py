@@ -68,7 +68,7 @@ def _parse_positive_finite(value, header_name):
     if _is_blank(value):
         raise AutoStabilityValidationError(
             'Header value {} is required when auto_stability_mode is '
-            'monitor.'.format(header_name)
+            'enabled.'.format(header_name)
         )
     try:
         numeric_value = float(value)
@@ -89,11 +89,11 @@ def parse_auto_stability_header_settings(header_values):
     '''Return canonical Stage-12 stability settings from a Header mapping.
 
     Missing stability rows return the exact inert ``off`` configuration, so
-    older workbooks retain their existing Auto behavior.  ``monitor`` is the
-    only enabled Stage-12 mode.  Parsing itself has no physical or optimizer
-    side effect; the Stage-12C scheduler consumes a valid monitor
-    configuration during a real run.  Active ranking modes are rejected
-    clearly until their separate GP and selection stages exist.
+    older workbooks retain their existing Auto behavior. ``monitor`` and the
+    Stage-12F-A configuration contract for ``target_then_stability`` are
+    accepted here. Parsing itself has no physical or optimizer side effect;
+    the controller keeps target-then-stability fail-closed until its separate
+    ranking stage is implemented. ``stability_only`` remains unavailable.
     '''
     if not isinstance(header_values, dict):
         raise AutoStabilityValidationError(
@@ -119,18 +119,16 @@ def parse_auto_stability_header_settings(header_values):
     }
     if raw_mode not in mode_aliases:
         raise AutoStabilityValidationError(
-            'Header value auto_stability_mode must be off or monitor at this '
-            'stage. Received: {!r}.'.format(raw_mode)
+            'Header value auto_stability_mode must be off, monitor, or '
+            'target_then_stability. Received: {!r}.'.format(raw_mode)
         )
 
     mode = mode_aliases[raw_mode]
-    if mode in (
-            STABILITY_MODE_TARGET_THEN_STABILITY,
-            STABILITY_MODE_STABILITY_ONLY):
+    if mode == STABILITY_MODE_STABILITY_ONLY:
         raise AutoStabilityValidationError(
-            'Header value auto_stability_mode={!r} is reserved for a later '
-            'Stage 12 selection implementation. Use monitor or off for now.'
-            .format(mode)
+            'Header value auto_stability_mode=stability_only is reserved for '
+            'a later separately validated implementation. Use off, monitor, '
+            'or target_then_stability.'
         )
 
     if mode == STABILITY_MODE_OFF:
@@ -141,6 +139,7 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_observation_window_s': None,
             'auto_stability_scan_interval_s': None,
             'auto_stability_min_peak_absorbance': None,
+            'auto_stability_replicate_log10_loss_rate_sd_max': None,
             'auto_stability_mixing_mode': None,
         }
 
@@ -150,7 +149,7 @@ def parse_auto_stability_header_settings(header_values):
     if not trigger_reagent:
         raise AutoStabilityValidationError(
             'Header value auto_stability_trigger_reagent is required when '
-            'auto_stability_mode is monitor.'
+            'auto_stability_mode is enabled.'
         )
 
     raw_schedule = _canonical_token(
@@ -211,20 +210,33 @@ def parse_auto_stability_header_settings(header_values):
             'not scientifically supported with the current whole-plate '
             'plate_shake implementation. It would produce only an immediate '
             'cohort observation, not a time-resolved post-peak trajectory. '
-            'Use cadenced_active_set for monitor mode.'
+            'Use cadenced_active_set with the current plate_shake stability '
+            'modes.'
         )
     scan_interval_s = _parse_positive_finite(
         header_values.get('auto_stability_scan_interval_s'),
         'auto_stability_scan_interval_s'
     )
 
+    replicate_log10_loss_rate_sd_max = None
+    if mode == STABILITY_MODE_TARGET_THEN_STABILITY:
+        replicate_log10_loss_rate_sd_max = _parse_positive_finite(
+            header_values.get(
+                'auto_stability_replicate_log10_loss_rate_sd_max'
+            ),
+            'auto_stability_replicate_log10_loss_rate_sd_max'
+        )
+
     return {
-        'auto_stability_mode': STABILITY_MODE_MONITOR,
+        'auto_stability_mode': mode,
         'auto_stability_trigger_reagent': trigger_reagent,
         'auto_stability_scan_schedule': scan_schedule,
         'auto_stability_observation_window_s': observation_window_s,
         'auto_stability_scan_interval_s': scan_interval_s,
         'auto_stability_min_peak_absorbance': min_peak_absorbance,
+        'auto_stability_replicate_log10_loss_rate_sd_max': (
+            replicate_log10_loss_rate_sd_max
+        ),
         'auto_stability_mixing_mode': mixing_aliases[raw_mixing_mode],
     }
 

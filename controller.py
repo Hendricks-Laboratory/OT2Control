@@ -127,7 +127,9 @@ from auto_preparation import (
     validate_manifest_source_names
 )
 from auto_stability import (
+    AutoStabilityValidationError,
     STABILITY_MODE_MONITOR,
+    STABILITY_MODE_TARGET_THEN_STABILITY,
     STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET,
     canonical_reagent_name,
     parse_auto_stability_header_settings,
@@ -5569,13 +5571,15 @@ class AutoContr(Controller):
         self._auto_plate_cursor_initialized = False
 
     def _initialize_auto_stability_configuration(self):
-        '''Validate Stage-12 monitor settings before the normal prechecks.
+        '''Validate Stage-12 stability settings before the normal prechecks.
 
         The configuration is parsed before a robot connection exists, so an
         unsafe trigger order cannot reach physical execution.  In a real
         monitor-mode run, the separately initialized Stage-12C scheduler will
-        later perform its documented shake and reader observations; this
-        method itself does not access hardware or change optimizer selection.
+        later perform its documented shake and reader observations. Stage-12F-A
+        also validates the target-then-stability configuration contract, then
+        fails closed before any selection or hardware work because that active
+        selection behavior is deliberately deferred to Stage 12F-B.
         '''
         header_dict = {
             row[0]: row[1]
@@ -5583,9 +5587,9 @@ class AutoContr(Controller):
         }
         stability_settings = parse_auto_stability_header_settings(header_dict)
 
-        if (
-                stability_settings['auto_stability_mode']
-                == STABILITY_MODE_MONITOR):
+        if stability_settings['auto_stability_mode'] in (
+                STABILITY_MODE_MONITOR,
+                STABILITY_MODE_TARGET_THEN_STABILITY):
             transfer_reagents = list(
                 self.rxn_df.loc[
                     (self.rxn_df['op'] == 'transfer')
@@ -5619,6 +5623,35 @@ class AutoContr(Controller):
                     stability_settings['auto_stability_min_peak_absorbance'],
                     stability_settings['auto_stability_mixing_mode']
                 )
+            )
+        elif (
+                stability_settings['auto_stability_mode']
+                == STABILITY_MODE_TARGET_THEN_STABILITY):
+            if (
+                    self.robo_params.get('acquisition_mode') != 'exploit'
+                    or self.robo_params.get(
+                        'using_acquisition_portfolio',
+                        False
+                    )
+                    or self.robo_params.get('acquisition_modes') != ['exploit']):
+                raise AutoStabilityValidationError(
+                    'auto_stability_mode=target_then_stability requires the '
+                    'single legacy acquisition interface '
+                    '(acquisition_mode=exploit and acquisition_modes=off or '
+                    'blank). target_ei, core3, and other portfolios are '
+                    'not stability-aware selection modes.'
+                )
+            if self.robo_params.get('num_duplicates', 0) < 3:
+                raise AutoStabilityValidationError(
+                    'auto_stability_mode=target_then_stability requires '
+                    'num_duplicates to be at least 3 so stability selection '
+                    'can enforce a replicate-variability limit.'
+                )
+            raise AutoStabilityValidationError(
+                'auto_stability_mode=target_then_stability is recognized and '
+                'its safety contract has been validated, but active recipe '
+                'selection is not enabled until Stage 12F-B. No robot, '
+                'reader, or optimizer selection has started.'
             )
 
     def _initialize_auto_stability_observer(self):

@@ -83,6 +83,9 @@ class AutoRecipeHistoryLifecycleTests(unittest.TestCase):
         self.controller._write_auto_run_report = record(
             'report', 'auto_run_report.md'
         )
+        self.controller._plot_auto_stability_reporting_artifacts = record(
+            'stability_plots', []
+        )
         self.controller._append_auto_plot_manifest = record('manifest')
 
     def _recipe_history_calls(self):
