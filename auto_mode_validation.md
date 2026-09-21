@@ -590,14 +590,93 @@ DEBUG-only reporting/export path to complete. The preserved raw reader files
 remain the validation source for reader/manifest integrity; synthetic evidence
 remains model-facing dry-debug evidence only and is not chemistry clearance.
 
+### Stage 12F-G controlled stability-only dry-debug closeout — 2026-09-21
+
+The repeat controlled `--no-sim` dry debug completed successfully as
+`DEBUGRTG_STAGE12F_2` on Auto-RTG commit `8e48d68`. It preserved six immutable,
+manifest-linked active-set reader files after nine confirmed trigger transfers:
+three scans for the two seed conditions and three scans for one subsequent
+stability-selected condition. All 25 DEBUG-only synthetic-evidence records
+first verified their corresponding preserved raw-reader spectrum. Both the
+loss-rate and reference-peak companion models fitted from the two seed
+conditions, the stability-only selector produced one physical-volume-feasible
+and signal-compatible follow-up condition, and both models finished with three
+accepted condition-level records. The durable run journal reached `finalized`.
+
+The run also demonstrated two deliberate Stage 12C limitations rather than
+failures: requested cadence was deferred by the serial reader and recorded as
+such, and scan intervals that crossed an individual well's fixed observation
+window end were retained but excluded from its metric. The dry debug used
+`synthetic_companion_evidence`; it validates execution, timing provenance,
+manifest integrity, reporting, companion-model refresh, and fail-closed
+selection flow, but is not nanocrystal chemistry evidence or chemistry
+clearance. A nonblocking empty-legend message came from the ordinary overlay
+plot operation on the dry plate and did not affect stability artifacts.
+
+### Stage 13 per-trigger adaptive monitoring refinement — 2026-09-21
+
+Stage 12 remains the validated interim plate-shake implementation. It records
+one controller-observed trigger time per physical well and scans an active set,
+but it waits for a completed trigger cohort, applies one whole-plate shake, and
+blocks the following batch until the fixed observation windows drain. It must
+not be represented as the final long-cohort stability workflow.
+
+The documented Stage 13 direction is a targeted-pipette-mixing and per-trigger
+active-set scheduler. After **each** confirmed final-trigger transfer, Auto
+will record that physical well's `t0`, mix only that newly completed well, then
+perform one immutable reader acquisition over every still-active well from the
+current and all earlier batches. A completion-triggered acquisition must not be
+silently coalesced away. Cadenced scans may occur only between trigger events
+when useful; their actual timing remains auditable and they must not duplicate
+the required completion-triggered acquisition. Older wells must never be
+whole-plate re-shaken or re-pipette-mixed merely because a later well was
+created.
+
+Stage 13 separates the following scientifically distinct time concepts:
+
+| Term | Contract |
+|---|---|
+| **Trigger `t0`** | The controller-observed completion of the final trigger transfer for one physical well; never a batch timestamp or assumed reader time. |
+| **Decision horizon** | A fixed, common post-trigger interval used to derive comparable per-well metrics and the QC-approved condition-level aggregate that may train/select the stability GP. |
+| **Maximum observation window** | The longest period for which an individual well may remain under extended monitoring. It may exceed the decision horizon. |
+| **Plateau confirmation** | A post-decision-horizon, adequately sampled, adequate-signal finding that the recent tail is no longer changing within configured statistical/noise limits across multiple scans. It is not a visual judgement or a one-scan result. |
+
+Each physical well retains its own timestamped trajectory, blank/signal status,
+and stability metric. Replicates are independent observations for trajectory
+QC and aggregation, but they are **not** independent duplicate GP recipe
+points: the stability and signal GPs continue to receive only one
+QC-approved condition-level summary per recipe. This prevents a condition from
+receiving extra model weight merely because it has more valid replicates.
+
+A well remains active only while it is within its own maximum observation
+window and has neither a confirmed plateau nor a terminal QC-invalid state.
+Once no further recipe batch is scheduled, Auto enters a final monitoring-drain
+phase and ends only after the active-well set is empty. Thus earlier batches
+can continue contributing extended trajectories while later batches are
+prepared, and the final batch remains observed until every well has either
+plateaued, expired, or reached a terminal QC outcome. A condition may become
+decision-ready after its fixed horizon while its individual wells remain active
+for extended reporting; extended observations must not make GP training targets
+non-comparable across conditions.
+
+For backward compatibility, the future configuration contract must preserve
+current fixed-window runs. The existing `auto_stability_observation_window_s`
+will remain accepted and map to equal decision and maximum windows unless the
+new explicit decision/max-window settings are supplied. Adaptive retirement
+must be opt-in until hardware-free and controlled dry-debug validation is
+complete. No Stage 13 change may weaken transfer, volume, source, mask,
+replicate-QC, or reader-provenance safeguards.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
-The remaining planned work extends the implemented Stage 12A–12E monitoring,
-trajectory-reporting, stability-QC, and companion-model foundation into
-standalone stability-directed selection. Stage 12F-A/B separately implements
-the later target-then-stability hybrid, and Stage 12F-C implements only the
-target-free stability-only Header contract; neither establishes standalone
-stability-only execution yet.
+Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
+stability-QC, companion-model, target-free stability-only selection, and
+explicit DEBUG-only dry-debug foundation. The remaining work begins with the
+optional small-chemistry monitor baseline in Stage 12G and the Stage 13
+targeted-mixing/per-trigger scheduler; it must not reinterpret DEBUG-only
+evidence as chemical evidence. Stage 12F-A/B remains the separately designed,
+later optional target-then-stability hybrid and still needs its own controlled
+dry debug before chemistry use.
 
 #### Scientific data contract
 
@@ -667,17 +746,21 @@ Two scan schedules are planned:
 
 | Schedule | Behavior | Intended use |
 |---|---|---|
-| `each_completion` | Proposed future targeted-mix policy: after each trigger completion, scan the newly complete well and any earlier eligible active wells. | Small kinetic batches; unavailable with current plate-shake policy. |
+| `each_completion` | Proposed future targeted-mix policy: after each trigger completion, scan the newly complete well and every earlier eligible active well. | Stage 13 supported direction; unavailable with current plate-shake policy. |
 | `cadenced_active_set` | Current bounded policy: after a completed trigger cohort, take one whole-plate-shaken active-set scan, then take unshaken active-set scans at requested cadence boundaries while in-window. | Current monitor-only default; actual timing is retained rather than assumed. |
 
 Strict `each_completion` would produce 2,628 well-spectrum observations for
-72 completed wells before follow-up scans. Both schedules therefore preserve
-real timestamps, but `cadenced_active_set` is the default design for larger
-batches. A bounded monitoring deadline must complete or explicitly mark each
-trajectory insufficient before the controller selects a later batch. The
-current reader is serial, so a requested cadence is a target; Stage 12D will
-export requested-versus-achieved timing and interval-boundary status rather
-than infer a regular sampling interval.
+72 completed wells before follow-up scans. That reader-throughput cost is an
+intentional Stage 13 tradeoff for reduced trigger-to-first-observation delay
+and richer early trajectories; it must be measured in dry debug and chemistry
+comparison rather than assumed acceptable. `cadenced_active_set` remains the
+current Stage 12 plate-shake policy. In Stage 13, a fixed decision horizon
+makes a condition ready for comparable GP use while its individual wells may
+continue under the maximum observation window; after the final scheduled batch
+the run drains only when no active well remains. The current reader is serial,
+so every requested cadence remains a target; exports must preserve
+requested-versus-achieved timing and interval-boundary status rather than infer
+a regular sampling interval.
 
 `target_ei` and `core3` remain λ-only while stability is in `monitor` mode.
 They must be rejected clearly—not silently repurposed—when active stability
@@ -699,11 +782,11 @@ meaningful stability trajectory.
 | **12F-C** | Target-free `stability_only` Header contract: blank/omitted target and target tolerance; required user-selected minimum/maximum reference-peak absorbance, signal-confidence multiplier, and replicate log-loss-rate variability bounds. | **Implemented; incorporated into 12F-F lifecycle validation.** |
 | **12F-D** | Independent cumulative reference-peak absorbance companion model, with condition-level signal provenance kept separate from the loss-rate GP and λmax GP. | **Implemented; incorporated into 12F-F lifecycle validation.** |
 | **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | **Implemented; incorporated into 12F-F lifecycle validation.** |
-| **12F-F** | Controller lifecycle, current-run companion-model refresh gate, target-free selection provenance, stability-only CSV/report exports, and explicit ordinary-wavelength audit labeling. λmax remains raw observational provenance only; target stopping, target plots, checkpoint import/save, and target-EI are inapplicable. | **Implemented; hardware-free validation passed.** Required next gate: controlled `--no-sim` dry debug for lifecycle, manifests, logs, and fail-closed behavior. |
-| **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before enabling stability-only chemistry selection. |
-| **13A** | Targeted pipette-mixing design and safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum volume, tip/contamination policy, and unsupported-labware rejection. | Hardware-free protocol and safety-contract review. |
-| **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
-| **13C** | Lab-PC overlapping-active-set scheduler: targeted mix only the newly triggered well; coalesce reader scans over the union of eligible new and older active wells; preserve per-well trigger/batch provenance; avoid whole-plate re-shaking of older trajectories. | Supervised dry debug confirming correct mix target, active-set membership, no duplicate scans, and no re-mixing of prior wells. |
+| **12F-F** | Controller lifecycle, current-run companion-model refresh gate, target-free selection provenance, stability-only CSV/report exports, and explicit ordinary-wavelength audit labeling. λmax remains raw observational provenance only; target stopping, target plots, checkpoint import/save, and target-EI are inapplicable. | **Implemented and controlled dry-debug closed.** The 2026-09-21 `DEBUGRTG_STAGE12F_2` `--no-sim` run verified immutable raw scans/manifest linkage, DEBUG-only evidence labeling, companion-model fitting, stability-selected follow-up execution, final exports, and clean journal finalization. It does not clear chemistry interpretation, long-cohort timing, or targeted pipette mixing. |
+| **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before real chemical stability evidence is used to assess or support stability-only selection. |
+| **13A** | Per-trigger adaptive-monitoring and targeted-mixing safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum reaction volume, tip/contamination policy, unsupported-labware rejection, fixed decision horizon versus maximum observation window, plateau-confirmation requirements, terminal-QC retirement, final monitoring-drain semantics, and backward-compatible fixed-window Header mapping. | Hardware-free protocol, timing-state, backward-compatibility, and scientific-contract review. |
+| **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, contamination policy, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
+| **13C** | Lab-PC per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; retire wells only for confirmed plateau, maximum-window expiry, or terminal QC; permit decision-ready conditions to inform later batches while older wells remain under extended observation; after the final scheduled batch, drain monitoring until no active wells remain. | Supervised dry debug confirming correct mix target, one required completion-triggered acquisition per well, cross-batch active-set membership, timestamp mapping, retirement/plateau state transitions, decision-versus-extended-observation separation, no duplicate scans, no re-mixing of prior wells, and final empty-active-set termination. |
 | **13D** | Reader-acquisition consolidation: after compatibility validation, one immutable reader acquisition supplies both ordinary λmax processing and stability extraction, eliminating validated duplicate reader passes without merging or losing provenance. | Regression and supervised dry debug comparing legacy λmax results and stability outputs. |
 | **13E** | Small chemistry comparison of plate shake versus targeted pipette mixing, followed by the decision whether large-batch stability-directed selection is scientifically supported. | Human review of trajectory reproducibility, time-to-first-observation, λmax impact, and practical reader throughput. |
 
