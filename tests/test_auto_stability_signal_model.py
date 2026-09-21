@@ -65,6 +65,21 @@ class StabilitySignalTrainingRecordTests(unittest.TestCase):
             records[0]['model_target_reference_peak_absorbance'], 0.42
         )
 
+    def test_controller_numpy_variable_reagents_are_accepted(self):
+        records = build_stability_signal_model_training_records(
+            condition_summaries=[_summary('RUN', 0, 0, 0.42)],
+            condition_rows=[_condition('RUN', 0, 0)],
+            # This is the concrete type supplied by AutoContr at runtime.
+            variable_reagents=np.asarray([
+                'silver_nitrate', 'potassium_bromide'
+            ]),
+            min_concentrations=np.asarray([0.0, 0.0]),
+            max_concentrations=np.asarray([0.20, 0.010]),
+        )
+        self.assertEqual(
+            records[0]['stability_signal_model_training_status'], 'accepted'
+        )
+
     def test_no_decline_low_and_high_signal_remain_training_evidence(self):
         records = self._records(
             [

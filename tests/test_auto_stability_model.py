@@ -69,6 +69,21 @@ class StabilityModelTrainingRecordTests(unittest.TestCase):
             record['loss_rate_absorbance_per_s'], 0.001
         )
 
+    def test_controller_numpy_variable_reagents_are_accepted(self):
+        records = build_stability_model_training_records(
+            condition_summaries=[_summary('RUN', 0, 0, 0.001)],
+            condition_rows=[_condition('RUN', 0, 0)],
+            # This is the concrete type supplied by AutoContr at runtime.
+            variable_reagents=np.asarray([
+                'silver_nitrate', 'potassium_bromide'
+            ]),
+            min_concentrations=np.asarray([0.0, 0.0]),
+            max_concentrations=np.asarray([0.20, 0.010]),
+        )
+        self.assertEqual(
+            records[0]['stability_model_training_status'], 'accepted'
+        )
+
     def test_stability_qc_is_independent_and_imported_history_is_excluded(self):
         records = self._records(
             [

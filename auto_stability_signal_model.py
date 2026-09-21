@@ -78,7 +78,11 @@ def _empty_audit_row(row, condition_id):
 
 def _validate_recipe_bounds(variable_reagents, min_concentrations,
                             max_concentrations):
-    reagent_names = [str(name) for name in (variable_reagents or [])]
+    # ``AutoContr`` keeps variable reagents in a NumPy array. Do not use a
+    # truthiness shortcut here: a multi-element NumPy array deliberately has
+    # no single Boolean value. ``None`` alone represents a missing sequence.
+    reagent_values = [] if variable_reagents is None else variable_reagents
+    reagent_names = [str(name) for name in reagent_values]
     if not reagent_names:
         raise AutoStabilitySignalModelValidationError(
             'A stability signal model requires at least one variable reagent.'

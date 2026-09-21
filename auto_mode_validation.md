@@ -560,6 +560,36 @@ event, and the complete 406-test suite. This correction changes no recipe,
 source-volume, reader, shake, scan, Pi/Auto-main, or chemistry behavior. The
 controlled `--no-sim` dry debug remains the next required gate.
 
+### Stage 12F-G companion-model NumPy boundary correction — 2026-09-21
+
+The next controlled `--no-sim` dry debug successfully completed its first
+stability-only seed batch: all six trigger transfers, the 30 s whole-plate
+shake, three preserved raw active-set scans, immutable manifest records, and
+the new stability-only journal milestones were recorded. The run then stopped
+before creating a stability-selected batch because both companion-model refresh
+functions received the controller's normal NumPy variable-reagent array but
+used a Python truthiness fallback (`variable_reagents or []`). A multi-element
+NumPy array intentionally has no single Boolean value, so both refreshes
+reported the same ambiguity error and the stability-only selection gate failed
+closed before any further recipe, well, or robot command was created.
+
+The correction changes those two pure model-input boundaries to treat only
+`None` as a missing reagent sequence; normal lists and the controller's NumPy
+arrays are now accepted identically. Focused regression tests exercise the
+exact two-variable NumPy input for both loss-rate and reference-peak training
+builders. Python 3.9.6 compilation, focused stability/lifecycle tests, AST
+checks, and the complete 408-test suite passed. This changes no recipe,
+transfer, source-volume, reader, shake, scan, Pi/Auto-main, or chemistry
+behavior.
+
+The required next gate is a repeat of the same controlled `--no-sim` dry
+debug. Acceptance requires both training-audit CSVs to contain the two
+accepted seed conditions, both companion-model states to be `fitted`, one
+stability-selected follow-up batch to be selected and executed, and the final
+DEBUG-only reporting/export path to complete. The preserved raw reader files
+remain the validation source for reader/manifest integrity; synthetic evidence
+remains model-facing dry-debug evidence only and is not chemistry clearance.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 The remaining planned work extends the implemented Stage 12A–12E monitoring,

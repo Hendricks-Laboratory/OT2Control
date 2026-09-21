@@ -99,7 +99,11 @@ def build_stability_model_training_records(
     for an imported well, so importing its lambda history must never fabricate
     stability training evidence.
     '''
-    reagent_names = [str(name) for name in (variable_reagents or [])]
+    # ``AutoContr`` keeps variable reagents in a NumPy array. Do not use a
+    # truthiness shortcut here: a multi-element NumPy array deliberately has
+    # no single Boolean value. ``None`` alone represents a missing sequence.
+    reagent_values = [] if variable_reagents is None else variable_reagents
+    reagent_names = [str(name) for name in reagent_values]
     if not reagent_names:
         raise AutoStabilityModelValidationError(
             'A stability model requires at least one variable reagent.'
