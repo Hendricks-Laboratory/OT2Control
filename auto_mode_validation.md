@@ -667,6 +667,31 @@ must be opt-in until hardware-free and controlled dry-debug validation is
 complete. No Stage 13 change may weaken transfer, volume, source, mask,
 replicate-QC, or reader-provenance safeguards.
 
+### Stage 13A lifecycle contract implemented — 2026-09-21
+
+Stage 13A adds no Pi command, robot movement, reader call, scheduler change,
+optimizer-selection change, or workbook requirement. It adds a pure,
+synthetically tested lifecycle contract in `auto_stability_lifecycle.py`:
+
+- distinct fixed decision-horizon and maximum-observation-window concepts;
+- pending, active, decision-ready, plateau-confirmed, maximum-window-expired,
+  and terminal-QC-excluded well states;
+- a quantitative plateau candidate rule requiring a valid signal, an observed
+  post-peak decline, sufficient post-peak observations, and sustained bounded
+  recent absolute slopes;
+- a prohibition on plateau or terminal low-signal retirement before the fixed
+  decision horizon; and
+- condition readiness that requires every uniquely named replicate to be
+  decision ready, preserving one condition-level GP observation rather than
+  duplicate well weighting.
+
+Current workbooks remain behaviorally unchanged: their existing
+`auto_stability_observation_window_s` is mapped internally to both future
+horizons and the retirement policy remains `fixed_window`. Adaptive retirement
+is only a pure, uncalled contract until the later per-trigger scheduler stage
+deliberately enables it. The existing Stage-12C scheduler continues to use
+only its validated single observation window.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
@@ -784,7 +809,7 @@ meaningful stability trajectory.
 | **12F-E** | Stability-only optimizer: retain all physical/mask constraints, require the signal-model predictive interval to lie within the user-selected absorbance bounds, then minimize predicted post-peak log loss rate. No λmax fallback; insufficient evidence or no eligible candidate stops before a new recipe. | **Implemented; incorporated into 12F-F lifecycle validation.** |
 | **12F-F** | Controller lifecycle, current-run companion-model refresh gate, target-free selection provenance, stability-only CSV/report exports, and explicit ordinary-wavelength audit labeling. λmax remains raw observational provenance only; target stopping, target plots, checkpoint import/save, and target-EI are inapplicable. | **Implemented and controlled dry-debug closed.** The 2026-09-21 `DEBUGRTG_STAGE12F_2` `--no-sim` run verified immutable raw scans/manifest linkage, DEBUG-only evidence labeling, companion-model fitting, stability-selected follow-up execution, final exports, and clean journal finalization. It does not clear chemistry interpretation, long-cohort timing, or targeted pipette mixing. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before real chemical stability evidence is used to assess or support stability-only selection. |
-| **13A** | Per-trigger adaptive-monitoring and targeted-mixing safety contract: supported pipette/volumes/cycles/heights, completed-well requirement, minimum reaction volume, tip/contamination policy, unsupported-labware rejection, fixed decision horizon versus maximum observation window, plateau-confirmation requirements, terminal-QC retirement, final monitoring-drain semantics, and backward-compatible fixed-window Header mapping. | Hardware-free protocol, timing-state, backward-compatibility, and scientific-contract review. |
+| **13A** | Pure monitoring lifecycle contract: fixed decision horizon versus maximum observation window, plateau-confirmation candidate requirements, terminal-QC retirement semantics, condition-level readiness, and backward-compatible fixed-window Header mapping. Targeted pipette-mixing hardware constraints remain deliberately deferred to 13B. | **Implemented; hardware-free validation passed.** Python 3.9 compilation, stability regression tests, pure lifecycle transition tests, and AST/diff review passed. No robot, reader, scheduler, GP-selection, or workbook behavior changed. |
 | **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, contamination policy, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
 | **13C** | Lab-PC per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; retire wells only for confirmed plateau, maximum-window expiry, or terminal QC; permit decision-ready conditions to inform later batches while older wells remain under extended observation; after the final scheduled batch, drain monitoring until no active wells remain. | Supervised dry debug confirming correct mix target, one required completion-triggered acquisition per well, cross-batch active-set membership, timestamp mapping, retirement/plateau state transitions, decision-versus-extended-observation separation, no duplicate scans, no re-mixing of prior wells, and final empty-active-set termination. |
 | **13D** | Reader-acquisition consolidation: after compatibility validation, one immutable reader acquisition supplies both ordinary λmax processing and stability extraction, eliminating validated duplicate reader passes without merging or losing provenance. | Regression and supervised dry debug comparing legacy λmax results and stability outputs. |

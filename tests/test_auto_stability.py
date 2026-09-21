@@ -55,6 +55,8 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
         )
         self.assertIsNone(settings['auto_stability_trigger_reagent'])
         self.assertIsNone(settings['auto_stability_observation_window_s'])
+        self.assertIsNone(settings['auto_stability_decision_horizon_s'])
+        self.assertIsNone(settings['auto_stability_max_observation_window_s'])
         self.assertIsNone(
             settings['auto_stability_replicate_log10_loss_rate_sd_max']
         )
@@ -76,6 +78,15 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             'cadenced_active_set'
         )
         self.assertEqual(settings['auto_stability_mixing_mode'], 'plate_shake')
+        self.assertAlmostEqual(
+            settings['auto_stability_decision_horizon_s'], 900.0
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_max_observation_window_s'], 900.0
+        )
+        self.assertEqual(
+            settings['auto_stability_retirement_policy'], 'fixed_window'
+        )
         self.assertIsNone(
             settings['auto_stability_replicate_log10_loss_rate_sd_max']
         )

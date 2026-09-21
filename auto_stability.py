@@ -50,6 +50,12 @@ METRIC_STATUS_INSUFFICIENT_OBSERVATIONS = 'insufficient_observations'
 METRIC_STATUS_LOW_SIGNAL = 'low_signal'
 METRIC_STATUS_NO_POST_PEAK_DECLINE = 'no_post_peak_decline'
 
+# Stage 13A introduces the monitoring-policy vocabulary without changing the
+# existing Stage-12C scheduler.  Until the later scheduler stage explicitly
+# opts into adaptive retirement, every existing workbook maps to the fixed
+# window policy below.
+STABILITY_RETIREMENT_POLICY_FIXED_WINDOW = 'fixed_window'
+
 
 def _is_blank(value):
     '''Return whether a Header/trajectory value is absent without losing zero.'''
@@ -184,6 +190,9 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_signal_confidence_z': None,
             'auto_stability_replicate_log10_loss_rate_sd_max': None,
             'auto_stability_mixing_mode': None,
+            'auto_stability_decision_horizon_s': None,
+            'auto_stability_max_observation_window_s': None,
+            'auto_stability_retirement_policy': None,
         }
 
     trigger_reagent = canonical_reagent_name(
@@ -242,6 +251,12 @@ def parse_auto_stability_header_settings(header_values):
         header_values.get('auto_stability_observation_window_s'),
         'auto_stability_observation_window_s'
     )
+    # These are separate concepts in the Stage-13 lifecycle contract.  They
+    # deliberately inherit the validated single-window setting for now: the
+    # current scheduler, reader path, and workbook template remain unchanged
+    # until a later, separately validated stage introduces their controls.
+    decision_horizon_s = observation_window_s
+    max_observation_window_s = observation_window_s
     min_peak_absorbance = _parse_positive_finite(
         header_values.get('auto_stability_min_peak_absorbance'),
         'auto_stability_min_peak_absorbance'
@@ -304,6 +319,11 @@ def parse_auto_stability_header_settings(header_values):
             replicate_log10_loss_rate_sd_max
         ),
         'auto_stability_mixing_mode': mixing_aliases[raw_mixing_mode],
+        'auto_stability_decision_horizon_s': decision_horizon_s,
+        'auto_stability_max_observation_window_s': max_observation_window_s,
+        'auto_stability_retirement_policy': (
+            STABILITY_RETIREMENT_POLICY_FIXED_WINDOW
+        ),
     }
 
 
@@ -419,6 +439,16 @@ def _normalized_observations(observations):
         })
         previous_timestamp_s = timestamp_s
     return normalized
+
+
+def normalize_stability_observations(observations):
+    '''Return validated, ordered stability observations for pure consumers.
+
+    This public wrapper prevents later lifecycle policies from independently
+    reimplementing timestamp and absorbance validation.  It performs no I/O,
+    reordering, interpolation, or spectral inference.
+    '''
+    return _normalized_observations(observations)
 
 
 def compute_stability_metrics(observations, min_peak_absorbance,
