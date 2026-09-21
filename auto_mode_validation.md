@@ -534,6 +534,32 @@ the resulting synthetic outputs. The next gate remains a controlled
 of the manifest, raw reader files, DEBUG-only evidence CSV, both companion
 model audits, selection provenance, and final report.
 
+### Stage 12F-G dry-debug startup contract correction — 2026-09-21
+
+The first controlled `--no-sim` dry-debug attempt stopped before the controller
+opened a robot or plate-reader connection. The Stage 12F-G controller emitted
+new durable stability-only journal milestones, but the corresponding names had
+not yet been registered in the shared live-run event schema. The journal
+correctly failed closed rather than writing an unvalidated event. A legacy
+generic error path then attempted portal cleanup even though no portal had
+been created, obscuring the actionable setup exception with a secondary
+`AttributeError`.
+
+The correction registers all five Stage-12 stability-only milestones with the
+canonical journal contract: debug-fixture enabled, stability batch measurement
+completed, companion models refreshed, stability batch completed, and
+stability run finalized. The Auto error handler now preserves an original
+pre-connection exception without attempting nonexistent portal cleanup. An AST
+regression test additionally requires every literal controller event and
+transition name to be schema-approved, preventing the same integration gap
+when later milestones are added.
+
+Hardware-free validation on Python 3.9.6 passed: compilation, focused journal
+and fault-handler contract tests, a direct journal-write check for every new
+event, and the complete 406-test suite. This correction changes no recipe,
+source-volume, reader, shake, scan, Pi/Auto-main, or chemistry behavior. The
+controlled `--no-sim` dry debug remains the next required gate.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 The remaining planned work extends the implemented Stage 12A–12E monitoring,

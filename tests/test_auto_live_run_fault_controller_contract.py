@@ -72,7 +72,12 @@ class AutoLiveRunFaultControllerContractTests(unittest.TestCase):
         handler_source = self._method_source('_error_handler')
         self.assertIn('_record_auto_live_run_fault(error)', handler_source)
         self.assertIn('raise error', handler_source)
+        self.assertIn("hasattr(self, 'portal')", handler_source)
         self.assertIn('super()._error_handler(error)', handler_source)
+        self.assertLess(
+            handler_source.index("hasattr(self, 'portal')"),
+            handler_source.index('super()._error_handler(error)')
+        )
         self.assertNotIn('self.close_connection(', handler_source)
         self.assertNotIn('_finalize_auto_run(', handler_source)
 

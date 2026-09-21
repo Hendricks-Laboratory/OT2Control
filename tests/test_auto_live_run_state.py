@@ -232,6 +232,20 @@ class AutoLiveRunStateContractTests(unittest.TestCase):
                 event['event_type'] = event_type
                 validate_event(event)
 
+    def test_stability_only_events_are_accepted(self):
+        '''Stage 12 milestones must remain valid durable journal records.'''
+        for event_type in (
+                'stability_debug_synthetic_evidence_enabled',
+                'stability_only_batch_measurement_completed',
+                'stability_only_companion_models_refreshed',
+                'stability_only_batch_completed',
+                'stability_only_run_finalized'):
+            with self.subTest(event_type=event_type):
+                self.assertIn(event_type, EVENT_TYPES)
+                event = self._event()
+                event['event_type'] = event_type
+                validate_event(event)
+
 
 if __name__ == '__main__':
     unittest.main()

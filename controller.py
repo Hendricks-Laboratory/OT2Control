@@ -9129,6 +9129,15 @@ class AutoContr(Controller):
         fault_record = self._record_auto_live_run_fault(error)
         if fault_record is not None:
             raise error
+
+        # Early configuration and journal failures can occur before
+        # ``create_connection()`` constructs ``self.portal``.  There is then
+        # no robot-side connection to close, and delegating to the legacy
+        # handler would replace the actionable setup exception with an
+        # AttributeError.  Preserve the original fail-closed error instead.
+        if not hasattr(self, 'portal'):
+            raise error
+
         super()._error_handler(error)
 
     def _auto_model_checkpoint_saving_enabled(self, model):

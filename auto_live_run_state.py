@@ -127,6 +127,14 @@ EVENT_TYPES = frozenset({
     'batch_measurement_completed',
     'batch_model_update_completed',
     'batch_completed',
+    # Stage 12 stability-only milestones.  These use the same durable journal
+    # contract as ordinary Auto batches, while retaining explicit names so
+    # target-free stability execution is distinguishable during audit.
+    'stability_debug_synthetic_evidence_enabled',
+    'stability_only_batch_measurement_completed',
+    'stability_only_companion_models_refreshed',
+    'stability_only_batch_completed',
+    'stability_only_run_finalized',
     'hold_entered',
     # Stage 11C2 records a request and any rejected workbook response before
     # the pre-existing terminal/Pi recovery path can act on a valid response.
