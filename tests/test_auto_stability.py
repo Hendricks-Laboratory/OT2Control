@@ -21,6 +21,8 @@ from auto_stability import (
     compute_stability_metrics,
     parse_auto_stability_header_settings,
     select_reference_wavelength_nm,
+    STABILITY_DEBUG_MODE_OFF,
+    STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE,
     validate_stability_trigger_reagent,
 )
 
@@ -48,6 +50,9 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
         settings = parse_auto_stability_header_settings({})
 
         self.assertEqual(settings['auto_stability_mode'], 'off')
+        self.assertEqual(
+            settings['auto_stability_debug_mode'], STABILITY_DEBUG_MODE_OFF
+        )
         self.assertIsNone(settings['auto_stability_trigger_reagent'])
         self.assertIsNone(settings['auto_stability_observation_window_s'])
         self.assertIsNone(
@@ -159,6 +164,25 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
                 )):
             with self.assertRaises(AutoStabilityValidationError):
                 parse_auto_stability_header_settings(invalid_header)
+
+    def test_synthetic_debug_evidence_is_explicit_and_stability_only(self):
+        settings = parse_auto_stability_header_settings(_monitor_header(
+            auto_stability_mode='stability_only',
+            auto_stability_max_peak_absorbance='0.90',
+            auto_stability_signal_confidence_z='1.96',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20',
+            auto_stability_debug_mode='synthetic',
+        ))
+        self.assertEqual(
+            settings['auto_stability_debug_mode'],
+            STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE
+        )
+
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError, 'available only with'):
+            parse_auto_stability_header_settings(_monitor_header(
+                auto_stability_debug_mode='synthetic_companion_evidence'
+            ))
 
     def test_unimplemented_mixing_fails_closed(self):
         with self.assertRaises(AutoStabilityValidationError):
@@ -417,6 +441,9 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 'target_then_stability'
             ),
             'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
+            'STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE': (
+                'synthetic_companion_evidence'
+            ),
             'parse_auto_stability_header_settings': (
                 parse_auto_stability_header_settings
             ),
@@ -478,6 +505,9 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
             'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
             'STABILITY_MODE_TARGET_THEN_STABILITY': (
                 'target_then_stability'
+            ),
+            'STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE': (
+                'synthetic_companion_evidence'
             ),
             'parse_auto_stability_header_settings': (
                 parse_auto_stability_header_settings
@@ -936,6 +966,33 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
                 'send_pack(', 'run_protocol(', 'execute_protocol_df('):
             self.assertNotIn(forbidden_text, reporting_source)
         self.assertIn('build_stability_reporting_records(', reporting_source)
+
+    def test_stability_only_debug_harness_is_explicit_and_never_bypasses_raw_loading(self):
+        reporting_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_build_auto_stability_reporting_records']
+        )
+        execute_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_stability_only_batch']
+        )
+        final_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_finalize_auto_stability_only_run']
+        )
+
+        self.assertIn('STABILITY_MODE_STABILITY_ONLY', reporting_source)
+        self.assertLess(
+            reporting_source.index(
+                'self._load_auto_stability_reporting_spectra(manifest_rows)'
+            ),
+            reporting_source.index('build_synthetic_companion_evidence(')
+        )
+        self.assertIn(
+            'SYNTHETIC_COMPANION_EVIDENCE_SOURCE', reporting_source
+        )
+        self.assertIn("'stability_debug_only'", execute_source)
+        self.assertIn('DEBUG ONLY', final_source)
 
     def test_stage_12e_companion_model_is_observational_and_precedes_selection(self):
         for method_name in (

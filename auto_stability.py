@@ -36,6 +36,15 @@ STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET = 'cadenced_active_set'
 
 STABILITY_MIXING_MODE_PLATE_SHAKE = 'plate_shake'
 
+# This is intentionally a separate, default-off test harness rather than a
+# scientific stability mode. It exists solely to exercise the Stage-12F
+# controller lifecycle with real reader files but deterministic model evidence
+# during a clearly labelled hardware dry debug.
+STABILITY_DEBUG_MODE_OFF = 'off'
+STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE = (
+    'synthetic_companion_evidence'
+)
+
 METRIC_STATUS_ELIGIBLE = 'eligible'
 METRIC_STATUS_INSUFFICIENT_OBSERVATIONS = 'insufficient_observations'
 METRIC_STATUS_LOW_SIGNAL = 'low_signal'
@@ -128,9 +137,44 @@ def parse_auto_stability_header_settings(header_values):
 
     mode = mode_aliases[raw_mode]
 
+    raw_debug_mode = _canonical_token(
+        header_values.get(
+            'auto_stability_debug_mode', STABILITY_DEBUG_MODE_OFF
+        )
+    )
+    debug_mode_aliases = {
+        '': STABILITY_DEBUG_MODE_OFF,
+        'off': STABILITY_DEBUG_MODE_OFF,
+        'none': STABILITY_DEBUG_MODE_OFF,
+        'false': STABILITY_DEBUG_MODE_OFF,
+        '0': STABILITY_DEBUG_MODE_OFF,
+        'synthetic_companion_evidence': (
+            STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE
+        ),
+        'synthetic': STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE,
+    }
+    if raw_debug_mode not in debug_mode_aliases:
+        raise AutoStabilityValidationError(
+            'Header value auto_stability_debug_mode must be off or '
+            'synthetic_companion_evidence. Received: {!r}.'.format(
+                raw_debug_mode
+            )
+        )
+    debug_mode = debug_mode_aliases[raw_debug_mode]
+    if (
+            debug_mode != STABILITY_DEBUG_MODE_OFF
+            and mode != STABILITY_MODE_STABILITY_ONLY):
+        raise AutoStabilityValidationError(
+            'auto_stability_debug_mode=synthetic_companion_evidence is '
+            'available only with auto_stability_mode=stability_only. It is '
+            'a DEBUG-ONLY model-evidence harness, never a monitor or '
+            'wavelength-targeting option.'
+        )
+
     if mode == STABILITY_MODE_OFF:
         return {
             'auto_stability_mode': STABILITY_MODE_OFF,
+            'auto_stability_debug_mode': STABILITY_DEBUG_MODE_OFF,
             'auto_stability_trigger_reagent': None,
             'auto_stability_scan_schedule': None,
             'auto_stability_observation_window_s': None,
@@ -248,6 +292,7 @@ def parse_auto_stability_header_settings(header_values):
 
     return {
         'auto_stability_mode': mode,
+        'auto_stability_debug_mode': debug_mode,
         'auto_stability_trigger_reagent': trigger_reagent,
         'auto_stability_scan_schedule': scan_schedule,
         'auto_stability_observation_window_s': observation_window_s,

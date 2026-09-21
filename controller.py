@@ -128,6 +128,7 @@ from auto_preparation import (
 )
 from auto_stability import (
     AutoStabilityValidationError,
+    STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE,
     STABILITY_MODE_MONITOR,
     STABILITY_MODE_STABILITY_ONLY,
     STABILITY_MODE_TARGET_THEN_STABILITY,
@@ -135,6 +136,10 @@ from auto_stability import (
     canonical_reagent_name,
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
+)
+from auto_stability_debug import (
+    SYNTHETIC_COMPANION_EVIDENCE_SOURCE,
+    build_synthetic_companion_evidence,
 )
 from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
@@ -5769,6 +5774,16 @@ class AutoContr(Controller):
                         stability_settings['auto_stability_trigger_reagent'],
                     )
                 )
+                if stability_settings['auto_stability_debug_mode'] == (
+                        STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
+                    print(
+                        '<<controller warning>> DEBUG ONLY: synthetic '
+                        'companion evidence is enabled. Real reader files '
+                        'will still be loaded and preserved, but deterministic '
+                        'test spectra—not measurements—will train the '
+                        'stability-only companion models. Do not use this '
+                        'Header setting for chemistry.'
+                    )
             else:
                 print(
                     '<<controller>> Auto target-then-stability selection '
@@ -12452,6 +12467,12 @@ class AutoContr(Controller):
                 ),
                 'stability_selection_status': prediction_metadata.get(
                     'stability_selection_status'
+                ),
+                'stability_evidence_source': prediction_metadata.get(
+                    'stability_evidence_source', 'raw_reader'
+                ),
+                'stability_debug_only': bool(
+                    prediction_metadata.get('stability_debug_only', False)
                 ),
                 'stability_model_status': prediction_metadata.get(
                     'stability_model_status'
@@ -29177,6 +29198,21 @@ class AutoContr(Controller):
         # begins.  The journal is enabled only for the real configured model,
         # never for launch_auto()'s preflight simulation.
         self._initialize_auto_live_run_journal(model)
+        if self.robo_params.get('auto_stability_debug_mode') == (
+                STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
+            self._record_auto_live_run_event(
+                'stability_debug_synthetic_evidence_enabled',
+                {
+                    'debug_only': True,
+                    'stability_evidence_source': (
+                        SYNTHETIC_COMPANION_EVIDENCE_SOURCE
+                    ),
+                    'disclaimer': (
+                        'Synthetic companion evidence is a dry-debug '
+                        'fixture, not measured nanocrystal data.'
+                    ),
+                }
+            )
         self._initialize_auto_stability_observer()
         self.create_connection(simulate, no_pr, port)
         if self.auto_main_robot_state_snapshot is not None:
@@ -29731,6 +29767,18 @@ class AutoContr(Controller):
                 'Stability-only mode cannot execute an empty batch.'
             )
 
+        prediction_metadata = dict(prediction_metadata or {})
+        prediction_metadata['stability_evidence_source'] = (
+            SYNTHETIC_COMPANION_EVIDENCE_SOURCE
+            if self.robo_params.get('auto_stability_debug_mode') == (
+                STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE
+            ) else 'raw_reader'
+        )
+        prediction_metadata['stability_debug_only'] = (
+            prediction_metadata['stability_evidence_source'] ==
+            SYNTHETIC_COMPANION_EVIDENCE_SOURCE
+        )
+
         recipes = self.duplicate_list_elements(
             unique_recipes,
             self.num_duplicates
@@ -29995,6 +30043,21 @@ class AutoContr(Controller):
             '- Selection/condition audit: `pr_data/auto_model_performance_log.csv`.',
             '',
         ]
+        if self.robo_params.get('auto_stability_debug_mode') == (
+                STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
+            lines.extend([
+                '## DEBUG ONLY — Synthetic Companion Evidence',
+                '',
+                'Real manifest-linked reader files were preserved and '
+                'loaded, but deterministic synthetic spectra were used only '
+                'for stability reporting, companion-model fitting, and '
+                'stability-only selection. These outputs are not measured '
+                'nanocrystal data and must not be used for scientific '
+                'interpretation, checkpointing, or import.',
+                '- Evidence manifest: '
+                '`pr_data/stability/stability_debug_synthetic_evidence.csv`.',
+                '',
+            ])
         with open(report_path, 'w', encoding='utf-8') as report_file:
             report_file.write('\n'.join(lines))
         print('<<controller>> exported stability-only run report to {}'.format(
@@ -30008,6 +30071,12 @@ class AutoContr(Controller):
                 'completed_batch_count': int(self.batch_num),
                 'lambda_target_used': False,
                 'model_checkpoint_created': False,
+                'stability_evidence_source': (
+                    SYNTHETIC_COMPANION_EVIDENCE_SOURCE
+                    if self.robo_params.get('auto_stability_debug_mode') == (
+                        STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE
+                    ) else 'raw_reader'
+                ),
             },
             active_batch_number=None
         )
@@ -30182,6 +30251,7 @@ class AutoContr(Controller):
         '''
         if self.robo_params.get('auto_stability_mode') not in (
                 STABILITY_MODE_MONITOR,
+                STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY):
             return None
         observer = getattr(self, 'auto_stability_observer', None)
@@ -30195,6 +30265,27 @@ class AutoContr(Controller):
         spectra_by_raw_scan, load_qc_rows = (
             self._load_auto_stability_reporting_spectra(manifest_rows)
         )
+        evidence_source = 'raw_reader'
+        debug_evidence_rows = []
+        if self.robo_params.get('auto_stability_debug_mode') == (
+                STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
+            # Preserve and validate every real raw reader file first. The
+            # fixture can never conceal an absent/malformed manifest-linked
+            # spectrum because its builder requires that exact pair to have
+            # passed the established reader-load and blank-correction path.
+            spectra_by_raw_scan, debug_evidence_rows = (
+                build_synthetic_companion_evidence(
+                    manifest_rows=manifest_rows,
+                    observed_spectra_by_raw_scan=spectra_by_raw_scan,
+                    condition_rows=self.auto_model_performance_rows,
+                )
+            )
+            evidence_source = SYNTHETIC_COMPANION_EVIDENCE_SOURCE
+            print(
+                '<<controller warning>> DEBUG ONLY: using deterministic '
+                'synthetic companion evidence after verified raw-reader '
+                'loading; raw reader files remain preserved separately.'
+            )
         records = build_stability_reporting_records(
             manifest_rows=manifest_rows,
             spectra_by_raw_scan=spectra_by_raw_scan,
@@ -30207,7 +30298,19 @@ class AutoContr(Controller):
                 'auto_stability_min_peak_absorbance'
             ],
         )
+        for row_group in (
+                records['timing_rows'], records['trajectory_rows'],
+                records['well_metrics'], records['condition_summaries'],
+                records['qc_rows']):
+            for row in row_group:
+                row['stability_evidence_source'] = evidence_source
+                row['debug_only'] = bool(debug_evidence_rows)
+        for row in load_qc_rows:
+            row['stability_evidence_source'] = 'raw_reader'
+            row['debug_only'] = bool(debug_evidence_rows)
         records['qc_rows'].extend(load_qc_rows)
+        records['stability_evidence_source'] = evidence_source
+        records['debug_evidence_rows'] = debug_evidence_rows
         return records
 
     def _write_auto_stability_model_exports(self):
@@ -30281,11 +30384,21 @@ class AutoContr(Controller):
                     STABILITY_MODE_STABILITY_ONLY else None
                 ),
             )
+            evidence_source = records.get(
+                'stability_evidence_source', 'raw_reader'
+            )
+            for training_record in training_records:
+                training_record['stability_evidence_source'] = evidence_source
+                training_record['debug_only'] = bool(
+                    records.get('debug_evidence_rows')
+                )
             model_summary = stability_model.refresh_from_training_records(
                 training_records
             )
             model_summary.update({
                 'enabled': True,
+                'stability_evidence_source': evidence_source,
+                'debug_only': bool(records.get('debug_evidence_rows')),
                 'reporting_condition_count': len(
                     records['condition_summaries']
                 ),
@@ -30407,11 +30520,21 @@ class AutoContr(Controller):
                 min_concentrations=self.min_conc,
                 max_concentrations=self.max_conc,
             )
+            evidence_source = records.get(
+                'stability_evidence_source', 'raw_reader'
+            )
+            for training_record in training_records:
+                training_record['stability_evidence_source'] = evidence_source
+                training_record['debug_only'] = bool(
+                    records.get('debug_evidence_rows')
+                )
             model_summary = signal_model.refresh_from_training_records(
                 training_records
             )
             model_summary.update({
                 'enabled': True,
+                'stability_evidence_source': evidence_source,
+                'debug_only': bool(records.get('debug_evidence_rows')),
                 'reporting_condition_count': len(
                     records['condition_summaries']
                 ),
@@ -30601,13 +30724,18 @@ class AutoContr(Controller):
         records = self._build_auto_stability_reporting_records()
         stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
         os.makedirs(stability_path, exist_ok=True)
-        output_specs = (
+        output_specs = [
             ('stability_scan_timing_audit.csv', records['timing_rows']),
             ('stability_well_trajectories.csv', records['trajectory_rows']),
             ('stability_well_metrics.csv', records['well_metrics']),
             ('condition_stability_summary.csv', records['condition_summaries']),
             ('stability_qc_audit.csv', records['qc_rows']),
-        )
+        ]
+        if records.get('debug_evidence_rows'):
+            output_specs.append((
+                'stability_debug_synthetic_evidence.csv',
+                records['debug_evidence_rows']
+            ))
         output_paths = []
         for filename, rows in output_specs:
             output_paths.append(self._write_auto_stability_reporting_csv(
@@ -30623,11 +30751,18 @@ class AutoContr(Controller):
                 for row in records['well_metrics']
             ),
             'condition_summary_count': len(records['condition_summaries']),
+            'stability_evidence_source': records.get(
+                'stability_evidence_source', 'raw_reader'
+            ),
+            'debug_only': bool(records.get('debug_evidence_rows')),
             'records': records,
         }
         print(
-            '<<controller>> exported Stage-12D stability reporting: {} '
+            '<<controller>> exported Stage-12D stability reporting [{}]: {} '
             'trajectory rows, {} well metrics ({} eligible).'.format(
+                self.auto_stability_reporting_summary[
+                    'stability_evidence_source'
+                ],
                 self.auto_stability_reporting_summary['trajectory_row_count'],
                 self.auto_stability_reporting_summary['well_metric_count'],
                 self.auto_stability_reporting_summary['eligible_well_count'],

@@ -53,7 +53,7 @@ recent feature commit only.
 | Relationship | `Auto` is an ancestor of `Auto-RTG`; the merge base is `356971a` |
 | Reviewed range | `Auto...Auto-RTG`, containing 238 commits |
 | Files changed in the range | Controller, optimizer, Pi-protocol, checkpoint, run-state, synchronization, preparation, plot/report, test, and governance/documentation code; generated run artifacts remain excluded |
-| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. Stages 12A–12E and 12F-C/D/E are implemented. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. Stage 12E adds a cumulative condition-level loss-rate GP; Stage 12F-D adds a separate reference-peak signal GP; Stage 12F-E adds target-free stability-only candidate ranking. None change physical execution or controller dispatch yet. These stages do not clear large-cohort stability chemistry or stability-directed selection. |
+| Latest focused validation | Stage 9 preparation work was closed under the accepted controlled-debug review and configuration refinements; Stages 10–11 retain their recorded hardware-free validation scope. The 2026-09-11 controlled Stage 12C dry debug passed the bounded plate-shake monitor contract, including the corrected reader-shake command and in-window active-set membership. The 2026-09-14 Stage 12D controlled dry debug produced complete manifest-linked exports, interval-aware trajectory/QC evidence, and final reporting. Stages 12E and 12F-C/D/E/F are implemented and hardware-free validated; Stage 12F-G adds a default-off synthetic-evidence harness solely to exercise the stability-only lifecycle during its required controlled dry debug. Python 3.9 compilation, focused tests, and the complete 404-test suite passed. This harness preserves and validates raw reader data before substituting only model-facing DEBUG-only evidence. It does not clear chemistry, unattended operation, large cohorts, or scientific use of synthetic outputs. |
 
 The reconciliation inspected current controller, optimizer, robot-container,
 plot/report, state/recovery, preparation, and test code as well as the
@@ -484,6 +484,55 @@ required gate is a controlled `--no-sim` dry debug that verifies the seed
 batch, active-well stability scans, both model-refresh audits, target-free
 selection provenance, ordinary wavelength audit labeling, and the fail-closed
 no-candidate/model-failure paths.
+
+### Stage 12F-G controlled dry-debug synthetic-evidence harness — 2026-09-20
+
+The next required Stage-12F gate is a physical `--no-sim` dry debug. Empty
+plates cannot supply scientifically meaningful nanocrystal trajectories, so
+the ordinary stability-only lifecycle would correctly fail before it could
+exercise its second (stability-selected) batch. Stage 12F-G adds an explicitly
+default-off, **DEBUG ONLY** harness for that narrow validation purpose:
+
+- Header value `auto_stability_debug_mode` accepts `off` (the backward-
+  compatible default) or `synthetic_companion_evidence`. The latter is valid
+  only with `auto_stability_mode=stability_only`; it is rejected for `off`,
+  `monitor`, and `target_then_stability` rather than silently changing an
+  ordinary run.
+- The physical protocol, trigger timing, plate shake, raw stability scan
+  schedule, source/volume/tip checks, reader acquisition, and all controller
+  hard stops remain unchanged. Every manifest-linked raw reader file must
+  still be loaded and blank-corrected through the normal path. A missing or
+  non-finite raw reader spectrum fails closed; the fixture cannot cover up a
+  reader/manifest failure.
+- Only after that raw-data verification, deterministic bounded synthetic
+  spectra are supplied to the established reporting and two companion-model
+  paths. They are keyed to the same immutable raw-scan IDs, logical wells,
+  timestamps, and condition/replicate provenance. Replicates agree exactly;
+  distinct conditions have distinct synthetic trajectories, allowing the
+  loss-rate and signal GPs and the target-free selected-batch path to be
+  exercised without claiming an optical measurement.
+- Every affected performance row, reporting row, model-training row, model
+  state, live-journal event, final report, and the dedicated
+  `pr_data/stability/stability_debug_synthetic_evidence.csv` audit file is
+  marked with `stability_evidence_source=synthetic_companion_evidence` and
+  `debug_only=true` as appropriate. The ordinary raw reader files and scan
+  manifest remain separately preserved. The fixture is never a checkpoint,
+  import, or scientific-history source.
+- A lifecycle defect found while preparing this gate was corrected: the shared
+  reporting helper now recognizes `stability_only` alongside monitor and the
+  hybrid mode. Without that correction, both required stability-only
+  companion-model refreshes would fail after a seed batch.
+
+Hardware-free validation on Python 3.9.6 passed: compilation, AST and
+duplicate-method checks, the focused Stage-12 tests, and the complete
+404-test suite. Pure tests prove raw-pair verification, synthetic trajectory
+ordering, replicate agreement, condition-level reporting eligibility, and
+fail-closed behavior on a missing reader pair. This does **not** clear the
+physical dry debug, chemistry, unattended operation, or scientific use of
+the resulting synthetic outputs. The next gate remains a controlled
+`--no-sim` dry debug with this Header value enabled, followed by human review
+of the manifest, raw reader files, DEBUG-only evidence CSV, both companion
+model audits, selection provenance, and final report.
 
 ### Stage 12 optical-stability planning record — revised future stages
 
