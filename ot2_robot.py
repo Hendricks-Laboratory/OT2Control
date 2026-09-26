@@ -687,9 +687,53 @@ class Well96(Well):
     """
     DEAD_VOL = 40 #uL
 
+    # The existing generic ``Container.mix`` path uses ``asp_height`` for
+    # both halves of a well mix.  For a 96-well plate that is the inherited
+    # 1 mm bottom clearance.  Keep the targeted Auto path on this established
+    # geometry rather than introducing a second, independently tuned Z path.
+    # These are physical-motion constants, not experiment settings.
+    TARGETED_MIX_ASPIRATE_CLEARANCE_MM = 1.0
+    TARGETED_MIX_DISPENSE_CLEARANCE_MM = 1.0
+    # ``InstrumentContext.mix(..., rate=...)`` multiplies the installed
+    # pipette's normal aspirate and dispense flow rates.  The historical tube
+    # mixers use 100.0, but that is not an evidence-based setting for a shallow
+    # reaction well.  Keep the new well-only path at the documented baseline.
+    TARGETED_MIX_RATE = 1.0
+
     @property
     def disp_height(self):
         return 9 #mm
+
+    def mix_targeted(self, pipette, mix_volume_uL, cycle_count):
+        '''Mix this 96-well reaction using the established well-mix geometry.
+
+        Unlike ``Container.mix``, this accepts an explicit volume and exact
+        cycle count so the Auto stability path cannot default to a full
+        pipette volume or power-of-two legacy mix code.  Each cycle invokes
+        the same one-cycle ``pipette.mix`` primitive used by the established
+        generic mixer.  Deliberately omit its legacy blow-out/touch-tip
+        cleanup: neither is needed to mix one completed reaction well, and
+        each would add a distinct physical motion to this new path.
+        '''
+        previous_aspirate = pipette.well_bottom_clearance.aspirate
+        previous_dispense = pipette.well_bottom_clearance.dispense
+        pipette.well_bottom_clearance.aspirate = (
+            self.TARGETED_MIX_ASPIRATE_CLEARANCE_MM
+        )
+        pipette.well_bottom_clearance.dispense = (
+            self.TARGETED_MIX_DISPENSE_CLEARANCE_MM
+        )
+        try:
+            for unused_cycle in range(cycle_count):
+                pipette.mix(
+                    1, mix_volume_uL, self.get_well(),
+                    rate=self.TARGETED_MIX_RATE
+                )
+        finally:
+            # Do not leave low 96-well clearances behind for an unrelated
+            # later operation if the mix or the surrounding protocol faults.
+            pipette.well_bottom_clearance.aspirate = previous_aspirate
+            pipette.well_bottom_clearance.dispense = previous_dispense
 
 class Well24(Well):
     '''
@@ -1056,6 +1100,18 @@ class OT2Robot():
         'tube_15ml': 7.2731,
         'tube_50ml': 13.6950
     }
+
+    # Stage 13B targeted stability mixing uses a dedicated tip and one
+    # verified Auto reaction well.  These are conservative execution bounds,
+    # not chemistry settings: the controller will later select the requested
+    # mix volume/cycles inside these fixed Pi-side limits.
+    AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.50
+    # This is intentionally the generic pre-selection floor. After selecting
+    # the established preparation-style mixing pipette, the Pi verifies the
+    # actual loaded instrument's own ``min_volume`` and ``max_volume`` rather
+    # than hard-coding a P300-specific operating range here.
+    AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL = 5.0
+    AUTO_COMPLETED_WELL_MIX_MAX_CYCLES = 10
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
 
@@ -1793,6 +1849,275 @@ class OT2Robot():
         if normalized_sizes[larger_pipette] <= preferred_size + 0.0001:
             return larger_pipette
         return smaller_pipette
+
+    def _validate_auto_completed_well_mix_request(self, request):
+        '''Validates one narrowly scoped, controller-addressed Auto-well mix.
+
+        This request intentionally names one logical Auto product well and
+        repeats its expected physical identity.  It is not a generic mixing
+        API and cannot accept a list of containers or an arbitrary reagent.
+        '''
+        required = {
+            'schema_version', 'action_id', 'wellname',
+            'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation',
+            'trigger_chemical_name', 'mix_volume_uL', 'cycle_count'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('completed-well mix request has an invalid schema.')
+        if request['schema_version'] != 1:
+            raise ValueError('completed-well mix request uses an unsupported schema.')
+        for field_name in ('action_id', 'wellname', 'expected_loc',
+                           'trigger_chemical_name'):
+            if (not isinstance(request[field_name], str)
+                    or not request[field_name].strip()):
+                raise ValueError('completed-well mix {} is invalid.'.format(
+                    field_name
+                ))
+        if not request['wellname'].startswith('autowell'):
+            raise ValueError('completed-well mix may address Auto product wells only.')
+        for field_name in ('expected_deck_pos',
+                           'expected_plate_mapping_revision',
+                           'expected_plate_generation', 'cycle_count'):
+            value = request[field_name]
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 0):
+                raise ValueError('completed-well mix {} is invalid.'.format(
+                    field_name
+                ))
+        if request['cycle_count'] < 1:
+            raise ValueError('completed-well mix cycle_count must be positive.')
+        if request['cycle_count'] > self.AUTO_COMPLETED_WELL_MIX_MAX_CYCLES:
+            raise ValueError(
+                'completed-well mix cycle_count exceeds the Pi safety limit.'
+            )
+        return {
+            'schema_version': 1,
+            'action_id': request['action_id'].strip(),
+            'wellname': request['wellname'].strip(),
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': request['expected_loc'].strip().upper(),
+            'expected_plate_mapping_revision': (
+                request['expected_plate_mapping_revision']
+            ),
+            'expected_plate_generation': request['expected_plate_generation'],
+            'trigger_chemical_name': request['trigger_chemical_name'].strip(),
+            'mix_volume_uL': self._preflight_number(
+                request['mix_volume_uL'],
+                'completed-well mix volume',
+                minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
+            ),
+            'cycle_count': request['cycle_count']
+        }
+
+    def _build_auto_completed_well_mix_plan(self, request):
+        '''Builds a non-mutating safety plan for one completed Auto product well.'''
+        normalized = self._validate_auto_completed_well_mix_request(request)
+        if (normalized['expected_plate_mapping_revision']
+                != self.plate_mapping_revision):
+            raise ValueError(
+                'completed-well mix plate mapping changed; retry before mixing.'
+            )
+        if normalized['expected_plate_generation'] != self.plate_generation:
+            raise ValueError(
+                'completed-well mix plate generation changed; retry before mixing.'
+            )
+
+        target = self.containers.get(normalized['wellname'])
+        if target is None or not isinstance(target, Well96):
+            raise ValueError(
+                'completed-well mix target is not a 96-well reaction well.'
+            )
+        if (str(getattr(target, 'name', '')) != normalized['wellname']
+                or int(getattr(target, 'deck_pos', -1))
+                != normalized['expected_deck_pos']
+                or str(getattr(target, 'loc', '')).upper()
+                != normalized['expected_loc']):
+            raise ValueError(
+                'completed-well mix target no longer matches the expected well.'
+            )
+        if target.deck_pos not in (4, 7):
+            raise ValueError('completed-well mix target is not on a plate reader.')
+        try:
+            target_labware = self.lab_deck[target.deck_pos]
+        except (IndexError, TypeError):
+            target_labware = None
+        if (target_labware is None
+                or getattr(target_labware, 'name', None)
+                not in ('platereader4', 'platereader7')):
+            raise ValueError('completed-well mix target plate is not registered.')
+        if getattr(target_labware, 'labware', None) is not getattr(
+                target, 'labware', None
+        ):
+            raise ValueError(
+                'completed-well mix target is not bound to its registered '
+                'plate-reader labware.'
+            )
+
+        history = getattr(target, 'history', None)
+        if not isinstance(history, list):
+            raise ValueError('completed-well mix target has no transfer history.')
+        additions = []
+        for entry in history:
+            if not isinstance(entry, tuple) or len(entry) != 3:
+                raise ValueError('completed-well mix target history is invalid.')
+            if self._preflight_number(
+                    entry[2], 'completed-well mix history volume'
+            ) > 0:
+                additions.append(entry)
+        if (not additions
+                or additions[-1][1] != normalized['trigger_chemical_name']):
+            raise ValueError(
+                'completed-well mix requires the final recorded transfer to '
+                'be the configured trigger reagent.'
+            )
+
+        well_volume_uL = self._preflight_number(
+            getattr(target, 'vol', None), 'completed-well mix target volume',
+            minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
+        )
+        maximum_mix_volume_uL = (
+            well_volume_uL * self.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION
+        )
+        if normalized['mix_volume_uL'] > maximum_mix_volume_uL + 1e-9:
+            raise ValueError(
+                'completed-well mix volume exceeds the conservative fraction '
+                'of the verified well volume.'
+            )
+        # This is intentionally the same larger-pipette selection used by the
+        # established preparation ``_mix`` route.  Do not reuse the requested
+        # reagent-transfer volume here: mixing does not meter a reagent and
+        # must not alter the validated small-transfer accuracy policy.
+        pipette_arm = self._get_preferred_pipette_arm_for_sizes(
+            300.0,
+            dict((arm, details['size']) for arm, details in
+                 self.pipettes.items())
+        )
+        pipette_details = self.pipettes[pipette_arm]
+        pipette = pipette_details.get('pipette')
+        if pipette is None or not hasattr(pipette, 'has_tip'):
+            raise ValueError('completed-well mix pipette state is unavailable.')
+        pipette_min_volume_uL = self._preflight_number(
+            getattr(pipette, 'min_volume', None),
+            'completed-well mix pipette minimum volume', minimum=1e-12
+        )
+        pipette_max_volume_uL = self._preflight_number(
+            getattr(pipette, 'max_volume', None),
+            'completed-well mix pipette maximum volume', minimum=1e-12
+        )
+        configured_pipette_size_uL = self._preflight_number(
+            pipette_details.get('size'),
+            'completed-well mix configured pipette size', minimum=1e-12
+        )
+        if abs(configured_pipette_size_uL - pipette_max_volume_uL) > 1e-9:
+            raise ValueError(
+                'completed-well mix pipette configuration disagrees with '
+                'the loaded instrument capacity.'
+            )
+        if normalized['mix_volume_uL'] < pipette_min_volume_uL - 1e-9:
+            raise ValueError(
+                'completed-well mix volume is below the selected pipette '
+                'minimum volume.'
+            )
+        if normalized['mix_volume_uL'] > pipette_max_volume_uL + 1e-9:
+            raise ValueError('completed-well mix volume exceeds pipette capacity.')
+
+        has_tip = bool(pipette.has_tip)
+        use_existing_clean_tip = (
+            has_tip and pipette_details.get('last_used') == 'clean'
+        )
+        requires_fresh_mix_tip = not use_existing_clean_tip
+        required_new_tips = 1 + int(requires_fresh_mix_tip)
+        available_new_tips = self._count_available_tips(
+            pipette, pipette_details.get('configured_tip_wells')
+        )
+        if available_new_tips < required_new_tips:
+            raise ValueError(
+                'completed-well mix needs {} unused {} tip(s), but only {} '
+                'are available.'.format(
+                    required_new_tips, pipette_arm, available_new_tips
+                )
+            )
+
+        plan = dict(normalized)
+        plan.update({
+            'target': target,
+            'pipette_arm': pipette_arm,
+            'well_volume_uL': well_volume_uL,
+            'maximum_mix_volume_uL': maximum_mix_volume_uL,
+            'pipette_min_volume_uL': pipette_min_volume_uL,
+            'pipette_max_volume_uL': pipette_max_volume_uL,
+            'use_existing_clean_tip': use_existing_clean_tip,
+            'requires_fresh_mix_tip': requires_fresh_mix_tip,
+            'required_new_tips': required_new_tips,
+            'available_new_tips': available_new_tips
+        })
+        return plan
+
+    def _execute_auto_completed_well_mix_plan(self, plan):
+        '''Mixes exactly one prevalidated well with a dedicated disposable tip.'''
+        pipette_details = self.pipettes[plan['pipette_arm']]
+        pipette = pipette_details['pipette']
+        target = plan['target']
+
+        if not plan['use_existing_clean_tip']:
+            if bool(pipette.has_tip):
+                pipette.drop_tip()
+            pipette_details['last_used'] = 'clean'
+            pipette.pick_up_tip()
+
+        # The mix tip is dedicated to this one completed product well.  It is
+        # discarded before a fresh clean tip is picked up for later work.
+        pipette_details['last_used'] = plan['wellname']
+        self.protocol._commands.append(
+            'HEAD: {} : targeted Auto mix {} at {}:{} using {}uL x{}'
+            .format(
+                datetime.now(pytz.timezone('US/Pacific')).strftime(
+                    '%d-%b-%Y %H:%M:%S:%f'
+                ),
+                plan['wellname'], plan['expected_deck_pos'],
+                plan['expected_loc'], plan['mix_volume_uL'],
+                plan['cycle_count']
+            )
+        )
+        try:
+            target.mix_targeted(
+                pipette, plan['mix_volume_uL'], plan['cycle_count']
+            )
+        finally:
+            if bool(pipette.has_tip):
+                pipette.drop_tip()
+
+        pipette_details['last_used'] = 'clean'
+        pipette.pick_up_tip()
+
+    def _auto_completed_well_mix_response(self, request):
+        '''Creates a JSON-safe acknowledgement shell for the targeted mix API.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': 1,
+            'record_type': 'auto_completed_well_mixed',
+            'action_id': request.get('action_id'),
+            'accepted': False,
+            'message': '',
+            'wellname': request.get('wellname'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'trigger_chemical_name': request.get('trigger_chemical_name'),
+            'plate_mapping_revision': int(
+                getattr(self, 'plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
+            'pipette_arm': None,
+            'mix_volume_uL': None,
+            'cycle_count': None,
+            'required_new_tips': None,
+            'available_new_tips': None,
+            'tip_policy': 'dedicated_discarded',
+            'physical_execution_started': False,
+            'started_at_utc': None,
+            'completed_at_utc': None
+        }
 
     @staticmethod
     def _count_available_tips(pipette, configured_tip_wells=None):
@@ -3160,7 +3485,8 @@ class OT2Robot():
                 'reset_pipette_tip_racks',
                 'register_auto_plate_generation',
                 'reserve_auto_preparation_groups',
-                'execute_auto_preparation_groups'
+                'execute_auto_preparation_groups',
+                'mix_auto_completed_well'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -3217,6 +3543,48 @@ class OT2Robot():
             'auto_plate_generation_registered',
             self._build_auto_plate_generation_registration(request)
         )
+
+    @exec_func('mix_auto_completed_well', 1, False, exec_funcs)
+    def _exec_mix_auto_completed_well(self, request):
+        '''Mixes one verified completed Auto product well and returns its audit ack.
+
+        Validation failures are acknowledged without robot motion.  A failure
+        after physical execution begins is deliberately not converted into a
+        success-like acknowledgement: the existing robot error boundary stops
+        and records the fault so the controller cannot replay the action.
+        '''
+        response = self._auto_completed_well_mix_response(request)
+        try:
+            plan = self._build_auto_completed_well_mix_plan(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+            self.portal.send_pack('auto_completed_well_mixed', response)
+            return
+
+        response.update({
+            'action_id': plan['action_id'],
+            'wellname': plan['wellname'],
+            'expected_deck_pos': plan['expected_deck_pos'],
+            'expected_loc': plan['expected_loc'],
+            'trigger_chemical_name': plan['trigger_chemical_name'],
+            'pipette_arm': plan['pipette_arm'],
+            'mix_volume_uL': plan['mix_volume_uL'],
+            'cycle_count': plan['cycle_count'],
+            'required_new_tips': plan['required_new_tips'],
+            'available_new_tips': plan['available_new_tips'],
+            'physical_execution_started': True,
+            'started_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self._execute_auto_completed_well_mix_plan(plan)
+        response.update({
+            'accepted': True,
+            'message': (
+                'targeted completed Auto well mixing completed with a '
+                'dedicated discarded tip.'
+            ),
+            'completed_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self.portal.send_pack('auto_completed_well_mixed', response)
 
     @exec_func('reserve_auto_preparation_groups', 1, False, exec_funcs)
     def _exec_reserve_auto_preparation_groups(self, request):

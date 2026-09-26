@@ -115,9 +115,10 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
             'preflight_transfer_plan',
             'refresh_source_container_mass',
             'reset_pipette_tip_racks',
-            'register_auto_plate_generation',
-            'reserve_auto_preparation_groups',
-            'execute_auto_preparation_groups'
+                'register_auto_plate_generation',
+                'reserve_auto_preparation_groups',
+                'execute_auto_preparation_groups',
+                'mix_auto_completed_well'
         ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
         self.assertEqual(0, snapshot['tip_inventory_revision'])
@@ -183,6 +184,8 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual(b'\x1A', packet_types['auto_plate_generation_registered'])
         self.assertEqual(b'\x1D', packet_types['execute_auto_preparation_groups'])
         self.assertEqual(b'\x1E', packet_types['auto_preparation_groups_executed'])
+        self.assertEqual(b'\x1F', packet_types['mix_auto_completed_well'])
+        self.assertEqual(b'\x20', packet_types['auto_completed_well_mixed'])
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -195,6 +198,8 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertIn('auto_plate_generation_registered', ghost_types)
         self.assertIn('execute_auto_preparation_groups', ghost_types)
         self.assertIn('auto_preparation_groups_executed', ghost_types)
+        self.assertIn('mix_auto_completed_well', ghost_types)
+        self.assertIn('auto_completed_well_mixed', ghost_types)
 
     def test_preparation_execution_is_a_structured_ghost_acknowledgement(self):
         """A ghost preparation result must not be followed by ``ready``."""
@@ -222,6 +227,43 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
             'auto_preparation_groups_executed',
             ast.literal_eval(send_calls[0].args[0])
         )
+
+    def test_targeted_mix_is_a_structured_ghost_acknowledgement(self):
+        handler = _class_method_node(
+            self.class_node, '_exec_mix_auto_completed_well'
+        )
+        self.assertEqual(1, len(handler.decorator_list))
+        decorator = handler.decorator_list[0]
+        self.assertIsInstance(decorator, ast.Call)
+        self.assertEqual('exec_func', decorator.func.id)
+        self.assertEqual(
+            'mix_auto_completed_well', ast.literal_eval(decorator.args[0])
+        )
+        self.assertFalse(ast.literal_eval(decorator.args[2]))
+
+        send_calls = [
+            node for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'send_pack'
+        ]
+        self.assertEqual(2, len(send_calls))
+        for call in send_calls:
+            self.assertEqual(
+                'auto_completed_well_mixed',
+                ast.literal_eval(call.args[0])
+            )
+
+        helper_calls = [
+            node.func.attr for node in ast.walk(handler)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == 'self'
+        ]
+        self.assertIn('_build_auto_completed_well_mix_plan', helper_calls)
+        self.assertIn('_execute_auto_completed_well_mix_plan', helper_calls)
+        self.assertNotIn('_mix', helper_calls)
 
 
 class AutoMainLabwareIdentityTests(unittest.TestCase):
