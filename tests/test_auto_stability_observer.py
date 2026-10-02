@@ -59,7 +59,7 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(
             event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
         )
-        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 3)
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 4)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
@@ -297,6 +297,47 @@ class AutoStabilityObserverTests(unittest.TestCase):
         with self.assertRaises(AutoStabilityObserverError):
             self.observer.reserve_raw_scan(0, 'autowell0C2.0')
         self.assertEqual(self.observer.get_active_wells(), [])
+
+    def test_targeted_mix_provenance_requires_one_active_pending_intent(self):
+        self.observer.record_trigger_transfer_dispatched(
+            0, 'autowell0C2.0', 10.0, 18
+        )
+        self.observer.confirm_trigger_transfer_completed('autowell0C2.0')
+        request = {
+            'action_id': 'targeted-mix-001',
+            'wellname': 'autowell0C2.0',
+            'mix_volume_uL': 20.0,
+            'cycle_count': 1
+        }
+        intent = self.observer.record_targeted_pipette_mix_intent(request, 0)
+        acknowledgement = self.observer.record_targeted_pipette_mix_acknowledged({
+            'action_id': 'targeted-mix-001',
+            'wellname': 'autowell0C2.0',
+            'pipette_arm': 'right',
+            'mix_volume_uL': 20.0,
+            'cycle_count': 1,
+            'tip_policy': 'dedicated_discarded',
+            'completed_at_utc': '2026-09-09T10:00:07+00:00'
+        })
+
+        self.assertEqual(
+            'targeted_pipette_mix_intent_recorded', intent['event_type']
+        )
+        self.assertEqual(
+            'targeted_pipette_mix_acknowledged', acknowledgement['event_type']
+        )
+        self.assertEqual(
+            'right', acknowledgement['targeted_mix_pipette_arm']
+        )
+        self.assertEqual(
+            'targeted-mix-001',
+            self._manifest_rows()[-1]['targeted_mix_action_id']
+        )
+        with self.assertRaises(AutoStabilityObserverError):
+            self.observer.record_targeted_pipette_mix_acknowledged({
+                'action_id': 'targeted-mix-001',
+                'wellname': 'autowell0C2.0'
+            })
 
 
 if __name__ == '__main__':

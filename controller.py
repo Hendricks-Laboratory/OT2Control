@@ -153,6 +153,13 @@ from auto_stability_signal_model import (
     STABILITY_SIGNAL_MODEL_STATUS_FIT_FAILED,
     build_stability_signal_model_training_records
 )
+from auto_stability_pipette_mix import (
+    AutoStabilityPipetteMixContractError,
+    TARGETED_MIX_ACKNOWLEDGEMENT,
+    TARGETED_MIX_COMMAND,
+    validate_targeted_mix_acknowledgement,
+    validate_targeted_mix_request
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -5646,6 +5653,11 @@ class AutoContr(Controller):
         # the physical 96-well plate generation separately for audit/reporting.
         self.auto_plate_generation = 0
         self.auto_plate_next_well = None
+        # Stage 13C records action IDs before a targeted-mix packet is sent.
+        # The set is intentionally process-local: Auto does not resume a
+        # partial physical run, and no restart is permitted to replay an
+        # unacknowledged mix action.
+        self._auto_stability_pipette_mix_action_ids = set()
         # ``None`` is overloaded deliberately: before the first batch the
         # controller has not yet resolved the configured starting well, while
         # after a completed plate it means that no physical wells remain.
@@ -5896,6 +5908,266 @@ class AutoContr(Controller):
                 reason='trigger_completion',
                 shake_before_scan=True
             )
+
+    def _require_auto_main_targeted_mix_capability(self):
+        '''Require the optional Stage-13 Pi command only at its call boundary.
+
+        The ordinary compatibility handshake intentionally does *not* require
+        this command, because validated ``plate_shake`` runs must remain
+        compatible with an earlier Auto-main deployment. Stage 13D will call
+        this method immediately before it elects the new pipette-mix path.
+        '''
+        snapshot = getattr(self, 'auto_main_robot_state_snapshot', None)
+        if not isinstance(snapshot, dict):
+            raise RuntimeError(
+                'Targeted stability mixing requires a validated Auto-main '
+                'state snapshot.'
+            )
+        if TARGETED_MIX_COMMAND not in snapshot.get('supported_commands', []):
+            raise RuntimeError(
+                'Targeted stability mixing is unavailable because the Pi does '
+                'not advertise {}. Keep plate_shake selected or deploy the '
+                'separately validated Auto-main Stage-13 capability.'
+                .format(TARGETED_MIX_COMMAND)
+            )
+        for field_name in ('plate_mapping_revision', 'plate_generation'):
+            value = snapshot.get(field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RuntimeError(
+                    'Targeted stability mixing requires a valid Pi {}.'
+                    .format(field_name)
+                )
+        if int(getattr(self, 'auto_plate_generation', 0)) != snapshot[
+                'plate_generation']:
+            raise RuntimeError(
+                'Targeted stability mixing refuses a stale controller plate '
+                'generation. Refresh the Auto-main state before mixing.'
+            )
+        return copy.deepcopy(snapshot)
+
+    def _build_auto_stability_targeted_mix_request(
+            self, wellname, trigger_chemical_name, mix_volume_uL, cycle_count):
+        '''Build one exact completed-well mix request without sending it.
+
+        This intentionally relies on the caller's freshly refreshed location
+        cache. Stage 13D must query that cache after the trigger-transfer
+        completion barrier and before this method. Separating the read-only
+        location query from the physical mix packet keeps the plate identity
+        explicit in both the journal and Pi validation path.
+        '''
+        snapshot = self._require_auto_main_targeted_mix_capability()
+        journal = getattr(self, 'auto_live_run_journal', None)
+        current_state = getattr(journal, 'current_state', None)
+        if not isinstance(current_state, dict):
+            raise RuntimeError(
+                'Targeted stability mixing requires an active Auto live-run '
+                'journal.'
+            )
+        if current_state.get('lifecycle_state') != LIFECYCLE_EXECUTING_BATCH:
+            raise RuntimeError(
+                'Targeted stability mixing is permitted only while an Auto '
+                'batch is executing.'
+            )
+        batch_number = int(getattr(self, 'batch_num', -1))
+        if current_state.get('active_batch_number') != batch_number:
+            raise RuntimeError(
+                'Targeted stability mixing refuses a journal batch mismatch.'
+            )
+
+        normalized_wellname = str(wellname).strip()
+        entry = getattr(self, '_cached_reader_locs', {}).get(normalized_wellname)
+        if entry is None:
+            raise RuntimeError(
+                'Targeted stability mixing requires a freshly cached reader '
+                'location for {}.'.format(normalized_wellname)
+            )
+        request = {
+            'schema_version': 1,
+            'action_id': 'auto-stability-pipette-mix-{}'.format(uuid.uuid4().hex),
+            'wellname': normalized_wellname,
+            'expected_deck_pos': int(entry.deck_pos),
+            'expected_loc': str(entry.loc).strip().upper(),
+            'expected_plate_mapping_revision': int(
+                snapshot['plate_mapping_revision']
+            ),
+            'expected_plate_generation': int(snapshot['plate_generation']),
+            'trigger_chemical_name': str(trigger_chemical_name).strip(),
+            'mix_volume_uL': mix_volume_uL,
+            'cycle_count': cycle_count
+        }
+        try:
+            return validate_targeted_mix_request(request)
+        except AutoStabilityPipetteMixContractError as exc:
+            raise RuntimeError(
+                'Targeted stability-mix request is invalid: {}.'.format(exc)
+            )
+
+    def _record_auto_stability_targeted_mix_rejection(
+            self, request, reason, acknowledgement=None):
+        '''Durably preserve a failed/unknown mix outcome without retrying it.'''
+        payload = {
+            'mix_request': copy.deepcopy(request),
+            'outcome': 'unacknowledged_or_rejected',
+            'reason': str(reason),
+            'automatic_retry_permitted': False
+        }
+        if acknowledgement is not None:
+            payload['acknowledgement'] = copy.deepcopy(acknowledgement)
+        self._record_auto_live_run_event(
+            'stability_pipette_mix_acknowledgement_rejected', payload
+        )
+
+    def _request_auto_stability_targeted_mix(self, request):
+        '''Send one already-journaled targeted well mix and require its exact ack.
+
+        This method is intentionally dormant until Stage 13D selects it. Once
+        its intent is durable, a transport failure, malformed response, Pi
+        rejection, or restart is terminal for that action; no code path here
+        resends the request automatically.
+        '''
+        try:
+            request = validate_targeted_mix_request(request)
+        except AutoStabilityPipetteMixContractError as exc:
+            raise RuntimeError(
+                'Targeted stability-mix request is invalid: {}.'.format(exc)
+            )
+
+        # Defend this low-level method as well as its request builder. A
+        # future call site must not be able to reuse a once-valid request
+        # after a plate replacement, run-state transition, or incompatible Pi
+        # reconnect.
+        snapshot = self._require_auto_main_targeted_mix_capability()
+        if (
+                request['expected_plate_mapping_revision']
+                != snapshot['plate_mapping_revision']
+                or request['expected_plate_generation']
+                != snapshot['plate_generation']):
+            raise RuntimeError(
+                'Targeted stability-mix request is stale relative to the '
+                'current Auto-main plate identity.'
+            )
+        journal = getattr(self, 'auto_live_run_journal', None)
+        current_state = getattr(journal, 'current_state', None)
+        if (
+                not isinstance(current_state, dict)
+                or current_state.get('lifecycle_state')
+                != LIFECYCLE_EXECUTING_BATCH
+                or current_state.get('active_batch_number')
+                != int(getattr(self, 'batch_num', -1))):
+            raise RuntimeError(
+                'Targeted stability mixing is not permitted outside the '
+                'current executing Auto batch.'
+            )
+
+        action_ids = getattr(
+            self, '_auto_stability_pipette_mix_action_ids', None
+        )
+        if action_ids is None:
+            action_ids = set()
+            self._auto_stability_pipette_mix_action_ids = action_ids
+        if request['action_id'] in action_ids:
+            raise RuntimeError(
+                'Targeted stability-mix action {} was already attempted; '
+                'automatic replay is forbidden.'.format(request['action_id'])
+            )
+
+        observer = getattr(self, 'auto_stability_observer', None)
+        if observer is None:
+            raise RuntimeError(
+                'Targeted stability mixing requires an initialized stability '
+                'observer for manifest provenance.'
+            )
+
+        # The live journal and observer manifest must both contain the intent
+        # before the Pi can receive a physical command. If either write fails,
+        # no packet is sent.
+        self._record_auto_live_run_event(
+            'stability_pipette_mix_intent_recorded',
+            {
+                'mix_request': copy.deepcopy(request),
+                'automatic_retry_permitted': False,
+                'dispatch_policy': (
+                    'one exact packet; any unacknowledged result is terminal'
+                )
+            }
+        )
+        observer.record_targeted_pipette_mix_intent(
+            request, int(getattr(self, 'batch_num', -1))
+        )
+        action_ids.add(request['action_id'])
+
+        try:
+            self.portal.send_pack(TARGETED_MIX_COMMAND, request)
+            pack_type, _, payload = self.portal.recv_pack()
+        except Exception as exc:
+            self._record_auto_stability_targeted_mix_rejection(
+                request,
+                'No trustworthy Pi acknowledgement was received: {}'
+                .format(exc)
+            )
+            raise RuntimeError(
+                'Targeted stability mix has an unknown physical outcome; do '
+                'not retry this run automatically. {}'.format(exc)
+            )
+
+        if pack_type != TARGETED_MIX_ACKNOWLEDGEMENT or \
+                not isinstance(payload, tuple) or len(payload) != 1:
+            self._record_auto_stability_targeted_mix_rejection(
+                request,
+                'Malformed Pi acknowledgement packet {!r}.'.format(pack_type)
+            )
+            raise RuntimeError(
+                'Targeted stability mix returned a malformed acknowledgement; '
+                'do not retry this run automatically.'
+            )
+
+        acknowledgement = payload[0]
+        try:
+            acknowledgement = validate_targeted_mix_acknowledgement(
+                acknowledgement, request
+            )
+        except AutoStabilityPipetteMixContractError as exc:
+            self._record_auto_stability_targeted_mix_rejection(
+                request, 'Invalid Pi acknowledgement: {}'.format(exc)
+            )
+            raise RuntimeError(
+                'Targeted stability mix returned an invalid acknowledgement; '
+                'do not retry this run automatically. {}'.format(exc)
+            )
+
+        if not acknowledgement['accepted']:
+            self._record_auto_stability_targeted_mix_rejection(
+                request,
+                'Pi declined the targeted mix: {}'.format(
+                    acknowledgement['message']
+                ),
+                acknowledgement=acknowledgement
+            )
+            raise RuntimeError(
+                'Pi declined targeted stability mix before physical execution: '
+                '{}. Do not retry this run automatically.'
+                .format(acknowledgement['message'])
+            )
+
+        self._record_auto_live_run_event(
+            'stability_pipette_mix_acknowledged',
+            {
+                'mix_request': copy.deepcopy(request),
+                'acknowledgement': copy.deepcopy(acknowledgement),
+                'automatic_retry_permitted': False
+            }
+        )
+        observer.record_targeted_pipette_mix_acknowledged(acknowledgement)
+        print(
+            '<<controller>> Auto-main acknowledged targeted stability mix {} '
+            'for {} using {}: {} cycle(s) at {} uL.'.format(
+                request['action_id'], request['wellname'],
+                acknowledgement['pipette_arm'],
+                acknowledgement['cycle_count'],
+                acknowledgement['mix_volume_uL']
+            )
+        )
+        return copy.deepcopy(acknowledgement)
 
     @staticmethod
     def _auto_stability_utc_now():

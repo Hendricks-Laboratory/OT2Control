@@ -23,7 +23,10 @@ import time
 # Version 3 adds the logical-well -> physical-reader-location mapping used by
 # Stage 12D to reload each immutable raw scan without guessing from a later
 # plate state. Every manifest is run-local, so no in-place migration is needed.
-STABILITY_OBSERVER_SCHEMA_VERSION = 3
+# Version 4 adds structured targeted-pipette-mix provenance. Existing
+# reporting readers ignore non-scan event fields and continue to read older
+# run-local v3 manifests through their named columns.
+STABILITY_OBSERVER_SCHEMA_VERSION = 4
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -45,6 +48,12 @@ MANIFEST_COLUMNS = (
     'trigger_transfer_dispatched_at_utc',
     'trigger_transfer_completion_observed_at_utc',
     'trigger_completion_time_basis',
+    'targeted_mix_action_id',
+    'targeted_mix_pipette_arm',
+    'targeted_mix_volume_uL',
+    'targeted_mix_cycle_count',
+    'targeted_mix_tip_policy',
+    'targeted_mix_acknowledged_at_utc',
     'raw_scan_id',
     'raw_scan_basename',
     'raw_scan_relative_path',
@@ -109,6 +118,7 @@ class AutoStabilityObserver:
         self._event_sequence = 0
         self._scan_sequence = 0
         self._active_wells = {}
+        self._targeted_mix_actions = {}
         self._events = []
 
         if not self.run_id:
@@ -312,6 +322,99 @@ class AutoStabilityObserver:
             for record in self._active_wells.values()
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
+
+    def record_targeted_pipette_mix_intent(self, request, batch_number):
+        '''Durably record a future targeted-mix intent before Pi dispatch.
+
+        The request is already validated at the controller contract boundary.
+        This observer verifies only lifecycle facts it owns: the well must be
+        active, associated with the same batch, and have at most one active
+        mix action. This does not claim that the robot moved.
+        '''
+        if not isinstance(request, dict):
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix request must be a dictionary.'
+            )
+        wellname = self._require_wellname(request.get('wellname'))
+        action_id = str(request.get('action_id', '')).strip()
+        if not action_id:
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix action_id cannot be blank.'
+            )
+        record = self._active_wells.get(wellname)
+        if record is None or record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
+            raise AutoStabilityObserverError(
+                'Targeted pipette mix requires an active completed trigger '
+                'well: {}.'.format(wellname)
+            )
+        if int(batch_number) != record['batch_number']:
+            raise AutoStabilityObserverError(
+                'Targeted pipette mix batch does not match active well {}.'
+                .format(wellname)
+            )
+        if action_id in self._targeted_mix_actions:
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix action {} was already recorded.'
+                .format(action_id)
+            )
+        self._targeted_mix_actions[action_id] = {
+            'wellname': wellname,
+            'batch_number': int(batch_number),
+            'acknowledged': False
+        }
+        return self._append_event(
+            'targeted_pipette_mix_intent_recorded',
+            batch_number=int(batch_number),
+            wellname=wellname,
+            activation_status=ACTIVATION_STATUS_ACTIVE,
+            targeted_mix_action_id=action_id,
+            targeted_mix_volume_uL=float(request['mix_volume_uL']),
+            targeted_mix_cycle_count=int(request['cycle_count']),
+            targeted_mix_tip_policy='dedicated_discarded',
+            notes=(
+                'Controller recorded an exact targeted-pipette-mix intent '
+                'before dispatch. No acknowledgement or robot motion is '
+                'claimed by this manifest event.'
+            )
+        )
+
+    def record_targeted_pipette_mix_acknowledged(self, acknowledgement):
+        '''Record one validated successful Pi acknowledgement for an intent.'''
+        if not isinstance(acknowledgement, dict):
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix acknowledgement must be a dictionary.'
+            )
+        action_id = str(acknowledgement.get('action_id', '')).strip()
+        action = self._targeted_mix_actions.get(action_id)
+        if action is None or action['acknowledged']:
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix acknowledgement has no pending intent.'
+            )
+        wellname = self._require_wellname(acknowledgement.get('wellname'))
+        if wellname != action['wellname']:
+            raise AutoStabilityObserverError(
+                'Targeted pipette-mix acknowledgement changed its well.'
+            )
+        action['acknowledged'] = True
+        return self._append_event(
+            'targeted_pipette_mix_acknowledged',
+            batch_number=action['batch_number'],
+            wellname=wellname,
+            activation_status=ACTIVATION_STATUS_ACTIVE,
+            targeted_mix_action_id=action_id,
+            targeted_mix_pipette_arm=str(acknowledgement['pipette_arm']),
+            targeted_mix_volume_uL=float(acknowledgement['mix_volume_uL']),
+            targeted_mix_cycle_count=int(acknowledgement['cycle_count']),
+            targeted_mix_tip_policy=str(acknowledgement['tip_policy']),
+            targeted_mix_acknowledged_at_utc=str(
+                acknowledgement['completed_at_utc']
+            ),
+            notes=(
+                'Pi acknowledged completion of the exact targeted mix. The '
+                'acknowledgement timestamps and dedicated-tip policy are '
+                'recorded without inferring a dispense-level timestamp.'
+            )
+        )
 
     def get_active_wells_within_observation_window(
             self, observation_window_s, now_monotonic_s=None):

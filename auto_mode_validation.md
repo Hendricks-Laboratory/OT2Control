@@ -692,6 +692,27 @@ is only a pure, uncalled contract until the later per-trigger scheduler stage
 deliberately enables it. The existing Stage-12C scheduler continues to use
 only its validated single observation window.
 
+### Stage 13B/13C targeted-mix boundary — 2026-10-02
+
+Stage 13B is the narrowly scoped **Auto-main** capability already isolated on
+the separate `Auto-main` branch: it accepts one exact completed Auto-well mix
+request, validates the current well/plate/trigger/tip state, uses its
+dedicated-tip policy, and returns a completion acknowledgement. It is not a
+generic mix endpoint and has not changed `main`. Its physical behavior still
+requires the separately supervised water-only validation described below.
+
+Stage 13C now adds the matching **Lab-PC controller contract**, but does not
+schedule or send it in an ordinary Auto run. It creates a versioned request
+only from a fresh reader-location cache and matching plate generation, writes
+both journal and stability-manifest intent records before dispatch, and accepts
+only an exact successful Pi acknowledgement. A timeout, malformed packet,
+rejection, or restart leaves a durable unacknowledged/rejected record and
+raises; the action is never resent automatically. The existing Header parser
+continues to accept only `plate_shake`, so this dormant contract cannot change
+current Stage-12 transfer, reader, or mixing behavior. The observer manifest
+is now schema v4 solely to add structured targeted-mix provenance; reporting
+continues to read earlier v3 manifests by named columns.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
@@ -810,10 +831,11 @@ meaningful stability trajectory.
 | **12F-F** | Controller lifecycle, current-run companion-model refresh gate, target-free selection provenance, stability-only CSV/report exports, and explicit ordinary-wavelength audit labeling. λmax remains raw observational provenance only; target stopping, target plots, checkpoint import/save, and target-EI are inapplicable. | **Implemented and controlled dry-debug closed.** The 2026-09-21 `DEBUGRTG_STAGE12F_2` `--no-sim` run verified immutable raw scans/manifest linkage, DEBUG-only evidence labeling, companion-model fitting, stability-selected follow-up execution, final exports, and clean journal finalization. It does not clear chemistry interpretation, long-cohort timing, or targeted pipette mixing. |
 | **12G** | Small controlled chemistry validation in `monitor` mode: few conditions, triplicates, one trigger, fixed cadence, plate shake only, and a short scientifically meaningful observation window. | Human review of curves, peak timing, cadence, replicate agreement, and scientifically justified absorbance bounds before real chemical stability evidence is used to assess or support stability-only selection. |
 | **13A** | Pure monitoring lifecycle contract: fixed decision horizon versus maximum observation window, plateau-confirmation candidate requirements, terminal-QC retirement semantics, condition-level readiness, and backward-compatible fixed-window Header mapping. Targeted pipette-mixing hardware constraints remain deliberately deferred to 13B. | **Implemented; hardware-free validation passed.** Python 3.9 compilation, stability regression tests, pure lifecycle transition tests, and AST/diff review passed. No robot, reader, scheduler, GP-selection, or workbook behavior changed. |
-| **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, contamination policy, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | Pi simulation/static validation and a supervised hardware dry debug. |
-| **13C** | Lab-PC per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; retire wells only for confirmed plateau, maximum-window expiry, or terminal QC; permit decision-ready conditions to inform later batches while older wells remain under extended observation; after the final scheduled batch, drain monitoring until no active wells remain. | Supervised dry debug confirming correct mix target, one required completion-triggered acquisition per well, cross-batch active-set membership, timestamp mapping, retirement/plateau state transitions, decision-versus-extended-observation separation, no duplicate scans, no re-mixing of prior wells, and final empty-active-set termination. |
-| **13D** | Reader-acquisition consolidation: after compatibility validation, one immutable reader acquisition supplies both ordinary λmax processing and stability extraction, eliminating validated duplicate reader passes without merging or losing provenance. | Regression and supervised dry debug comparing legacy λmax results and stability outputs. |
-| **13E** | Small chemistry comparison of plate shake versus targeted pipette mixing, followed by the decision whether large-batch stability-directed selection is scientifically supported. | Human review of trajectory reproducibility, time-to-first-observation, λmax impact, and practical reader throughput. |
+| **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, contamination policy, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | **Implemented on Auto-main; static/Pi simulation review passed.** It is not cleared for an unattended or chemistry run; first physical use remains the supervised water-only test. |
+| **13C** | Lab-PC controller-to-Pi targeted-mix handshake: exact request/acknowledgement schema, capability and current plate-identity gate, pre-dispatch journal plus observer-manifest intent, structured completion provenance, and explicit no-retry handling for timeout/malformed/rejected responses. The existing `plate_shake` path remains unchanged and this handshake is not yet scheduled. | **Implemented; hardware-free Python 3.9 contract, observer, lifecycle-event, AST, and diff checks passed.** No robot, reader, transfer, mixing, schedule, or Header behavior changes. |
+| **13D** | Per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; retire wells only for confirmed plateau, maximum-window expiry, or terminal QC; permit decision-ready conditions to inform later batches while older wells remain under extended observation; after the final scheduled batch, drain monitoring until no active wells remain. | Combined-file review and supervised dry debug confirming mix target, one required completion-triggered acquisition per well, cross-batch active-set membership, timestamp mapping, retirement/plateau state transitions, decision-versus-extended-observation separation, no duplicate scans, no re-mixing of prior wells, and final empty-active-set termination. |
+| **13E** | Supervised physical water-only targeted-mix validation: begin at the conservative one-cycle 20 uL P300 path in one actual 96-well reaction well, then evaluate the separately approved volume escalation. Confirm actual plate geometry, tip handling, reader-tray state, and no unintended movement before any chemistry. | Human-supervised physical inspection only. This does not establish chemical mixing quality or large-batch stability-selection clearance. |
+| **13F** | Reader-acquisition consolidation and small chemistry comparison of plate shake versus targeted pipette mixing, preserving ordinary λmax processing and stability provenance without duplicate reader passes. | Regression plus human review of trajectory reproducibility, time-to-first-observation, λmax impact, practical reader throughput, and chemistry evidence before large-batch stability-directed selection. |
 
 Later follow-ons after the staged targeted-mixing work are stability-aware
 `core3`, stability-aware target-EI or Pareto selection, alternative spectral

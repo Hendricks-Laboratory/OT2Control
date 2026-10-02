@@ -135,6 +135,12 @@ EVENT_TYPES = frozenset({
     'stability_only_companion_models_refreshed',
     'stability_only_batch_completed',
     'stability_only_run_finalized',
+    # Stage 13C records a targeted-mix intent before its Pi packet is sent.
+    # An unacknowledged intent is deliberately terminal evidence, never a
+    # retry authorization. Acknowledgement records preserve the Pi result.
+    'stability_pipette_mix_intent_recorded',
+    'stability_pipette_mix_acknowledged',
+    'stability_pipette_mix_acknowledgement_rejected',
     'hold_entered',
     # Stage 11C2 records a request and any rejected workbook response before
     # the pre-existing terminal/Pi recovery path can act on a valid response.
