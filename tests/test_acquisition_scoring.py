@@ -2975,11 +2975,18 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
     def setUpClass(cls):
         cls.AutoController = _load_auto_controller_methods([
             '_get_auto_batch_pi_transfer_plan',
+            '_get_auto_batch_targeted_mix_preflight_plan',
             '_build_auto_pi_transfer_plan_preflight_request',
             '_validate_auto_main_transfer_plan_preflight',
             '_request_auto_main_transfer_plan_preflight',
             '_preflight_auto_next_batch_on_pi'
-        ])
+        ], extra_namespace={
+            'TARGETED_MIX_DEFAULT_VOLUME_UL': 20.0,
+            'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 1,
+            'canonical_reagent_name': (
+                lambda value: str(value).strip().replace(' ', '_')
+            )
+        })
 
     def _build_controller(self):
         controller = self.AutoController()
@@ -2988,7 +2995,12 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
         controller._round_transfer_volume = lambda volume: float(volume)
         controller.robo_params = {
             'auto_source_volume_check': 'required',
-            'auto_source_reserve_volume_uL': 5.0
+            'auto_source_reserve_volume_uL': 5.0,
+            'auto_stability_mixing_mode': 'plate_shake'
+        }
+        controller.tot_vols = {
+            'autowell0C1.0': 200.0,
+            'autowell1C1.0': 200.0
         }
         return controller
 
@@ -2996,12 +3008,14 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
         return pd.DataFrame([
             {
                 'op': 'transfer',
+                'reagent': 'reagent_a',
                 'chemical_name': 'reagent_aC1.0',
                 'autowell0C1.0': 20.0,
                 'autowell1C1.0': 0.0
             },
             {
                 'op': 'transfer',
+                'reagent': 'Water',
                 'chemical_name': 'WaterC1.0',
                 'autowell0C1.0': 70.0,
                 'autowell1C1.0': 70.0
@@ -3127,6 +3141,51 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
             self._build_protocol_dataframe(),
             'legacy batch'
         ))
+
+    def test_future_targeted_mix_plan_forces_exact_preflight_and_is_auditable(self):
+        '''The dormant future policy must preflight its dedicated P300 tips.'''
+        controller = self._build_controller()
+        controller.robo_params.update({
+            'auto_source_volume_check': 'off',
+            'auto_stability_mixing_mode': 'pipette_mix',
+            'auto_stability_trigger_reagent': 'reagent_a'
+        })
+        protocol_dataframe = self._build_protocol_dataframe()
+        request = controller._build_auto_pi_transfer_plan_preflight_request(
+            protocol_dataframe
+        )
+
+        self.assertEqual(2, request['schema_version'])
+        self.assertEqual([{
+            'wellname': 'autowell0C1.0',
+            'trigger_chemical_name': 'reagent_aC1.0',
+            'mix_volume_uL': 20.0,
+            'cycle_count': 1,
+            'expected_well_volume_uL': 200.0
+        }], request['targeted_mix_plan'])
+
+        result = self._passed_result(request['batch_number'])
+        result['schema_version'] = 2
+        result['targeted_mix_requirements'] = [{
+            'wellname': 'autowell0C1.0',
+            'trigger_chemical_name': 'reagent_aC1.0',
+            'pipette_arm': 'left',
+            'required_new_tips': 1
+        }]
+        controller._request_auto_main_transfer_plan_preflight = (
+            lambda received_request: self.assertEqual(request, received_request)
+            or result
+        )
+
+        audit = controller._preflight_auto_next_batch_on_pi(
+            protocol_dataframe,
+            'future targeted-mix batch'
+        )
+        self.assertEqual(request, audit['request'])
+        self.assertEqual(
+            result['targeted_mix_requirements'],
+            audit['result']['targeted_mix_requirements']
+        )
 
 
 class AutoMainSameContainerRecoveryTests(unittest.TestCase):

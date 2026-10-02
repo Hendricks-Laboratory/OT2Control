@@ -16,6 +16,12 @@ TARGETED_MIX_COMMAND = 'mix_auto_completed_well'
 TARGETED_MIX_ACKNOWLEDGEMENT = 'auto_completed_well_mixed'
 TARGETED_MIX_RECORD_TYPE = 'auto_completed_well_mixed'
 TARGETED_MIX_TIP_POLICY = 'dedicated_discarded'
+# These are deliberately controller-owned fixed safety defaults for the first
+# targeted-mix implementation. They are not worksheet-tunable: the Pi still
+# validates the eventual physical well volume, selected P300 limits, and its
+# conservative fraction immediately before movement.
+TARGETED_MIX_DEFAULT_VOLUME_UL = 20.0
+TARGETED_MIX_DEFAULT_CYCLE_COUNT = 1
 
 
 class AutoStabilityPipetteMixContractError(ValueError):

@@ -157,6 +157,8 @@ from auto_stability_pipette_mix import (
     AutoStabilityPipetteMixContractError,
     TARGETED_MIX_ACKNOWLEDGEMENT,
     TARGETED_MIX_COMMAND,
+    TARGETED_MIX_DEFAULT_CYCLE_COUNT,
+    TARGETED_MIX_DEFAULT_VOLUME_UL,
     validate_targeted_mix_acknowledgement,
     validate_targeted_mix_request
 )
@@ -7323,9 +7325,74 @@ class AutoContr(Controller):
                 })
         return source_plan
 
+    def _get_auto_batch_targeted_mix_preflight_plan(self, rxn_df):
+        '''Return future targeted-mix tip actions without enabling the feature.
+
+        Current Header parsing still accepts only ``plate_shake``. This helper
+        therefore returns an empty plan in every currently executable run.
+        The later Stage-13 scheduler may opt in only after it has selected the
+        paired ``pipette_mix``/``each_completion`` policy. Keeping the exact
+        batch plan next to the existing transfer plan lets the Pi simulate
+        normal and dedicated mixing-tip use in their real interleaved order.
+        '''
+        if self.robo_params.get('auto_stability_mixing_mode') != 'pipette_mix':
+            return []
+        if not isinstance(rxn_df, pd.DataFrame):
+            raise ValueError(
+                'Targeted-mix preflight requires a constructed protocol dataframe.'
+            )
+        trigger_name = canonical_reagent_name(
+            self.robo_params.get('auto_stability_trigger_reagent')
+        ).lower()
+        if not trigger_name:
+            raise ValueError(
+                'Targeted-mix preflight requires a configured trigger reagent.'
+            )
+        target_rows = rxn_df.loc[
+            (rxn_df['op'] == 'transfer')
+            & (rxn_df['reagent'].apply(
+                lambda value: canonical_reagent_name(value).lower()
+            ) == trigger_name)
+        ]
+        if len(target_rows.index) != 1:
+            raise ValueError(
+                'Targeted-mix preflight requires exactly one trigger transfer row.'
+            )
+        trigger_row = target_rows.iloc[0]
+        chemical_name = str(trigger_row.get('chemical_name', '')).strip()
+        if not chemical_name:
+            raise ValueError(
+                'Targeted-mix preflight found a trigger row without chemical_name.'
+            )
+        product_volumes = pd.to_numeric(
+            trigger_row[self._products], errors='coerce'
+        ).fillna(0.0)
+        targeted_mix_plan = []
+        for wellname, volume_uL in product_volumes.items():
+            if volume_uL <= 1e-9:
+                continue
+            expected_well_volume_uL = self.tot_vols.get(wellname)
+            if expected_well_volume_uL is None:
+                raise ValueError(
+                    'Targeted-mix preflight has no expected final volume for {}.'
+                    .format(wellname)
+                )
+            targeted_mix_plan.append({
+                'wellname': str(wellname),
+                'trigger_chemical_name': chemical_name,
+                'mix_volume_uL': TARGETED_MIX_DEFAULT_VOLUME_UL,
+                'cycle_count': TARGETED_MIX_DEFAULT_CYCLE_COUNT,
+                'expected_well_volume_uL': float(expected_well_volume_uL),
+            })
+        if not targeted_mix_plan:
+            raise ValueError(
+                'Targeted-mix preflight found no nonzero trigger transfers.'
+            )
+        return targeted_mix_plan
+
     def _build_auto_pi_transfer_plan_preflight_request(self, rxn_df):
         '''Returns the versioned, non-mutating next-batch Pi request.'''
-        return {
+        request = {
             'schema_version': 1,
             'batch_number': int(getattr(self, 'batch_num', 0)),
             'reserve_volume_uL': float(
@@ -7333,6 +7400,13 @@ class AutoContr(Controller):
             ),
             'source_plan': self._get_auto_batch_pi_transfer_plan(rxn_df)
         }
+        targeted_mix_plan = self._get_auto_batch_targeted_mix_preflight_plan(
+            rxn_df
+        )
+        if targeted_mix_plan:
+            request['schema_version'] = 2
+            request['targeted_mix_plan'] = targeted_mix_plan
+        return request
 
     def _validate_auto_main_transfer_plan_preflight(self, result, request):
         '''Validates the Pi's exact preflight result before execution begins.'''
@@ -7346,11 +7420,13 @@ class AutoContr(Controller):
             'tip_requirements',
             'deficits'
         }
+        if request['schema_version'] == 2:
+            required_keys.add('targeted_mix_requirements')
         if not isinstance(result, dict) or set(result) != required_keys:
             raise RuntimeError(
                 'Auto Pi transfer-plan preflight returned an invalid schema.'
             )
-        if result['schema_version'] != 1:
+        if result['schema_version'] != request['schema_version']:
             raise RuntimeError(
                 'Auto Pi transfer-plan preflight returned an unsupported '
                 'schema version.'
@@ -7381,6 +7457,12 @@ class AutoContr(Controller):
                     'Auto Pi transfer-plan preflight returned invalid {} '
                     'data.'.format(field_name)
                 )
+        if request['schema_version'] == 2 and not isinstance(
+                result['targeted_mix_requirements'], list):
+            raise RuntimeError(
+                'Auto Pi transfer-plan preflight returned invalid targeted '
+                'mix requirement data.'
+            )
         if result['passed'] and result['deficits']:
             raise RuntimeError(
                 'Auto Pi transfer-plan preflight approved a plan while '
@@ -7414,10 +7496,12 @@ class AutoContr(Controller):
 
     def _preflight_auto_next_batch_on_pi(self, rxn_df, context_label):
         '''Fail-closes on an exact Pi source/tip preflight when protection is on.'''
-        if (
-            self.robo_params.get('auto_source_volume_check', 'off')
-            != 'required'
-        ):
+        targeted_mix_required = (
+            self.robo_params.get('auto_stability_mixing_mode') == 'pipette_mix'
+        )
+        if not targeted_mix_required and (
+                self.robo_params.get('auto_source_volume_check', 'off')
+                != 'required'):
             return None
 
         request = self._build_auto_pi_transfer_plan_preflight_request(rxn_df)

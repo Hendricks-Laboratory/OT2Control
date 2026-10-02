@@ -736,6 +736,31 @@ scheduler must make retirements durable, obtain the Stage-13C targeted-mix
 acknowledgement, reserve the raw scan, and only then operate the reader; no
 runtime call site invokes this contract yet.
 
+### Stage 13D-B targeted-mix resource preflight — 2026-10-02
+
+Stage 13D-B extends the existing exact next-batch Pi preflight with a
+backward-compatible schema-v2 request only for the future `pipette_mix`
+policy. It interleaves one dedicated P300 mixing-tip simulation immediately
+after each planned final-trigger transfer, preserving the same dirty-tip
+replacement and post-mix fresh-clean-tip policy that the independently
+validated Stage-13B action will use. The result retains an auditable
+per-well `targeted_mix_requirements` record alongside ordinary source and tip
+requirements, and fails before any transfer when aggregate rack inventory is
+insufficient.
+
+Schema-v1 requests and responses are unchanged for all current
+`plate_shake` runs. The current Header parser still rejects `pipette_mix`, so
+this stage sends no new Pi packet in an executable Auto run, moves no robot
+hardware, consumes no tips, and does not change reader, source, recipe, QC,
+or model behavior. The Pi validates that each requested mix is bound to an
+ordered final-trigger transfer and that its 20 uL one-cycle conservative plan
+fits the expected well volume; the later physical action will still perform
+the stricter live plate, well-history, pipette, and actual-volume checks
+immediately before movement. Python 3.9 compilation, static duplicate-method
+checks, controller contract tests, Pi preflight/targeted-mix tests, malformed
+request rejection, non-mutation tests, and diff checks passed. No physical or
+controlled dry-debug claim is made at this preflight-only stage.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
