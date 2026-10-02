@@ -2070,7 +2070,7 @@ class OT2Robot():
         # discarded before a fresh clean tip is picked up for later work.
         pipette_details['last_used'] = plan['wellname']
         self.protocol._commands.append(
-            'HEAD: {} : targeted Auto mix {} at {}:{} using {}uL x{}'
+            'HEAD: {} : targeted Auto mix started {} at {}:{} using {}uL x{}'
             .format(
                 datetime.now(pytz.timezone('US/Pacific')).strftime(
                     '%d-%b-%Y %H:%M:%S:%f'
@@ -2080,16 +2080,32 @@ class OT2Robot():
                 plan['cycle_count']
             )
         )
-        try:
-            target.mix_targeted(
-                pipette, plan['mix_volume_uL'], plan['cycle_count']
-            )
-        finally:
-            if bool(pipette.has_tip):
-                pipette.drop_tip()
+        # Once ``mix_targeted`` has issued a liquid-handling operation, do
+        # not automatically issue a follow-on disposal or replacement move if
+        # it faults.  The existing outer error boundary must stop and preserve
+        # that indeterminate physical state for human review.
+        target.mix_targeted(
+            pipette, plan['mix_volume_uL'], plan['cycle_count']
+        )
 
-        pipette_details['last_used'] = 'clean'
+        # Only a completed mix receives the normal dedicated-tip disposal and
+        # clean-tip restoration.  If either follow-up action faults, the
+        # success audit record is intentionally not written.
+        if bool(pipette.has_tip):
+            pipette.drop_tip()
         pipette.pick_up_tip()
+        pipette_details['last_used'] = 'clean'
+        self.protocol._commands.append(
+            'HEAD: {} : targeted Auto mix completed {} at {}:{} using {}uL x{}'
+            .format(
+                datetime.now(pytz.timezone('US/Pacific')).strftime(
+                    '%d-%b-%Y %H:%M:%S:%f'
+                ),
+                plan['wellname'], plan['expected_deck_pos'],
+                plan['expected_loc'], plan['mix_volume_uL'],
+                plan['cycle_count']
+            )
+        )
 
     def _auto_completed_well_mix_response(self, request):
         '''Creates a JSON-safe acknowledgement shell for the targeted mix API.'''

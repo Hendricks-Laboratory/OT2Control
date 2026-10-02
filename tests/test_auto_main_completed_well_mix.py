@@ -36,12 +36,15 @@ class _TargetWell(_Well96):
         self._well = object()
         self.labware = object()
         self.targeted_mix_calls = []
+        self.raise_on_targeted_mix = False
 
     def get_well(self):
         return self._well
 
     def mix_targeted(self, pipette, mix_volume_uL, cycle_count):
         self.targeted_mix_calls.append((pipette, mix_volume_uL, cycle_count))
+        if self.raise_on_targeted_mix:
+            raise RuntimeError('synthetic targeted-well mix fault')
 
 
 class _TipWell(object):
@@ -337,7 +340,28 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         self.assertTrue(pipette.has_tip)
         self.assertEqual('clean', robot.pipettes['right']['last_used'])
         self.assertEqual(200.0, target.vol)
+        self.assertEqual(2, len(robot.protocol._commands))
+        self.assertIn('targeted Auto mix started', robot.protocol._commands[0])
+        self.assertIn('targeted Auto mix completed', robot.protocol._commands[1])
+
+    def test_targeted_mix_fault_issues_no_post_fault_tip_motion(self):
+        robot, target, pipette = self._robot()
+        target.raise_on_targeted_mix = True
+        plan = robot._build_auto_completed_well_mix_plan(self._request())
+
+        with self.assertRaisesRegex(RuntimeError, 'synthetic targeted-well mix fault'):
+            robot._execute_auto_completed_well_mix_plan(plan)
+
+        self.assertEqual([], pipette.calls)
+        self.assertEqual([
+            (pipette, 100.0, 3)
+        ], target.targeted_mix_calls)
+        self.assertTrue(pipette.has_tip)
+        self.assertEqual('autowell7C1.0', robot.pipettes['right']['last_used'])
+        self.assertEqual(200.0, target.vol)
         self.assertEqual(1, len(robot.protocol._commands))
+        self.assertIn('targeted Auto mix started', robot.protocol._commands[0])
+        self.assertNotIn('completed', robot.protocol._commands[0])
 
     def test_dirty_tip_requires_two_fresh_tips_and_never_reuses_it_for_mix(self):
         robot, _, pipette = self._robot(

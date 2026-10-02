@@ -96,9 +96,12 @@ physical dry debug.
   Pi execution safety bound, not a chemistry optimization setting; future
   controller work must choose a requested volume inside it.
 - Mixing uses a dedicated clean tip for the single verified target well and
-  discards it immediately afterwards. A retained clean tip may serve as that
-  dedicated tip; a contaminated or absent tip is replaced before mixing. The
-  Pi reserves enough unused tips to restore a clean tip after the operation.
+  discards it immediately afterwards **only after a completed mix**. A retained
+  clean tip may serve as that dedicated tip; a contaminated or absent tip is
+  replaced before mixing. The Pi reserves enough unused tips to restore a clean
+  tip after a completed operation. If the mix faults, it issues no automatic
+  post-fault disposal or replacement motion; the existing error boundary stops
+  in that indeterminate physical state for human review.
 - The only new liquid-handling primitive is `Well96.mix_targeted`. It repeats
   the established repository `pipette.mix(1, ...)` primitive at the existing
   96-well 1 mm aspiration and dispense clearance, restores prior pipette
@@ -111,20 +114,23 @@ physical dry debug.
   reaction-well volume accounting, reader, shaking, scheduler, or model.
 - A validation failure sends an explicit rejected acknowledgement without
   motion. If physical execution begins and then raises, the Pi deliberately
-  emits no success-like acknowledgement; the existing error boundary records
-  the fault and the future controller must fail closed rather than replaying
-  the mix.
+  emits no success-like acknowledgement or automatic post-fault tip motion;
+  the existing error boundary records the fault and the future controller must
+  fail closed rather than replaying the mix. The command audit records a mix
+  as `started` before the liquid operation and as `completed` only after the
+  mix and clean-tip restoration both succeed.
 
 Hardware-free validation on the laboratory PC used the system Python
 `3.9.6`: compilation of the changed Pi files and focused packet/snapshot,
-source-preflight, and targeted-mix stub tests passed (33 tests). The stubs
+source-preflight, and targeted-mix stub tests passed (34 tests). The stubs
 verify append-only packet identifiers, ghost registration, request schema,
 stale/mismatched target rejection before motion, final-trigger validation,
 tip-shortage rejection without state mutation, registered-plate identity,
 live-instrument range and capacity-agreement rejection, one-target mix
-execution, dedicated-tip discard/replacement, unchanged target volume, exact
-1 mm targeted-mix geometry, one-cycle repetition, and clearance restoration
-after both success and a synthetic pipette fault. This is static
+execution, dedicated-tip discard/replacement after success only, no post-fault
+tip motion after a synthetic target-well mix fault, unchanged target volume,
+exact 1 mm targeted-mix geometry, one-cycle repetition, and clearance
+restoration after both success and a synthetic pipette fault. This is static
 and synthetic evidence only. Before Stage 13C can
 use the capability, the
 exact Auto-main commit needs its established bundle deployment and a human
