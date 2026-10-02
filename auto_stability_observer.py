@@ -19,14 +19,21 @@ import os
 import tempfile
 import time
 
+from auto_stability_per_trigger import (
+    AutoStabilityPerTriggerError,
+    build_per_trigger_active_set,
+    normalize_physical_identity,
+)
+
 
 # Version 3 adds the logical-well -> physical-reader-location mapping used by
 # Stage 12D to reload each immutable raw scan without guessing from a later
 # plate state. Every manifest is run-local, so no in-place migration is needed.
-# Version 4 adds structured targeted-pipette-mix provenance. Existing
-# reporting readers ignore non-scan event fields and continue to read older
-# run-local v3 manifests through their named columns.
-STABILITY_OBSERVER_SCHEMA_VERSION = 4
+# Version 4 adds structured targeted-pipette-mix provenance. Version 5 adds
+# an explicit registered physical identity for the future Stage-13D
+# cross-batch active-set contract. Existing reporting readers ignore fields
+# they do not need and continue to read older run-local manifests by name.
+STABILITY_OBSERVER_SCHEMA_VERSION = 5
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -48,12 +55,17 @@ MANIFEST_COLUMNS = (
     'trigger_transfer_dispatched_at_utc',
     'trigger_transfer_completion_observed_at_utc',
     'trigger_completion_time_basis',
+    'trigger_completion_sequence',
     'targeted_mix_action_id',
     'targeted_mix_pipette_arm',
     'targeted_mix_volume_uL',
     'targeted_mix_cycle_count',
     'targeted_mix_tip_policy',
     'targeted_mix_acknowledged_at_utc',
+    'plate_generation',
+    'plate_mapping_revision',
+    'plate_deck_pos',
+    'reader_location',
     'raw_scan_id',
     'raw_scan_basename',
     'raw_scan_relative_path',
@@ -117,6 +129,7 @@ class AutoStabilityObserver:
         self._monotonic_clock = monotonic_clock or time.monotonic
         self._event_sequence = 0
         self._scan_sequence = 0
+        self._trigger_completion_sequence = 0
         self._active_wells = {}
         self._targeted_mix_actions = {}
         self._events = []
@@ -240,6 +253,7 @@ class AutoStabilityObserver:
             'trigger_transfer_dispatched_at_utc': dispatched_at_utc,
             'trigger_transfer_completion_observed_at_utc': None,
             'trigger_completion_time_basis': 'unconfirmed_dispatch',
+            'trigger_completion_sequence': None,
             # Monotonic timing is intentionally in-memory only. Stage 10's
             # fail-closed interruption behavior does not resume a partially
             # observed trajectory, so it never needs to survive a restart.
@@ -247,6 +261,13 @@ class AutoStabilityObserver:
             'last_observation_monotonic_s': None,
             'last_scan_completed_monotonic_s': None,
             'observation_count': 0,
+            # Physical identity is registered separately only by the future
+            # Stage-13D scheduler after it has refreshed the reader mapping.
+            # Stage-12 behavior deliberately does not depend on these fields.
+            'plate_generation': None,
+            'plate_mapping_revision': None,
+            'deck_pos': None,
+            'reader_location': None,
         }
         return self._append_event(
             'trigger_transfer_dispatched',
@@ -288,9 +309,13 @@ class AutoStabilityObserver:
             )
 
         completed_at_utc = self._now()
+        self._trigger_completion_sequence += 1
         record['activation_status'] = ACTIVATION_STATUS_ACTIVE
         record['trigger_transfer_completion_observed_at_utc'] = completed_at_utc
         record['trigger_completion_time_basis'] = completion_time_basis
+        record['trigger_completion_sequence'] = (
+            self._trigger_completion_sequence
+        )
         record['activation_monotonic_s'] = self._monotonic_clock()
         record['last_observation_monotonic_s'] = None
         record['last_scan_completed_monotonic_s'] = None
@@ -307,6 +332,7 @@ class AutoStabilityObserver:
             ),
             trigger_transfer_completion_observed_at_utc=completed_at_utc,
             trigger_completion_time_basis=completion_time_basis,
+            trigger_completion_sequence=record['trigger_completion_sequence'],
             notes=(
                 'The controller observed the configured completion point '
                 'after the trigger command. This establishes a per-well '
@@ -322,6 +348,93 @@ class AutoStabilityObserver:
             for record in self._active_wells.values()
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
+
+    def register_stage13_physical_identity(
+            self,
+            wellname,
+            plate_generation,
+            plate_mapping_revision,
+            deck_pos,
+            reader_location):
+        '''Register one refreshed physical identity for a future Stage-13 scan.
+
+        This records only a controller-resolved mapping; it does not move a
+        plate, reserve a scan, send a Pi packet, or alter the Stage-12 active
+        set. A later per-trigger scheduler must register every active well
+        before it asks the strict cross-batch planner to scan them together.
+        '''
+        wellname = self._require_wellname(wellname)
+        record = self._active_wells.get(wellname)
+        if record is None or record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
+            raise AutoStabilityObserverError(
+                'Physical identity requires an active completed trigger well: {}.'
+                .format(wellname)
+            )
+        identity_record = {
+            'plate_generation': plate_generation,
+            'plate_mapping_revision': plate_mapping_revision,
+            'deck_pos': deck_pos,
+            'reader_location': reader_location,
+        }
+        try:
+            identity = normalize_physical_identity(identity_record)
+        except AutoStabilityPerTriggerError as exc:
+            raise AutoStabilityObserverError(
+                'Invalid Stage-13 physical identity for {}: {}.'.format(
+                    wellname, exc
+                )
+            )
+        # The planner's canonicalized identity is preferable to duplicating
+        # parser rules here.
+        record['plate_generation'] = identity['plate_generation']
+        record['plate_mapping_revision'] = identity['plate_mapping_revision']
+        record['deck_pos'] = identity['deck_pos']
+        record['reader_location'] = identity['reader_location']
+        return self._append_event(
+            'stage13_physical_identity_registered',
+            batch_number=record['batch_number'],
+            wellname=wellname,
+            activation_status=ACTIVATION_STATUS_ACTIVE,
+            trigger_completion_sequence=record['trigger_completion_sequence'],
+            plate_generation=record['plate_generation'],
+            plate_mapping_revision=record['plate_mapping_revision'],
+            plate_deck_pos=record['deck_pos'],
+            reader_location=record['reader_location'],
+            notes=(
+                'Registered the refreshed logical-well to physical plate and '
+                'reader identity for a future Stage-13 per-trigger scan. No '
+                'reader reservation, plate motion, or robot command occurred.'
+            )
+        )
+
+    def plan_stage13_per_trigger_active_set(
+            self,
+            triggering_wellname,
+            now_monotonic_s,
+            monitoring_policy,
+            minimum_peak_absorbance,
+            observations_by_well=None):
+        '''Return a non-mutating cross-batch active-set plan for Stage 13D.
+
+        The plan is deliberately not appended to the manifest yet: it is an
+        in-memory decision boundary, and the later scheduler must first make
+        lifecycle retirements durable and then reserve the actual raw scan.
+        Keeping that sequence separate prevents this foundation from claiming
+        an unperformed reader acquisition or changing Stage-12 behavior.
+        '''
+        try:
+            return build_per_trigger_active_set(
+                active_well_records=self.get_active_wells(),
+                triggering_wellname=triggering_wellname,
+                now_monotonic_s=now_monotonic_s,
+                monitoring_policy=monitoring_policy,
+                minimum_peak_absorbance=minimum_peak_absorbance,
+                observations_by_well=observations_by_well,
+            )
+        except AutoStabilityPerTriggerError as exc:
+            raise AutoStabilityObserverError(
+                'Cannot build Stage-13 per-trigger active set: {}.'.format(exc)
+            )
 
     def record_targeted_pipette_mix_intent(self, request, batch_number):
         '''Durably record a future targeted-mix intent before Pi dispatch.

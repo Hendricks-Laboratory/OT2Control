@@ -709,9 +709,32 @@ only an exact successful Pi acknowledgement. A timeout, malformed packet,
 rejection, or restart leaves a durable unacknowledged/rejected record and
 raises; the action is never resent automatically. The existing Header parser
 continues to accept only `plate_shake`, so this dormant contract cannot change
-current Stage-12 transfer, reader, or mixing behavior. The observer manifest
-is now schema v4 solely to add structured targeted-mix provenance; reporting
-continues to read earlier v3 manifests by named columns.
+current Stage-12 transfer, reader, or mixing behavior. Stage 13C raised the
+observer manifest to schema v4 solely to add structured targeted-mix
+provenance; reporting continues to read earlier v3 manifests by named columns.
+
+### Stage 13D-A cross-batch active-set contract — 2026-10-02
+
+Stage 13D-A adds only a pure, dormant planning boundary for the later
+per-trigger scheduler.  It does not add a Header option, Pi packet dispatch,
+reader operation, plate motion, targeted mix, transfer, model update, or
+ordinary Stage-12 behavior change.  `auto_stability_per_trigger.py` accepts
+only active completed wells with an explicitly registered physical identity
+(plate generation, mapping revision, deck position, and reader coordinate),
+evaluates every well through the Stage-13A lifecycle policy, and returns one
+ordered `each_completion` scan plan.
+
+The plan deliberately allows wells from earlier batches **only** when all
+still-active wells resolve to the same physical plate identity. It includes
+decision-ready wells until they retire, reports lifecycle-retired wells
+explicitly rather than dropping them silently, and refuses mixed generations,
+mapping revisions, deck positions, duplicate reader locations, missing
+identity, future activation times, or unknown trajectory evidence. The
+observer's schema-v5 identity-registration event records controller-resolved
+mapping provenance without claiming that a scan occurred. A later 13D-B
+scheduler must make retirements durable, obtain the Stage-13C targeted-mix
+acknowledgement, reserve the raw scan, and only then operate the reader; no
+runtime call site invokes this contract yet.
 
 ### Stage 12 optical-stability planning record — revised future stages
 

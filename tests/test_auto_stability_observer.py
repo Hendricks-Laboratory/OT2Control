@@ -59,7 +59,7 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(
             event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
         )
-        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 4)
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 5)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
@@ -338,6 +338,48 @@ class AutoStabilityObserverTests(unittest.TestCase):
                 'action_id': 'targeted-mix-001',
                 'wellname': 'autowell0C2.0'
             })
+
+    def test_stage13_identity_and_cross_batch_plan_are_dormant_and_explicit(self):
+        monotonic_time = [10.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-STAGE13D',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-10-02T12:00:00+00:00',
+            monotonic_clock=lambda: monotonic_time[0]
+        )
+        for batch_number, wellname, reader_location in (
+                (0, 'autowell0C1.0', 'A1'),
+                (1, 'autowell1C1.0', 'B1')):
+            observer.record_trigger_transfer_dispatched(
+                batch_number, wellname, 20.0, batch_number + 1
+            )
+            observer.confirm_trigger_transfer_completed(wellname)
+            observer.register_stage13_physical_identity(
+                wellname, 2, 7, 4, reader_location
+            )
+            monotonic_time[0] += 5.0
+
+        policy = {
+            'decision_horizon_s': 30.0,
+            'max_observation_window_s': 90.0,
+            'adaptive_retirement_enabled': False,
+            'plateau_min_tail_observation_count': 3,
+            'plateau_consecutive_interval_count': 2,
+            'plateau_max_absorbance_slope_per_s': 0.002,
+        }
+        plan = observer.plan_stage13_per_trigger_active_set(
+            'autowell1C1.0', 20.0, policy, 0.10
+        )
+
+        self.assertEqual(plan['scan_wellnames'], [
+            'autowell0C1.0', 'autowell1C1.0'
+        ])
+        self.assertEqual(plan['active_batch_numbers'], [0, 1])
+        self.assertEqual(
+            self._manifest_rows()[-1]['event_type'],
+            'stage13_physical_identity_registered'
+        )
 
 
 if __name__ == '__main__':
