@@ -22,6 +22,7 @@ import time
 from auto_stability_per_trigger import (
     AutoStabilityPerTriggerError,
     build_per_trigger_active_set,
+    build_per_trigger_post_mix_active_set,
     normalize_physical_identity,
 )
 
@@ -436,6 +437,62 @@ class AutoStabilityObserver:
                 'Cannot build Stage-13 per-trigger active set: {}.'.format(exc)
             )
 
+    def plan_stage13_post_mix_active_set(
+            self,
+            triggering_wellname,
+            now_monotonic_s,
+            monitoring_policy,
+            minimum_peak_absorbance,
+            observations_by_well=None):
+        '''Return a future scan plan only after all active mixes are acknowledged.
+
+        This is the Stage-13D-C pure planning boundary. It deliberately does
+        not reserve a reader path, append a scan event, dispatch a Pi packet,
+        or change ordinary Stage-12 behavior. The later runtime scheduler
+        will call it after a Stage-13C acknowledged mix for the new well.
+        '''
+        try:
+            return build_per_trigger_post_mix_active_set(
+                active_well_records=self.get_active_wells(),
+                triggering_wellname=triggering_wellname,
+                now_monotonic_s=now_monotonic_s,
+                monitoring_policy=monitoring_policy,
+                minimum_peak_absorbance=minimum_peak_absorbance,
+                acknowledged_mix_actions_by_well=(
+                    self._get_acknowledged_targeted_mix_actions_by_well()
+                ),
+                observations_by_well=observations_by_well,
+            )
+        except AutoStabilityPerTriggerError as exc:
+            raise AutoStabilityObserverError(
+                'Cannot build Stage-13 post-mix active set: {}.'.format(exc)
+            )
+
+    def _get_acknowledged_targeted_mix_actions_by_well(self):
+        '''Expose only one confirmed targeted-mix action per active well.'''
+        actions_by_well = {}
+        for action_id, action in self._targeted_mix_actions.items():
+            if not action.get('acknowledged'):
+                continue
+            wellname = self._require_wellname(action.get('wellname'))
+            active_record = self._active_wells.get(wellname)
+            if (active_record is None
+                    or active_record['activation_status']
+                    != ACTIVATION_STATUS_ACTIVE):
+                continue
+            if wellname in actions_by_well:
+                raise AutoStabilityObserverError(
+                    'Multiple acknowledged targeted mixes exist for active '
+                    'well {}.'.format(wellname)
+                )
+            actions_by_well[wellname] = {
+                'action_id': action_id,
+                'wellname': wellname,
+                'batch_number': action.get('batch_number'),
+                'acknowledged': True
+            }
+        return actions_by_well
+
     def record_targeted_pipette_mix_intent(self, request, batch_number):
         '''Durably record a future targeted-mix intent before Pi dispatch.
 
@@ -469,6 +526,13 @@ class AutoStabilityObserver:
             raise AutoStabilityObserverError(
                 'Targeted pipette-mix action {} was already recorded.'
                 .format(action_id)
+            )
+        if any(
+                existing_action.get('wellname') == wellname
+                for existing_action in self._targeted_mix_actions.values()):
+            raise AutoStabilityObserverError(
+                'Targeted pipette mix was already recorded for active well {}.'
+                .format(wellname)
             )
         self._targeted_mix_actions[action_id] = {
             'wellname': wellname,

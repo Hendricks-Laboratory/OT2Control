@@ -310,6 +310,12 @@ class AutoStabilityObserverTests(unittest.TestCase):
             'cycle_count': 1
         }
         intent = self.observer.record_targeted_pipette_mix_intent(request, 0)
+        duplicate_request = dict(request)
+        duplicate_request['action_id'] = 'targeted-mix-duplicate'
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'already recorded'):
+            self.observer.record_targeted_pipette_mix_intent(
+                duplicate_request, 0
+            )
         acknowledgement = self.observer.record_targeted_pipette_mix_acknowledged({
             'action_id': 'targeted-mix-001',
             'wellname': 'autowell0C2.0',
@@ -380,6 +386,40 @@ class AutoStabilityObserverTests(unittest.TestCase):
             self._manifest_rows()[-1]['event_type'],
             'stage13_physical_identity_registered'
         )
+
+        for batch_number, wellname in (
+                (0, 'autowell0C1.0'),
+                (1, 'autowell1C1.0')):
+            action_id = 'targeted-mix-{}'.format(wellname)
+            observer.record_targeted_pipette_mix_intent({
+                'action_id': action_id,
+                'wellname': wellname,
+                'mix_volume_uL': 20.0,
+                'cycle_count': 1
+            }, batch_number)
+            observer.record_targeted_pipette_mix_acknowledged({
+                'action_id': action_id,
+                'wellname': wellname,
+                'pipette_arm': 'left',
+                'mix_volume_uL': 20.0,
+                'cycle_count': 1,
+                'tip_policy': 'dedicated_discarded',
+                'completed_at_utc': '2026-10-02T12:00:10+00:00'
+            })
+
+        event_count_before_plan = len(self._manifest_rows())
+        post_mix_plan = observer.plan_stage13_post_mix_active_set(
+            'autowell1C1.0', 20.0, policy, 0.10
+        )
+        self.assertTrue(post_mix_plan['targeted_mix_acknowledgement_required'])
+        self.assertEqual(post_mix_plan['scan_wellnames'], [
+            'autowell0C1.0', 'autowell1C1.0'
+        ])
+        self.assertEqual(post_mix_plan['targeted_mix_action_ids'], [
+            'targeted-mix-autowell0C1.0',
+            'targeted-mix-autowell1C1.0'
+        ])
+        self.assertEqual(event_count_before_plan, len(self._manifest_rows()))
 
 
 if __name__ == '__main__':

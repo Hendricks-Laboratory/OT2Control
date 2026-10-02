@@ -731,7 +731,7 @@ explicitly rather than dropping them silently, and refuses mixed generations,
 mapping revisions, deck positions, duplicate reader locations, missing
 identity, future activation times, or unknown trajectory evidence. The
 observer's schema-v5 identity-registration event records controller-resolved
-mapping provenance without claiming that a scan occurred. A later 13D-B
+mapping provenance without claiming that a scan occurred. A later 13D-C
 scheduler must make retirements durable, obtain the Stage-13C targeted-mix
 acknowledgement, reserve the raw scan, and only then operate the reader; no
 runtime call site invokes this contract yet.
@@ -760,6 +760,29 @@ immediately before movement. Python 3.9 compilation, static duplicate-method
 checks, controller contract tests, Pi preflight/targeted-mix tests, malformed
 request rejection, non-mutation tests, and diff checks passed. No physical or
 controlled dry-debug claim is made at this preflight-only stage.
+
+### Stage 13D-C acknowledged-mix scan-planning contract — 2026-10-02
+
+Stage 13D-C adds a stricter, still-pure companion to the Stage-13D-A planner.
+Before a future `each_completion` reader acquisition can be planned, every
+active well must have exactly one successful Stage-13C targeted-mix
+acknowledgement with the same logical well and batch identity. The returned
+plan preserves the already-validated completion ordering, physical plate
+identity, lifecycle retirement, and nonduplicative reader layout, while also
+recording the acknowledged action ID associated with each planned well and
+the triggering well. A missing, unacknowledged, duplicate, mismatched-well,
+or mismatched-batch action fails closed before a reader reservation can exist.
+
+This contract writes no new manifest event when it plans: the existing
+acknowledgement is already durable evidence, and a later runtime stage must
+make lifecycle retirement durable, reserve an immutable raw path, and only
+then operate the reader. It does not enable the Header values, send a Pi
+packet, move a pipette, consume a tip, shake or move a plate, scan a reader,
+change recipes/models/QC, or alter the validated `plate_shake` scheduler.
+Python 3.9 compilation, pure planner/observer regression tests, the focused
+Stage-13C handshake tests, the 92-test stability suite, AST duplicate-method
+checks, and diff checks passed. No dry-debug or physical-execution claim is
+made at this planning-only stage.
 
 ### Stage 12 optical-stability planning record — revised future stages
 

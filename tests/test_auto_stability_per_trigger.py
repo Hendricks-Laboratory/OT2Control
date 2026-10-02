@@ -7,6 +7,7 @@ from auto_stability_per_trigger import (
     AutoStabilityPerTriggerError,
     PER_TRIGGER_ACTIVE_SET_SCHEMA_VERSION,
     build_per_trigger_active_set,
+    build_per_trigger_post_mix_active_set,
 )
 
 
@@ -39,7 +40,72 @@ def _record(wellname, batch_number, activation_time, location, **overrides):
     return record
 
 
+def _acknowledged_actions(records):
+    return {
+        record['wellname']: {
+            'action_id': 'targeted-mix-{}'.format(record['wellname']),
+            'wellname': record['wellname'],
+            'batch_number': record['batch_number'],
+            'acknowledged': True,
+        }
+        for record in records
+    }
+
+
 class PerTriggerActiveSetTests(unittest.TestCase):
+    def test_post_mix_plan_requires_acknowledgements_for_each_active_well(self):
+        records = [
+            _record('autowell0C1.0', 0, 0.0, 'A1'),
+            _record('autowell1C1.0', 1, 20.0, 'B1'),
+        ]
+        plan = build_per_trigger_post_mix_active_set(
+            records,
+            'autowell1C1.0',
+            25.0,
+            _policy(),
+            0.10,
+            _acknowledged_actions(records),
+        )
+
+        self.assertTrue(plan['targeted_mix_acknowledgement_required'])
+        self.assertEqual(
+            [
+                'targeted-mix-autowell0C1.0',
+                'targeted-mix-autowell1C1.0',
+            ],
+            plan['targeted_mix_action_ids']
+        )
+        self.assertEqual(
+            'targeted-mix-autowell1C1.0',
+            plan['triggering_mix_action_id']
+        )
+
+    def test_post_mix_plan_rejects_missing_unacknowledged_or_wrong_batch_mix(self):
+        records = [
+            _record('autowell0C1.0', 0, 0.0, 'A1'),
+            _record('autowell1C1.0', 1, 20.0, 'B1'),
+        ]
+        actions = _acknowledged_actions(records)
+        actions.pop('autowell0C1.0')
+        with self.assertRaisesRegex(AutoStabilityPerTriggerError, 'match'):
+            build_per_trigger_post_mix_active_set(
+                records, 'autowell1C1.0', 25.0, _policy(), 0.10, actions
+            )
+
+        actions = _acknowledged_actions(records)
+        actions['autowell1C1.0']['acknowledged'] = False
+        with self.assertRaisesRegex(AutoStabilityPerTriggerError, 'not acknowledged'):
+            build_per_trigger_post_mix_active_set(
+                records, 'autowell1C1.0', 25.0, _policy(), 0.10, actions
+            )
+
+        actions = _acknowledged_actions(records)
+        actions['autowell1C1.0']['batch_number'] = 0
+        with self.assertRaisesRegex(AutoStabilityPerTriggerError, 'batch mismatch'):
+            build_per_trigger_post_mix_active_set(
+                records, 'autowell1C1.0', 25.0, _policy(), 0.10, actions
+            )
+
     def test_cross_batch_plan_keeps_prior_active_wells_and_new_trigger(self):
         plan = build_per_trigger_active_set(
             [

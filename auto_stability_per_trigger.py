@@ -351,3 +351,125 @@ def build_per_trigger_active_set(
         'retired_wellnames': retired_wellnames,
         'well_lifecycles': lifecycles,
     }
+
+
+def _normalize_acknowledged_targeted_mix_actions(
+        active_well_records, acknowledged_mix_actions_by_well):
+    '''Bind every active future well to exactly one completed mix action.
+
+    The Stage-13D reader plan is valid only after the Pi has positively
+    acknowledged the targeted mix for every well that could be included. This
+    is intentionally stricter than the Stage-13D-A planner: it is a separate
+    future boundary so current plate-shake callers retain their validated
+    contract unchanged.
+    '''
+    if not isinstance(acknowledged_mix_actions_by_well, dict):
+        raise AutoStabilityPerTriggerError(
+            'acknowledged_mix_actions_by_well must be a dictionary.'
+        )
+    active_by_well = {}
+    for record in active_well_records:
+        wellname = _require_nonblank_text(record.get('wellname'), 'wellname')
+        active_by_well[wellname] = record
+
+    if set(acknowledged_mix_actions_by_well) != set(active_by_well):
+        missing = sorted(set(active_by_well) - set(
+            acknowledged_mix_actions_by_well
+        ))
+        unexpected = sorted(set(acknowledged_mix_actions_by_well) - set(
+            active_by_well
+        ))
+        raise AutoStabilityPerTriggerError(
+            'Targeted-mix acknowledgements must match active wells exactly; '
+            'missing={}, unexpected={}.'.format(missing, unexpected)
+        )
+
+    normalized = {}
+    seen_action_ids = set()
+    for wellname, action in acknowledged_mix_actions_by_well.items():
+        if not isinstance(action, dict):
+            raise AutoStabilityPerTriggerError(
+                'Targeted-mix acknowledgement for {} must be a dictionary.'
+                .format(wellname)
+            )
+        action_id = _require_nonblank_text(
+            action.get('action_id'),
+            'targeted mix action_id for {}'.format(wellname)
+        )
+        if action_id in seen_action_ids:
+            raise AutoStabilityPerTriggerError(
+                'Targeted-mix acknowledgement action_id {} is reused.'
+                .format(action_id)
+            )
+        if _require_nonblank_text(
+                action.get('wellname'),
+                'targeted mix acknowledgement wellname'
+        ) != wellname:
+            raise AutoStabilityPerTriggerError(
+                'Targeted-mix acknowledgement action {} changed its well.'
+                .format(action_id)
+            )
+        if action.get('acknowledged') is not True:
+            raise AutoStabilityPerTriggerError(
+                'Targeted-mix action {} for {} is not acknowledged.'
+                .format(action_id, wellname)
+            )
+        action_batch = _require_nonnegative_integer(
+            action.get('batch_number'),
+            'targeted mix batch_number for {}'.format(wellname)
+        )
+        record_batch = _require_nonnegative_integer(
+            active_by_well[wellname].get('batch_number'),
+            'active well batch_number for {}'.format(wellname)
+        )
+        if action_batch != record_batch:
+            raise AutoStabilityPerTriggerError(
+                'Targeted-mix action {} has a batch mismatch for {}.'
+                .format(action_id, wellname)
+            )
+        seen_action_ids.add(action_id)
+        normalized[wellname] = {
+            'action_id': action_id,
+            'wellname': wellname,
+            'batch_number': action_batch,
+            'acknowledged': True
+        }
+    return normalized
+
+
+def build_per_trigger_post_mix_active_set(
+        active_well_records,
+        triggering_wellname,
+        now_monotonic_s,
+        monitoring_policy,
+        minimum_peak_absorbance,
+        acknowledged_mix_actions_by_well,
+        observations_by_well=None):
+    '''Build a future per-trigger reader plan only after every mix is confirmed.
+
+    This is a pure contract. It neither sends a mix packet nor reserves or
+    starts a reader acquisition. The later runtime scheduler must use this
+    stricter function, not the Stage-13D-A foundation, after it has durably
+    recorded a successful Stage-13C Pi acknowledgement.
+    '''
+    records = list(active_well_records)
+    acknowledged_actions = _normalize_acknowledged_targeted_mix_actions(
+        records, acknowledged_mix_actions_by_well
+    )
+    plan = build_per_trigger_active_set(
+        active_well_records=records,
+        triggering_wellname=triggering_wellname,
+        now_monotonic_s=now_monotonic_s,
+        monitoring_policy=monitoring_policy,
+        minimum_peak_absorbance=minimum_peak_absorbance,
+        observations_by_well=observations_by_well,
+    )
+    plan['targeted_mix_acknowledgement_required'] = True
+    plan['targeted_mix_action_ids'] = [
+        acknowledged_actions[wellname]['action_id']
+        for wellname in plan['scan_wellnames']
+    ]
+    plan['triggering_mix_action_id'] = acknowledged_actions[
+        plan['triggering_wellname']
+    ]['action_id']
+    return plan
