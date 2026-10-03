@@ -35,6 +35,7 @@ STABILITY_SCAN_SCHEDULE_EACH_COMPLETION = 'each_completion'
 STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET = 'cadenced_active_set'
 
 STABILITY_MIXING_MODE_PLATE_SHAKE = 'plate_shake'
+STABILITY_MIXING_MODE_PIPETTE_MIX = 'pipette_mix'
 
 # This is intentionally a separate, default-off test harness rather than a
 # scientific stability mode. It exists solely to exercise the Stage-12F
@@ -238,14 +239,15 @@ def parse_auto_stability_header_settings(header_values):
         'plate_shake': STABILITY_MIXING_MODE_PLATE_SHAKE,
         'shake': STABILITY_MIXING_MODE_PLATE_SHAKE,
         'plate': STABILITY_MIXING_MODE_PLATE_SHAKE,
+        'pipette_mix': STABILITY_MIXING_MODE_PIPETTE_MIX,
+        'pipette': STABILITY_MIXING_MODE_PIPETTE_MIX,
     }
     if raw_mixing_mode not in mixing_aliases:
         raise AutoStabilityValidationError(
-            'Header value auto_stability_mixing_mode currently supports '
-            'only plate_shake. Pipette mixing and no-added-mixing remain '
-            'separate future, hardware-validated implementations. Received: '
-            '{!r}.'.format(raw_mixing_mode)
+            'Header value auto_stability_mixing_mode must be plate_shake '
+            'or pipette_mix. Received: {!r}.'.format(raw_mixing_mode)
         )
+    mixing_mode = mixing_aliases[raw_mixing_mode]
 
     observation_window_s = _parse_positive_finite(
         header_values.get('auto_stability_observation_window_s'),
@@ -280,15 +282,27 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_signal_confidence_z'
         )
 
-    if scan_schedule != STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
+    if (
+            mixing_mode == STABILITY_MIXING_MODE_PLATE_SHAKE
+            and scan_schedule != STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET):
         raise AutoStabilityValidationError(
             'Header value auto_stability_scan_schedule=each_completion is '
-            'not scientifically supported with the current whole-plate '
-            'plate_shake implementation. It would produce only an immediate '
-            'cohort observation, not a time-resolved post-peak trajectory. '
-            'Use cadenced_active_set with the current plate_shake stability '
-            'modes.'
+            'not supported with whole-plate plate_shake. Use '
+            'cadenced_active_set with plate_shake, or select the paired '
+            'pipette_mix/each_completion policy.'
         )
+    if (
+            mixing_mode == STABILITY_MIXING_MODE_PIPETTE_MIX
+            and scan_schedule != STABILITY_SCAN_SCHEDULE_EACH_COMPLETION):
+        raise AutoStabilityValidationError(
+            'auto_stability_mixing_mode=pipette_mix requires '
+            'auto_stability_scan_schedule=each_completion. The targeted '
+            'P300 action is coupled to one immediate, non-shaking active-set '
+            'scan after every confirmed trigger completion.'
+        )
+    # The later bounded post-batch drain continues to use this interval for
+    # un-mixed cadence scans even under ``each_completion``.  It is therefore
+    # required for both scientifically valid policy pairs.
     scan_interval_s = _parse_positive_finite(
         header_values.get('auto_stability_scan_interval_s'),
         'auto_stability_scan_interval_s'
@@ -318,7 +332,7 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_replicate_log10_loss_rate_sd_max': (
             replicate_log10_loss_rate_sd_max
         ),
-        'auto_stability_mixing_mode': mixing_aliases[raw_mixing_mode],
+        'auto_stability_mixing_mode': mixing_mode,
         'auto_stability_decision_horizon_s': decision_horizon_s,
         'auto_stability_max_observation_window_s': max_observation_window_s,
         'auto_stability_retirement_policy': (

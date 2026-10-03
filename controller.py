@@ -129,14 +129,17 @@ from auto_preparation import (
 from auto_stability import (
     AutoStabilityValidationError,
     STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE,
+    STABILITY_MIXING_MODE_PIPETTE_MIX,
     STABILITY_MODE_MONITOR,
     STABILITY_MODE_STABILITY_ONLY,
     STABILITY_MODE_TARGET_THEN_STABILITY,
+    STABILITY_SCAN_SCHEDULE_EACH_COMPLETION,
     STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET,
     canonical_reagent_name,
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
 )
+from auto_stability_lifecycle import build_fixed_window_monitoring_policy
 from auto_stability_debug import (
     SYNTHETIC_COMPANION_EVIDENCE_SOURCE,
     build_synthetic_companion_evidence,
@@ -5660,6 +5663,12 @@ class AutoContr(Controller):
         # partial physical run, and no restart is permitted to replay an
         # unacknowledged mix action.
         self._auto_stability_pipette_mix_action_ids = set()
+        # The exact Auto-main chemical name is part of the targeted-mix
+        # request.  It is captured only after the same trigger row has been
+        # durably dispatched, and is consumed after that well's transfer-ready
+        # acknowledgement.  This is controller-local provenance, never a
+        # substitute for the observer's physical-completion record.
+        self._auto_stability_trigger_chemical_names = {}
         # ``None`` is overloaded deliberately: before the first batch the
         # controller has not yet resolved the configured starting well, while
         # after a completed plate it means that no physical wells remain.
@@ -5866,14 +5875,33 @@ class AutoContr(Controller):
         if not self._is_auto_stability_trigger_row(row):
             return []
 
+        trigger_chemical_name = str(row.get('chemical_name', '')).strip()
+        if not trigger_chemical_name:
+            raise RuntimeError(
+                'Auto stability trigger transfer has no exact chemical_name '
+                'for the later targeted-mix request.'
+            )
+        chemical_names = getattr(
+            self, '_auto_stability_trigger_chemical_names', None
+        )
+        if chemical_names is None:
+            chemical_names = {}
+            self._auto_stability_trigger_chemical_names = chemical_names
+
         pending_wellnames = []
         for wellname, transfer_volume_uL in transfer_steps:
+            if wellname in chemical_names:
+                raise RuntimeError(
+                    'Auto stability trigger chemical identity was already '
+                    'recorded for {}.'.format(wellname)
+                )
             self.auto_stability_observer.record_trigger_transfer_dispatched(
                 batch_number=self.batch_num,
                 wellname=wellname,
                 transfer_volume_uL=transfer_volume_uL,
                 trigger_command_id=command_id
             )
+            chemical_names[wellname] = trigger_chemical_name
             pending_wellnames.append(wellname)
         return pending_wellnames
 
@@ -5882,7 +5910,14 @@ class AutoContr(Controller):
         return self._is_auto_stability_trigger_row(row)
 
     def _confirm_auto_stability_trigger_step_completion(self, pending_wellnames):
-        '''Promote one trigger well after its own Pi transfer acknowledgement.'''
+        '''Promote one trigger well after its own Pi transfer acknowledgement.
+
+        The paired Stage-13 ``pipette_mix``/``each_completion`` policy adds
+        exactly one acknowledged targeted mix and one active-set observation
+        immediately after this existing transfer-ready barrier.  The legacy
+        plate-shake policy still only promotes the well here; its cohort scan
+        remains in ``_confirm_auto_stability_trigger_completion``.
+        '''
         if self.auto_stability_observer is None:
             return False
         for wellname in pending_wellnames:
@@ -5890,12 +5925,26 @@ class AutoContr(Controller):
                 wellname,
                 completion_time_basis='controller_observed_transfer_ready'
             )
+            if self._uses_auto_stability_pipette_mix_schedule():
+                self._run_auto_stability_pipette_mix_completion(
+                    wellname
+                )
         return bool(pending_wellnames)
 
     def _confirm_auto_stability_trigger_completion(
             self, pending_wellnames, observe_completed_wells=False):
         '''Finish legacy pending promotion, then observe the completed cohort.'''
         if self.auto_stability_observer is None:
+            return
+        if self._uses_auto_stability_pipette_mix_schedule():
+            if pending_wellnames:
+                raise RuntimeError(
+                    'Targeted pipette stability mixing requires every trigger '
+                    'well to complete at its individual transfer-ready barrier.'
+                )
+            # Every eligible well was already mixed and scanned immediately
+            # after its own confirmed trigger completion. Do not add a cohort
+            # scan, plate shake, or a second mix here.
             return
         for wellname in pending_wellnames:
             self.auto_stability_observer.confirm_trigger_transfer_completed(
@@ -5909,6 +5958,142 @@ class AutoContr(Controller):
             self._run_auto_stability_observation(
                 reason='trigger_completion',
                 shake_before_scan=True
+            )
+
+    def _uses_auto_stability_pipette_mix_schedule(self):
+        '''Return whether the one supported targeted-mix policy is selected.
+
+        Header parsing owns normal validation. This local guard nevertheless
+        rejects a partially injected runtime configuration, rather than
+        accidentally treating a future mixing value as the validated schedule.
+        '''
+        mixing_mode = self.robo_params.get('auto_stability_mixing_mode')
+        scan_schedule = self.robo_params.get('auto_stability_scan_schedule')
+        if mixing_mode == STABILITY_MIXING_MODE_PIPETTE_MIX:
+            if scan_schedule != STABILITY_SCAN_SCHEDULE_EACH_COMPLETION:
+                raise RuntimeError(
+                    'Targeted pipette stability mixing requires the paired '
+                    'each_completion scan schedule.'
+                )
+            return True
+        if scan_schedule == STABILITY_SCAN_SCHEDULE_EACH_COMPLETION:
+            raise RuntimeError(
+                'The each_completion stability schedule requires the paired '
+                'pipette_mix mixing mode.'
+            )
+        return False
+
+    def _get_auto_stability_fixed_window_policy(self):
+        '''Return the current bounded fixed-window lifecycle policy.
+
+        Stage 13D-D intentionally preserves the established Header's one
+        observation-window setting. Adaptive plateau retirement and separate
+        decision/max-window controls remain later, independently validated
+        work; they are not inferred from a new movement path.
+        '''
+        return build_fixed_window_monitoring_policy(
+            self.robo_params['auto_stability_observation_window_s']
+        )
+
+    def _get_auto_stability_latest_active_wellname(self):
+        '''Return the newest confirmed active well for a cadence-only scan.'''
+        observer = self.auto_stability_observer
+        active_records = observer.get_active_wells()
+        if not active_records:
+            return None
+        return max(
+            active_records,
+            key=lambda record: record['trigger_completion_sequence']
+        )['wellname']
+
+    def _register_auto_stability_targeted_mix_identity(self, wellname):
+        '''Refresh and durably register one post-trigger plate identity.
+
+        The targeted mix request and the following reader plan both use this
+        same freshly resolved logical-well mapping. No Pi packet is sent by
+        this method.
+        '''
+        observer = self.auto_stability_observer
+        if observer is None:
+            raise RuntimeError(
+                'Targeted stability mixing requires an initialized observer.'
+            )
+        reader_locations = self._get_auto_stability_reader_locations([
+            wellname
+        ])
+        entry = self._cached_reader_locs[wellname]
+        snapshot = self._require_auto_main_targeted_mix_capability()
+        observer.register_stage13_physical_identity(
+            wellname=wellname,
+            plate_generation=snapshot['plate_generation'],
+            plate_mapping_revision=snapshot['plate_mapping_revision'],
+            deck_pos=entry.deck_pos,
+            reader_location=reader_locations[0]
+        )
+
+    def _plan_auto_stability_post_mix_active_set(self, triggering_wellname):
+        '''Return the bounded same-batch plan after durable mix acknowledgements.'''
+        observer = self.auto_stability_observer
+        observation_window_s = self.robo_params[
+            'auto_stability_observation_window_s'
+        ]
+        observer.complete_expired_observation_windows(
+            observation_window_s,
+            now_monotonic_s=time.monotonic()
+        )
+        if not observer.get_active_wells():
+            return None
+        plan = observer.plan_stage13_post_mix_active_set(
+            triggering_wellname=triggering_wellname,
+            now_monotonic_s=time.monotonic(),
+            monitoring_policy=self._get_auto_stability_fixed_window_policy(),
+            minimum_peak_absorbance=self.robo_params[
+                'auto_stability_min_peak_absorbance'
+            ]
+        )
+        # Stage 13D-D is deliberately bounded to the current physical batch.
+        # Cross-batch overlap needs its own lifecycle-retirement, reporting,
+        # and supervised-debug validation before it may be enabled.
+        if plan['active_batch_numbers'] != [int(self.batch_num)]:
+            raise RuntimeError(
+                'The bounded targeted-mix scheduler refuses an active set '
+                'outside the current batch. Cross-batch monitoring is not '
+                'enabled at this stage.'
+            )
+        if plan['retired_wellnames']:
+            raise RuntimeError(
+                'Targeted stability scanning found lifecycle-retired wells '
+                'after the fixed-window retirement pass: {}.'.format(
+                    plan['retired_wellnames']
+                )
+            )
+        return plan
+
+    def _run_auto_stability_pipette_mix_completion(self, wellname):
+        '''Perform the exact post-trigger mix then its required active-set scan.'''
+        chemical_names = getattr(
+            self, '_auto_stability_trigger_chemical_names', {}
+        )
+        trigger_chemical_name = chemical_names.get(wellname)
+        if not trigger_chemical_name:
+            raise RuntimeError(
+                'Targeted stability mixing has no recorded trigger chemical '
+                'identity for {}.'.format(wellname)
+            )
+        self._register_auto_stability_targeted_mix_identity(wellname)
+        request = self._build_auto_stability_targeted_mix_request(
+            wellname=wellname,
+            trigger_chemical_name=trigger_chemical_name,
+            mix_volume_uL=TARGETED_MIX_DEFAULT_VOLUME_UL,
+            cycle_count=TARGETED_MIX_DEFAULT_CYCLE_COUNT
+        )
+        self._request_auto_stability_targeted_mix(request)
+        plan = self._plan_auto_stability_post_mix_active_set(wellname)
+        if plan is not None:
+            self._run_auto_stability_post_mix_active_set_scan(
+                plan,
+                observation_reason='each_completion',
+                mixing_mode=STABILITY_MIXING_MODE_PIPETTE_MIX
             )
 
     def _require_auto_main_targeted_mix_capability(self):
@@ -6395,6 +6580,186 @@ class AutoContr(Controller):
         )
         return reservation
 
+    def _run_auto_stability_post_mix_active_set_scan(
+            self, plan, observation_reason, mixing_mode):
+        '''Run one bounded, unshaken scan from an acknowledged mix plan.
+
+        This is intentionally separate from the validated Stage-12C
+        plate-shake helper. It accepts only the strict Stage-13D-C plan whose
+        active wells each have one acknowledged targeted mix. The first
+        runtime integration remains one batch at a time; it never combines
+        older batches, re-mixes them, or sends a plate-shake command.
+        '''
+        if not isinstance(plan, dict):
+            raise RuntimeError(
+                'Targeted stability active-set scan requires a planner '
+                'dictionary.'
+            )
+        wellnames = list(plan.get('scan_wellnames', []))
+        reader_locations = list(plan.get('reader_locations', []))
+        if not wellnames or len(wellnames) != len(reader_locations):
+            raise RuntimeError(
+                'Targeted stability active-set scan received an invalid '
+                'well/location plan.'
+            )
+        if plan.get('targeted_mix_acknowledgement_required') is not True:
+            raise RuntimeError(
+                'Targeted stability active-set scan requires acknowledged '
+                'mix provenance for every active well.'
+            )
+        if plan.get('active_batch_numbers') != [int(self.batch_num)]:
+            raise RuntimeError(
+                'The bounded targeted stability scan refuses non-current '
+                'batch wells.'
+            )
+        if plan.get('retired_wellnames'):
+            raise RuntimeError(
+                'Targeted stability scan refuses lifecycle-retired wells.'
+            )
+        if not str(observation_reason).strip():
+            raise RuntimeError(
+                'Targeted stability scan requires a nonblank observation '
+                'reason.'
+            )
+        if observation_reason == STABILITY_SCAN_SCHEDULE_EACH_COMPLETION:
+            if mixing_mode != STABILITY_MIXING_MODE_PIPETTE_MIX:
+                raise RuntimeError(
+                    'A completion-triggered targeted stability scan must '
+                    'record its immediately preceding pipette mix.'
+                )
+        elif observation_reason == STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
+            if mixing_mode != 'none':
+                raise RuntimeError(
+                    'A later targeted stability cadence scan must not claim '
+                    'that it mixed the active wells again.'
+                )
+        else:
+            raise RuntimeError(
+                'Targeted stability scan has an unsupported observation '
+                'reason: {}.'.format(observation_reason)
+            )
+
+        observer = self.auto_stability_observer
+        if observer is None:
+            raise RuntimeError(
+                'Targeted stability active-set scan requires an observer.'
+            )
+        triggering_wellname = plan.get('triggering_wellname')
+        if triggering_wellname not in wellnames:
+            raise RuntimeError(
+                'Targeted stability scan plan omitted its triggering well.'
+            )
+
+        plate_is_in_reader = False
+        reservation = None
+        try:
+            # This is the established reader-access sequence. It is retained
+            # verbatim from the validated Stage-12C scan path, except that no
+            # whole-plate shake is performed after an already acknowledged
+            # targeted pipette mix.
+            self.portal.send_pack('home')
+            self.portal.burn_pipe()
+            self.pr.exec_macro('PlateIn')
+            plate_is_in_reader = True
+
+            # Reader staging can consume a meaningful part of a short window.
+            # Replan at the actual reader boundary rather than scanning a
+            # stale active set. The plan itself is not a durable claim, so
+            # replacing it before reservation does not rewrite evidence.
+            staged_plan = self._plan_auto_stability_post_mix_active_set(
+                triggering_wellname
+            )
+            if staged_plan is None:
+                print(
+                    '<<controller>> targeted stability observation {} '
+                    'skipped: no active well remained in the fixed window.'
+                    .format(observation_reason)
+                )
+                return None
+            wellnames = list(staged_plan['scan_wellnames'])
+            reader_locations = list(staged_plan['reader_locations'])
+
+            # Re-resolve immediately before reservation. The already-recorded
+            # Stage-13 physical identities must still describe the controller
+            # cache exactly; a plate mapping change cannot be silently used.
+            current_locations = self._get_auto_stability_reader_locations(
+                wellnames
+            )
+            if current_locations != reader_locations:
+                raise RuntimeError(
+                    'Targeted stability scan refuses a changed reader '
+                    'mapping after the mix acknowledgement.'
+                )
+            for wellname in wellnames:
+                entry = self._cached_reader_locs[wellname]
+                if int(entry.deck_pos) != int(staged_plan['deck_pos']):
+                    raise RuntimeError(
+                        'Targeted stability scan refuses a changed plate '
+                        'deck position for {}.'.format(wellname)
+                    )
+
+            scan_protocol = self._get_auto_stability_scan_protocol()
+            scan_started_monotonic_s = time.monotonic()
+            reservation = observer.reserve_raw_scan(
+                int(self.batch_num),
+                wellnames,
+                reader_locations=reader_locations
+            )
+            scan_started_at_utc = self._auto_stability_utc_now()
+            print(
+                '<<controller>> targeted stability observation {}: {} '
+                'acknowledged-mix active well(s), raw scan {}.'
+                .format(
+                    observation_reason,
+                    len(wellnames),
+                    reservation['raw_scan_basename']
+                )
+            )
+            self.pr.run_protocol(
+                scan_protocol,
+                reservation['raw_scan_basename'],
+                layout=reader_locations,
+                record_in_aggregate=False
+            )
+            scan_completed_at_utc = self._auto_stability_utc_now()
+            scan_completed_monotonic_s = time.monotonic()
+        finally:
+            if plate_is_in_reader:
+                self.pr.exec_macro('PlateOut')
+
+        source_path = os.path.join(
+            self.pr.data_path,
+            reservation['raw_scan_basename'] + '.csv'
+        )
+        destination_path = os.path.join(
+            self.pr.data_path,
+            reservation['raw_scan_relative_path']
+        )
+        if not os.path.exists(source_path):
+            raise RuntimeError(
+                'Targeted stability reader scan completed without producing '
+                'its expected raw file {}.'.format(source_path)
+            )
+        if os.path.exists(destination_path):
+            raise RuntimeError(
+                'Targeted stability raw-scan destination already exists: {}.'
+                .format(destination_path)
+            )
+        shutil.move(source_path, destination_path)
+        observer.record_raw_scan_completed(
+            reservation=reservation,
+            scan_started_at_utc=scan_started_at_utc,
+            scan_completed_at_utc=scan_completed_at_utc,
+            scan_started_monotonic_s=scan_started_monotonic_s,
+            scan_completed_monotonic_s=scan_completed_monotonic_s,
+            observation_reason=observation_reason,
+            mixing_mode=mixing_mode,
+            shake_duration_s=0.0,
+            shake_started_at_utc=None,
+            shake_completed_at_utc=None
+        )
+        return reservation
+
     @staticmethod
     def _wait_for_auto_stability_deadline(deadline_monotonic_s, active_count):
         '''Wait with one readable updating terminal line rather than log spam.
@@ -6431,11 +6796,12 @@ class AutoContr(Controller):
     def _complete_auto_stability_observation_window(self):
         '''Run the bounded post-batch cadence and mark all windows complete.
 
-        The currently supported cadenced schedule adds raw scans at its
-        configured interval while a well remains in-window. No later Auto
-        batch can be selected before every active well is marked complete or
-        this method fails. ``each_completion`` is rejected at Header parsing
-        until a separately validated nonperturbing policy exists.
+        Both supported policies retain the established bounded final-window
+        drain: no later Auto batch is selected before every active well is
+        complete. ``pipette_mix``/``each_completion`` has already performed
+        its required mix-and-scan after each trigger; its later cadence scans
+        are reader-only and never re-mix a well. Cross-batch overlap remains
+        deliberately out of scope for this first runtime integration.
         '''
         observer = self.auto_stability_observer
         if observer is None:
@@ -6457,16 +6823,35 @@ class AutoContr(Controller):
                 break
 
             cadence_deadline = None
-            if scan_schedule == STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET:
+            if scan_schedule in (
+                    STABILITY_SCAN_SCHEDULE_CADENCED_ACTIVE_SET,
+                    STABILITY_SCAN_SCHEDULE_EACH_COMPLETION):
                 cadence_deadline = observer.get_next_cadence_deadline(
                     observation_window_s,
                     scan_interval_s
                 )
                 if cadence_deadline is not None and cadence_deadline <= now_monotonic_s:
-                    self._run_auto_stability_observation(
-                        reason='cadenced_active_set',
-                        shake_before_scan=False
-                    )
+                    if self._uses_auto_stability_pipette_mix_schedule():
+                        triggering_wellname = (
+                            self._get_auto_stability_latest_active_wellname()
+                        )
+                        if triggering_wellname is not None:
+                            plan = (
+                                self._plan_auto_stability_post_mix_active_set(
+                                    triggering_wellname
+                                )
+                            )
+                            if plan is not None:
+                                self._run_auto_stability_post_mix_active_set_scan(
+                                    plan,
+                                    observation_reason='cadenced_active_set',
+                                    mixing_mode='none'
+                                )
+                    else:
+                        self._run_auto_stability_observation(
+                            reason='cadenced_active_set',
+                            shake_before_scan=False
+                        )
                     continue
 
             window_deadline = observer.get_next_window_expiration_deadline(
@@ -7328,10 +7713,9 @@ class AutoContr(Controller):
     def _get_auto_batch_targeted_mix_preflight_plan(self, rxn_df):
         '''Return future targeted-mix tip actions without enabling the feature.
 
-        Current Header parsing still accepts only ``plate_shake``. This helper
-        therefore returns an empty plan in every currently executable run.
-        The later Stage-13 scheduler may opt in only after it has selected the
-        paired ``pipette_mix``/``each_completion`` policy. Keeping the exact
+        This helper is inert for the validated ``plate_shake`` policy. The
+        bounded Stage-13D-D path opts in only through the paired
+        ``pipette_mix``/``each_completion`` Header policy. Keeping the exact
         batch plan next to the existing transfer plan lets the Pi simulate
         normal and dedicated mixing-tip use in their real interleaved order.
         '''

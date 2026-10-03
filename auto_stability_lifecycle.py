@@ -189,6 +189,29 @@ def build_stability_monitoring_policy(
     }
 
 
+def build_fixed_window_monitoring_policy(observation_window_s):
+    '''Build the current non-adaptive policy from one legacy window setting.
+
+    Stage 12 workbooks expose one observation window, and Stage 13D-D keeps
+    that established bounded behavior while it validates the new targeted-mix
+    sequencing.  The generic lifecycle schema includes plateau parameters so
+    that a later, explicitly configured adaptive policy can be evaluated;
+    they are intentionally inert here because adaptive retirement is false.
+    This helper prevents the controller from inventing a second set of
+    scientific Header values before that later stage exists.
+    '''
+    return build_stability_monitoring_policy(
+        decision_horizon_s=observation_window_s,
+        max_observation_window_s=observation_window_s,
+        adaptive_retirement_enabled=False,
+        # Required structural values for the shared lifecycle schema. They
+        # cannot affect this non-adaptive fixed-window policy.
+        plateau_min_tail_observation_count=3,
+        plateau_consecutive_interval_count=2,
+        plateau_max_absorbance_slope_per_s=0.0,
+    )
+
+
 def evaluate_stability_plateau(
         observations,
         trigger_timestamp_s,

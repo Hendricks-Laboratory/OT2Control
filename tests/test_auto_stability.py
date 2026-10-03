@@ -102,14 +102,34 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             with self.assertRaises(AutoStabilityValidationError):
                 parse_auto_stability_header_settings(header)
 
-    def test_each_completion_fails_closed_until_a_nonperturbing_policy_exists(self):
-        header = _monitor_header(
-            auto_stability_scan_schedule='each_completion'
-        )
-        del header['auto_stability_scan_interval_s']
+    def test_paired_pipette_mix_each_completion_policy_is_canonicalized(self):
+        settings = parse_auto_stability_header_settings(_monitor_header(
+            auto_stability_scan_schedule='each_complete',
+            auto_stability_mixing_mode='pipette',
+        ))
 
-        with self.assertRaises(AutoStabilityValidationError):
-            parse_auto_stability_header_settings(header)
+        self.assertEqual(
+            settings['auto_stability_scan_schedule'], 'each_completion'
+        )
+        self.assertEqual(
+            settings['auto_stability_mixing_mode'], 'pipette_mix'
+        )
+
+    def test_unpaired_stability_mix_and_schedule_values_fail_closed(self):
+        for header in (
+                _monitor_header(
+                    auto_stability_scan_schedule='each_completion'
+                ),
+                _monitor_header(
+                    auto_stability_mixing_mode='pipette_mix'
+                ),
+                _monitor_header(
+                    auto_stability_scan_schedule='each_completion',
+                    auto_stability_mixing_mode='pipette_mix',
+                    auto_stability_scan_interval_s=''
+                )):
+            with self.assertRaises(AutoStabilityValidationError):
+                parse_auto_stability_header_settings(header)
 
     def test_target_then_stability_requires_explicit_replicate_limit(self):
         settings = parse_auto_stability_header_settings(_monitor_header(
@@ -195,10 +215,10 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
                 auto_stability_debug_mode='synthetic_companion_evidence'
             ))
 
-    def test_unimplemented_mixing_fails_closed(self):
+    def test_unknown_mixing_fails_closed(self):
         with self.assertRaises(AutoStabilityValidationError):
             parse_auto_stability_header_settings(_monitor_header(
-                auto_stability_mixing_mode='pipette_mix'
+                auto_stability_mixing_mode='none'
             ))
 
     def test_trigger_must_be_final_nonwater_transfer(self):
