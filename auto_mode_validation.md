@@ -825,6 +825,38 @@ human-supervised water-only dry debug on the separately validated Auto-main
 build; this documentation does not establish physical clearance or
 chemical-use clearance.
 
+### Stage 13D-D reader-to-robot coordinate correction — 2026-10-07
+
+The first supervised water-only Stage 13D-D attempt correctly stopped before
+the targeted P300 mix began. The ordinary trigger-transfer packet names only
+the logical Auto well, which the Pi resolves through its own native physical
+container registry. The new targeted-mix packet additionally carries an
+explicit physical-well assertion. The controller's established location cache
+intentionally stores reader-layout coordinates for scans, so the initial
+packet accidentally supplied reader `A1` where the Pi's registered physical
+well was `E1` on `platereader4`.
+
+The controller now performs the inverse conversion only while building that
+explicit Pi assertion. It uses the pre-existing 96-entry bidirectional
+reader/OT-2 translation table, verifies that the mapped labware agrees with
+the cached plate deck position, and fails closed before dispatch on a blank,
+unknown, non-integral, non-reader, or cross-plate location. The reader cache,
+reader scan layouts, ordinary logical-name transfer packets, Pi mapping, and
+Auto-main code are unchanged. The adjacent immutable observer record retains
+the reader coordinate, while the targeted-mix intent/acknowledgement retains
+the native Pi coordinate, making both dialects auditable without expanding the
+wire schema.
+
+Hardware-free validation on Python 3.9.6 verified all 96 mappings are unique
+and plate-matched, cross-checked the saved failed-run physical and translated
+well maps, rejected an intentionally cross-plate cache before a packet could
+be sent, exercised both reader plates, compiled the affected files, and
+passed the focused Stage 13 suite plus all 452 local tests. This correction
+does not prove physical liquid placement or mixing. A fresh human-supervised
+water-only run must confirm that the first request for logical reader `A1`
+contains native `expected_loc=E1`, receives a successful Pi acknowledgement,
+and only then begins the first targeted mix and reader acquisition.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,

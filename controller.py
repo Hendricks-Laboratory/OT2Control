@@ -6197,12 +6197,24 @@ class AutoContr(Controller):
                 'Targeted stability mixing requires a freshly cached reader '
                 'location for {}.'.format(normalized_wellname)
             )
+        # ``_cached_reader_locs`` intentionally stores the reader-layout
+        # coordinate for plate-reader wells (for example, A1).  Ordinary
+        # transfers remain coordinate-free at this layer: the Pi resolves the
+        # logical destination name through its native container registry.
+        # The targeted-mix packet is different because its explicit location
+        # is a Pi-side physical-identity assertion.  Translate that cached
+        # reader coordinate back through the established bijection before
+        # constructing the packet; never send a reader-layout coordinate as
+        # an OT-2 well coordinate.
+        robot_location = self._get_auto_stability_robot_location(
+            entry.loc, entry.deck_pos
+        )
         request = {
             'schema_version': 1,
             'action_id': 'auto-stability-pipette-mix-{}'.format(uuid.uuid4().hex),
             'wellname': normalized_wellname,
             'expected_deck_pos': int(entry.deck_pos),
-            'expected_loc': str(entry.loc).strip().upper(),
+            'expected_loc': robot_location,
             'expected_plate_mapping_revision': int(
                 snapshot['plate_mapping_revision']
             ),
@@ -6217,6 +6229,77 @@ class AutoContr(Controller):
             raise RuntimeError(
                 'Targeted stability-mix request is invalid: {}.'.format(exc)
             )
+
+    def _get_auto_stability_robot_location(self, reader_location, deck_pos):
+        '''Translate one cached reader coordinate into its native Pi location.
+
+        ``_update_cached_locs`` intentionally converts Pi-native wellplate
+        coordinates into the layout used by the plate reader.  This helper is
+        the inverse boundary for the one Stage-13 packet that explicitly
+        asserts a physical OT-2 well location.  It is read-only, rejects an
+        ambiguous or cross-plate translation before any packet is sent, and
+        does not alter the cache used for subsequent reader scans.
+        '''
+        try:
+            normalized_deck_pos = int(deck_pos)
+        except (TypeError, ValueError):
+            raise RuntimeError(
+                'Targeted stability mixing requires a valid plate-reader '
+                'deck position, not {!r}.'.format(deck_pos)
+            )
+        try:
+            is_integral_deck_position = (
+                float(deck_pos) == float(normalized_deck_pos)
+            )
+        except (TypeError, ValueError):
+            is_integral_deck_position = False
+        if (not is_integral_deck_position or
+                normalized_deck_pos not in (4, 7)):
+            raise RuntimeError(
+                'Targeted stability mixing requires plate-reader deck '
+                'position 4 or 7, not {}.'.format(normalized_deck_pos)
+            )
+
+        normalized_reader_location = str(reader_location).strip().upper()
+        if not normalized_reader_location:
+            raise RuntimeError(
+                'Targeted stability mixing requires a nonblank reader '
+                'location.'
+            )
+        try:
+            robot_location, mapped_labware = (
+                self.PLATEREADER_INDEX_TRANSLATOR[normalized_reader_location]
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(
+                'Targeted stability mixing cannot translate reader location '
+                '{} into an OT-2 well coordinate.'.format(
+                    normalized_reader_location
+                )
+            )
+
+        expected_labware = 'platereader{}'.format(normalized_deck_pos)
+        if mapped_labware != expected_labware:
+            raise RuntimeError(
+                'Targeted stability mixing refuses reader location {} on '
+                'deck position {} because it belongs to {} rather than {}.'
+                .format(
+                    normalized_reader_location,
+                    normalized_deck_pos,
+                    mapped_labware,
+                    expected_labware
+                )
+            )
+
+        normalized_robot_location = str(robot_location).strip().upper()
+        if not normalized_robot_location:
+            raise RuntimeError(
+                'Targeted stability mixing received an empty OT-2 well '
+                'coordinate for reader location {}.'.format(
+                    normalized_reader_location
+                )
+            )
+        return normalized_robot_location
 
     def _record_auto_stability_targeted_mix_rejection(
             self, request, reason, acknowledgement=None):

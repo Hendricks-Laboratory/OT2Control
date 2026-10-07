@@ -19,6 +19,36 @@ from auto_stability_pipette_mix import (
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
+ARMCHAIR_PATH = os.path.join(REPOSITORY_ROOT, 'Armchair', 'armchair.py')
+
+
+def _load_armchair_packet_registry():
+    '''Read the live wire map without importing legacy socket dependencies.'''
+    with open(ARMCHAIR_PATH, encoding='utf-8') as source_file:
+        source = source_file.read()
+    tree = ast.parse(source)
+    armchair_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == 'Armchair'
+    )
+    assignments = {
+        node.targets[0].id: node.value
+        for node in armchair_class.body
+        if (isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name))
+    }
+    packet_expression = assignments['PACK_TYPES']
+    packet_map = ast.literal_eval(packet_expression.args[0])
+    ghost_types = ast.literal_eval(assignments['GHOST_TYPES'])
+    return type(
+        'ArmchairRegistryStub',
+        (),
+        {'PACK_TYPES': packet_map, 'GHOST_TYPES': ghost_types}
+    )
+
+
+ARMCHAIR_REGISTRY = _load_armchair_packet_registry()
 
 
 def _load_methods(method_names):
@@ -48,6 +78,7 @@ def _load_methods(method_names):
         ),
         'TARGETED_MIX_ACKNOWLEDGEMENT': TARGETED_MIX_ACKNOWLEDGEMENT,
         'TARGETED_MIX_COMMAND': TARGETED_MIX_COMMAND,
+        'Armchair': ARMCHAIR_REGISTRY,
         'validate_targeted_mix_acknowledgement': (
             validate_targeted_mix_acknowledgement
         ),
@@ -62,6 +93,7 @@ class Stage13CHandshakeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.AutoController = _load_methods([
             '_require_auto_main_targeted_mix_capability',
+            '_get_auto_stability_robot_location',
             '_build_auto_stability_targeted_mix_request',
             '_record_auto_stability_targeted_mix_rejection',
             '_request_auto_stability_targeted_mix'
@@ -78,6 +110,9 @@ class Stage13CHandshakeTests(unittest.TestCase):
         controller.batch_num = 4
         controller._cached_reader_locs = {
             'autowell4C1.0': SimpleNamespace(deck_pos=4, loc='A1')
+        }
+        controller.PLATEREADER_INDEX_TRANSLATOR = {
+            'A1': ('E1', 'platereader4')
         }
         controller.auto_live_run_journal = SimpleNamespace(current_state={
             'lifecycle_state': 'executing_batch',
