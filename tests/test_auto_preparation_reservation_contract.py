@@ -114,7 +114,7 @@ class AutoPreparationReservationContractTests(unittest.TestCase):
         self.assertIn('execute_auto_preparation_groups', ghost_types)
         self.assertIn('auto_preparation_groups_executed', ghost_types)
         self.assertIn(
-            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v9'",
+            "AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v10'",
             self.robot_source
         )
 

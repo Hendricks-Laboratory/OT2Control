@@ -24,8 +24,10 @@ def _robot_preflight_class():
     method_names = {
         '_preflight_number',
         '_get_preferred_pipette_arm_for_sizes',
+        '_get_auto_completed_well_mix_p300_arm',
         '_count_available_tips',
         '_validate_transfer_plan_preflight_request',
+        '_validate_targeted_mix_preflight_plan',
         '_get_preflight_source_containers',
         '_simulate_preflight_source',
         '_simulate_preflight_tips',
@@ -48,7 +50,36 @@ def _robot_preflight_class():
             name='OT2Robot',
             bases=[],
             keywords=[],
-            body=methods,
+            body=[
+                ast.Assign(
+                    targets=[ast.Name(
+                        id='AUTO_COMPLETED_WELL_MIX_MAX_FRACTION',
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Constant(value=0.50)
+                ),
+                ast.Assign(
+                    targets=[ast.Name(
+                        id='AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL',
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Constant(value=5.0)
+                ),
+                ast.Assign(
+                    targets=[ast.Name(
+                        id='AUTO_COMPLETED_WELL_MIX_MAX_CYCLES',
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Constant(value=10)
+                ),
+                ast.Assign(
+                    targets=[ast.Name(
+                        id='AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL',
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Constant(value=300.0)
+                )
+            ] + methods,
             decorator_list=[]
         )],
         type_ignores=[]
@@ -126,13 +157,13 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
     def setUpClass(cls):
         cls.Robot = _robot_preflight_class()
 
-    def _build_robot(self, right_tip_count=8):
+    def _build_robot(self, left_tip_count=8, right_tip_count=8):
         robot = self.Robot()
         robot.pipettes = {
             'left': {
                 'size': 300.0,
                 'last_used': 'clean',
-                'pipette': _PipetteStub(unused_tip_count=8),
+                'pipette': _PipetteStub(unused_tip_count=left_tip_count),
                 'tip_rack_deck_positions': [9],
                 'tip_rack_names': ['tip_rack_300uL']
             },
@@ -179,6 +210,19 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             ]
         }
 
+    @classmethod
+    def _targeted_mix_request(cls):
+        request = cls._request()
+        request['schema_version'] = 2
+        request['targeted_mix_plan'] = [{
+            'wellname': 'autowell0C1.0',
+            'trigger_chemical_name': 'reagent_bC1.0',
+            'mix_volume_uL': 20.0,
+            'cycle_count': 1,
+            'expected_well_volume_uL': 200.0
+        }]
+        return request
+
     def test_backup_is_selected_without_mutating_source_state(self):
         robot = self._build_robot()
         primary = robot.containers['reagent_aC1.0'].cont_list[0]
@@ -197,6 +241,94 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             backup.vol,
             robot.containers['reagent_aC1.0']._cont_i
         ))
+
+    def test_legacy_schema_one_response_remains_unchanged(self):
+        result = self._build_robot()._build_transfer_plan_preflight(
+            self._request()
+        )
+
+        self.assertEqual(1, result['schema_version'])
+        self.assertNotIn('targeted_mix_requirements', result)
+
+    def test_targeted_mix_tips_are_interleaved_and_audited_without_mutation(self):
+        '''A dirty P300 requires a mix tip plus its clean replacement.'''
+        robot = self._build_robot()
+        left_pipette = robot.pipettes['left']['pipette']
+        before = (left_pipette.has_tip, robot.pipettes['left']['last_used'])
+
+        result = robot._build_transfer_plan_preflight(
+            self._targeted_mix_request()
+        )
+
+        self.assertTrue(result['passed'])
+        self.assertEqual(2, result['schema_version'])
+        targeted_requirements = result['targeted_mix_requirements']
+        self.assertEqual(1, len(targeted_requirements))
+        self.assertEqual({
+            'wellname': 'autowell0C1.0',
+            'trigger_chemical_name': 'reagent_bC1.0',
+            'pipette_arm': 'left',
+            'mix_volume_uL': 20.0,
+            'cycle_count': 1,
+            'required_new_tips': 2,
+            'post_mix_tip_policy': 'dedicated_discarded_with_clean_replacement'
+        }, targeted_requirements[0])
+        left_requirement = next(
+            requirement for requirement in result['tip_requirements']
+            if requirement['pipette_arm'] == 'left'
+        )
+        self.assertEqual(2, left_requirement['required_new_tips'])
+        self.assertEqual(before, (
+            left_pipette.has_tip,
+            robot.pipettes['left']['last_used']
+        ))
+
+    def test_targeted_mix_tip_shortage_blocks_before_transfer(self):
+        robot = self._build_robot(left_tip_count=1)
+
+        result = robot._build_transfer_plan_preflight(
+            self._targeted_mix_request()
+        )
+
+        self.assertFalse(result['passed'])
+        left_shortage = next(
+            deficit for deficit in result['deficits']
+            if (deficit['deficit_type'] == 'tip_inventory'
+                and deficit['pipette_arm'] == 'left')
+        )
+        self.assertEqual(2, left_shortage['required_new_tips'])
+        self.assertEqual(1, left_shortage['available_new_tips'])
+
+    def test_targeted_mix_preflight_rejects_non_p300_configuration(self):
+        robot = self._build_robot()
+        robot.pipettes['left']['size'] = 20.0
+        robot.pipettes['right']['size'] = 1000.0
+
+        result = robot._build_transfer_plan_preflight(
+            self._targeted_mix_request()
+        )
+
+        self.assertFalse(result['passed'])
+        self.assertTrue(any(
+            deficit['deficit_type'] == 'tip_state'
+            and 'requires exactly one configured P300' in deficit['message']
+            for deficit in result['deficits']
+        ))
+
+    def test_invalid_targeted_mix_plan_returns_versioned_rejection(self):
+        '''A stale or mismatched trigger can never be silently preflighted.'''
+        robot = self._build_robot()
+        request = self._targeted_mix_request()
+        request['targeted_mix_plan'][0]['trigger_chemical_name'] = (
+            'missing_triggerC1.0'
+        )
+
+        result = robot._build_transfer_plan_preflight(request)
+
+        self.assertFalse(result['passed'])
+        self.assertEqual(2, result['schema_version'])
+        self.assertEqual([], result['targeted_mix_requirements'])
+        self.assertEqual('invalid_request', result['deficits'][0]['deficit_type'])
 
     def test_multicontainer_aggregate_ignores_sub_dead_source_deficits(self):
         """An empty primary cannot reduce a usable backup's inventory."""

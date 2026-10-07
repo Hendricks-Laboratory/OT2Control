@@ -95,6 +95,7 @@ def _robot_mix_class():
     method_names = {
         '_preflight_number',
         '_get_preferred_pipette_arm_for_sizes',
+        '_get_auto_completed_well_mix_p300_arm',
         '_count_available_tips',
         '_validate_auto_completed_well_mix_request',
         '_build_auto_completed_well_mix_plan',
@@ -112,12 +113,20 @@ def _robot_mix_class():
             methods.append(method)
     if len(methods) != len(method_names):
         raise AssertionError('A required targeted-mix helper is absent.')
+    required_p300_constant = next(
+        copy.deepcopy(node) for node in robot_class.body
+        if (isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id
+            == 'AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL')
+    )
     module = ast.fix_missing_locations(ast.Module(
         body=[ast.ClassDef(
             name='OT2Robot',
             bases=[],
             keywords=[],
-            body=methods,
+            body=[required_p300_constant] + methods,
             decorator_list=[]
         )],
         type_ignores=[]
@@ -204,6 +213,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         robot.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.50
         robot.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL = 5.0
         robot.AUTO_COMPLETED_WELL_MIX_MAX_CYCLES = 10
+        robot.AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL = 300.0
         robot.protocol = type('Protocol', (), {'_commands': []})()
         return robot, target, right_pipette
 
@@ -239,7 +249,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         self.assertEqual(300.0, plan['pipette_max_volume_uL'])
         self.assertEqual(200.0, target.vol)
 
-    def test_targeted_mix_uses_preparation_pipette_policy_not_transfer_policy(self):
+    def test_targeted_mix_requires_p300_not_reagent_transfer_pipette(self):
         robot, _, _ = self._robot()
 
         # Existing reagent transfers retain their validated small-volume
@@ -250,13 +260,23 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
                 20.0, {'left': 20.0, 'right': 300.0}
             )
         )
-        # A completed-well mix instead follows the existing preparation
-        # policy, which asks the larger P300 to mix even for a smaller valid
-        # mix aliquot.
+        # A completed-well mix instead requires the configured P300, even for
+        # a smaller valid mixing aliquot.
         plan = robot._build_auto_completed_well_mix_plan(
             self._request(mix_volume_uL=20.0)
         )
         self.assertEqual('right', plan['pipette_arm'])
+
+    def test_targeted_mix_rejects_any_non_p300_fallback(self):
+        robot, _, pipette = self._robot()
+        robot.pipettes['right']['size'] = 1000.0
+        pipette.max_volume = 1000.0
+
+        with self.assertRaisesRegex(ValueError, 'requires exactly one configured P300'):
+            robot._build_auto_completed_well_mix_plan(
+                self._request(mix_volume_uL=20.0)
+            )
+        self.assertEqual([], pipette.calls)
 
     def test_bad_identity_or_uncompleted_target_is_rejected_before_motion(self):
         cases = [

@@ -1093,7 +1093,10 @@ class OT2Robot():
     # Auto controller compatibility contract.  The controller verifies these
     # values before an Auto run proceeds, so it can stop before liquid handling
     # when the Pi is running an incompatible Auto-main revision or calibration.
-    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v9'
+    # v10 guarantees schema-v2 targeted-mix tip preflight support.  The
+    # Lab-PC must reject an earlier snapshot before a stability batch starts,
+    # rather than discovering the missing preflight only after setup.
+    AUTO_MAIN_PROTOCOL_VERSION = 'auto-main-state-v10'
     TARE_CALIBRATION_ID = 'ot2control_tube_tares_2026_07_v1'
     TARE_CALIBRATION_G = {
         'tube_2ml': 1.7,
@@ -1112,6 +1115,7 @@ class OT2Robot():
     # than hard-coding a P300-specific operating range here.
     AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL = 5.0
     AUTO_COMPLETED_WELL_MIX_MAX_CYCLES = 10
+    AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL = 300.0
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
 
@@ -1850,6 +1854,39 @@ class OT2Robot():
             return larger_pipette
         return smaller_pipette
 
+    @staticmethod
+    def _get_auto_completed_well_mix_p300_arm(pipette_sizes):
+        '''Return the one configured P300 arm permitted for targeted mixing.
+
+        Ordinary reagent transfers retain the established smallest-suitable
+        pipette routing.  A completed-well stability mix is different: its
+        20 uL volume is a mixing aliquot, not a metered reagent addition, and
+        Stage 13 deliberately standardizes it on one P300.  Do not silently
+        fall back to a P20 or P1000 if hardware configuration changes.
+        '''
+        if not isinstance(pipette_sizes, dict) or set(pipette_sizes) != {
+                'left', 'right'}:
+            raise ValueError(
+                'completed-well mix requires left and right pipette sizes.'
+            )
+        required_size = (
+            OT2Robot.AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL
+        )
+        p300_arms = []
+        for arm, size in pipette_sizes.items():
+            normalized_size = OT2Robot._preflight_number(
+                size, '{} pipette size'.format(arm), minimum=1e-12
+            )
+            if math.isclose(
+                    normalized_size, required_size, rel_tol=0, abs_tol=1e-9):
+                p300_arms.append(arm)
+        if len(p300_arms) != 1:
+            raise ValueError(
+                'completed-well mix requires exactly one configured P300 '
+                '(300 uL) pipette.'
+            )
+        return p300_arms[0]
+
     def _validate_auto_completed_well_mix_request(self, request):
         '''Validates one narrowly scoped, controller-addressed Auto-well mix.
 
@@ -1984,12 +2021,11 @@ class OT2Robot():
                 'completed-well mix volume exceeds the conservative fraction '
                 'of the verified well volume.'
             )
-        # This is intentionally the same larger-pipette selection used by the
-        # established preparation ``_mix`` route.  Do not reuse the requested
-        # reagent-transfer volume here: mixing does not meter a reagent and
-        # must not alter the validated small-transfer accuracy policy.
-        pipette_arm = self._get_preferred_pipette_arm_for_sizes(
-            300.0,
+        # This is intentionally separate from reagent-transfer routing. The
+        # targeted mix is standardized on exactly one P300 so a changed deck
+        # configuration fails closed instead of silently selecting a P20 or
+        # P1000 based on a 20 uL mixing aliquot.
+        pipette_arm = self._get_auto_completed_well_mix_p300_arm(
             dict((arm, details['size']) for arm, details in
                  self.pipettes.items())
         )
@@ -2013,6 +2049,14 @@ class OT2Robot():
             raise ValueError(
                 'completed-well mix pipette configuration disagrees with '
                 'the loaded instrument capacity.'
+            )
+        if not math.isclose(
+                pipette_max_volume_uL,
+                self.AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL,
+                rel_tol=0,
+                abs_tol=1e-9):
+            raise ValueError(
+                'completed-well mix requires a loaded P300 instrument.'
             )
         if normalized['mix_volume_uL'] < pipette_min_volume_uL - 1e-9:
             raise ValueError(
@@ -2169,20 +2213,27 @@ class OT2Robot():
 
     def _validate_transfer_plan_preflight_request(self, request):
         '''Validates a controller plan without consulting or changing hardware.'''
-        required_keys = {
+        base_required_keys = {
             'schema_version',
             'batch_number',
             'reserve_volume_uL',
             'source_plan'
         }
-        if not isinstance(request, dict) or set(request) != required_keys:
+        if not isinstance(request, dict):
+            raise ValueError('transfer-plan request must be a dictionary.')
+        schema_version = request.get('schema_version')
+        if schema_version == 1:
+            required_keys = base_required_keys
+        elif schema_version == 2:
+            required_keys = base_required_keys | {'targeted_mix_plan'}
+        else:
+            raise ValueError('transfer-plan request uses an unsupported schema.')
+        if set(request) != required_keys:
             raise ValueError(
                 'transfer-plan request must contain exactly {}.'.format(
                     ', '.join(sorted(required_keys))
                 )
             )
-        if request['schema_version'] != 1:
-            raise ValueError('transfer-plan request uses an unsupported schema.')
         if (
             isinstance(request['batch_number'], bool)
             or not isinstance(request['batch_number'], int)
@@ -2267,12 +2318,125 @@ class OT2Robot():
                 'transfer_steps': normalized_steps
             })
 
-        return {
-            'schema_version': 1,
+        normalized_request = {
+            'schema_version': schema_version,
             'batch_number': request['batch_number'],
             'reserve_volume_uL': reserve_volume_uL,
             'source_plan': normalized_sources
         }
+        if schema_version == 2:
+            normalized_request['targeted_mix_plan'] = (
+                self._validate_targeted_mix_preflight_plan(
+                    request['targeted_mix_plan'], normalized_sources
+                )
+            )
+        return normalized_request
+
+    def _validate_targeted_mix_preflight_plan(self, mix_plan, source_plan):
+        '''Validates future dedicated well-mix tip requirements without movement.
+
+        The normal Stage-4 source plan remains authoritative for transfer order.
+        A v2 plan may attach at most one requested dedicated mix immediately
+        after one exact trigger source-to-well transfer.  Physical well and
+        history checks remain in the future action handler immediately before
+        a real mix; this ghost preflight intentionally never requires a live
+        Auto well container to exist.
+        '''
+        if not isinstance(mix_plan, list) or not mix_plan:
+            raise ValueError('targeted_mix_plan must be a non-empty list.')
+        available_transfers = set()
+        for source_specification in source_plan:
+            source_name = source_specification['source_chemical_name']
+            for transfer_step in source_specification['transfer_steps']:
+                available_transfers.add((
+                    source_name,
+                    transfer_step['destination_name']
+                ))
+
+        normalized_plan = []
+        seen_targets = set()
+        for mix_index, mix_specification in enumerate(mix_plan):
+            required_keys = {
+                'wellname',
+                'trigger_chemical_name',
+                'mix_volume_uL',
+                'cycle_count',
+                'expected_well_volume_uL'
+            }
+            if (not isinstance(mix_specification, dict)
+                    or set(mix_specification) != required_keys):
+                raise ValueError(
+                    'targeted_mix_plan entry {} has an invalid schema.'.format(
+                        mix_index
+                    )
+                )
+            wellname = mix_specification['wellname']
+            trigger_chemical_name = mix_specification[
+                'trigger_chemical_name'
+            ]
+            if (not isinstance(wellname, str) or not wellname.startswith(
+                    'autowell')):
+                raise ValueError(
+                    'targeted_mix_plan entry {} has an invalid Auto well.'
+                    .format(mix_index)
+                )
+            if (not isinstance(trigger_chemical_name, str)
+                    or not trigger_chemical_name.strip()):
+                raise ValueError(
+                    'targeted_mix_plan entry {} has no trigger source.'.format(
+                        mix_index
+                    )
+                )
+            trigger_chemical_name = trigger_chemical_name.strip()
+            target_key = (trigger_chemical_name, wellname)
+            if target_key in seen_targets:
+                raise ValueError(
+                    'targeted_mix_plan repeats trigger transfer {} -> {}.'
+                    .format(trigger_chemical_name, wellname)
+                )
+            if target_key not in available_transfers:
+                raise ValueError(
+                    'targeted_mix_plan requires a missing trigger transfer '
+                    '{} -> {}.'.format(trigger_chemical_name, wellname)
+                )
+            mix_volume_uL = self._preflight_number(
+                mix_specification['mix_volume_uL'],
+                'targeted mix volume for {}'.format(wellname),
+                minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
+            )
+            expected_well_volume_uL = self._preflight_number(
+                mix_specification['expected_well_volume_uL'],
+                'expected well volume for {}'.format(wellname),
+                minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
+            )
+            if mix_volume_uL > (
+                    expected_well_volume_uL
+                    * self.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION + 1e-9):
+                raise ValueError(
+                    'targeted mix volume for {} exceeds the conservative '
+                    'fraction of its expected final well volume.'.format(
+                        wellname
+                    )
+                )
+            cycle_count = mix_specification['cycle_count']
+            if (isinstance(cycle_count, bool)
+                    or not isinstance(cycle_count, int)
+                    or cycle_count < 1
+                    or cycle_count > self.AUTO_COMPLETED_WELL_MIX_MAX_CYCLES):
+                raise ValueError(
+                    'targeted mix cycle_count for {} is invalid.'.format(
+                        wellname
+                    )
+                )
+            seen_targets.add(target_key)
+            normalized_plan.append({
+                'wellname': wellname,
+                'trigger_chemical_name': trigger_chemical_name,
+                'mix_volume_uL': mix_volume_uL,
+                'cycle_count': cycle_count,
+                'expected_well_volume_uL': expected_well_volume_uL
+            })
+        return normalized_plan
 
     def _get_preflight_source_containers(self, source_name):
         '''Returns immutable descriptors for the source sequence currently live.'''
@@ -2452,8 +2616,8 @@ class OT2Robot():
             'deficits': deficits
         }
 
-    def _simulate_preflight_tips(self, source_plan):
-        '''Simulates only the existing tip-cleanup rule on copied pipette state.'''
+    def _simulate_preflight_tips(self, source_plan, targeted_mix_plan=None):
+        '''Simulates transfer and future dedicated-mix tips on copied state.'''
         tip_state = {}
         for arm, details in self.pipettes.items():
             pipette = details.get('pipette')
@@ -2478,7 +2642,16 @@ class OT2Robot():
                 'transfer preflight requires left and right pipettes.'
             )
 
+        pending_targeted_mixes = {}
+        for mix_specification in targeted_mix_plan or []:
+            key = (
+                mix_specification['trigger_chemical_name'],
+                mix_specification['wellname']
+            )
+            pending_targeted_mixes[key] = dict(mix_specification)
+
         deficits = []
+        targeted_mix_requirements = []
         for source_specification in source_plan:
             source_name = source_specification['source_chemical_name']
             requires_cleaning = any(
@@ -2519,6 +2692,56 @@ class OT2Robot():
                     })
                 tip_state[arm]['last_used'] = source_name
 
+                mix_specification = pending_targeted_mixes.pop(
+                    (source_name, transfer_step['destination_name']), None
+                )
+                if mix_specification is None:
+                    continue
+
+                # Match the exact P300 requirement enforced by the Pi action
+                # handler. This is intentionally independent of the trigger
+                # transfer's metering pipette: a mix is not a reagent dose.
+                mix_arm = self._get_auto_completed_well_mix_p300_arm(
+                    dict((name, state['size']) for name, state in
+                         tip_state.items())
+                )
+                mix_state = tip_state[mix_arm]
+                use_existing_clean_tip = (
+                    mix_state['has_tip']
+                    and mix_state['last_used'] == 'clean'
+                )
+                required_new_tips = 1 + int(not use_existing_clean_tip)
+                mix_state['required_new_tips'] += required_new_tips
+
+                # The future Pi action discards its dedicated mix tip and
+                # immediately restores a clean tip before later transfers.
+                # Model that exact terminal state while leaving the real
+                # pipette, rack, and controller metadata untouched.
+                mix_state['has_tip'] = True
+                mix_state['last_used'] = 'clean'
+                targeted_mix_requirements.append({
+                    'wellname': mix_specification['wellname'],
+                    'trigger_chemical_name': mix_specification[
+                        'trigger_chemical_name'
+                    ],
+                    'pipette_arm': mix_arm,
+                    'mix_volume_uL': mix_specification['mix_volume_uL'],
+                    'cycle_count': mix_specification['cycle_count'],
+                    'required_new_tips': required_new_tips,
+                    'post_mix_tip_policy': 'dedicated_discarded_with_clean_replacement'
+                })
+
+        for source_name, wellname in sorted(pending_targeted_mixes):
+            deficits.append({
+                'deficit_type': 'targeted_mix_plan',
+                'source_chemical_name': source_name,
+                'destination_name': wellname,
+                'message': (
+                    'Targeted mix has no matching trigger transfer in the '
+                    'ordered source plan.'
+                )
+            })
+
         requirements = []
         for arm in sorted(tip_state):
             state = tip_state[arm]
@@ -2556,17 +2779,20 @@ class OT2Robot():
                     'message': 'Insufficient unused tips for this batch.'
                 })
             requirements.append(requirement)
-        return requirements, deficits
+        return requirements, deficits, targeted_mix_requirements
 
     def _build_transfer_plan_preflight(self, request):
         '''Returns an exact non-mutating feasibility decision for one batch.'''
+        response_schema_version = 2 if (
+            isinstance(request, dict) and request.get('schema_version') == 2
+        ) else 1
         try:
             normalized_request = self._validate_transfer_plan_preflight_request(
                 request
             )
         except ValueError as exc:
-            return {
-                'schema_version': 1,
+            response = {
+                'schema_version': response_schema_version,
                 'record_type': 'transfer_plan_preflight',
                 'batch_number': None,
                 'passed': False,
@@ -2578,6 +2804,9 @@ class OT2Robot():
                     'message': str(exc)
                 }]
             }
+            if response_schema_version == 2:
+                response['targeted_mix_requirements'] = []
+            return response
 
         source_containers = []
         allocations = []
@@ -2602,19 +2831,23 @@ class OT2Robot():
             deficits.extend(source_result['deficits'])
 
         try:
-            tip_requirements, tip_deficits = self._simulate_preflight_tips(
-                normalized_request['source_plan']
+            (tip_requirements,
+             tip_deficits,
+             targeted_mix_requirements) = self._simulate_preflight_tips(
+                normalized_request['source_plan'],
+                normalized_request.get('targeted_mix_plan')
             )
         except ValueError as exc:
             tip_requirements = []
+            targeted_mix_requirements = []
             tip_deficits = [{
                 'deficit_type': 'tip_state',
                 'message': str(exc)
             }]
         deficits.extend(tip_deficits)
 
-        return {
-            'schema_version': 1,
+        response = {
+            'schema_version': normalized_request['schema_version'],
             'record_type': 'transfer_plan_preflight',
             'batch_number': normalized_request['batch_number'],
             'passed': len(deficits) == 0,
@@ -2623,6 +2856,9 @@ class OT2Robot():
             'tip_requirements': tip_requirements,
             'deficits': deficits
         }
+        if normalized_request['schema_version'] == 2:
+            response['targeted_mix_requirements'] = targeted_mix_requirements
+        return response
 
     def _get_source_container_for_mass_refresh(
             self,

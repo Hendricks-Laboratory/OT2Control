@@ -38,7 +38,7 @@ The current Pi protocol provides the reviewed support needed by the paired
 Auto-RTG baseline, including:
 
 - calibrated Pi-side tube-tare defaults and container inventory handling;
-- read-only robot-state compatibility snapshots (`auto-main-state-v9`);
+- read-only robot-state compatibility snapshots (`auto-main-state-v10`);
 - source-volume preflight and source-mass refresh responses;
 - pipette-tip-rack reset and plate-generation registration responses;
 - grouped working-solution preparation reservation and one-time execution;
@@ -76,25 +76,25 @@ physical dry debug.
   `mix_auto_completed_well` (`0x1F`) and
   `auto_completed_well_mixed` (`0x20`). Both are ghost request/response
   packets, so they do not alter ordinary transfer-ready buffering.
-- The read-only compatibility snapshot continues to report
-  `auto-main-state-v9` and now advertises the optional targeted-mix command.
-  Existing Lab-PC validation checks required command membership and therefore
-  remains compatible with this additional advertised capability. The Lab-PC
-  does not call the command until its dedicated Stage 13C work.
+- The read-only compatibility snapshot reports `auto-main-state-v10`, the
+  first version that guarantees the schema-v2 targeted-mix tip preflight used
+  by the bounded Stage 13D controller path, and advertises the optional
+  targeted-mix command. The Lab-PC rejects older snapshot versions before a
+  batch begins instead of discovering missing preflight support at execution.
 - The request names exactly one logical `autowell...` product and repeats its
   expected plate-reader deck position, well location, plate-mapping revision,
   and plate generation. The Pi rejects any stale/mismatched identity, generic
   reagent/container, non-reader plate, non-`Well96` target, target not bound
   to its registered custom plate-reader labware, or target whose final recorded
   material transfer is not the named trigger reagent.
-- The Pi validates a finite mix volume, a bounded cycle count, the selected
-  loaded instrument's actual minimum and maximum volumes, configured-versus-
-  loaded pipette-capacity agreement, and a conservative maximum of 50% of the
-  robot-tracked completed-well volume. Targeted well mixing deliberately uses
-  the same larger-pipette selection policy as legacy preparation mixing;
-  ordinary reagent-transfer selection remains unchanged. The 50% limit is a
-  Pi execution safety bound, not a chemistry optimization setting; future
-  controller work must choose a requested volume inside it.
+- The Pi validates a finite mix volume, a bounded cycle count, exactly one
+  configured and loaded P300 (300 uL) instrument, its actual minimum and
+  maximum volumes, configured-versus-loaded capacity agreement, and a
+  conservative maximum of 50% of the robot-tracked completed-well volume.
+  Ordinary reagent-transfer selection remains unchanged: a targeted mix is
+  not allowed to fall back to the P20 or P1000 when deck hardware differs.
+  The 50% limit is a Pi execution safety bound, not a chemistry optimization
+  setting; future controller work must choose a requested volume inside it.
 - Mixing uses a dedicated clean tip for the single verified target well and
   discards it immediately afterwards **only after a completed mix**. A retained
   clean tip may serve as that dedicated tip; a contaminated or absent tip is
