@@ -687,13 +687,13 @@ class Well96(Well):
     """
     DEAD_VOL = 40 #uL
 
-    # The existing generic ``Container.mix`` path uses ``asp_height`` for
-    # both halves of a well mix.  For a 96-well plate that is the inherited
-    # 1 mm bottom clearance.  Keep the targeted Auto path on this established
-    # geometry rather than introducing a second, independently tuned Z path.
-    # These are physical-motion constants, not experiment settings.
-    TARGETED_MIX_ASPIRATE_CLEARANCE_MM = 1.0
-    TARGETED_MIX_DISPENSE_CLEARANCE_MM = 1.0
+    # A targeted well mix is a new physical operation.  Start its first
+    # supervised commissioning runs 2 mm above the 96-well bottom: this adds
+    # 1 mm of mechanical margin over the legacy generic-mix geometry while
+    # retaining meaningful immersion in a completed 200 uL reaction.  These
+    # are physical-motion constants, not experiment settings.
+    TARGETED_MIX_ASPIRATE_CLEARANCE_MM = 2.0
+    TARGETED_MIX_DISPENSE_CLEARANCE_MM = 2.0
     # ``InstrumentContext.mix(..., rate=...)`` multiplies the installed
     # pipette's normal aspirate and dispense flow rates.  The historical tube
     # mixers use 100.0, but that is not an evidence-based setting for a shallow

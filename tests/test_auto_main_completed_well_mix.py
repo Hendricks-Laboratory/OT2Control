@@ -401,7 +401,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         self.assertEqual('drop_tip', pipette.calls[2][0])
         self.assertEqual('pick_up_tip', pipette.calls[3][0])
 
-    def test_well96_targeted_mix_preserves_legacy_one_mm_geometry(self):
+    def test_well96_targeted_mix_uses_commissioning_two_mm_geometry(self):
         source_tree = ast.parse(ROBOT_SOURCE.read_text())
         well96 = next(
             node for node in source_tree.body
@@ -414,8 +414,8 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
             and isinstance(assignment.targets[0], ast.Name)
             and isinstance(assignment.value, ast.Constant)
         }
-        self.assertEqual(1.0, constants['TARGETED_MIX_ASPIRATE_CLEARANCE_MM'])
-        self.assertEqual(1.0, constants['TARGETED_MIX_DISPENSE_CLEARANCE_MM'])
+        self.assertEqual(2.0, constants['TARGETED_MIX_ASPIRATE_CLEARANCE_MM'])
+        self.assertEqual(2.0, constants['TARGETED_MIX_DISPENSE_CLEARANCE_MM'])
         self.assertEqual(1.0, constants['TARGETED_MIX_RATE'])
 
         method = next(

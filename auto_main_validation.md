@@ -103,8 +103,9 @@ physical dry debug.
   post-fault disposal or replacement motion; the existing error boundary stops
   in that indeterminate physical state for human review.
 - The only new liquid-handling primitive is `Well96.mix_targeted`. It repeats
-  the established repository `pipette.mix(1, ...)` primitive at the existing
-  96-well 1 mm aspiration and dispense clearance, restores prior pipette
+  the established repository `pipette.mix(1, ...)` primitive at a conservative
+  96-well 2 mm aspiration and dispense clearance for its first supervised
+  commissioning run, restores prior pipette
   clearances even on failure, and deliberately omits legacy blow-out and
   touch-tip cleanup so this route adds no extra contact motion. Its rate is
   the documented `1.0` baseline, not the historical tube-only `100.0`
