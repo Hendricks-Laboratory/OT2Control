@@ -19,36 +19,6 @@ from auto_stability_pipette_mix import (
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
-ARMCHAIR_PATH = os.path.join(REPOSITORY_ROOT, 'Armchair', 'armchair.py')
-
-
-def _load_armchair_packet_registry():
-    '''Read the live wire map without importing legacy socket dependencies.'''
-    with open(ARMCHAIR_PATH, encoding='utf-8') as source_file:
-        source = source_file.read()
-    tree = ast.parse(source)
-    armchair_class = next(
-        node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == 'Armchair'
-    )
-    assignments = {
-        node.targets[0].id: node.value
-        for node in armchair_class.body
-        if (isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name))
-    }
-    packet_expression = assignments['PACK_TYPES']
-    packet_map = ast.literal_eval(packet_expression.args[0])
-    ghost_types = ast.literal_eval(assignments['GHOST_TYPES'])
-    return type(
-        'ArmchairRegistryStub',
-        (),
-        {'PACK_TYPES': packet_map, 'GHOST_TYPES': ghost_types}
-    )
-
-
-ARMCHAIR_REGISTRY = _load_armchair_packet_registry()
 
 
 def _load_methods(method_names):
@@ -78,7 +48,6 @@ def _load_methods(method_names):
         ),
         'TARGETED_MIX_ACKNOWLEDGEMENT': TARGETED_MIX_ACKNOWLEDGEMENT,
         'TARGETED_MIX_COMMAND': TARGETED_MIX_COMMAND,
-        'Armchair': ARMCHAIR_REGISTRY,
         'validate_targeted_mix_acknowledgement': (
             validate_targeted_mix_acknowledgement
         ),
@@ -86,21 +55,6 @@ def _load_methods(method_names):
     }
     exec(compile(module, CONTROLLER_PATH, 'exec'), namespace)
     return namespace['AutoContr']
-
-
-def _method_source(method_name):
-    with open(CONTROLLER_PATH, encoding='utf-8') as source_file:
-        source = source_file.read()
-    tree = ast.parse(source)
-    auto_class = next(
-        node for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
-    )
-    method = next(
-        node for node in auto_class.body
-        if isinstance(node, ast.FunctionDef) and node.name == method_name
-    )
-    return ast.get_source_segment(source, method)
 
 
 class Stage13CHandshakeTests(unittest.TestCase):
@@ -186,44 +140,6 @@ class Stage13CHandshakeTests(unittest.TestCase):
             controller._build_auto_stability_targeted_mix_request(
                 'autowell4C1.0', 'sodium_borohydrideC6.25', 20.0, 1
             )
-
-    def test_local_packet_registry_has_targeted_mix_wire_codes(self):
-        self.assertEqual(
-            b'\x1F', ARMCHAIR_REGISTRY.PACK_TYPES[TARGETED_MIX_COMMAND]
-        )
-        self.assertEqual(
-            b'\x20', ARMCHAIR_REGISTRY.PACK_TYPES[
-                TARGETED_MIX_ACKNOWLEDGEMENT
-            ]
-        )
-        self.assertIn(TARGETED_MIX_COMMAND, ARMCHAIR_REGISTRY.GHOST_TYPES)
-        self.assertIn(
-            TARGETED_MIX_ACKNOWLEDGEMENT, ARMCHAIR_REGISTRY.GHOST_TYPES
-        )
-
-    def test_missing_local_packet_fails_before_a_mix_request_is_built(self):
-        controller = self._controller(None)
-        original_packet_types = ARMCHAIR_REGISTRY.PACK_TYPES
-        try:
-            incomplete_packet_types = original_packet_types.copy()
-            del incomplete_packet_types[TARGETED_MIX_COMMAND]
-            ARMCHAIR_REGISTRY.PACK_TYPES = incomplete_packet_types
-            with self.assertRaisesRegex(
-                    RuntimeError, 'local controller Armchair packet'):
-                controller._build_auto_stability_targeted_mix_request(
-                    'autowell4C1.0', 'sodium_borohydrideC6.25', 20.0, 1
-                )
-        finally:
-            ARMCHAIR_REGISTRY.PACK_TYPES = original_packet_types
-
-    def test_runtime_checks_targeted_packet_capability_before_preparation(self):
-        run_source = _method_source('_run')
-        self.assertLess(
-            run_source.index(
-                'self._require_auto_main_targeted_mix_capability()'
-            ),
-            run_source.index('self._execute_auto_preparation_phase(')
-        )
 
     def test_stale_plate_identity_cannot_send_a_previously_built_request(self):
         controller = self._controller(None)

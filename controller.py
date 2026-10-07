@@ -6108,6 +6108,31 @@ class AutoContr(Controller):
         compatible with an earlier Auto-main deployment. Stage 13D will call
         this method immediately before it elects the new pipette-mix path.
         '''
+        # The command is a ghost request/response pair. Check this local
+        # registry before the Pi snapshot so a controller/Pi version skew is
+        # caught at startup, before an otherwise valid trigger transfer could
+        # leave a newly completed well without its required mix and scan.
+        required_local_packets = (
+            (TARGETED_MIX_COMMAND, b'\x1F'),
+            (TARGETED_MIX_ACKNOWLEDGEMENT, b'\x20')
+        )
+        for packet_name, expected_code in required_local_packets:
+            if Armchair.PACK_TYPES.get(packet_name) != expected_code:
+                raise RuntimeError(
+                    'Targeted stability mixing requires local controller '
+                    'Armchair packet {} with code {!r}; update Auto-RTG '
+                    'before beginning a stability batch.'.format(
+                        packet_name, expected_code
+                    )
+                )
+            if packet_name not in Armchair.GHOST_TYPES:
+                raise RuntimeError(
+                    'Targeted stability mixing requires local controller '
+                    'Armchair packet {} to be configured as a ghost '
+                    'request/response packet; update Auto-RTG before '
+                    'beginning a stability batch.'.format(packet_name)
+                )
+
         snapshot = getattr(self, 'auto_main_robot_state_snapshot', None)
         if not isinstance(snapshot, dict):
             raise RuntimeError(
@@ -29973,6 +29998,12 @@ class AutoContr(Controller):
                 'auto_main_compatibility_validated',
                 copy.deepcopy(self.auto_main_robot_state_snapshot)
             )
+        # Verify both ends of the optional Stage-13 protocol before Auto
+        # preparation or a trigger transfer can begin. The Pi capability
+        # snapshot alone cannot prove that this controller installation can
+        # encode the matching packet names.
+        if self._uses_auto_stability_pipette_mix_schedule():
+            self._require_auto_main_targeted_mix_capability()
         self._execute_auto_preparation_phase(model, simulate)
         if self.robo_params.get('auto_stability_mode') == (
                 STABILITY_MODE_STABILITY_ONLY):
