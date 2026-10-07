@@ -812,13 +812,18 @@ Hardware-free source-extracted tests cover Header pairing, fail-closed
 unpaired runtime configuration, transfer-ready → identity → request → exact
 acknowledgement → strict plan → scan ordering, no cohort scan after the
 per-well path, unshaken reader provenance, and fixed-window policy behavior.
-The active development machine did not expose `python3.9`; compatibility is
-therefore limited to Python-3.9-safe source review plus a Python 3.12 static
-parse and synthetic test pass. No robot, reader, server, or protocol was run.
-The next required evidence is a combined-file review followed by a human-
-supervised water-only dry debug on the separately validated Auto-main build;
-this documentation does not establish physical clearance or chemical-use
-clearance.
+The 2026-10-04 pre-debug review also confirmed that the active development
+machine exposes `/usr/bin/python3` as Python 3.9.6: compilation plus 79
+focused controller/observer/packet compatibility tests passed without
+hardware access. The paired Auto-main review requires protocol
+`auto-main-state-v10`, which fail-closes older Pi builds before batch
+execution and requires the physical mixing instrument to be one verified P300
+(300 uL) rather than silently falling back to another pipette. A combined
+source/diff review and 45 focused Auto-main contract tests also passed. No
+robot, reader, server, or protocol was run. The next required evidence is a
+human-supervised water-only dry debug on the separately validated Auto-main
+build; this documentation does not establish physical clearance or
+chemical-use clearance.
 
 ### Stage 12 optical-stability planning record — revised future stages
 

@@ -2422,6 +2422,32 @@ class AutoMainCompatibilityHandshakeTests(unittest.TestCase):
             'plate_generation': 0
         }
 
+    def test_production_contract_requires_schema_two_preflight_version(self):
+        '''The deployed controller must reject the older targeted-mix packet.
+
+        The method-level handshake tests below deliberately use a compact v7
+        fixture.  This source-level assertion separately protects the real
+        controller constant that gates the schema-v2 targeted-mix tip
+        preflight required by the Stage 13 bounded runtime path.
+        '''
+        controller_tree = ast.parse(
+            CONTROLLER_PATH.read_text(), filename=str(CONTROLLER_PATH)
+        )
+        auto_controller = next(
+            node for node in controller_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
+        )
+        required_protocol = next(
+            node.value.value for node in auto_controller.body
+            if (isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id
+                == 'AUTO_MAIN_REQUIRED_PROTOCOL_VERSION'
+                and isinstance(node.value, ast.Constant))
+        )
+        self.assertEqual('auto-main-state-v10', required_protocol)
+
     def test_valid_snapshot_is_accepted_and_copied(self):
         controller = self._build_controller()
         snapshot = self._valid_snapshot()

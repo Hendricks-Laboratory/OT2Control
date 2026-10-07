@@ -5291,7 +5291,11 @@ class AutoContr(Controller):
     # workflow.  Auto validates this immediately after Pi initialization and
     # fails closed before generating or executing a recipe if it is absent or
     # mismatched. Manual controller workflows do not use this contract.
-    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v9'
+    # v10 is the first Auto-main compatibility contract that guarantees the
+    # schema-v2 targeted-mix tip preflight required by the bounded Stage-13D
+    # runtime path.  Do not accept an earlier Pi merely because it advertises
+    # the older targeted-mix packet name.
+    AUTO_MAIN_REQUIRED_PROTOCOL_VERSION = 'auto-main-state-v10'
     AUTO_MAIN_REQUIRED_TARE_CALIBRATION_ID = (
         'ot2control_tube_tares_2026_07_v1'
     )
