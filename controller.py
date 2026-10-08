@@ -5421,7 +5421,8 @@ class AutoContr(Controller):
         print(
             '<<controller>> validated {} Auto preparation group(s) / {} '
             'working tube(s) from {} (manifest {}). Physical preparation is '
-            'not enabled until the Auto-main group protocol is installed.'
+            'scheduled for the one-time Auto-main preparation phase after '
+            'compatibility and reservation checks pass.'
             .format(
                 len(manifest['preparations']),
                 sum(
@@ -32484,7 +32485,10 @@ class AutoContr(Controller):
         group may require both pipette sizes during each batch.
 
         The count includes startup pipette tips picked up during robot
-        initialization.
+        initialization, one-time Auto preparation, and Stage 13 dedicated
+        P300 targeted-mix tips when that policy is enabled.  It remains an
+        early planning estimate: Auto-main's exact next-batch preflight is
+        still the execution authority.
 
         params:
             OptimizationModel model:
@@ -32516,6 +32520,46 @@ class AutoContr(Controller):
             20.0: max(1, total_batches * non_water_reagent_groups),
             300.0: max(1, total_batches * non_water_reagent_groups)
         }
+
+        if self.robo_params.get('auto_preparation_mode', 'off') == 'required':
+            manifest = getattr(self, 'auto_preparation_manifest', None)
+            if not isinstance(manifest, dict):
+                raise RuntimeError(
+                    'Auto preparation tip estimation requires a validated '
+                    'preparation manifest.'
+                )
+            preparations = manifest.get('preparations')
+            if not isinstance(preparations, list) or not preparations:
+                raise RuntimeError(
+                    'Auto preparation tip estimation requires one or more '
+                    'validated preparation entries.'
+                )
+            preparation_destination_count = sum(
+                int(preparation['tube_count'])
+                for preparation in preparations
+            )
+            # The grouped Auto-main preparation protocol uses one fresh P300
+            # tip each for water, stock, and legacy tube mixing per working
+            # destination.  Count all three actions before the first batch.
+            estimated_counts[300.0] += 3 * preparation_destination_count
+
+        if self.robo_params.get('auto_stability_mixing_mode') == 'pipette_mix':
+            initial_conditions = (
+                0
+                if getattr(model, '_auto_model_checkpoint_imported', False)
+                else int(self.getModelInfo()['initial_data'])
+            )
+            iterative_conditions = (
+                max_iterations * int(model.batch_size)
+            )
+            maximum_trigger_wells = (
+                (initial_conditions + iterative_conditions)
+                * int(self.num_duplicates)
+            )
+            # Stage 13 targeted well mixing intentionally uses a fresh P300
+            # tip after every nonzero trigger transfer.  Every planned
+            # physical well is therefore an upper bound before recipes exist.
+            estimated_counts[300.0] += maximum_trigger_wells
 
         return estimated_counts
     

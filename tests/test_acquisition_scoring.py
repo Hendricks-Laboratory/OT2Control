@@ -2994,6 +2994,96 @@ class AutoPipetteTipCapacityWarningTests(unittest.TestCase):
                 controller._check_auto_pipette_tip_capacity(None)
 
 
+class AutoPipetteTipEstimateTests(unittest.TestCase):
+    '''Exercise the conservative early estimate without hardware imports.'''
+
+    @classmethod
+    def setUpClass(cls):
+        cls.AutoController = _load_auto_controller_methods([
+            '_count_non_water_reagent_groups_for_tip_estimate',
+            '_estimate_max_auto_pipette_tips_needed'
+        ])
+
+    def _controller(self):
+        controller = self.AutoController()
+        controller.robo_params = {
+            'reagent_df': pd.DataFrame(
+                index=['WaterC1.0', 'reagent_aC1.0', 'reagent_bC1.0']
+            ),
+            'auto_preparation_mode': 'off',
+            'auto_stability_mixing_mode': 'plate_shake'
+        }
+        controller.num_duplicates = 3
+        controller.getModelInfo = lambda: {
+            'initial_data': 2,
+            'max_iterations': 1
+        }
+        return controller
+
+    def test_estimate_preserves_ordinary_run_behavior(self):
+        controller = self._controller()
+        model = SimpleNamespace(
+            _auto_model_checkpoint_imported=False,
+            batch_size=2
+        )
+
+        self.assertEqual(
+            {20.0: 4, 300.0: 4},
+            controller._estimate_max_auto_pipette_tips_needed(model)
+        )
+
+    def test_estimate_includes_preparation_and_dedicated_mix_tips(self):
+        controller = self._controller()
+        controller.robo_params.update({
+            'auto_preparation_mode': 'required',
+            'auto_stability_mixing_mode': 'pipette_mix'
+        })
+        controller.auto_preparation_manifest = {
+            'preparations': [{
+                'tube_count': 2
+            }]
+        }
+        model = SimpleNamespace(
+            _auto_model_checkpoint_imported=False,
+            batch_size=2
+        )
+
+        # Ordinary estimate: 2 reagent groups x 2 batches = 4 tips/arm.
+        # Preparation: 2 destinations x (water, stock, tube mix) = 6 P300.
+        # Targeted mix: (2 seed + 1 x 2 iterative) x 3 replicates = 12 P300.
+        self.assertEqual(
+            {20.0: 4, 300.0: 22},
+            controller._estimate_max_auto_pipette_tips_needed(model)
+        )
+
+    def test_required_preparation_without_manifest_fails_closed(self):
+        controller = self._controller()
+        controller.robo_params['auto_preparation_mode'] = 'required'
+        controller.auto_preparation_manifest = None
+        model = SimpleNamespace(
+            _auto_model_checkpoint_imported=False,
+            batch_size=1
+        )
+
+        with self.assertRaisesRegex(RuntimeError, 'validated preparation manifest'):
+            controller._estimate_max_auto_pipette_tips_needed(model)
+
+    def test_imported_run_omits_seed_mixing_tip_estimate(self):
+        controller = self._controller()
+        controller.robo_params['auto_stability_mixing_mode'] = 'pipette_mix'
+        model = SimpleNamespace(
+            _auto_model_checkpoint_imported=True,
+            batch_size=2
+        )
+
+        # Imported runs have one two-condition iterative batch only: 2
+        # ordinary reagent-group tips per arm and 2 x 3 dedicated P300 mixes.
+        self.assertEqual(
+            {20.0: 2, 300.0: 8},
+            controller._estimate_max_auto_pipette_tips_needed(model)
+        )
+
+
 class AutoMainTransferPlanPreflightTests(unittest.TestCase):
     '''Pure controller tests for the Stage 4 Pi resource authority.'''
 
