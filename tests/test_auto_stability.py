@@ -91,6 +91,37 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             settings['auto_stability_replicate_log10_loss_rate_sd_max']
         )
 
+    def test_optional_decision_and_maximum_windows_are_validated(self):
+        stability_only_header = _monitor_header(
+            auto_stability_mode='stability_only',
+            auto_stability_scan_schedule='each_completion',
+            auto_stability_mixing_mode='pipette_mix',
+            auto_stability_max_peak_absorbance='0.90',
+            auto_stability_signal_confidence_z='1.96',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20',
+            auto_stability_decision_horizon_s='120',
+            auto_stability_max_observation_window_s='900',
+        )
+        settings = parse_auto_stability_header_settings(stability_only_header)
+        self.assertAlmostEqual(
+            settings['auto_stability_decision_horizon_s'], 120.0
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_max_observation_window_s'], 900.0
+        )
+        with self.assertRaisesRegex(
+                AutoStabilityValidationError, 'greater than or equal'):
+            parse_auto_stability_header_settings(dict(
+                stability_only_header,
+                auto_stability_decision_horizon_s='901',
+                auto_stability_max_observation_window_s='900',
+            ))
+        with self.assertRaisesRegex(AutoStabilityValidationError, 'only'):
+            parse_auto_stability_header_settings(_monitor_header(
+                auto_stability_decision_horizon_s='120',
+                auto_stability_max_observation_window_s='900',
+            ))
+
     def test_monitor_requires_explicit_scientific_settings(self):
         for missing_key in (
                 'auto_stability_trigger_reagent',

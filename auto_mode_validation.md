@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-09-18
+**Updated through:** 2026-10-08
 
 ---
 
@@ -857,6 +857,95 @@ water-only run must confirm that the first request for logical reader `A1`
 contains native `expected_loc=E1`, receives a successful Pi acknowledgement,
 and only then begins the first targeted mix and reader acquisition.
 
+### Stage 13D-D/13E supervised six-well water debug — 2026-10-07
+
+The supervised water-only run
+`DEBUGRTG_STAGE13_PREP_PIPETTE_WATER_1_3` completed the first physical
+validation of the bounded per-trigger path after the coordinate correction.
+It prepared one 1,000 uL working tube, executed six trigger transfers, and
+received six exact Auto-main acknowledgements for the fixed targeted-mix
+configuration: one dedicated right-arm P300 tip, one 20 uL aspiration/dispense
+cycle, and the configured 2 mm 96-well clearance for each completed well.
+Human observation reported no collision or unintended movement. This validates
+the configured conservative movement only; it is not a chemical-mixing-quality
+claim and does not validate a larger mix volume or additional cycles.
+
+Each trigger well followed the intended individual lifecycle: pending trigger
+dispatch, controller-observed transfer completion, resolved reader/native Pi
+identity, durable targeted-mix intent, successful mix acknowledgement, and an
+unmerged `each_completion` reader acquisition. The manifest contains 51 events
+and seven immutable raw active-set scans. The six completion-triggered scan
+sets contained 1, 2, 3, 2, 2, and 3 acknowledged-mix active wells,
+respectively, followed by one one-well cadence scan. Those changing counts are
+expected: earlier wells expire from the 240 s fixed observation window while
+newer wells are still active; they do not mean that activation or scanning was
+skipped. Every one of the six logical wells has its own trigger timestamp,
+physical reader location, raw-scan membership, trajectory rows, and two
+metric-eligible observations. Boundary-spanning intervals were retained as raw
+evidence and correctly excluded from the metric rather than being relabeled as
+valid observations.
+
+This run used the explicit `synthetic_companion_evidence` debug harness. Raw
+reader files were still required, acquired, and manifest-linked, but the six
+model-facing well metrics, condition summaries, and companion-model training
+records are labeled `debug_only=true` and are not nanocrystal stability
+evidence. The run validates physical mixing, per-well activation, exact
+controller/Pi handoff, reader scan membership, timing provenance, individual
+trajectory accounting, and the synthetic debug lifecycle. It does **not**
+validate chemistry-derived stability metrics, mixing sufficiency for the real
+reaction, cross-batch active-well overlap, adaptive plateau retirement, or
+stability-directed chemistry selection. The relevant artifacts are
+`pr_data/auto_stability_scan_manifest.csv`,
+`pr_data/stability/stability_well_trajectories.csv`,
+`pr_data/stability/stability_well_metrics.csv`,
+`pr_data/stability/stability_scan_timing_audit.csv`, and
+`pr_data/stability/stability_debug_synthetic_evidence.csv` inside that run
+folder.
+
+### Stage 13D-E fixed-horizon cross-batch implementation — 2026-10-08
+
+Stage 13D-E now has a branch-local code implementation, validated only by
+Python 3.9 compilation, source-structure checks, and hardware-free synthetic
+tests. It has **not** received a physical cross-batch water validation or any
+chemical validation.
+
+For the exact `stability_only` + `pipette_mix` + `each_completion` policy, the
+Header may now separate the positive decision horizon
+`auto_stability_decision_horizon_s` from the positive maximum audit window
+`auto_stability_max_observation_window_s`; the maximum must be at least the
+decision horizon. Older workbooks that provide only
+`auto_stability_observation_window_s` remain single-window compatible because
+that value supplies both horizons. Separate horizons fail closed outside this
+exact targeted stability-only policy, rather than silently changing monitor or
+target-then-stability behavior.
+
+At the decision horizon, each condition receives an immutable, auditable
+snapshot based only on intervals fully contained in that condition's decision
+window. The stability and reference-peak companion GPs consume those frozen
+condition-level records for subsequent selection. Reader observations continue
+until each individual well reaches its maximum window, but those extended
+measurements are audit-only: they cannot revise an earlier selection snapshot.
+The run exports frozen decision condition and per-well CSVs plus a lifecycle
+audit containing trigger, plate identity, decision-horizon, and retirement
+events.
+
+The Stage 13 per-trigger reader path can now scan the union of current and
+earlier active wells only when they share the same physical plate generation,
+mapping revision, deck slot, and reader plate identity. It never remixes or
+reshakes older wells. A new plate replacement is blocked while any active
+trajectory remains, preventing cross-plate ambiguity. The final run drain
+continues only audit collection through the individual maximum windows. This
+stage deliberately does not add adaptive plateau retirement, alter the P300
+mix command, alter tip use, alter ordinary Auto behavior, or change Auto-main
+or Pi packets.
+
+The next required gate is a supervised two-small-batch water-only debug with
+the decision horizon shorter than the maximum window. It must inspect
+same-plate mixed-batch scan membership, trigger-to-reader timestamps,
+decision-snapshot immutability, companion-model provenance, extended audit
+records, and the fail-closed plate-replacement boundary before any chemistry
+or unattended use.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
@@ -927,16 +1016,18 @@ a whole-plate reader shake. Current Stage 12C applies it once after a completed
 trigger cohort and then blocks a later batch until every active window closes.
 This avoids repeated shake perturbation of older trajectories, but makes its
 first observations increasingly distant from the trigger for long cohorts.
-Future `pipette_mix` and `none` options are reserved but unavailable until
-their own implementation and dry-debug validation. The scheduler must record
-the actual mixing policy and event time; it must never claim a cohort-level
-post-shake scan is a per-well `t0` measurement.
+The narrowly supported `pipette_mix` route is now the Stage 13
+`stability_only` + `each_completion` policy, using the separately validated
+conservative P300 command; it remains unvalidated for cross-batch behavior and
+for chemistry. `none` remains reserved. The scheduler must record the actual
+mixing policy and event time; it must never claim a cohort-level post-shake
+scan is a per-well `t0` measurement.
 
 Two scan schedules are planned:
 
 | Schedule | Behavior | Intended use |
 |---|---|---|
-| `each_completion` | Proposed future targeted-mix policy: after each trigger completion, scan the newly complete well and every earlier eligible active well. | Stage 13 supported direction; unavailable with current plate-shake policy. |
+| `each_completion` | After each confirmed targeted trigger mix, scan the newly complete well and every earlier eligible active well on the same physical plate. | Implemented only for `stability_only` + `pipette_mix`; physical cross-batch validation remains required. |
 | `cadenced_active_set` | Current bounded policy: after a completed trigger cohort, take one whole-plate-shaken active-set scan, then take unshaken active-set scans at requested cadence boundaries while in-window. | Current monitor-only default; actual timing is retained rather than assumed. |
 
 Strict `each_completion` would produce 2,628 well-spectrum observations for
@@ -977,8 +1068,8 @@ meaningful stability trajectory.
 | **13A** | Pure monitoring lifecycle contract: fixed decision horizon versus maximum observation window, plateau-confirmation candidate requirements, terminal-QC retirement semantics, condition-level readiness, and backward-compatible fixed-window Header mapping. Targeted pipette-mixing hardware constraints remain deliberately deferred to 13B. | **Implemented; hardware-free validation passed.** Python 3.9 compilation, stability regression tests, pure lifecycle transition tests, and AST/diff review passed. No robot, reader, scheduler, GP-selection, or workbook behavior changed. |
 | **13B** | Narrow Auto-main/Pi well-mixing capability with validated destination, pipette suitability, volume, tip state, contamination policy, completion acknowledgement, and compatibility snapshot update. Pi `main` remains untouched; only `Auto-main` changes through the established bundle workflow. | **Implemented on Auto-main; static/Pi simulation review passed.** It is not cleared for an unattended or chemistry run; first physical use remains the supervised water-only test. |
 | **13C** | Lab-PC controller-to-Pi targeted-mix handshake: exact request/acknowledgement schema, capability and current plate-identity gate, pre-dispatch journal plus observer-manifest intent, structured completion provenance, and explicit no-retry handling for timeout/malformed/rejected responses. The existing `plate_shake` path remains unchanged and this handshake is not yet scheduled. | **Implemented; hardware-free Python 3.9 contract, observer, lifecycle-event, AST, and diff checks passed.** No robot, reader, transfer, mixing, schedule, or Header behavior changes. |
-| **13D** | Per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; retire wells only for confirmed plateau, maximum-window expiry, or terminal QC; permit decision-ready conditions to inform later batches while older wells remain under extended observation; after the final scheduled batch, drain monitoring until no active wells remain. | **13D-A through 13D-D are implemented and hardware-free validated.** D-D deliberately permits only one current batch and its fixed-window cadence drain. The required next work is cross-batch lifecycle/reporting integration, then combined-file review and supervised water-only debug confirming mix target, completion-triggered scans, active-set membership, timestamp mapping, no re-mixing, and final empty-active-set termination. |
-| **13E** | Supervised physical water-only targeted-mix validation: begin at the conservative one-cycle 20 uL P300 path in one actual 96-well reaction well, then evaluate the separately approved volume escalation. Confirm actual plate geometry, tip handling, reader-tray state, and no unintended movement before any chemistry. | Human-supervised physical inspection only. This does not establish chemical mixing quality or large-batch stability-selection clearance. |
+| **13D** | Per-trigger overlapping-active-set scheduler: after each confirmed trigger completion and targeted mix, perform one immutable reader acquisition over the union of eligible new and older active wells across batches; preserve per-well trigger/batch provenance; never re-shake or re-mix older wells; support nonduplicative between-trigger cadence; freeze decision-ready conditions for later model selection while older wells remain under extended audit observation; and after the final scheduled batch, drain monitoring until no active well remains. | **13D-A through 13D-E are implemented with hardware-free validation.** The 2026-10-07 supervised six-well water debug validated only the bounded same-batch path. A supervised two-small-batch cross-batch water debug is now required to validate same-plate mixed-batch scans, immutable decision snapshots, and extended audit collection. Adaptive plateau retirement remains deferred. |
+| **13E** | Supervised physical water-only targeted-mix validation: begin at the conservative one-cycle 20 uL P300 path in actual 96-well reaction wells, then evaluate any separately approved volume escalation. Confirm actual plate geometry, tip handling, reader-tray state, and no unintended movement before any chemistry. | **Conservative 20 uL x 1 configuration validated across six water-only wells on 2026-10-07.** This does not establish chemical mixing quality, validate a larger mix volume/cycle count, or clear large-batch stability-directed chemistry selection. |
 | **13F** | Reader-acquisition consolidation and small chemistry comparison of plate shake versus targeted pipette mixing, preserving ordinary λmax processing and stability provenance without duplicate reader passes. | Regression plus human review of trajectory reproducibility, time-to-first-observation, λmax impact, practical reader throughput, and chemistry evidence before large-batch stability-directed selection. |
 
 Later follow-ons after the staged targeted-mixing work are stability-aware

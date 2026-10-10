@@ -32,9 +32,13 @@ from auto_stability_per_trigger import (
 # plate state. Every manifest is run-local, so no in-place migration is needed.
 # Version 4 adds structured targeted-pipette-mix provenance. Version 5 adds
 # an explicit registered physical identity for the future Stage-13D
-# cross-batch active-set contract. Existing reporting readers ignore fields
+# cross-batch active-set contract. Version 6 records the batch identities
+# represented by a cross-batch raw scan while retaining the newest batch as
+# the scan's filename/audit anchor. Existing reporting readers ignore fields
 # they do not need and continue to read older run-local manifests by name.
-STABILITY_OBSERVER_SCHEMA_VERSION = 5
+# Version 7 adds explicit fixed-horizon and maximum-window lifecycle events
+# for cross-batch decision-snapshot auditability.
+STABILITY_OBSERVER_SCHEMA_VERSION = 7
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -71,6 +75,7 @@ MANIFEST_COLUMNS = (
     'raw_scan_basename',
     'raw_scan_relative_path',
     'active_wellnames',
+    'active_batch_numbers',
     'active_well_locations',
     'observation_reason',
     'mixing_mode',
@@ -80,6 +85,9 @@ MANIFEST_COLUMNS = (
     'scan_started_at_utc',
     'scan_completed_at_utc',
     'scan_time_basis',
+    'decision_horizon_s',
+    'max_observation_window_s',
+    'retirement_reason',
     'notes',
 )
 
@@ -262,6 +270,7 @@ class AutoStabilityObserver:
             'last_observation_monotonic_s': None,
             'last_scan_completed_monotonic_s': None,
             'observation_count': 0,
+            'decision_horizon_recorded': False,
             # Physical identity is registered separately only by the future
             # Stage-13D scheduler after it has refreshed the reader mapping.
             # Stage-12 behavior deliberately does not depend on these fields.
@@ -349,6 +358,83 @@ class AutoStabilityObserver:
             for record in self._active_wells.values()
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
+
+    def record_decision_horizons_reached(
+            self, wellnames, decision_horizon_s, max_observation_window_s,
+            now_monotonic_s=None):
+        '''Durably record fixed-horizon readiness without retiring a well.
+
+        This is a timing fact only. It neither evaluates spectral QC nor
+        claims a model update; the controller later freezes those derived
+        values from immutable reader files. A well remains active until its
+        maximum window reaches a separately recorded retirement boundary.
+        '''
+        try:
+            decision_horizon_s = float(decision_horizon_s)
+            max_observation_window_s = float(max_observation_window_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Decision and maximum observation windows must be numeric.'
+            )
+        if (
+                not math.isfinite(decision_horizon_s)
+                or not math.isfinite(max_observation_window_s)
+                or decision_horizon_s <= 0.0
+                or max_observation_window_s < decision_horizon_s):
+            raise AutoStabilityObserverError(
+                'Decision and maximum observation windows are invalid.'
+            )
+        if now_monotonic_s is None:
+            now_monotonic_s = self._monotonic_clock()
+        try:
+            now_monotonic_s = float(now_monotonic_s)
+        except (TypeError, ValueError):
+            raise AutoStabilityObserverError(
+                'Decision-horizon time must be numeric.'
+            )
+        if not math.isfinite(now_monotonic_s):
+            raise AutoStabilityObserverError(
+                'Decision-horizon time must be finite.'
+            )
+        normalized_wellnames = self._normalize_active_wellnames(wellnames)
+        events = []
+        for wellname in normalized_wellnames:
+            record = self._active_wells[wellname]
+            if now_monotonic_s < (
+                    record['activation_monotonic_s'] + decision_horizon_s):
+                raise AutoStabilityObserverError(
+                    'Well {} has not reached the fixed decision horizon.'
+                    .format(wellname)
+                )
+            if record['decision_horizon_recorded']:
+                continue
+            record['decision_horizon_recorded'] = True
+            events.append(self._append_event(
+                'decision_horizon_reached',
+                batch_number=record['batch_number'],
+                wellname=wellname,
+                transfer_volume_uL=record['transfer_volume_uL'],
+                trigger_command_id=record['trigger_command_id'],
+                activation_status=ACTIVATION_STATUS_ACTIVE,
+                trigger_completion_sequence=(
+                    record['trigger_completion_sequence']
+                ),
+                plate_generation=record.get('plate_generation', ''),
+                plate_mapping_revision=record.get(
+                    'plate_mapping_revision', ''
+                ),
+                plate_deck_pos=record.get('deck_pos', ''),
+                reader_location=record.get('reader_location', ''),
+                decision_horizon_s=decision_horizon_s,
+                max_observation_window_s=max_observation_window_s,
+                notes=(
+                    'Fixed decision horizon reached after {} recorded '
+                    'stability scan(s). The well remains active for '
+                    'audit-only observation until a maximum-window '
+                    'retirement event.'.format(record['observation_count'])
+                )
+            ))
+        return events
 
     def register_stage13_physical_identity(
             self,
@@ -761,15 +847,18 @@ class AutoStabilityObserver:
         )
         batch_number = int(batch_number)
         records = [self._active_wells[wellname] for wellname in wellnames]
-        for record in records:
-            if batch_number != record['batch_number']:
-                raise AutoStabilityObserverError(
-                    'Raw-scan batch {} does not match active well {} batch {}.'.format(
-                        batch_number,
-                        record['wellname'],
-                        record['batch_number']
-                    )
-                )
+        active_batch_numbers = sorted({
+            int(record['batch_number']) for record in records
+        })
+        # A cross-batch observation is anchored to the newest represented
+        # batch, which is the only batch that can have caused this scan. This
+        # retains a deterministic filename and rejects a stale caller that
+        # tries to describe an older scan as if it represented newer wells.
+        if batch_number != active_batch_numbers[-1]:
+            raise AutoStabilityObserverError(
+                'Raw-scan anchor batch {} must equal the newest active '
+                'well batch {}.'.format(batch_number, active_batch_numbers[-1])
+            )
 
         self._scan_sequence += 1
         scan_id = '{:04d}'.format(self._scan_sequence)
@@ -791,10 +880,14 @@ class AutoStabilityObserver:
             raw_scan_basename=basename,
             raw_scan_relative_path=relative_path,
             active_wellnames=';'.join(wellnames),
+            active_batch_numbers=';'.join(
+                str(number) for number in active_batch_numbers
+            ),
             active_well_locations=active_well_locations,
             notes=(
-                'Reserved for one unmerged active-well raw scan. The reader '
-                'has not yet been invoked.'
+                'Reserved for one unmerged active-well raw scan anchored to '
+                'the newest represented batch. The reader has not yet been '
+                'invoked.'
             )
         )
 
@@ -885,6 +978,7 @@ class AutoStabilityObserver:
             raw_scan_basename=reservation['raw_scan_basename'],
             raw_scan_relative_path=reservation['raw_scan_relative_path'],
             active_wellnames=';'.join(wellnames),
+            active_batch_numbers=reservation.get('active_batch_numbers', ''),
             active_well_locations=reservation.get('active_well_locations', ''),
             observation_reason=observation_reason,
             mixing_mode=mixing_mode,
@@ -1014,12 +1108,21 @@ class AutoStabilityObserver:
                 trigger_completion_time_basis=(
                     record['trigger_completion_time_basis']
                 ),
+                plate_generation=record.get('plate_generation', ''),
+                plate_mapping_revision=record.get(
+                    'plate_mapping_revision', ''
+                ),
+                plate_deck_pos=record.get('deck_pos', ''),
+                reader_location=record.get('reader_location', ''),
                 notes=(
-                    'Configured stability observation window elapsed after {} '
+                    'Configured maximum stability observation window elapsed '
+                    'after {} '
                     'recorded stability scan(s). No additional scan was '
                     'invented at the window boundary.'.format(
                         record['observation_count']
                     )
-                )
+                ),
+                max_observation_window_s=observation_window_s,
+                retirement_reason='maximum_observation_window_expired'
             )
         return completed

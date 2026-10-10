@@ -199,6 +199,46 @@ class StabilityOnlyControllerLifecycleTests(unittest.TestCase):
         self.assertIn("'not_applicable_stability_only'", performance_source)
         self.assertIn("'audit_only' if stability_only_mode", performance_source)
 
+    def test_cross_batch_snapshot_precedes_companion_model_refresh(self):
+        source, methods, _unused = _controller_methods(
+            '_execute_auto_stability_only_batch',
+            '_refresh_auto_stability_model_from_reporting',
+            '_refresh_auto_stability_signal_model_from_reporting',
+        )
+        execute_source = ast.get_source_segment(
+            source, methods['_execute_auto_stability_only_batch']
+        )
+        loss_refresh_source = ast.get_source_segment(
+            source, methods['_refresh_auto_stability_model_from_reporting']
+        )
+        signal_refresh_source = ast.get_source_segment(
+            source, methods['_refresh_auto_stability_signal_model_from_reporting']
+        )
+
+        wait_index = execute_source.index(
+            '_await_auto_stability_batch_decision_horizon'
+        )
+        freeze_index = execute_source.index(
+            '_freeze_auto_stability_batch_decision_snapshots'
+        )
+        loss_refresh_index = execute_source.index(
+            '_refresh_auto_stability_model_from_reporting'
+        )
+        signal_refresh_index = execute_source.index(
+            '_refresh_auto_stability_signal_model_from_reporting'
+        )
+        self.assertLess(wait_index, freeze_index)
+        self.assertLess(freeze_index, loss_refresh_index)
+        self.assertLess(loss_refresh_index, signal_refresh_index)
+        self.assertIn(
+            '_get_auto_stability_companion_reporting_records()',
+            loss_refresh_source
+        )
+        self.assertIn(
+            '_get_auto_stability_companion_reporting_records()',
+            signal_refresh_source
+        )
+
     def test_legacy_dummy_simulation_is_explicitly_blocked_before_execution(self):
         source, methods, _unused = _controller_methods(
             'run_simulation', 'run_protocol'

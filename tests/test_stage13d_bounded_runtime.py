@@ -14,7 +14,7 @@ import unittest
 from collections import namedtuple
 from types import SimpleNamespace
 
-from auto_stability_lifecycle import build_fixed_window_monitoring_policy
+from auto_stability_lifecycle import build_stability_monitoring_policy
 
 
 REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,11 +44,12 @@ def _load_methods(method_names):
         'shutil': shutil,
         'time': time,
         'STABILITY_MIXING_MODE_PIPETTE_MIX': 'pipette_mix',
+        'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
         'STABILITY_SCAN_SCHEDULE_EACH_COMPLETION': 'each_completion',
         'TARGETED_MIX_DEFAULT_VOLUME_UL': 20.0,
         'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 1,
-        'build_fixed_window_monitoring_policy': (
-            build_fixed_window_monitoring_policy
+        'build_stability_monitoring_policy': (
+            build_stability_monitoring_policy
         ),
     }
     exec(compile(module, CONTROLLER_PATH, 'exec'), namespace)
@@ -131,6 +132,7 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.AutoController = _load_methods([
             '_uses_auto_stability_pipette_mix_schedule',
+            '_uses_auto_stability_cross_batch_scheduler',
             '_get_auto_stability_fixed_window_policy',
             '_get_auto_stability_latest_active_wellname',
             '_confirm_auto_stability_trigger_step_completion',
@@ -145,9 +147,14 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
         controller.robo_params = {
             'auto_stability_mixing_mode': 'pipette_mix',
             'auto_stability_scan_schedule': 'each_completion',
+            'auto_stability_mode': 'stability_only',
             'auto_stability_observation_window_s': 90.0,
         }
         controller.auto_stability_observer = _ObserverStub()
+        controller.auto_main_robot_state_snapshot = {
+            'plate_generation': 0,
+            'plate_mapping_revision': 0,
+        }
         return controller
 
     def test_completion_acknowledgement_precedes_exactly_one_post_mix_action(self):
@@ -227,6 +234,23 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
         self.assertEqual(90.0, policy['decision_horizon_s'])
         self.assertEqual(90.0, policy['max_observation_window_s'])
 
+    def test_cross_batch_path_requires_shorter_targeted_stability_horizon(self):
+        controller = self._controller()
+        self.assertFalse(
+            controller._uses_auto_stability_cross_batch_scheduler()
+        )
+        controller.robo_params.update({
+            'auto_stability_decision_horizon_s': 30.0,
+            'auto_stability_max_observation_window_s': 90.0,
+        })
+        self.assertTrue(
+            controller._uses_auto_stability_cross_batch_scheduler()
+        )
+        controller.robo_params['auto_stability_mode'] = 'monitor'
+        self.assertFalse(
+            controller._uses_auto_stability_cross_batch_scheduler()
+        )
+
     def test_reader_scan_is_unshaken_and_preserves_plan_mapping(self):
         controller = self._controller()
         plan = {
@@ -237,6 +261,8 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
             'retired_wellnames': [],
             'triggering_wellname': 'autowell0C1.0',
             'deck_pos': 4,
+            'plate_generation': 0,
+            'plate_mapping_revision': 0,
         }
         controller._plan_auto_stability_post_mix_active_set = (
             lambda wellname: plan

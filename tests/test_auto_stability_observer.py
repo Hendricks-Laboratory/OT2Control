@@ -18,14 +18,8 @@ class AutoStabilityObserverTests(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.timestamps = iter([
-            '2026-09-09T10:00:00+00:00',
-            '2026-09-09T10:00:01+00:00',
-            '2026-09-09T10:00:02+00:00',
-            '2026-09-09T10:00:03+00:00',
-            '2026-09-09T10:00:04+00:00',
-            '2026-09-09T10:00:05+00:00',
-            '2026-09-09T10:00:06+00:00',
-            '2026-09-09T10:00:07+00:00',
+            '2026-09-09T10:00:{:02d}+00:00'.format(second)
+            for second in range(40)
         ])
         self.observer = AutoStabilityObserver(
             pr_data_path=self.temporary_directory.name,
@@ -59,7 +53,7 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(
             event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
         )
-        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 5)
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 7)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
@@ -143,6 +137,53 @@ class AutoStabilityObserverTests(unittest.TestCase):
         )
         with self.assertRaises(AutoStabilityObserverError):
             self.observer.reserve_raw_scan(2, 'autowell2C1.0', ['B7', 'C7'])
+
+    def test_cross_batch_reservation_uses_newest_batch_anchor_and_audits_all(self):
+        for batch_number, wellname in (
+                (0, 'autowell0C1.0'), (1, 'autowell1C1.0')):
+            self.observer.record_trigger_transfer_dispatched(
+                batch_number, wellname, 15.0, batch_number + 1
+            )
+            self.observer.confirm_trigger_transfer_completed(wellname)
+        reservation = self.observer.reserve_raw_scan(
+            1,
+            ['autowell0C1.0', 'autowell1C1.0'],
+            reader_locations=['A1', 'B1']
+        )
+        self.assertEqual('0;1', reservation['active_batch_numbers'])
+        self.assertIn('batch_001', reservation['raw_scan_basename'])
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'newest'):
+            self.observer.reserve_raw_scan(
+                0, ['autowell0C1.0', 'autowell1C1.0']
+            )
+
+    def test_decision_horizon_is_durable_without_retiring_the_well(self):
+        clock = [10.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-DECISION',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-09-09T11:00:00+00:00',
+            monotonic_clock=lambda: clock[0],
+        )
+        observer.record_trigger_transfer_dispatched(0, 'autowell0C1.0', 20, 1)
+        observer.confirm_trigger_transfer_completed('autowell0C1.0')
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'not reached'):
+            observer.record_decision_horizons_reached(
+                ['autowell0C1.0'], 30, 90, now_monotonic_s=39.9
+            )
+        events = observer.record_decision_horizons_reached(
+            ['autowell0C1.0'], 30, 90, now_monotonic_s=40.0
+        )
+        self.assertEqual(['decision_horizon_reached'], [
+            event['event_type'] for event in events
+        ])
+        self.assertEqual(['autowell0C1.0'], [
+            record['wellname'] for record in observer.get_active_wells()
+        ])
+        self.assertEqual([], observer.record_decision_horizons_reached(
+            ['autowell0C1.0'], 30, 90, now_monotonic_s=41.0
+        ))
 
     def test_active_set_scan_records_one_file_and_a_cadence_deadline(self):
         monotonic_time = [100.0]

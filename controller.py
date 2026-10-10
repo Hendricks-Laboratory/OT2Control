@@ -139,7 +139,7 @@ from auto_stability import (
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
 )
-from auto_stability_lifecycle import build_fixed_window_monitoring_policy
+from auto_stability_lifecycle import build_stability_monitoring_policy
 from auto_stability_debug import (
     SYNTHETIC_COMPANION_EVIDENCE_SOURCE,
     build_synthetic_companion_evidence,
@@ -5637,6 +5637,11 @@ class AutoContr(Controller):
         )
         self.auto_stability_signal_model_training_records = []
         self.auto_stability_signal_model_summary = None
+        # Stage 13D-E freezes one decision-window record per completed
+        # condition. These records are controller-local, append-only for the
+        # run, and are the only stability evidence that may reach a
+        # cross-batch companion-model refresh.
+        self.auto_stability_decision_snapshots = {}
         # Stage 10B keeps only local, conservative evidence for an unexpected
         # interruption after physical work may have begun. These values never
         # authorize automatic retry, continuation, or model updates.
@@ -5989,14 +5994,47 @@ class AutoContr(Controller):
         return False
 
     def _get_auto_stability_fixed_window_policy(self):
-        '''Return the current bounded fixed-window lifecycle policy.
+        '''Return the non-adaptive decision/max lifecycle policy.
 
-        Stage 13D-D intentionally preserves the established Header's one
-        observation-window setting. Adaptive plateau retirement and separate
-        decision/max-window controls remain later, independently validated
-        work; they are not inferred from a new movement path.
+        Older Header files map their one observation window to both values in
+        ``parse_auto_stability_header_settings``. Stage 13D-E may provide a
+        shorter comparable decision horizon for stability-only runs, but it
+        still uses only the validated fixed maximum-window retirement rule;
+        adaptive plateau retirement remains deliberately disabled.
         '''
-        return build_fixed_window_monitoring_policy(
+        return build_stability_monitoring_policy(
+            decision_horizon_s=self.robo_params.get(
+                'auto_stability_decision_horizon_s',
+                self.robo_params['auto_stability_observation_window_s']
+            ),
+            max_observation_window_s=self.robo_params.get(
+                'auto_stability_max_observation_window_s',
+                self.robo_params['auto_stability_observation_window_s']
+            ),
+            adaptive_retirement_enabled=False,
+            plateau_min_tail_observation_count=3,
+            plateau_consecutive_interval_count=2,
+            plateau_max_absorbance_slope_per_s=0.0,
+        )
+
+    def _uses_auto_stability_cross_batch_scheduler(self):
+        '''Return whether the separately validated cross-batch path is active.
+
+        Cross-batch scanning is intentionally limited to the target-free
+        stability-only mode and the paired targeted-pipette policy. Equal
+        decision and maximum windows retain the established one-window
+        behavior, preserving older workbook execution semantics.
+        '''
+        if not self._uses_auto_stability_pipette_mix_schedule():
+            return False
+        if self.robo_params.get('auto_stability_mode') != (
+                STABILITY_MODE_STABILITY_ONLY):
+            return False
+        return self.robo_params.get(
+            'auto_stability_decision_horizon_s',
+            self.robo_params['auto_stability_observation_window_s']
+        ) < self.robo_params.get(
+            'auto_stability_max_observation_window_s',
             self.robo_params['auto_stability_observation_window_s']
         )
 
@@ -6037,42 +6075,42 @@ class AutoContr(Controller):
         )
 
     def _plan_auto_stability_post_mix_active_set(self, triggering_wellname):
-        '''Return the bounded same-batch plan after durable mix acknowledgements.'''
+        '''Return one current-plate plan after durable mix acknowledgements.'''
         observer = self.auto_stability_observer
-        observation_window_s = self.robo_params[
-            'auto_stability_observation_window_s'
-        ]
-        observer.complete_expired_observation_windows(
-            observation_window_s,
-            now_monotonic_s=time.monotonic()
+        max_window_s = self.robo_params.get(
+            'auto_stability_max_observation_window_s',
+            self.robo_params['auto_stability_observation_window_s']
         )
-        if not observer.get_active_wells():
-            return None
-        plan = observer.plan_stage13_post_mix_active_set(
-            triggering_wellname=triggering_wellname,
-            now_monotonic_s=time.monotonic(),
-            monitoring_policy=self._get_auto_stability_fixed_window_policy(),
-            minimum_peak_absorbance=self.robo_params[
-                'auto_stability_min_peak_absorbance'
-            ]
+        # Reader staging can cross a maximum-window boundary. Retire those
+        # wells durably, then replan; never allow a planner-only retirement
+        # to silently alter the manifest or reader layout.
+        for unused_attempt in range(2):
+            observer.complete_expired_observation_windows(
+                max_window_s,
+                now_monotonic_s=time.monotonic()
+            )
+            if not observer.get_active_wells():
+                return None
+            plan = observer.plan_stage13_post_mix_active_set(
+                triggering_wellname=triggering_wellname,
+                now_monotonic_s=time.monotonic(),
+                monitoring_policy=self._get_auto_stability_fixed_window_policy(),
+                minimum_peak_absorbance=self.robo_params[
+                    'auto_stability_min_peak_absorbance'
+                ]
+            )
+            if not plan['retired_wellnames']:
+                if not self._uses_auto_stability_cross_batch_scheduler() and (
+                        plan['active_batch_numbers'] != [int(self.batch_num)]):
+                    raise RuntimeError(
+                        'The configured one-window targeted-mix scheduler '
+                        'refuses an active set outside the current batch.'
+                    )
+                return plan
+        raise RuntimeError(
+            'Targeted stability scan could not durably retire an expired '
+            'well before building its active-set plan.'
         )
-        # Stage 13D-D is deliberately bounded to the current physical batch.
-        # Cross-batch overlap needs its own lifecycle-retirement, reporting,
-        # and supervised-debug validation before it may be enabled.
-        if plan['active_batch_numbers'] != [int(self.batch_num)]:
-            raise RuntimeError(
-                'The bounded targeted-mix scheduler refuses an active set '
-                'outside the current batch. Cross-batch monitoring is not '
-                'enabled at this stage.'
-            )
-        if plan['retired_wellnames']:
-            raise RuntimeError(
-                'Targeted stability scanning found lifecycle-retired wells '
-                'after the fixed-window retirement pass: {}.'.format(
-                    plan['retired_wellnames']
-                )
-            )
-        return plan
 
     def _run_auto_stability_pipette_mix_completion(self, wellname):
         '''Perform the exact post-trigger mix then its required active-set scan.'''
@@ -6695,13 +6733,13 @@ class AutoContr(Controller):
 
     def _run_auto_stability_post_mix_active_set_scan(
             self, plan, observation_reason, mixing_mode):
-        '''Run one bounded, unshaken scan from an acknowledged mix plan.
+        '''Run one unshaken acknowledged-mix active-set scan.
 
-        This is intentionally separate from the validated Stage-12C
-        plate-shake helper. It accepts only the strict Stage-13D-C plan whose
-        active wells each have one acknowledged targeted mix. The first
-        runtime integration remains one batch at a time; it never combines
-        older batches, re-mixes them, or sends a plate-shake command.
+        Every represented well must be on the same registered physical plate.
+        When Stage 13D-E enables a shorter decision horizon, the plan may
+        include earlier-batch wells that remain inside their longer maximum
+        observation window. Those wells are scanned only: no old well is
+        mixed, shaken, or sent another Pi command.
         '''
         if not isinstance(plan, dict):
             raise RuntimeError(
@@ -6720,10 +6758,16 @@ class AutoContr(Controller):
                 'Targeted stability active-set scan requires acknowledged '
                 'mix provenance for every active well.'
             )
-        if plan.get('active_batch_numbers') != [int(self.batch_num)]:
+        active_batch_numbers = list(plan.get('active_batch_numbers', []))
+        if not active_batch_numbers:
             raise RuntimeError(
-                'The bounded targeted stability scan refuses non-current '
-                'batch wells.'
+                'Targeted stability scan plan omitted its batch anchor.'
+            )
+        if (not self._uses_auto_stability_cross_batch_scheduler() and
+                active_batch_numbers != [int(self.batch_num)]):
+            raise RuntimeError(
+                'The configured one-window targeted stability scan refuses '
+                'non-current batch wells.'
             )
         if plan.get('retired_wellnames'):
             raise RuntimeError(
@@ -6791,6 +6835,20 @@ class AutoContr(Controller):
                 return None
             wellnames = list(staged_plan['scan_wellnames'])
             reader_locations = list(staged_plan['reader_locations'])
+            staged_batch_numbers = list(staged_plan.get(
+                'active_batch_numbers', []
+            ))
+            if not staged_batch_numbers:
+                raise RuntimeError(
+                    'Targeted stability reader staging lost its batch '
+                    'anchor.'
+                )
+            if (not self._uses_auto_stability_cross_batch_scheduler() and
+                    staged_batch_numbers != [int(self.batch_num)]):
+                raise RuntimeError(
+                    'The configured one-window targeted stability scan '
+                    'refuses a changed active batch while staging.'
+                )
 
             # Re-resolve immediately before reservation. The already-recorded
             # Stage-13 physical identities must still describe the controller
@@ -6810,11 +6868,28 @@ class AutoContr(Controller):
                         'Targeted stability scan refuses a changed plate '
                         'deck position for {}.'.format(wellname)
                     )
+            snapshot = getattr(self, 'auto_main_robot_state_snapshot', None)
+            if not isinstance(snapshot, dict):
+                raise RuntimeError(
+                    'Targeted stability scan requires the already validated '
+                    'Auto-main plate identity snapshot.'
+                )
+            if (
+                    int(staged_plan['plate_generation']) != int(
+                        snapshot['plate_generation']
+                    )
+                    or int(staged_plan['plate_mapping_revision']) != int(
+                        snapshot['plate_mapping_revision']
+                    )):
+                raise RuntimeError(
+                    'Targeted stability scan refuses a changed physical '
+                    'plate identity after its acknowledged mix.'
+                )
 
             scan_protocol = self._get_auto_stability_scan_protocol()
             scan_started_monotonic_s = time.monotonic()
             reservation = observer.reserve_raw_scan(
-                int(self.batch_num),
+                max(staged_batch_numbers),
                 wellnames,
                 reader_locations=reader_locations
             )
@@ -6907,21 +6982,24 @@ class AutoContr(Controller):
             time.sleep(min(1.0, remaining_s))
 
     def _complete_auto_stability_observation_window(self):
-        '''Run the bounded post-batch cadence and mark all windows complete.
+        '''Run the bounded maximum-window cadence and retire all active wells.
 
-        Both supported policies retain the established bounded final-window
-        drain: no later Auto batch is selected before every active well is
-        complete. ``pipette_mix``/``each_completion`` has already performed
-        its required mix-and-scan after each trigger; its later cadence scans
-        are reader-only and never re-mix a well. Cross-batch overlap remains
-        deliberately out of scope for this first runtime integration.
+        The ordinary and one-window paths use this immediately after a batch.
+        Stage 13D-E invokes it only at stability-only run finalization: later
+        batches may begin after immutable decision snapshots, while this
+        method continues longer audit-only trajectories to their configured
+        maximum window. ``pipette_mix``/``each_completion`` cadence scans are
+        reader-only and never re-mix a well.
         '''
         observer = self.auto_stability_observer
         if observer is None:
             return
 
         settings = self.robo_params
-        observation_window_s = settings['auto_stability_observation_window_s']
+        observation_window_s = settings.get(
+            'auto_stability_max_observation_window_s',
+            settings['auto_stability_observation_window_s']
+        )
         scan_schedule = settings['auto_stability_scan_schedule']
         scan_interval_s = settings['auto_stability_scan_interval_s']
 
@@ -6977,6 +7055,268 @@ class AutoContr(Controller):
                 next_deadline,
                 len(active_records)
             )
+
+    def _await_auto_stability_batch_decision_horizon(self, wellnames):
+        '''Observe until every current-batch well reaches its fixed horizon.
+
+        This is the Stage-13D-E boundary that permits a later batch to begin.
+        It does not retire the current batch at its decision horizon: all
+        still-active wells remain eligible for reader-only scans until their
+        individual maximum windows expire. A missing current-batch active
+        well is a fail-closed provenance error, never a reason to infer a
+        decision snapshot from another batch.
+        '''
+        observer = self.auto_stability_observer
+        if observer is None:
+            raise RuntimeError(
+                'Cross-batch stability scheduling requires an initialized '
+                'observer.'
+            )
+        expected_wellnames = {str(wellname) for wellname in wellnames}
+        if not expected_wellnames:
+            raise RuntimeError(
+                'Cross-batch stability scheduling requires current-batch '
+                'well names.'
+            )
+        current_batch = int(self.batch_num)
+        decision_horizon_s = self.robo_params.get(
+            'auto_stability_decision_horizon_s',
+            self.robo_params['auto_stability_observation_window_s']
+        )
+        max_window_s = self.robo_params.get(
+            'auto_stability_max_observation_window_s',
+            self.robo_params['auto_stability_observation_window_s']
+        )
+        scan_interval_s = self.robo_params['auto_stability_scan_interval_s']
+
+        while True:
+            now_monotonic_s = time.monotonic()
+            observer.complete_expired_observation_windows(
+                max_window_s,
+                now_monotonic_s=now_monotonic_s
+            )
+            current_records = [
+                record for record in observer.get_active_wells()
+                if int(record['batch_number']) == current_batch
+            ]
+            current_wellnames = {
+                record['wellname'] for record in current_records
+            }
+            missing = sorted(expected_wellnames - current_wellnames)
+            if missing:
+                raise RuntimeError(
+                    'Cross-batch stability scheduling lost current-batch '
+                    'active well(s) before their decision horizon: {}.'
+                    .format(missing)
+                )
+            decision_pending = [
+                record for record in current_records
+                if now_monotonic_s < (
+                    record['activation_monotonic_s'] + decision_horizon_s
+                )
+            ]
+            if not decision_pending:
+                observer.record_decision_horizons_reached(
+                    sorted(expected_wellnames),
+                    decision_horizon_s=decision_horizon_s,
+                    max_observation_window_s=max_window_s,
+                    now_monotonic_s=now_monotonic_s,
+                )
+                return
+
+            cadence_deadline = observer.get_next_cadence_deadline(
+                max_window_s, scan_interval_s
+            )
+            if cadence_deadline is not None and cadence_deadline <= now_monotonic_s:
+                triggering_wellname = (
+                    self._get_auto_stability_latest_active_wellname()
+                )
+                if triggering_wellname is None:
+                    raise RuntimeError(
+                        'Cross-batch stability scheduling had no active '
+                        'well to anchor its reader-only cadence scan.'
+                    )
+                plan = self._plan_auto_stability_post_mix_active_set(
+                    triggering_wellname
+                )
+                if plan is not None:
+                    self._run_auto_stability_post_mix_active_set_scan(
+                        plan,
+                        observation_reason='cadenced_active_set',
+                        mixing_mode='none'
+                    )
+                continue
+
+            decision_deadline = min(
+                record['activation_monotonic_s'] + decision_horizon_s
+                for record in decision_pending
+            )
+            maximum_deadline = observer.get_next_window_expiration_deadline(
+                max_window_s
+            )
+            next_deadline = min(
+                deadline for deadline in (
+                    decision_deadline, cadence_deadline, maximum_deadline
+                ) if deadline is not None
+            )
+            self._wait_for_auto_stability_deadline(
+                next_deadline,
+                len(observer.get_active_wells())
+            )
+
+    @staticmethod
+    def _canonical_auto_stability_snapshot_value(value):
+        '''Serialize one snapshot payload solely for equality verification.'''
+        return json.dumps(value, sort_keys=True, separators=(',', ':'),
+                          default=str)
+
+    def _write_auto_stability_decision_snapshot_exports(self):
+        '''Export the append-only Stage-13D-E model-evidence snapshots.'''
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        condition_rows = []
+        well_rows = []
+        for condition_id in sorted(self.auto_stability_decision_snapshots):
+            snapshot = self.auto_stability_decision_snapshots[condition_id]
+            condition_row = dict(snapshot['condition_summary'])
+            condition_row.update({
+                'snapshot_status': 'frozen',
+                'decision_horizon_s': snapshot['decision_horizon_s'],
+                'stability_evidence_source': snapshot[
+                    'stability_evidence_source'
+                ],
+                'debug_only': snapshot['debug_only'],
+            })
+            condition_rows.append(condition_row)
+            for metric in snapshot['well_metrics']:
+                well_row = dict(metric)
+                well_row.update({
+                    'snapshot_status': 'frozen',
+                    'decision_horizon_s': snapshot['decision_horizon_s'],
+                    'stability_evidence_source': snapshot[
+                        'stability_evidence_source'
+                    ],
+                    'debug_only': snapshot['debug_only'],
+                })
+                well_rows.append(well_row)
+        return [
+            self._write_auto_stability_reporting_csv(
+                os.path.join(
+                    stability_path,
+                    'stability_decision_snapshot_conditions.csv'
+                ),
+                condition_rows
+            ),
+            self._write_auto_stability_reporting_csv(
+                os.path.join(
+                    stability_path,
+                    'stability_decision_snapshot_wells.csv'
+                ),
+                well_rows
+            ),
+        ]
+
+    def _freeze_auto_stability_batch_decision_snapshots(self, batch_number):
+        '''Freeze current-batch decision-window evidence before selection.
+
+        The reporting builder applies the conservative reader-interval rule:
+        an interval that spans a decision boundary is retained in the raw
+        trajectory but never enters this fixed-horizon snapshot. Rebuilding
+        later from longer audit trajectories therefore cannot change the
+        model-facing metric; this method also rejects any attempted mutation
+        of an already-frozen condition payload.
+        '''
+        records = self._build_auto_stability_reporting_records(
+            metric_window_s=self.robo_params.get(
+                'auto_stability_decision_horizon_s',
+                self.robo_params['auto_stability_observation_window_s']
+            )
+        )
+        batch_text = str(int(batch_number))
+        summaries = [
+            dict(row) for row in records['condition_summaries']
+            if str(row.get('batch_number', '')) == batch_text
+        ]
+        if not summaries:
+            raise RuntimeError(
+                'Cross-batch stability scheduling reached a decision horizon '
+                'without a current-batch condition summary.'
+            )
+        metrics_by_condition = {}
+        for metric in records['well_metrics']:
+            condition_id = str(metric.get('condition_id', '')).strip()
+            if condition_id:
+                metrics_by_condition.setdefault(condition_id, []).append(
+                    dict(metric)
+                )
+        for summary in summaries:
+            condition_id = str(summary.get('condition_id', '')).strip()
+            if not condition_id or condition_id not in metrics_by_condition:
+                raise RuntimeError(
+                    'Cross-batch stability decision snapshot lacks complete '
+                    'per-well evidence for condition {!r}.'.format(
+                        condition_id
+                    )
+                )
+            snapshot = {
+                'decision_horizon_s': self.robo_params.get(
+                    'auto_stability_decision_horizon_s',
+                    self.robo_params['auto_stability_observation_window_s']
+                ),
+                'condition_summary': summary,
+                'well_metrics': sorted(
+                    metrics_by_condition[condition_id],
+                    key=lambda row: str(row.get('wellname', ''))
+                ),
+                'stability_evidence_source': records.get(
+                    'stability_evidence_source', 'raw_reader'
+                ),
+                'debug_only': bool(records.get('debug_evidence_rows')),
+            }
+            existing = self.auto_stability_decision_snapshots.get(condition_id)
+            if existing is not None and (
+                    self._canonical_auto_stability_snapshot_value(existing) !=
+                    self._canonical_auto_stability_snapshot_value(snapshot)):
+                raise RuntimeError(
+                    'Cross-batch stability decision snapshot for {} would '
+                    'change after it was frozen.'.format(condition_id)
+                )
+            self.auto_stability_decision_snapshots[condition_id] = snapshot
+        self._write_auto_stability_decision_snapshot_exports()
+
+    def _get_auto_stability_companion_reporting_records(self):
+        '''Return frozen decision evidence only for cross-batch model refresh.'''
+        if not self._uses_auto_stability_cross_batch_scheduler():
+            return self._build_auto_stability_reporting_records()
+        snapshots = self.auto_stability_decision_snapshots
+        if not snapshots:
+            raise RuntimeError(
+                'Cross-batch stability companion-model refresh requires at '
+                'least one frozen decision snapshot.'
+            )
+        ordered = [snapshots[key] for key in sorted(snapshots)]
+        evidence_sources = {
+            snapshot['stability_evidence_source'] for snapshot in ordered
+        }
+        if len(evidence_sources) != 1:
+            raise RuntimeError(
+                'Cross-batch stability decision snapshots have inconsistent '
+                'evidence sources.'
+            )
+        return {
+            'condition_summaries': [
+                dict(snapshot['condition_summary']) for snapshot in ordered
+            ],
+            'well_metrics': [
+                dict(metric) for snapshot in ordered
+                for metric in snapshot['well_metrics']
+            ],
+            'stability_evidence_source': next(iter(evidence_sources)),
+            'debug_evidence_rows': (
+                [{}] if any(snapshot['debug_only'] for snapshot in ordered)
+                else []
+            ),
+        }
 
     @staticmethod
     def _auto_preparation_source_base_name(chemical_name):
@@ -30659,7 +30999,17 @@ class AutoContr(Controller):
         )
         wellnames = [self._generate_wellname() for _ in range(recipes.shape[0])]
         self._ensure_auto_plate_capacity_for_batch(len(wellnames))
-        self._create_samples(wellnames, recipes, model)
+        self._create_samples(
+            wellnames,
+            recipes,
+            model,
+            defer_auto_stability_completion=(
+                getattr(
+                    self, '_uses_auto_stability_cross_batch_scheduler',
+                    lambda: False
+                )()
+            )
+        )
 
         filenames = self.rxn_df[
             (self.rxn_df['op'] == 'scan') |
@@ -30693,6 +31043,14 @@ class AutoContr(Controller):
             scan_quality_by_replicate=scan_quality,
             replicate_wellnames=wellnames
         )
+        if getattr(
+                self, '_uses_auto_stability_cross_batch_scheduler',
+                lambda: False
+        )():
+            self._await_auto_stability_batch_decision_horizon(wellnames)
+            self._freeze_auto_stability_batch_decision_snapshots(
+                self.batch_num
+            )
         self._refresh_auto_stability_model_from_reporting()
         self._refresh_auto_stability_signal_model_from_reporting()
         self._update_experiment_data(recipes, lambda_values, axis=0)
@@ -30832,6 +31190,14 @@ class AutoContr(Controller):
             model.curr_iter += 1
             self.batch_num += 1
 
+        if getattr(
+                self, '_uses_auto_stability_cross_batch_scheduler',
+                lambda: False
+        )():
+            # No further condition can be selected. Drain the remaining
+            # audit-only trajectories through their individual maximum
+            # windows before final report generation.
+            self._complete_auto_stability_observation_window()
         model.quit = True
         self._finalize_auto_stability_only_run(model)
 
@@ -31109,8 +31475,8 @@ class AutoContr(Controller):
                     })
         return spectra_by_raw_scan, qc_rows
 
-    def _build_auto_stability_reporting_records(self):
-        '''Derive current Stage-12D records from immutable completed scans.
+    def _build_auto_stability_reporting_records(self, metric_window_s=None):
+        '''Derive stability records from immutable scans for one fixed window.
 
         This shared, read-only helper lets Stage 12E use the exact same
         manifest, historical reader-layout, blank-correction, and
@@ -31130,6 +31496,33 @@ class AutoContr(Controller):
             )
         with open(observer.manifest_path, newline='', encoding='utf-8') as handle:
             manifest_rows = list(csv.DictReader(handle))
+        lifecycle_rows = []
+        for row in manifest_rows:
+            if row.get('event_type') not in (
+                    'trigger_transfer_completed',
+                    'stage13_physical_identity_registered',
+                    'decision_horizon_reached',
+                    'observation_window_completed'):
+                continue
+            lifecycle_rows.append({
+                'event_type': row.get('event_type', ''),
+                'recorded_at_utc': row.get('recorded_at_utc', ''),
+                'wellname': row.get('wellname', ''),
+                'batch_number': row.get('batch_number', ''),
+                'activation_status': row.get('activation_status', ''),
+                'plate_generation': row.get('plate_generation', ''),
+                'plate_mapping_revision': row.get(
+                    'plate_mapping_revision', ''
+                ),
+                'plate_deck_pos': row.get('plate_deck_pos', ''),
+                'reader_location': row.get('reader_location', ''),
+                'decision_horizon_s': row.get('decision_horizon_s', ''),
+                'max_observation_window_s': row.get(
+                    'max_observation_window_s', ''
+                ),
+                'retirement_reason': row.get('retirement_reason', ''),
+                'notes': row.get('notes', ''),
+            })
         spectra_by_raw_scan, load_qc_rows = (
             self._load_auto_stability_reporting_spectra(manifest_rows)
         )
@@ -31154,13 +31547,16 @@ class AutoContr(Controller):
                 'synthetic companion evidence after verified raw-reader '
                 'loading; raw reader files remain preserved separately.'
             )
+        if metric_window_s is None:
+            metric_window_s = self.robo_params.get(
+                'auto_stability_max_observation_window_s',
+                self.robo_params['auto_stability_observation_window_s']
+            )
         records = build_stability_reporting_records(
             manifest_rows=manifest_rows,
             spectra_by_raw_scan=spectra_by_raw_scan,
             condition_rows=self.auto_model_performance_rows,
-            observation_window_s=self.robo_params[
-                'auto_stability_observation_window_s'
-            ],
+            observation_window_s=metric_window_s,
             scan_interval_s=self.robo_params['auto_stability_scan_interval_s'],
             min_peak_absorbance=self.robo_params[
                 'auto_stability_min_peak_absorbance'
@@ -31177,6 +31573,7 @@ class AutoContr(Controller):
             row['stability_evidence_source'] = 'raw_reader'
             row['debug_only'] = bool(debug_evidence_rows)
         records['qc_rows'].extend(load_qc_rows)
+        records['lifecycle_rows'] = lifecycle_rows
         records['stability_evidence_source'] = evidence_source
         records['debug_evidence_rows'] = debug_evidence_rows
         return records
@@ -31235,7 +31632,7 @@ class AutoContr(Controller):
                 'Stability monitor mode has no initialized Stage-12E model.'
             )
         try:
-            records = self._build_auto_stability_reporting_records()
+            records = self._get_auto_stability_companion_reporting_records()
             training_records = build_stability_model_training_records(
                 condition_summaries=records['condition_summaries'],
                 condition_rows=self.auto_model_performance_rows,
@@ -31380,7 +31777,7 @@ class AutoContr(Controller):
                 'signal model.'
             )
         try:
-            records = self._build_auto_stability_reporting_records()
+            records = self._get_auto_stability_companion_reporting_records()
             training_records = build_stability_signal_model_training_records(
                 condition_summaries=records['condition_summaries'],
                 condition_rows=self.auto_model_performance_rows,
@@ -31594,6 +31991,7 @@ class AutoContr(Controller):
         os.makedirs(stability_path, exist_ok=True)
         output_specs = [
             ('stability_scan_timing_audit.csv', records['timing_rows']),
+            ('stability_lifecycle_audit.csv', records['lifecycle_rows']),
             ('stability_well_trajectories.csv', records['trajectory_rows']),
             ('stability_well_metrics.csv', records['well_metrics']),
             ('condition_stability_summary.csv', records['condition_summaries']),
@@ -31766,7 +32164,9 @@ class AutoContr(Controller):
         #reorder according to order of wellnames
         return unordered_data[wellnames]
 
-    def _create_samples(self, wellnames, recipes, model=None):
+    def _create_samples(
+            self, wellnames, recipes, model=None,
+            defer_auto_stability_completion=False):
         '''
         creates the desired reactions on the platereader  
         params:  
@@ -31955,11 +32355,13 @@ class AutoContr(Controller):
             )
 
         self.execute_protocol_df(model)
-        # Stage 12C keeps a stability-monitor batch closed until its active
-        # wells complete the configured observation window. This runs after
-        # the ordinary protocol (including its normal scan) and therefore
-        # cannot replace or merge that existing data path.
-        self._complete_auto_stability_observation_window()
+        # Ordinary and one-window stability runs retain the established
+        # post-batch drain. Stage 13D-E stability-only execution explicitly
+        # defers that drain: it freezes a fixed decision-window snapshot after
+        # condition rows exist, then leaves longer trajectories active for
+        # audit-only scans during later batches.
+        if not defer_auto_stability_completion:
+            self._complete_auto_stability_observation_window()
         if hasattr(self, '_record_auto_plate_batch_execution'):
             self._record_auto_plate_batch_execution(len(wellnames))
 
@@ -32157,6 +32559,14 @@ class AutoContr(Controller):
         )
         if count <= available:
             return
+        observer = getattr(self, 'auto_stability_observer', None)
+        if observer is not None and observer.get_active_wells():
+            raise RuntimeError(
+                'Auto plate replacement is blocked while stability-active '
+                'wells remain on the current physical plate. Let their '
+                'maximum observation windows retire before replacing the '
+                'plate; no cursor registration or liquid handling occurred.'
+            )
         # A held lifecycle state is only valid when it identifies the exact
         # operator action that may release it.  Keep this identifier in both
         # the hold and accepted-registration records so the local journal can

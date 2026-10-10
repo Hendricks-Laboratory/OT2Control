@@ -253,12 +253,36 @@ def parse_auto_stability_header_settings(header_values):
         header_values.get('auto_stability_observation_window_s'),
         'auto_stability_observation_window_s'
     )
-    # These are separate concepts in the Stage-13 lifecycle contract.  They
-    # deliberately inherit the validated single-window setting for now: the
-    # current scheduler, reader path, and workbook template remain unchanged
-    # until a later, separately validated stage introduces their controls.
-    decision_horizon_s = observation_window_s
-    max_observation_window_s = observation_window_s
+    # Earlier workbooks expose one observation window.  Preserve that exact
+    # behavior when the optional Stage-13D-E controls are absent, while
+    # allowing a stability-only targeted-mix run to freeze comparable
+    # model-facing evidence before its longer raw-trajectory audit ends.
+    raw_decision_horizon = header_values.get(
+        'auto_stability_decision_horizon_s'
+    )
+    raw_max_observation_window = header_values.get(
+        'auto_stability_max_observation_window_s'
+    )
+    decision_horizon_s = (
+        observation_window_s if _is_blank(raw_decision_horizon) else
+        _parse_positive_finite(
+            raw_decision_horizon,
+            'auto_stability_decision_horizon_s'
+        )
+    )
+    max_observation_window_s = (
+        observation_window_s if _is_blank(raw_max_observation_window) else
+        _parse_positive_finite(
+            raw_max_observation_window,
+            'auto_stability_max_observation_window_s'
+        )
+    )
+    if max_observation_window_s < decision_horizon_s:
+        raise AutoStabilityValidationError(
+            'Header value auto_stability_max_observation_window_s must be '
+            'greater than or equal to '
+            'auto_stability_decision_horizon_s.'
+        )
     min_peak_absorbance = _parse_positive_finite(
         header_values.get('auto_stability_min_peak_absorbance'),
         'auto_stability_min_peak_absorbance'
@@ -299,6 +323,21 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_scan_schedule=each_completion. The targeted '
             'P300 action is coupled to one immediate, non-shaking active-set '
             'scan after every confirmed trigger completion.'
+        )
+    if (
+            (decision_horizon_s != observation_window_s
+             or max_observation_window_s != observation_window_s)
+            and not (
+                mode == STABILITY_MODE_STABILITY_ONLY
+                and mixing_mode == STABILITY_MIXING_MODE_PIPETTE_MIX
+                and scan_schedule == STABILITY_SCAN_SCHEDULE_EACH_COMPLETION
+            )):
+        raise AutoStabilityValidationError(
+            'Separate stability decision/max observation windows are currently '
+            'supported only for auto_stability_mode=stability_only with the '
+            'paired pipette_mix/each_completion policy. Other modes must '
+            'leave both optional values blank so they inherit '
+            'auto_stability_observation_window_s.'
         )
     # The later bounded post-batch drain continues to use this interval for
     # un-mixed cadence scans even under ``each_completion``.  It is therefore
