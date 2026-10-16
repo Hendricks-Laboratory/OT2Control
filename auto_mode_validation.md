@@ -989,40 +989,50 @@ robot, Pi deployment, water debug, or dye assay was run. Physical clearance,
 mixing quality, and the number of production cycles remain unvalidated until
 the later supervised calibration workflow and its water-first test.
 
-### Stage 13G-C1 calibration-only execution-plan boundary — 2026-10-16
+### Stage 13G-C1/C2a calibration-only assay contract — 2026-10-16
 
-Stage 13G-C1 adds no controller execution path. It introduces a pure
-`auto_mix_calibration_plan.py` builder that receives already-resolved source,
-logical-well, reader-layout, and plate-identity inputs from a future
-controller stage and produces one fixed, strictly validated calibration
-schedule:
+Stages 13G-C1 and C2a add no controller execution path. They provide a pure
+configuration and plan boundary for the supervised P300 mix calibration. C2a
+supersedes C1's earlier ambiguous `base`/`trigger` terminology and its
+copper-first provisional order. The reviewed two-dye profile is now explicitly
+aligned to the QC dye-assay order:
 
 ```text
-Pi no-motion calibration preflight
-→ ordinary 180 uL base transfer
-→ ordinary 20 uL trigger transfer
+20 uL Acid Red 1 (0.36 mM) first
+→ 180 uL copper sulfate dye (8 mM) second
 → selected-well baseline scan 00
 → (one 150 uL Pi mix → one selected-well raw scan) × 10
 ```
 
-The calibration Header now requires exactly one user-facing physical target,
-`auto_mix_calibration_target_reader_well` (`A1` through `H12`). The plan
-derives the corresponding OT-2 location and reader deck through the existing
-controller translator, so an operator never enters conflicting reader and
-robot coordinates. Enabled calibration also rejects any non-off
-`auto_stability_mode`; the generated plan explicitly marks ordinary Auto and
-ordinary stability execution as forbidden. It records eleven unmerged scan
-intents—baseline index 0 followed by post-mix indices 1 through 10—and each
-mix action has a unique, ordered, non-retryable Pi request.
+The final well volume is fixed at 200 uL. The two-dye Header therefore names
+the `qc_two_dye_20ul_red` assay profile, one first reagent, one second reagent,
+and exactly one physical reader well (`A1` through `H12`); it does not accept
+ordinary Input Template transfer steps as a substitute for the assay profile.
+The configuration parser rejects missing/unknown two-dye profiles, duplicate
+sources, incompatible reader locations, and every non-off
+`auto_stability_mode`. A separate pure source-metadata validator requires the
+resolved first/second source identities and concentrations to match Acid Red 1
+at 0.36 mM and copper sulfate dye at 8 mM before a later controller can build
+a run plan.
 
-The plan builder imports only the calibration configuration and packet-contract
-modules. It contains no controller, reader, socket, robot, filesystem, or
-spreadsheet-I/O import and therefore cannot create a physical action. It does
-not yet resolve spreadsheet sources, perform inventory preflight, initialize a
-robot, create a well, send a packet, transfer liquid, scan a plate, write an
-output, or change a model. Python 3.9.6 compilation and 34 focused
-configuration/protocol/plan plus existing targeted-stability regression tests
-passed. The next stage, 13G-C2, must connect this plan through a dedicated
+The plan derives the corresponding OT-2 location and reader deck through the
+existing controller translator, so an operator never enters conflicting reader
+and robot coordinates. It explicitly forbids ordinary Auto and stability
+execution, retains eleven unmerged scan intents (baseline index 0 followed by
+post-mix indices 1 through 10), and requires a unique ordered non-retryable Pi
+mix request for every cycle. The deployed Pi preflight packet retains its
+historical identity-only `base_chemical_name`/`trigger_chemical_name` field
+names for version-1 compatibility; the pure plan maps first to the former and
+second to the latter only at that boundary. Transfer order and transfer volume
+are defined solely by the explicit first/second plan steps.
+
+The configuration and plan modules import no controller, reader, socket,
+robot, filesystem, or spreadsheet-I/O code. They cannot create a physical
+action and do not yet resolve spreadsheet sources, perform inventory preflight,
+initialize a robot, create a well, send a packet, transfer liquid, scan a
+plate, write an output, or change a model. Python 3.9.6 compilation and 36
+focused configuration/protocol/plan plus existing targeted-stability regression
+tests passed. Stage 13G-C2b must connect this fixed contract through a dedicated
 calibration-only controller entry point and retain the same fail-closed
 preflight, acknowledgement, and raw-scan boundaries.
 

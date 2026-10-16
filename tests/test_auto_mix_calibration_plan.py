@@ -5,7 +5,15 @@ import copy
 import pathlib
 import unittest
 
-from auto_mix_calibration import parse_auto_mix_calibration_header_settings
+from auto_mix_calibration import (
+    MIX_CALIBRATION_ASSAY_PROFILE_HEADER,
+    MIX_CALIBRATION_FIRST_REAGENT_HEADER,
+    MIX_CALIBRATION_FIRST_VOLUME_UL,
+    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+    MIX_CALIBRATION_SECOND_REAGENT_HEADER,
+    MIX_CALIBRATION_SECOND_VOLUME_UL,
+    parse_auto_mix_calibration_header_settings,
+)
 from auto_mix_calibration_plan import (
     AutoMixCalibrationPlanError,
     MIX_CALIBRATION_EXPECTED_SCAN_COUNT,
@@ -18,8 +26,11 @@ from auto_mix_calibration_plan import (
 def _settings():
     return parse_auto_mix_calibration_header_settings({
         'auto_mix_calibration_mode': 'two_dye',
-        'auto_mix_calibration_base_reagent': 'Copper EDTA Base',
-        'auto_mix_calibration_trigger_reagent': 'Acid Red 1',
+        MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+        ),
+        MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
+        MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
         'auto_mix_calibration_target_reader_well': 'C4',
     })
 
@@ -35,8 +46,8 @@ def _plan():
         calibration_id='dye-calibration-001',
         logical_wellname='autowell-calibration-001',
         source_container_names={
-            'base': 'CopperEDTABaseC1.0',
-            'trigger': 'AcidRed1C1.0',
+            'first': 'AcidRed1C0.36',
+            'second': 'CopperSulfateDyeC8.0',
         },
         reader_location_mapping=_mapping(),
         plate_mapping_revision=4,
@@ -68,10 +79,14 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertEqual(4, target['expected_deck_pos'])
         self.assertEqual('platereader4', target['expected_labware_name'])
 
-    def test_exact_plan_is_base_trigger_baseline_then_ten_mix_scan_pairs(self):
+    def test_exact_plan_is_pdf_ordered_then_ten_mix_scan_pairs(self):
         plan = _plan()
         self.assertFalse(plan['normal_auto_execution_permitted'])
         self.assertFalse(plan['normal_stability_execution_permitted'])
+        self.assertEqual(
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+            plan['assay_profile']
+        )
         self.assertEqual(200.0, plan['expected_final_well_volume_uL'])
         self.assertEqual(11, plan['expected_scan_count'])
         self.assertEqual(MIX_CALIBRATION_EXPECTED_SCAN_COUNT,
@@ -79,20 +94,22 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertEqual(24, len(plan['execution_steps']))
 
         transfers = plan['transfer_steps']
-        self.assertEqual('CopperEDTABaseC1.0',
+        self.assertEqual('AcidRed1C0.36',
                          transfers[0]['source_chemical_name'])
-        self.assertEqual(180.0, transfers[0]['volume_uL'])
-        self.assertEqual('AcidRed1C1.0',
+        self.assertEqual(MIX_CALIBRATION_FIRST_VOLUME_UL,
+                         transfers[0]['volume_uL'])
+        self.assertEqual('CopperSulfateDyeC8.0',
                          transfers[1]['source_chemical_name'])
-        self.assertEqual(20.0, transfers[1]['volume_uL'])
-        self.assertEqual('transfer-base', transfers[1]['requires_step_id'])
+        self.assertEqual(MIX_CALIBRATION_SECOND_VOLUME_UL,
+                         transfers[1]['volume_uL'])
+        self.assertEqual('transfer-first', transfers[1]['requires_step_id'])
 
         baseline = plan['scan_steps'][0]
         self.assertEqual(0, baseline['scan_index'])
         self.assertEqual(0, baseline['cycle_index'])
-        self.assertEqual('baseline_after_trigger_before_mix',
+        self.assertEqual('baseline_after_second_transfer_before_mix',
                          baseline['observation_reason'])
-        self.assertEqual('transfer-trigger', baseline['requires_step_id'])
+        self.assertEqual('transfer-second', baseline['requires_step_id'])
         self.assertFalse(baseline['record_in_aggregate'])
 
         action_ids = set()
@@ -110,9 +127,12 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertEqual('scan-00', plan['mix_steps'][0]['requires_step_id'])
         self.assertEqual('scan-09', plan['mix_steps'][-1]['requires_step_id'])
 
-    def test_tampering_cannot_create_a_different_sequence_or_aggregate_scan(self):
+    def test_tampering_cannot_reverse_or_alter_sequence_or_aggregate_scan(self):
         for mutator in (
-                lambda plan: plan['transfer_steps'][0].update(volume_uL=179.0),
+                lambda plan: plan['transfer_steps'][0].update(volume_uL=21.0),
+                lambda plan: plan['transfer_steps'].__setitem__(
+                    0, copy.deepcopy(plan['transfer_steps'][1])
+                ),
                 lambda plan: plan['mix_steps'][1]['request'].update(cycle_index=1),
                 lambda plan: plan['scan_steps'][1].update(
                     record_in_aggregate=True
@@ -138,8 +158,8 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
                 calibration_id='dye-calibration-001',
                 logical_wellname='autowell-calibration-001',
                 source_container_names={
-                    'base': 'SameContainerC1.0',
-                    'trigger': 'samecontainerc1.0',
+                    'first': 'SameContainerC1.0',
+                    'second': 'samecontainerc1.0',
                 },
                 reader_location_mapping=_mapping(),
                 plate_mapping_revision=4,

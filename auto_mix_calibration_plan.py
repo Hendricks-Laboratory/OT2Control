@@ -1,22 +1,23 @@
 '''Pure execution-plan contract for one supervised well-mix calibration.
 
 This module has no controller, reader, socket, robot, spreadsheet-I/O, or
-filesystem imports.  It turns already-normalized calibration settings plus
-injected run-specific identities into one strictly validated, reviewable plan. A later
-controller stage may execute this plan, but no function here can cause a
-physical action.
+filesystem imports. It turns already-normalized calibration settings plus
+injected run-specific identities into one strictly validated, reviewable plan.
+A later controller stage may execute this plan, but no function here can cause
+a physical action.
 '''
 
 import re
 
 from auto_mix_calibration import (
-    MIX_CALIBRATION_BASE_VOLUME_UL,
+    MIX_CALIBRATION_ASSAY_PROFILE_HEADER,
     MIX_CALIBRATION_CYCLE_COUNT,
     MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
+    MIX_CALIBRATION_FIRST_VOLUME_UL,
     MIX_CALIBRATION_MODE_OFF,
     MIX_CALIBRATION_P300_VOLUME_UL,
+    MIX_CALIBRATION_SECOND_VOLUME_UL,
     MIX_CALIBRATION_TARGET_READER_WELL_HEADER,
-    MIX_CALIBRATION_TRIGGER_VOLUME_UL,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
 )
 from auto_mix_calibration_protocol import (
@@ -26,7 +27,7 @@ from auto_mix_calibration_protocol import (
 )
 
 
-MIX_CALIBRATION_PLAN_VERSION = 1
+MIX_CALIBRATION_PLAN_VERSION = 2
 MIX_CALIBRATION_BASELINE_SCAN_INDEX = 0
 MIX_CALIBRATION_EXPECTED_SCAN_COUNT = 1 + MIX_CALIBRATION_CYCLE_COUNT
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
@@ -71,13 +72,7 @@ def _require_logical_wellname(value):
 
 
 def resolve_auto_mix_calibration_target(reader_well, reader_location_mapping):
-    '''Resolve one user-entered reader well into one guarded Pi identity.
-
-    ``reader_location_mapping`` is injected by the controller from its
-    established `PLATEREADER_INDEX_TRANSLATOR`.  Keeping it an argument avoids
-    importing the hardware-facing controller just to validate a plan and keeps
-    the user-facing Header to one coordinate rather than two conflicting ones.
-    '''
+    '''Resolve one user-entered reader well into one guarded Pi identity.'''
     if not isinstance(reader_well, str) or not reader_well.strip():
         raise AutoMixCalibrationPlanError('Calibration reader well is blank.')
     normalized_reader_well = reader_well.strip().upper()
@@ -129,7 +124,7 @@ def resolve_auto_mix_calibration_target(reader_well, reader_location_mapping):
 
 def _build_scan_step(scan_index, cycle_index, wellname, target, prerequisite):
     if scan_index == MIX_CALIBRATION_BASELINE_SCAN_INDEX:
-        reason = 'baseline_after_trigger_before_mix'
+        reason = 'baseline_after_second_transfer_before_mix'
     else:
         reason = 'post_mix_cycle_{:02d}'.format(cycle_index)
     return {
@@ -150,12 +145,14 @@ def _build_scan_step(scan_index, cycle_index, wellname, target, prerequisite):
 def build_auto_mix_calibration_run_plan(
         settings, calibration_id, logical_wellname, source_container_names,
         reader_location_mapping, plate_mapping_revision, plate_generation):
-    '''Build the exact non-executing 180 + 20, baseline, ten mix/scan plan.
+    '''Build the exact 20 + 180, baseline, then ten mix/scan plan.
 
-    The caller supplies canonical source-container identities and the live
-    plate identity only after its own future controller-side resolution.  This
-    plan intentionally performs neither source-volume preflight nor a packet
-    send: those belong to the later controller execution stage.
+    ``source_container_names`` deliberately uses first/second keys. The current
+    already-deployed Pi preflight packet still calls its two identity-only
+    fields ``base_chemical_name`` and ``trigger_chemical_name``; this pure plan
+    maps first->base and second->trigger only at that wire-compatibility edge.
+    Transfer order is governed solely by this plan's explicit first/second
+    steps, not by those historical packet field names.
     '''
     if not isinstance(settings, dict):
         raise AutoMixCalibrationPlanError('Calibration settings must be a dict.')
@@ -164,25 +161,28 @@ def build_auto_mix_calibration_run_plan(
         raise AutoMixCalibrationPlanError(
             'A calibration run plan requires enabled calibration mode.'
         )
+    profile = settings.get(MIX_CALIBRATION_ASSAY_PROFILE_HEADER)
+    if not isinstance(profile, str) or not profile:
+        raise AutoMixCalibrationPlanError('Calibration assay profile is blank.')
     calibration_id = _require_identifier(calibration_id, 'calibration_id')
     wellname = _require_logical_wellname(logical_wellname)
     if not isinstance(source_container_names, dict):
         raise AutoMixCalibrationPlanError(
-            'source_container_names must contain base and trigger identities.'
+            'source_container_names must contain first and second identities.'
         )
-    if set(source_container_names) != set(('base', 'trigger')):
+    if set(source_container_names) != set(('first', 'second')):
         raise AutoMixCalibrationPlanError(
-            'source_container_names must contain exactly base and trigger.'
+            'source_container_names must contain exactly first and second.'
         )
-    base_container = _require_container_name(
-        source_container_names['base'], 'base source container'
+    first_container = _require_container_name(
+        source_container_names['first'], 'first source container'
     )
-    trigger_container = _require_container_name(
-        source_container_names['trigger'], 'trigger source container'
+    second_container = _require_container_name(
+        source_container_names['second'], 'second source container'
     )
-    if base_container.casefold() == trigger_container.casefold():
+    if first_container.casefold() == second_container.casefold():
         raise AutoMixCalibrationPlanError(
-            'The resolved base and trigger source containers must differ.'
+            'The resolved first and second source containers must differ.'
         )
     target = resolve_auto_mix_calibration_target(
         settings.get(MIX_CALIBRATION_TARGET_READER_WELL_HEADER),
@@ -204,8 +204,10 @@ def build_auto_mix_calibration_run_plan(
         'expected_loc': target['expected_loc'],
         'expected_plate_mapping_revision': plate_mapping_revision,
         'expected_plate_generation': plate_generation,
-        'base_chemical_name': base_container,
-        'trigger_chemical_name': trigger_container,
+        # Compatibility names are identity-only Pi preflight fields; they do
+        # not select transfer ordering or volumes.
+        'base_chemical_name': first_container,
+        'trigger_chemical_name': second_container,
         'expected_final_well_volume_uL': MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
         'mix_volume_uL': MIX_CALIBRATION_P300_VOLUME_UL,
         'total_cycle_count': MIX_CALIBRATION_CYCLE_COUNT,
@@ -216,27 +218,27 @@ def build_auto_mix_calibration_run_plan(
     )
     transfer_steps = [
         {
-            'step_id': 'transfer-base',
+            'step_id': 'transfer-first',
             'step_type': 'ordinary_transfer',
             'sequence_index': 1,
-            'source_chemical_name': base_container,
+            'source_chemical_name': first_container,
             'destination_wellname': wellname,
-            'volume_uL': MIX_CALIBRATION_BASE_VOLUME_UL,
+            'volume_uL': MIX_CALIBRATION_FIRST_VOLUME_UL,
             'requires_step_id': 'pi-preflight',
         },
         {
-            'step_id': 'transfer-trigger',
+            'step_id': 'transfer-second',
             'step_type': 'ordinary_transfer',
             'sequence_index': 2,
-            'source_chemical_name': trigger_container,
+            'source_chemical_name': second_container,
             'destination_wellname': wellname,
-            'volume_uL': MIX_CALIBRATION_TRIGGER_VOLUME_UL,
-            'requires_step_id': 'transfer-base',
+            'volume_uL': MIX_CALIBRATION_SECOND_VOLUME_UL,
+            'requires_step_id': 'transfer-first',
         },
     ]
     baseline_scan = _build_scan_step(
         MIX_CALIBRATION_BASELINE_SCAN_INDEX, 0, wellname, target,
-        'transfer-trigger'
+        'transfer-second'
     )
     mix_steps = []
     scan_steps = [baseline_scan]
@@ -277,6 +279,7 @@ def build_auto_mix_calibration_run_plan(
         'plan_version': MIX_CALIBRATION_PLAN_VERSION,
         'calibration_id': calibration_id,
         'calibration_mode': mode,
+        'assay_profile': profile,
         'normal_auto_execution_permitted': False,
         'normal_stability_execution_permitted': False,
         'target': target,
@@ -307,6 +310,8 @@ def validate_auto_mix_calibration_run_plan(plan):
         raise AutoMixCalibrationPlanError(
             'Calibration plan must remain isolated from Auto and stability.'
         )
+    if not isinstance(plan.get('assay_profile'), str) or not plan['assay_profile']:
+        raise AutoMixCalibrationPlanError('Calibration plan assay profile is invalid.')
     preflight = validate_mix_calibration_preflight_request(
         plan.get('preflight_request')
     )
@@ -330,32 +335,30 @@ def validate_auto_mix_calibration_run_plan(plan):
         )
     transfer_steps = plan.get('transfer_steps')
     expected_transfers = (
-        (preflight['base_chemical_name'], MIX_CALIBRATION_BASE_VOLUME_UL),
-        (preflight['trigger_chemical_name'], MIX_CALIBRATION_TRIGGER_VOLUME_UL),
+        (preflight['base_chemical_name'], MIX_CALIBRATION_FIRST_VOLUME_UL),
+        (preflight['trigger_chemical_name'], MIX_CALIBRATION_SECOND_VOLUME_UL),
     )
     if not isinstance(transfer_steps, list) or len(transfer_steps) != 2:
         raise AutoMixCalibrationPlanError(
-            'Calibration plan must contain exactly base then trigger transfer.'
+            'Calibration plan must contain exactly first then second transfer.'
         )
     for sequence_index, (step, expected) in enumerate(
             zip(transfer_steps, expected_transfers), start=1):
+        expected_step_id = ('transfer-first' if sequence_index == 1
+                            else 'transfer-second')
+        expected_prerequisite = ('pi-preflight' if sequence_index == 1
+                                 else 'transfer-first')
         if (not isinstance(step, dict)
-                or step.get('step_id') != (
-                    'transfer-base' if sequence_index == 1
-                    else 'transfer-trigger'
-                )
+                or step.get('step_id') != expected_step_id
                 or step.get('step_type') != 'ordinary_transfer'
                 or step.get('sequence_index') != sequence_index
                 or step.get('source_chemical_name') != expected[0]
                 or step.get('destination_wellname') != preflight['wellname']
                 or step.get('volume_uL') != expected[1]
-                or step.get('requires_step_id') != (
-                    'pi-preflight' if sequence_index == 1
-                    else 'transfer-base'
-                )):
+                or step.get('requires_step_id') != expected_prerequisite):
             raise AutoMixCalibrationPlanError(
-                'Calibration transfer sequence is not the reviewed 180 + 20 '
-                'uL base/trigger sequence.'
+                'Calibration transfer sequence is not the reviewed 20 + 180 '
+                'uL first/second sequence.'
             )
     if (plan.get('expected_final_well_volume_uL')
             != MIX_CALIBRATION_FINAL_WELL_VOLUME_UL):
@@ -375,8 +378,8 @@ def validate_auto_mix_calibration_run_plan(plan):
     if (baseline.get('scan_index') != MIX_CALIBRATION_BASELINE_SCAN_INDEX
             or baseline.get('cycle_index') != 0
             or baseline.get('observation_reason')
-            != 'baseline_after_trigger_before_mix'
-            or baseline.get('requires_step_id') != 'transfer-trigger'
+            != 'baseline_after_second_transfer_before_mix'
+            or baseline.get('requires_step_id') != 'transfer-second'
             or baseline.get('wellname') != preflight['wellname']
             or baseline.get('reader_well') != target['reader_well']
             or baseline.get('expected_deck_pos')
@@ -384,7 +387,7 @@ def validate_auto_mix_calibration_run_plan(plan):
             or baseline.get('expected_loc') != preflight['expected_loc']
             or baseline.get('record_in_aggregate') is not False):
         raise AutoMixCalibrationPlanError(
-            'Calibration baseline scan is not positioned after trigger transfer.'
+            'Calibration baseline scan is not positioned after second transfer.'
         )
     seen_action_ids = set()
     for cycle_index, (mix_step, scan_step) in enumerate(
