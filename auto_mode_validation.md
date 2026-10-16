@@ -1078,6 +1078,42 @@ configuration/protocol/plan/execution and existing targeted-stability
 regression tests passed. No robot, plate reader, socket, or live workbook was
 accessed.
 
+### Stage 13G-C2c paired resource-preflight contract — 2026-10-16
+
+Stage 13G-C2c defines the paired Auto-main/Lab-PC version-2 contract required
+to make C2b's all-resources barrier meaningful. It adds four new local ghost
+packet identities, deliberately separate from normal Auto packets:
+
+```text
+bind_auto_mix_calibration_well
+auto_mix_calibration_well_bound
+preflight_auto_mix_calibration_resources
+auto_mix_calibration_resources_preflight
+```
+
+The first no-motion exchange binds exactly one vacant, translated reader-well
+location to the dedicated logical calibration well. It echoes the expected deck
+position, OT-2 location, plate mapping revision, and plate generation. An
+accepted response must prove the location was vacant and a binding was created;
+a rejected response is forbidden from claiming that it changed state.
+
+The second no-motion exchange is tied to that binding and simulates the whole
+assay before either source is transferred. It requires evidence for the exact
+first/second source allocations (5/195 uL for the two-dye profile or 20/180 uL
+for water safety), source volume available above native dead-volume rules, one
+ordinary P20 tip, one ordinary P300 tip, and eleven independent P300 mix tips.
+The v2 capability validator also requires the pre-existing v1 calibration
+preflight/mix commands, so a partial Pi implementation cannot advertise
+readiness.
+
+Only the pure Lab-PC schemas, local packet registry, and synthetic validation
+exist on `Auto-RTG` at this point. The separate Auto-main handler has **not**
+been edited from this checkout; it must implement the same no-motion behavior,
+native source/tip accounting, vacant-well binding, and snapshot capability
+before a Lab-PC controller adapter is enabled. Python 3.9.6 compilation and 50
+focused calibration/stability regression tests passed. No physical endpoint,
+reader, socket, workbook, or robot was accessed.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
