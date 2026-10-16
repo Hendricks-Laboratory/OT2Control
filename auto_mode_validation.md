@@ -1155,6 +1155,58 @@ workbook, or physical command was run. C2eB remains required to attach the
 approved preflight bridge to the established transfer and selected-well scan
 paths; no water or dye commissioning run is authorized from C2eA alone.
 
+### Stage 13G-C2eB/C3 isolated execution and review exports — 2026-10-16
+
+Stage C2eB now connects the existing C2eA evidence to a **separate** command
+line route, `-m mix_calibration`. It is not an alternative path through
+ordinary `-m auto`: the route constructs neither an optimizer nor an Auto
+batch, recipe, stability observer, aggregate scan, or model update. It rejects
+simulation and `--no-pr`; a real, established reader scan protocol and an
+explicit `y`/`yes` confirmation are required. Normal Auto behavior remains
+unchanged, and no Auto-main code was changed in this stage.
+
+After C2eA has accepted and atomically recorded the v1/v2 snapshot,
+well-binding, and source/tip preflight, C2eB consumes that record rather than
+replaying it. This is necessary because a second v1 preflight correctly sees
+that the calibration well has already been bound. Before physical work, the
+controller revalidates the full immutable record against the plan. It then
+executes exactly once:
+
+```text
+profile-locked first ordinary transfer
+-> profile-locked second ordinary transfer
+-> one selected-well, unmerged baseline scan
+-> (one acknowledged Pi P300 mix -> one selected-well, unmerged scan) × 10
+```
+
+The ordinary transfer engine still selects its normal appropriate pipette; it
+is not reimplemented or overridden by calibration code. The separate Pi packet
+remains responsible for the reviewed 150 uL P300 well-mix action. The raw
+baseline scan proves 520/730 nm coverage for the two-dye profile before the
+first mix. If coverage is absent, or any transfer, reader, packet, or
+acknowledgement fails, execution stops without an automatic retry or replay.
+
+Stage C3 records one raw spectrum per scan under
+`pr_data/mix_calibration/raw_scans/`, an in-progress/final JSON manifest,
+per-cycle CSV metrics, a full-spectra overlay, and a 520/730 nm convergence
+plot. Metrics retain scan timestamps, elapsed time from the baseline scan
+start, per-wavelength values and deltas, plus full-spectrum RMS and maximum
+change. The artifacts intentionally do **not** pick a production mix count;
+that remains a human scientific decision after review. Raw files are moved to
+their final manifest paths before the corresponding metric is written, so a
+reporting failure cannot create a manifest that names a missing raw file.
+
+Python 3.9.6 compilation, AST duplicate-method checks, whitespace-diff
+validation, and 46 focused calibration/targeted-mixing synthetic tests passed.
+The synthetic tests cover profile-locked transfer/mix/scan order, rejection
+before transfer, a missing 730 nm baseline that stops before the first mix,
+raw artifact/CSV/manifest/plot output, timing metrics, unmerged reader scans,
+and raw-file preservation order. No controller launcher, robot, Pi, reader,
+workbook, or physical command was run. This code is ready only for a
+human-supervised, water-first commissioning run after combined-file review;
+physical clearance, transfer behavior, reader protocol behavior, and mixing
+quality are not established by static or synthetic validation.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,

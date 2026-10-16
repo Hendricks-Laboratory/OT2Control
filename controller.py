@@ -167,13 +167,30 @@ from auto_stability_pipette_mix import (
 )
 from auto_mix_calibration import (
     AutoMixCalibrationValidationError,
+    MIX_CALIBRATION_ASSAY_PROFILE_HEADER,
+    MIX_CALIBRATION_FIRST_REAGENT_HEADER,
     MIX_CALIBRATION_MODE_OFF,
+    MIX_CALIBRATION_SECOND_REAGENT_HEADER,
     parse_auto_mix_calibration_header_settings,
+    validate_auto_mix_calibration_profile_source_metadata,
+)
+from auto_mix_calibration_execution import (
+    execute_auto_mix_calibration_plan_after_preflight,
+)
+from auto_mix_calibration_plan import (
+    AutoMixCalibrationPlanError,
+    build_auto_mix_calibration_run_plan,
 )
 from auto_mix_calibration_preflight import (
     run_auto_mix_calibration_pi_preflight,
 )
+from auto_mix_calibration_reporting import (
+    AutoMixCalibrationReporter,
+    write_auto_mix_calibration_execution_record,
+)
 from auto_mix_calibration_protocol import (
+    MIX_CALIBRATION_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_COMMAND,
     MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT,
     MIX_CALIBRATION_PREFLIGHT_COMMAND,
 )
@@ -329,7 +346,10 @@ def terminal_output_capture_guard(func):
 
 def init_parser():
     parser = argparse.ArgumentParser()
-    mode_help_str = 'mode=auto runs in ml, mode=protocol or not supplied runs protocol'
+    mode_help_str = (
+        'mode=auto runs Auto; mode=protocol or not supplied runs a protocol; '
+        'mode=mix_calibration runs the isolated supervised P300 mix assay'
+    )
     parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
     parser.add_argument('-n','--name',help='the name of the google sheet')
     parser.add_argument('-c','--cache',help='flag. if supplied, uses cache',action='store_true')
@@ -431,6 +451,12 @@ def main(serveraddr):
     elif args.mode == 'auto':
         print('launching in auto mode')
         launch_auto(serveraddr,args.name,args.cache,args.simulate,args.no_sim,args.no_pr)
+    elif args.mode == 'mix_calibration':
+        print('launching supervised well-mix calibration mode')
+        launch_auto_mix_calibration(
+            serveraddr, args.name, args.cache, args.simulate, args.no_sim,
+            args.no_pr
+        )
     else:
         print("invalid argument to mode, '{}'".format(args.mode))
         parser.print_help()
@@ -603,6 +629,45 @@ def launch_auto(serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
     finally:
         if auto is not None:
             auto._stop_terminal_output_capture()
+
+
+def launch_auto_mix_calibration(
+        serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+    '''Launch only the explicit supervised mix-calibration workflow.
+
+    This route is deliberately not a variation of ``launch_auto``. It has no
+    optimizer, recipe-generation, batch, stability-observer, or normal Auto
+    execution path. A real reader spectrum is mandatory for its review
+    evidence, so simulation and ``--no-pr`` are rejected before a connection.
+    '''
+    if simulate or no_pr:
+        raise AutoMixCalibrationValidationError(
+            'mix_calibration requires the real established plate-reader '
+            'scan path; --simulate and --no-pr are not supported.'
+        )
+    if not no_sim:
+        raise AutoMixCalibrationValidationError(
+            'mix_calibration has no legacy simulator. Use --no-sim only '
+            'after completing the static and controlled-debug review.'
+        )
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    my_ip = socket.gethostbyname(socket.gethostname())
+    calibration = AutoMixCalibrationContr(
+        rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache
+    )
+    try:
+        response = input(
+            '<<controller>> This runs one isolated 200 uL supervised mixing '
+            'calibration (two transfers, baseline scan, then ten P300 '
+            'mix/scan cycles). Type y or yes to begin: '
+        ).strip().lower()
+        if response not in ('y', 'yes'):
+            print('<<controller>> mix calibration cancelled before connection.')
+            return
+        calibration.run_protocol(simulate=False, no_pr=False)
+    finally:
+        calibration._stop_terminal_output_capture()
 
 
 
@@ -34681,6 +34746,362 @@ class ProtocolExecutor(Controller):
         return found_errors
 
     #POST Simulation
+
+class AutoMixCalibrationExecutionAdapter(object):
+    '''Narrow live adapter for the reviewed calibration-only action sequence.'''
+
+    def __init__(self, controller, reporter):
+        self.controller = controller
+        self.reporter = reporter
+
+    def transfer(self, source, destination, volume_uL):
+        '''Send one ordinary single-destination transfer and wait for it.'''
+        self.controller.portal.send_pack(
+            'transfer', source, [(destination, float(volume_uL))]
+        )
+        # Retain the established Pi completion barrier. This deliberately does
+        # not choose or alter the ordinary transfer pipette.
+        self.controller.portal.burn_pipe()
+        print(
+            '<<controller>> calibration transfer completed: {} -> {} '
+            '({} uL).'.format(source, destination, volume_uL)
+        )
+
+    def request_pi_mix(self, request):
+        self.controller.portal.send_pack(MIX_CALIBRATION_COMMAND, request)
+        packet_type, _, payload = self.controller.portal.recv_pack()
+        if packet_type != MIX_CALIBRATION_ACKNOWLEDGEMENT or \
+                not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Calibration mix expected {!r}, received {!r}.'.format(
+                    MIX_CALIBRATION_ACKNOWLEDGEMENT, packet_type
+                )
+            )
+        return payload[0]
+
+    def scan(self, scan_step):
+        return self.controller._run_auto_mix_calibration_raw_scan(
+            scan_step, self.reporter
+        )
+
+
+class AutoMixCalibrationContr(Controller):
+    '''Dedicated one-well calibration controller, isolated from normal Auto.
+
+    The runner uses existing source initialization, ordinary transfer, reader
+    macro, and raw-reader parsing primitives. It never constructs an Auto
+    optimizer, recipe batch, or stability observer.
+    '''
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4,
+                 use_cache=False, cache_path='Cache'):
+        super().__init__(
+            rxn_sheet_name, my_ip, server_ip, buff_size, use_cache, cache_path
+        )
+        header = {row[0]: row[1] for row in self.header_data[1:] if row}
+        self.calibration_settings = parse_auto_mix_calibration_header_settings(
+            header
+        )
+        if self.calibration_settings['auto_mix_calibration_mode'] == (
+                MIX_CALIBRATION_MODE_OFF):
+            raise AutoMixCalibrationValidationError(
+                'mix_calibration mode requires Header '
+                'auto_mix_calibration_mode=water_safety or two_dye.'
+            )
+        self.calibration_scan_protocol = self._get_calibration_scan_protocol()
+        self.calibration_source_names = (
+            self._resolve_calibration_source_container_names()
+        )
+        self.calibration_source_metadata = (
+            self._resolve_calibration_source_metadata()
+        )
+        validate_auto_mix_calibration_profile_source_metadata(
+            self.calibration_settings, self.calibration_source_metadata
+        )
+        print(
+            '<<controller>> supervised mix calibration configured: profile={}, '
+            'first source={}, second source={}, reader well={}, scan protocol={}. '
+            'Normal Auto/optimizer execution is disabled.'.format(
+                self.calibration_settings[MIX_CALIBRATION_ASSAY_PROFILE_HEADER],
+                self.calibration_source_names['first'],
+                self.calibration_source_names['second'],
+                self.calibration_settings[
+                    'auto_mix_calibration_target_reader_well'
+                ],
+                self.calibration_scan_protocol,
+            )
+        )
+
+    def _query_reagents(self, spreadsheet_key, credentials):
+        '''Preserve measured calibration sources in Reagent Info.
+
+        The normal controller generator derives Reagent Info from Input
+        Template transfer rows. Calibration instead owns its two transfers in
+        the profile, so regenerating that worksheet could overwrite prepared,
+        measured assay sources.
+        '''
+        return None
+
+    def _get_product_df(self, products_to_labware):
+        '''The Pi binds the single calibration well; no products are initialized.'''
+        return pd.DataFrame(columns=['labware', 'container', 'max_vol'])
+
+    def _rename_products(self, rxn_df):
+        '''Input Template is reader-protocol metadata only for calibration.'''
+        return None
+
+    def _get_rxn_max_vol(self, name, products):
+        return 0.0
+
+    def run_simulation(self, no_pr=False):
+        raise AutoMixCalibrationValidationError(
+            'mix_calibration has no legacy simulator because it requires '
+            'paired Auto-main packets and real raw spectra.'
+        )
+
+    def _get_calibration_scan_protocol(self):
+        scan_rows = self.rxn_df.loc[
+            self.rxn_df['op'].isin(['scan', 'scan_until_complete'])
+        ]
+        if scan_rows.empty:
+            raise AutoMixCalibrationValidationError(
+                'mix_calibration requires one existing scan or '
+                'scan_until_complete Input Template row with scan protocol '
+                'metadata. No reader command has been sent.'
+            )
+        protocol = scan_rows.iloc[-1].get('scan_protocol')
+        if pd.isna(protocol) or not str(protocol).strip():
+            raise AutoMixCalibrationValidationError(
+                'mix_calibration requires the selected Input Template scan '
+                'row to name an established plate-reader protocol.'
+            )
+        return str(protocol).strip()
+
+    @staticmethod
+    def _calibration_source_base_name(chemical_name):
+        match = re.search(r'C\d*\.\d*$', str(chemical_name))
+        return (str(chemical_name) if match is None
+                else str(chemical_name)[:match.start()])
+
+    def _find_single_calibration_source(self, configured_reagent, slot):
+        matches = []
+        for chemical_name, source_row in self.robo_params['reagent_df'].iterrows():
+            if self._calibration_source_base_name(chemical_name).casefold() == (
+                    str(configured_reagent).strip().casefold()):
+                matches.append((str(chemical_name), source_row.copy()))
+        if not matches:
+            raise AutoMixCalibrationValidationError(
+                'Calibration {} source {!r} is missing from Reagent Info.'
+                .format(slot, configured_reagent)
+            )
+        if len(matches) != 1:
+            raise AutoMixCalibrationValidationError(
+                'Calibration {} source {!r} resolves to {} physical '
+                'containers. Calibration requires exactly one measured '
+                'source per profile slot; fallback switching is prohibited.'
+                .format(slot, configured_reagent, len(matches))
+            )
+        return matches[0]
+
+    def _resolve_calibration_source_container_names(self):
+        first_name, _ = self._find_single_calibration_source(
+            self.calibration_settings[MIX_CALIBRATION_FIRST_REAGENT_HEADER],
+            'first'
+        )
+        second_name, _ = self._find_single_calibration_source(
+            self.calibration_settings[MIX_CALIBRATION_SECOND_REAGENT_HEADER],
+            'second'
+        )
+        if first_name.casefold() == second_name.casefold():
+            raise AutoMixCalibrationValidationError(
+                'Calibration first and second sources resolve to the same '
+                'physical container.'
+            )
+        return {'first': first_name, 'second': second_name}
+
+    def _resolve_calibration_source_metadata(self):
+        metadata = {}
+        for slot, header_name in (
+                ('first', MIX_CALIBRATION_FIRST_REAGENT_HEADER),
+                ('second', MIX_CALIBRATION_SECOND_REAGENT_HEADER)):
+            _, source_row = self._find_single_calibration_source(
+                self.calibration_settings[header_name], slot
+            )
+            metadata[slot] = {
+                'reagent_name': self.calibration_settings[header_name],
+                'concentration_mM': source_row.get('conc'),
+            }
+        return metadata
+
+    def _build_calibration_plan_from_snapshot(self, snapshot):
+        if not isinstance(snapshot, dict):
+            raise AutoMixCalibrationPlanError(
+                'Calibration requires an Auto-main state snapshot before '
+                'binding its selected reader well.'
+            )
+        try:
+            mapping_revision = snapshot['plate_mapping_revision']
+            plate_generation = snapshot['plate_generation']
+        except KeyError:
+            raise AutoMixCalibrationPlanError(
+                'Calibration Auto-main snapshot lacks plate identity.'
+            )
+        if (isinstance(mapping_revision, bool)
+                or isinstance(plate_generation, bool)
+                or not isinstance(mapping_revision, int)
+                or not isinstance(plate_generation, int)):
+            raise AutoMixCalibrationPlanError(
+                'Calibration Auto-main snapshot has invalid plate identity.'
+            )
+        calibration_id = 'mixcal-{}'.format(uuid.uuid4().hex)
+        return build_auto_mix_calibration_run_plan(
+            settings=self.calibration_settings,
+            calibration_id=calibration_id,
+            logical_wellname='autowell-{}'.format(calibration_id),
+            source_container_names=self.calibration_source_names,
+            reader_location_mapping=dict(self.PLATEREADER_INDEX_TRANSLATOR),
+            plate_mapping_revision=mapping_revision,
+            plate_generation=plate_generation,
+        )
+
+    @staticmethod
+    def _calibration_utc_now():
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def _run_auto_mix_calibration_raw_scan(self, scan_step, reporter):
+        '''Run the established home/PlateIn/scan/PlateOut sequence once.'''
+        scan_index = int(scan_step['scan_index'])
+        basename = 'mix_calibration_scan_{:02d}'.format(scan_index)
+        source_path = os.path.join(self.pr.data_path, basename + '.csv')
+        destination_path = os.path.join(
+            self.pr.data_path, reporter.raw_scan_relative_path(scan_index)
+        )
+        if os.path.exists(source_path) or os.path.exists(destination_path):
+            raise RuntimeError(
+                'Calibration scan destination already exists for scan {}. '
+                'Refusing to overwrite raw evidence.'.format(scan_index)
+            )
+        plate_in = False
+        scan_started_at_utc = None
+        scan_completed_at_utc = None
+        try:
+            self.portal.send_pack('home')
+            self.portal.burn_pipe()
+            self.pr.exec_macro('PlateIn')
+            plate_in = True
+            scan_started_at_utc = self._calibration_utc_now()
+            self.pr.run_protocol(
+                self.calibration_scan_protocol,
+                basename,
+                layout=[scan_step['expected_loc']],
+                record_in_aggregate=False,
+            )
+            scan_completed_at_utc = self._calibration_utc_now()
+        finally:
+            if plate_in:
+                self.pr.exec_macro('PlateOut')
+        if not os.path.exists(source_path):
+            raise RuntimeError(
+                'Calibration reader scan completed without raw file {}.'
+                .format(source_path)
+            )
+        scan_data, _ = self.pr.load_reader_data(
+            basename, {scan_step['expected_loc']: scan_step['wellname']}
+        )
+        if (scan_step['wellname'] not in scan_data.columns
+                or scan_data.shape[1] != 1):
+            raise RuntimeError(
+                'Calibration reader scan did not return exactly its selected '
+                'logical well.'
+            )
+        # Preserve the raw reader file at its manifest path before recording
+        # a metric that names it. A reporting failure can then never leave a
+        # durable manifest pointing to an unmoved reader artifact.
+        shutil.move(source_path, destination_path)
+        metric = reporter.record_scan(
+            scan_step,
+            scan_data[scan_step['wellname']],
+            scan_started_at_utc,
+            scan_completed_at_utc,
+        )
+        print(
+            '<<controller>> calibration raw scan {} saved to {}.'
+            .format(scan_index, reporter.raw_scan_relative_path(scan_index))
+        )
+        return reporter.scan_record(scan_step, metric)
+
+    def _write_calibration_execution_record(self, execution_record):
+        root = os.path.join(self.out_path, 'pr_data', 'mix_calibration')
+        os.makedirs(root, exist_ok=True)
+        return write_auto_mix_calibration_execution_record(
+            execution_record,
+            os.path.join(root, 'mix_calibration_execution.json')
+        )
+
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
+        '''Run one confirmed calibration; normal Auto remains unavailable.'''
+        if simulate or no_pr:
+            raise AutoMixCalibrationValidationError(
+                'mix_calibration requires real reader data and does not '
+                'support simulation or --no-pr.'
+            )
+        connection_created = False
+        completed = False
+        try:
+            self.create_connection(simulate=False, no_pr=False, port=port)
+            connection_created = True
+            # Complete normal Pi initialization before reading the identity
+            # that fixes this calibration's selected physical reader well.
+            self.portal.burn_pipe()
+            preflight_transport = AutoMixCalibrationPiPreflightTransport(
+                self.portal
+            )
+            initial_snapshot = preflight_transport.get_robot_state_snapshot()
+            plan = self._build_calibration_plan_from_snapshot(initial_snapshot)
+            reporter = AutoMixCalibrationReporter(self.out_path, plan, {})
+            preflight_record = run_auto_mix_calibration_controller_preflight(
+                plan=plan,
+                portal=self.portal,
+                reader_scan_protocol=self.calibration_scan_protocol,
+                record_path=os.path.join(
+                    reporter.data_root, 'mix_calibration_preflight.json'
+                )
+            )
+            reporter.preflight_record = dict(preflight_record)
+            adapter = AutoMixCalibrationExecutionAdapter(self, reporter)
+            execution_record = execute_auto_mix_calibration_plan_after_preflight(
+                plan, preflight_record, adapter,
+                expected_reader_scan_protocol=self.calibration_scan_protocol
+            )
+            execution_record['completed_at_utc'] = self._calibration_utc_now()
+            execution_record['reporting'] = reporter.finalize()
+            execution_record['execution_record_path'] = (
+                self._write_calibration_execution_record(execution_record)
+            )
+            print(
+                '<<controller>> supervised mix calibration completed. '
+                'Review {} before selecting any production mix count.'
+                .format(execution_record['reporting']['metrics_path'])
+            )
+            completed = True
+        finally:
+            if connection_created and completed:
+                self.close_connection()
+            elif connection_created:
+                # A failed transfer, scan, or mix has no automatic replay
+                # path. Close the controller channel without constructing
+                # additional protocol rows; durable evidence remains intact.
+                try:
+                    self.portal.send_pack('close')
+                    self.portal.close()
+                finally:
+                    print(
+                        '<<controller>> calibration stopped after an error; '
+                        'no action was retried automatically.'
+                    )
+            if getattr(self, 'pr', None) is not None:
+                self.pr.shutdown()
+
 
 class AbstractPlateReader(ABC):
     '''
