@@ -13,12 +13,12 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_ASSAY_PROFILE_HEADER,
     MIX_CALIBRATION_CYCLE_COUNT,
     MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
-    MIX_CALIBRATION_FIRST_VOLUME_UL,
     MIX_CALIBRATION_MODE_OFF,
     MIX_CALIBRATION_P300_VOLUME_UL,
-    MIX_CALIBRATION_SECOND_VOLUME_UL,
     MIX_CALIBRATION_TARGET_READER_WELL_HEADER,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
+    get_auto_mix_calibration_profile_mode,
+    get_auto_mix_calibration_profile_transfer_volumes,
 )
 from auto_mix_calibration_protocol import (
     MIX_CALIBRATION_SCHEMA_VERSION,
@@ -27,7 +27,7 @@ from auto_mix_calibration_protocol import (
 )
 
 
-MIX_CALIBRATION_PLAN_VERSION = 2
+MIX_CALIBRATION_PLAN_VERSION = 3
 MIX_CALIBRATION_BASELINE_SCAN_INDEX = 0
 MIX_CALIBRATION_EXPECTED_SCAN_COUNT = 1 + MIX_CALIBRATION_CYCLE_COUNT
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
@@ -145,7 +145,7 @@ def _build_scan_step(scan_index, cycle_index, wellname, target, prerequisite):
 def build_auto_mix_calibration_run_plan(
         settings, calibration_id, logical_wellname, source_container_names,
         reader_location_mapping, plate_mapping_revision, plate_generation):
-    '''Build the exact 20 + 180, baseline, then ten mix/scan plan.
+    '''Build one profile-locked transfer, baseline, then mix/scan plan.
 
     ``source_container_names`` deliberately uses first/second keys. The current
     already-deployed Pi preflight packet still calls its two identity-only
@@ -164,6 +164,23 @@ def build_auto_mix_calibration_run_plan(
     profile = settings.get(MIX_CALIBRATION_ASSAY_PROFILE_HEADER)
     if not isinstance(profile, str) or not profile:
         raise AutoMixCalibrationPlanError('Calibration assay profile is blank.')
+    try:
+        first_volume, second_volume = (
+            get_auto_mix_calibration_profile_transfer_volumes(profile)
+        )
+        expected_mode = get_auto_mix_calibration_profile_mode(profile)
+    except ValueError as error:
+        raise AutoMixCalibrationPlanError(str(error))
+    if mode != expected_mode:
+        raise AutoMixCalibrationPlanError(
+            'Calibration mode does not permit the selected assay profile.'
+        )
+    if (settings.get('auto_mix_calibration_first_volume_uL') != first_volume
+            or settings.get('auto_mix_calibration_second_volume_uL')
+            != second_volume):
+        raise AutoMixCalibrationPlanError(
+            'Calibration settings do not match the reviewed assay profile.'
+        )
     calibration_id = _require_identifier(calibration_id, 'calibration_id')
     wellname = _require_logical_wellname(logical_wellname)
     if not isinstance(source_container_names, dict):
@@ -223,7 +240,7 @@ def build_auto_mix_calibration_run_plan(
             'sequence_index': 1,
             'source_chemical_name': first_container,
             'destination_wellname': wellname,
-            'volume_uL': MIX_CALIBRATION_FIRST_VOLUME_UL,
+            'volume_uL': first_volume,
             'requires_step_id': 'pi-preflight',
         },
         {
@@ -232,7 +249,7 @@ def build_auto_mix_calibration_run_plan(
             'sequence_index': 2,
             'source_chemical_name': second_container,
             'destination_wellname': wellname,
-            'volume_uL': MIX_CALIBRATION_SECOND_VOLUME_UL,
+            'volume_uL': second_volume,
             'requires_step_id': 'transfer-first',
         },
     ]
@@ -312,9 +329,24 @@ def validate_auto_mix_calibration_run_plan(plan):
         )
     if not isinstance(plan.get('assay_profile'), str) or not plan['assay_profile']:
         raise AutoMixCalibrationPlanError('Calibration plan assay profile is invalid.')
+    try:
+        first_volume, second_volume = (
+            get_auto_mix_calibration_profile_transfer_volumes(
+                plan['assay_profile']
+            )
+        )
+        expected_mode = get_auto_mix_calibration_profile_mode(
+            plan['assay_profile']
+        )
+    except ValueError as error:
+        raise AutoMixCalibrationPlanError(str(error))
     preflight = validate_mix_calibration_preflight_request(
         plan.get('preflight_request')
     )
+    if plan.get('calibration_mode') != expected_mode:
+        raise AutoMixCalibrationPlanError(
+            'Calibration plan mode does not permit its assay profile.'
+        )
     target = plan.get('target')
     if not isinstance(target, dict):
         raise AutoMixCalibrationPlanError('Calibration plan target is invalid.')
@@ -335,8 +367,8 @@ def validate_auto_mix_calibration_run_plan(plan):
         )
     transfer_steps = plan.get('transfer_steps')
     expected_transfers = (
-        (preflight['base_chemical_name'], MIX_CALIBRATION_FIRST_VOLUME_UL),
-        (preflight['trigger_chemical_name'], MIX_CALIBRATION_SECOND_VOLUME_UL),
+        (preflight['base_chemical_name'], first_volume),
+        (preflight['trigger_chemical_name'], second_volume),
     )
     if not isinstance(transfer_steps, list) or len(transfer_steps) != 2:
         raise AutoMixCalibrationPlanError(
@@ -357,8 +389,8 @@ def validate_auto_mix_calibration_run_plan(plan):
                 or step.get('volume_uL') != expected[1]
                 or step.get('requires_step_id') != expected_prerequisite):
             raise AutoMixCalibrationPlanError(
-                'Calibration transfer sequence is not the reviewed 20 + 180 '
-                'uL first/second sequence.'
+                'Calibration transfer sequence is not the reviewed '
+                'profile-locked first/second sequence.'
             )
     if (plan.get('expected_final_well_volume_uL')
             != MIX_CALIBRATION_FINAL_WELL_VOLUME_UL):

@@ -8,10 +8,10 @@ import unittest
 from auto_mix_calibration import (
     MIX_CALIBRATION_ASSAY_PROFILE_HEADER,
     MIX_CALIBRATION_FIRST_REAGENT_HEADER,
-    MIX_CALIBRATION_FIRST_VOLUME_UL,
-    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
+    MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+    MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
     MIX_CALIBRATION_SECOND_REAGENT_HEADER,
-    MIX_CALIBRATION_SECOND_VOLUME_UL,
     parse_auto_mix_calibration_header_settings,
 )
 from auto_mix_calibration_plan import (
@@ -27,7 +27,7 @@ def _settings():
     return parse_auto_mix_calibration_header_settings({
         'auto_mix_calibration_mode': 'two_dye',
         MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
-            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
         ),
         MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
         MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
@@ -46,7 +46,7 @@ def _plan():
         calibration_id='dye-calibration-001',
         logical_wellname='autowell-calibration-001',
         source_container_names={
-            'first': 'AcidRed1C0.36',
+            'first': 'AcidRed1C1.44',
             'second': 'CopperSulfateDyeC8.0',
         },
         reader_location_mapping=_mapping(),
@@ -84,7 +84,7 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertFalse(plan['normal_auto_execution_permitted'])
         self.assertFalse(plan['normal_stability_execution_permitted'])
         self.assertEqual(
-            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
             plan['assay_profile']
         )
         self.assertEqual(200.0, plan['expected_final_well_volume_uL'])
@@ -94,13 +94,13 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertEqual(24, len(plan['execution_steps']))
 
         transfers = plan['transfer_steps']
-        self.assertEqual('AcidRed1C0.36',
+        self.assertEqual('AcidRed1C1.44',
                          transfers[0]['source_chemical_name'])
-        self.assertEqual(MIX_CALIBRATION_FIRST_VOLUME_UL,
+        self.assertEqual(MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
                          transfers[0]['volume_uL'])
         self.assertEqual('CopperSulfateDyeC8.0',
                          transfers[1]['source_chemical_name'])
-        self.assertEqual(MIX_CALIBRATION_SECOND_VOLUME_UL,
+        self.assertEqual(MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
                          transfers[1]['volume_uL'])
         self.assertEqual('transfer-first', transfers[1]['requires_step_id'])
 
@@ -129,9 +129,12 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
 
     def test_tampering_cannot_reverse_or_alter_sequence_or_aggregate_scan(self):
         for mutator in (
-                lambda plan: plan['transfer_steps'][0].update(volume_uL=21.0),
+                lambda plan: plan['transfer_steps'][0].update(volume_uL=6.0),
                 lambda plan: plan['transfer_steps'].__setitem__(
                     0, copy.deepcopy(plan['transfer_steps'][1])
+                ),
+                lambda plan: plan.update(
+                    assay_profile='water_safety_20ul_first'
                 ),
                 lambda plan: plan['mix_steps'][1]['request'].update(cycle_index=1),
                 lambda plan: plan['scan_steps'][1].update(

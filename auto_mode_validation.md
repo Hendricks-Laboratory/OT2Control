@@ -994,25 +994,27 @@ the later supervised calibration workflow and its water-first test.
 Stages 13G-C1 and C2a add no controller execution path. They provide a pure
 configuration and plan boundary for the supervised P300 mix calibration. C2a
 supersedes C1's earlier ambiguous `base`/`trigger` terminology and its
-copper-first provisional order. The reviewed two-dye profile is now explicitly
-aligned to the QC dye-assay order:
+copper-first provisional order. A same-stage correction replaces C2a's
+provisional 0.36 mM/20 uL profile with the actually available 1.44 mM Acid
+Red 1 pair and the corresponding QC-table 5 uL target dispense. The reviewed
+two-dye profile is explicitly aligned to the QC dye-assay order:
 
 ```text
-20 uL Acid Red 1 (0.36 mM) first
-→ 180 uL copper sulfate dye (8 mM) second
+5 uL Acid Red 1 (1.44 mM, prepared in 8 mM copper sulfate) first
+→ 195 uL copper sulfate dye (8 mM) second
 → selected-well baseline scan 00
 → (one 150 uL Pi mix → one selected-well raw scan) × 10
 ```
 
 The final well volume is fixed at 200 uL. The two-dye Header therefore names
-the `qc_two_dye_20ul_red` assay profile, one first reagent, one second reagent,
+the `qc_two_dye_5ul_red` assay profile, one first reagent, one second reagent,
 and exactly one physical reader well (`A1` through `H12`); it does not accept
 ordinary Input Template transfer steps as a substitute for the assay profile.
 The configuration parser rejects missing/unknown two-dye profiles, duplicate
 sources, incompatible reader locations, and every non-off
 `auto_stability_mode`. A separate pure source-metadata validator requires the
 resolved first/second source identities and concentrations to match Acid Red 1
-at 0.36 mM and copper sulfate dye at 8 mM before a later controller can build
+at 1.44 mM and copper sulfate dye at 8 mM before a later controller can build
 a run plan.
 
 The plan derives the corresponding OT-2 location and reader deck through the

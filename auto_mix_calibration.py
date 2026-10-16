@@ -27,21 +27,38 @@ MIX_CALIBRATION_TARGET_READER_WELL_HEADER = (
 )
 
 MIX_CALIBRATION_PROFILE_WATER_SAFETY = 'water_safety_20ul_first'
-MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED = 'qc_two_dye_20ul_red'
+MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED = 'qc_two_dye_5ul_red'
 
 # These are fixed, reviewed calibration conditions rather than ordinary
 # worksheet-tunable production settings. The first/second order is deliberate:
 # it matches the QC dye assay's Acid Red 1 then copper sulfate dye order.
 MIX_CALIBRATION_FINAL_WELL_VOLUME_UL = 200.0
-MIX_CALIBRATION_FIRST_VOLUME_UL = 20.0
-MIX_CALIBRATION_SECOND_VOLUME_UL = 180.0
+MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL = 20.0
+MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL = 180.0
+MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL = 5.0
+MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL = 195.0
 MIX_CALIBRATION_P300_VOLUME_UL = 150.0
 MIX_CALIBRATION_CYCLE_COUNT = 10
 MIX_CALIBRATION_WELL_CLEARANCE_MM = 2.0
 
-MIX_CALIBRATION_QC_ACID_RED_1_CONCENTRATION_MM = 0.36
+MIX_CALIBRATION_QC_ACID_RED_1_CONCENTRATION_MM = 1.44
 MIX_CALIBRATION_QC_COPPER_SULFATE_CONCENTRATION_MM = 8.0
 MIX_CALIBRATION_QC_ANALYSIS_WAVELENGTHS_NM = (520, 730)
+
+MIX_CALIBRATION_PROFILE_TRANSFER_VOLUMES_UL = {
+    MIX_CALIBRATION_PROFILE_WATER_SAFETY: (
+        MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
+        MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
+    ),
+    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED: (
+        MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+        MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
+    ),
+}
+MIX_CALIBRATION_PROFILE_MODES = {
+    MIX_CALIBRATION_PROFILE_WATER_SAFETY: MIX_CALIBRATION_MODE_WATER_SAFETY,
+    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED: MIX_CALIBRATION_MODE_TWO_DYE,
+}
 
 MIX_CALIBRATION_READER_WELL_PATTERN = re.compile(
     r'^[A-H](?:[1-9]|1[0-2])$'
@@ -106,8 +123,14 @@ def _require_exact_fixed_configuration():
     '''Defend reviewed fixed assay constants against accidental invalid edits.'''
     numeric_values = (
         (MIX_CALIBRATION_FINAL_WELL_VOLUME_UL, 'final well volume'),
-        (MIX_CALIBRATION_FIRST_VOLUME_UL, 'first transfer volume'),
-        (MIX_CALIBRATION_SECOND_VOLUME_UL, 'second transfer volume'),
+        (MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
+         'water-safety first transfer volume'),
+        (MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
+         'water-safety second transfer volume'),
+        (MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+         'two-dye first transfer volume'),
+        (MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
+         'two-dye second transfer volume'),
         (MIX_CALIBRATION_P300_VOLUME_UL, 'P300 mix volume'),
         (MIX_CALIBRATION_WELL_CLEARANCE_MM, 'well clearance'),
         (MIX_CALIBRATION_QC_ACID_RED_1_CONCENTRATION_MM,
@@ -120,18 +143,36 @@ def _require_exact_fixed_configuration():
             raise AutoMixCalibrationValidationError(
                 'Reviewed calibration {} must be finite.'.format(label)
             )
-    if (MIX_CALIBRATION_FIRST_VOLUME_UL <= 0
-            or MIX_CALIBRATION_SECOND_VOLUME_UL <= 0
-            or not math.isclose(
-                MIX_CALIBRATION_FIRST_VOLUME_UL
-                + MIX_CALIBRATION_SECOND_VOLUME_UL,
-                MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
-                rel_tol=0,
-                abs_tol=1e-9)):
+    expected_profile_volumes = {
+        MIX_CALIBRATION_PROFILE_WATER_SAFETY: (
+            MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
+            MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
+        ),
+        MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED: (
+            MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+            MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
+        ),
+    }
+    if (MIX_CALIBRATION_PROFILE_TRANSFER_VOLUMES_UL
+            != expected_profile_volumes
+            or set(MIX_CALIBRATION_PROFILE_MODES)
+            != set(expected_profile_volumes)):
         raise AutoMixCalibrationValidationError(
-            'Reviewed calibration transfers must exactly equal the final '
-            'well volume.'
+            'Reviewed calibration profile constants are internally '
+            'inconsistent.'
         )
+    for profile, volumes in expected_profile_volumes.items():
+        if (not isinstance(volumes, tuple) or len(volumes) != 2
+                or volumes[0] <= 0 or volumes[1] <= 0
+                or not math.isclose(
+                    volumes[0] + volumes[1],
+                    MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
+                    rel_tol=0,
+                    abs_tol=1e-9)):
+            raise AutoMixCalibrationValidationError(
+                'Reviewed calibration transfers for profile {!r} must '
+                'exactly equal the final well volume.'.format(profile)
+            )
     if (not isinstance(MIX_CALIBRATION_CYCLE_COUNT, int)
             or MIX_CALIBRATION_CYCLE_COUNT < 1):
         raise AutoMixCalibrationValidationError(
@@ -152,8 +193,8 @@ def _canonical_profile(mode, value):
         }
     elif mode == MIX_CALIBRATION_MODE_TWO_DYE:
         aliases = {
-            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED: (
-                MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED: (
+                MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
             ),
         }
     else:
@@ -163,7 +204,7 @@ def _canonical_profile(mode, value):
     if raw_profile not in aliases:
         expected = (MIX_CALIBRATION_PROFILE_WATER_SAFETY
                     if mode == MIX_CALIBRATION_MODE_WATER_SAFETY
-                    else MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED)
+                    else MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED)
         raise AutoMixCalibrationValidationError(
             '{} must be {!r} when auto_mix_calibration_mode is {!r}. '
             'Received {!r}.'.format(
@@ -173,7 +214,36 @@ def _canonical_profile(mode, value):
     return aliases[raw_profile]
 
 
-def _settings_template(mode):
+def get_auto_mix_calibration_profile_transfer_volumes(profile):
+    '''Return the reviewed first/second transfer volumes for one profile.'''
+    try:
+        volumes = MIX_CALIBRATION_PROFILE_TRANSFER_VOLUMES_UL[profile]
+    except (KeyError, TypeError):
+        raise AutoMixCalibrationValidationError(
+            'Calibration profile {!r} has no reviewed transfer volumes.'
+            .format(profile)
+        )
+    return volumes
+
+
+def get_auto_mix_calibration_profile_mode(profile):
+    '''Return the only calibration mode permitted to use one profile.'''
+    try:
+        return MIX_CALIBRATION_PROFILE_MODES[profile]
+    except (KeyError, TypeError):
+        raise AutoMixCalibrationValidationError(
+            'Calibration profile {!r} has no permitted calibration mode.'
+            .format(profile)
+        )
+
+
+def _settings_template(mode, profile=None):
+    first_volume = None
+    second_volume = None
+    if profile is not None:
+        first_volume, second_volume = (
+            get_auto_mix_calibration_profile_transfer_volumes(profile)
+        )
     return {
         'auto_mix_calibration_mode': mode,
         MIX_CALIBRATION_ASSAY_PROFILE_HEADER: None,
@@ -183,10 +253,8 @@ def _settings_template(mode):
         'auto_mix_calibration_final_well_volume_uL': (
             MIX_CALIBRATION_FINAL_WELL_VOLUME_UL
         ),
-        'auto_mix_calibration_first_volume_uL': MIX_CALIBRATION_FIRST_VOLUME_UL,
-        'auto_mix_calibration_second_volume_uL': (
-            MIX_CALIBRATION_SECOND_VOLUME_UL
-        ),
+        'auto_mix_calibration_first_volume_uL': first_volume,
+        'auto_mix_calibration_second_volume_uL': second_volume,
         'auto_mix_calibration_p300_volume_uL': MIX_CALIBRATION_P300_VOLUME_UL,
         'auto_mix_calibration_cycle_count': MIX_CALIBRATION_CYCLE_COUNT,
         'auto_mix_calibration_well_clearance_mm': (
@@ -233,14 +301,14 @@ def parse_auto_mix_calibration_header_settings(header):
             )
         )
     mode = aliases[raw_mode]
-    settings = _settings_template(mode)
     if mode == MIX_CALIBRATION_MODE_OFF:
-        return settings
+        return _settings_template(mode)
 
     _require_stability_mode_is_off(header)
     profile = _canonical_profile(
         mode, _header_value(header, MIX_CALIBRATION_ASSAY_PROFILE_HEADER)
     )
+    settings = _settings_template(mode, profile)
     first_reagent = _require_name(
         _header_value(header, MIX_CALIBRATION_FIRST_REAGENT_HEADER),
         MIX_CALIBRATION_FIRST_REAGENT_HEADER
@@ -304,7 +372,7 @@ def validate_auto_mix_calibration_profile_source_metadata(
     if settings.get('auto_mix_calibration_mode') != MIX_CALIBRATION_MODE_TWO_DYE:
         return None
     if (settings.get(MIX_CALIBRATION_ASSAY_PROFILE_HEADER)
-            != MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED):
+            != MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED):
         raise AutoMixCalibrationValidationError(
             'Two-dye calibration requires the reviewed QC assay profile.'
         )
@@ -350,7 +418,7 @@ def validate_auto_mix_calibration_profile_source_metadata(
                 '{} concentration_mM must equal {} for profile {}. '
                 'Received {}.'.format(
                     label, expected,
-                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED, actual
+                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED, actual
                 )
             )
     return {

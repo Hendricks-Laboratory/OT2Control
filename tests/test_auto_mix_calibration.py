@@ -8,16 +8,18 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_CYCLE_COUNT,
     MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
     MIX_CALIBRATION_FIRST_REAGENT_HEADER,
-    MIX_CALIBRATION_FIRST_VOLUME_UL,
     MIX_CALIBRATION_MODE_OFF,
     MIX_CALIBRATION_MODE_TWO_DYE,
     MIX_CALIBRATION_MODE_WATER_SAFETY,
     MIX_CALIBRATION_P300_VOLUME_UL,
-    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
     MIX_CALIBRATION_QC_ANALYSIS_WAVELENGTHS_NM,
+    MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+    MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
     MIX_CALIBRATION_SECOND_REAGENT_HEADER,
-    MIX_CALIBRATION_SECOND_VOLUME_UL,
     MIX_CALIBRATION_TARGET_READER_WELL_HEADER,
+    MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
+    MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
     parse_auto_mix_calibration_header_settings,
     validate_auto_mix_calibration_profile_source_metadata,
@@ -28,7 +30,7 @@ def _two_dye_header():
     return {
         'auto_mix_calibration_mode': 'two_dye',
         MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
-            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
         ),
         MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
         MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
@@ -64,11 +66,11 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             settings['auto_mix_calibration_final_well_volume_uL']
         )
         self.assertEqual(
-            MIX_CALIBRATION_FIRST_VOLUME_UL,
+            MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
             settings['auto_mix_calibration_first_volume_uL']
         )
         self.assertEqual(
-            MIX_CALIBRATION_SECOND_VOLUME_UL,
+            MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
             settings['auto_mix_calibration_second_volume_uL']
         )
         self.assertEqual(
@@ -94,7 +96,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             settings['auto_mix_calibration_mode']
         )
         self.assertEqual(
-            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED,
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
             settings[MIX_CALIBRATION_ASSAY_PROFILE_HEADER]
         )
         self.assertEqual(
@@ -107,6 +109,14 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
         self.assertEqual(
             MIX_CALIBRATION_QC_ANALYSIS_WAVELENGTHS_NM,
             settings['auto_mix_calibration_analysis_wavelengths_nm']
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+            settings['auto_mix_calibration_first_volume_uL']
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
+            settings['auto_mix_calibration_second_volume_uL']
         )
 
     def test_two_dye_profile_rejects_ambiguous_or_incompatible_header(self):
@@ -126,8 +136,15 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             },
             {
                 'auto_mix_calibration_mode': 'two_dye',
+                MIX_CALIBRATION_ASSAY_PROFILE_HEADER: 'qc_two_dye_20ul_red',
+                MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
+                MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
+                MIX_CALIBRATION_TARGET_READER_WELL_HEADER: 'C4',
+            },
+            {
+                'auto_mix_calibration_mode': 'two_dye',
                 MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
-                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
                 ),
                 'auto_mix_calibration_base_reagent': 'copper_sulfate_dye',
                 'auto_mix_calibration_trigger_reagent': 'acid_red_1',
@@ -136,7 +153,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             {
                 'auto_mix_calibration_mode': 'two_dye',
                 MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
-                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
                 ),
                 MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
                 MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'acid_red_1',
@@ -145,7 +162,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             {
                 'auto_mix_calibration_mode': 'two_dye',
                 MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
-                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_20UL_RED
+                    MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED
                 ),
                 MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
                 MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
@@ -165,7 +182,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             {
                 'first': {
                     'reagent_name': 'acid_red_1',
-                    'concentration_mM': 0.36,
+                    'concentration_mM': 1.44,
                 },
                 'second': {
                     'reagent_name': 'copper_sulfate_dye',
@@ -173,7 +190,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual(0.36, accepted['first_concentration_mM'])
+        self.assertEqual(1.44, accepted['first_concentration_mM'])
         self.assertEqual(8.0, accepted['second_concentration_mM'])
 
         for source_metadata in (
@@ -184,13 +201,13 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
                     },
                     'second': {
                         'reagent_name': 'acid_red_1',
-                        'concentration_mM': 0.36,
+                        'concentration_mM': 1.44,
                     },
                 },
                 {
                     'first': {
                         'reagent_name': 'acid_red_1',
-                        'concentration_mM': 0.35,
+                        'concentration_mM': 1.43,
                     },
                     'second': {
                         'reagent_name': 'copper_sulfate_dye',
@@ -200,7 +217,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
                 {
                     'first': {
                         'reagent_name': 'acid_red_1',
-                        'concentration_mM': 0.36,
+                        'concentration_mM': 1.44,
                     },
                     'second': {
                         'reagent_name': 'copper_sulfate_dye',
