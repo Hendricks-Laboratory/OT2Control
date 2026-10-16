@@ -165,6 +165,11 @@ from auto_stability_pipette_mix import (
     validate_targeted_mix_acknowledgement,
     validate_targeted_mix_request
 )
+from auto_mix_calibration import (
+    AutoMixCalibrationValidationError,
+    MIX_CALIBRATION_MODE_OFF,
+    parse_auto_mix_calibration_header_settings,
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -5573,6 +5578,7 @@ class AutoContr(Controller):
         #print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
         self._initialize_auto_stability_configuration()
+        self._initialize_auto_mix_calibration_configuration()
         self.y_shape = len(self.variable_reagents)
         #print(f"y-shape is {self.y_shape}")
         if (
@@ -5832,6 +5838,36 @@ class AutoContr(Controller):
                         stability_settings['auto_stability_trigger_reagent'],
                     )
                 )
+
+    def _initialize_auto_mix_calibration_configuration(self):
+        '''Reject calibration-only Header settings from the normal Auto route.
+
+        The supervised dye/water mixing calibration has a fixed transfer
+        sequence, one physical well, and no optimizer or ordinary Auto batch
+        semantics.  Parsing it here makes malformed settings fail before a
+        connection exists; rejecting enabled settings prevents ``-m auto``
+        from silently treating the calibration sources as an optimization
+        recipe.  The later dedicated calibration runner will consume the same
+        pure Header contract through its own explicit entry point.
+        '''
+        header_dict = {
+            row[0]: row[1]
+            for row in self.header_data[1:]
+        }
+        calibration_settings = parse_auto_mix_calibration_header_settings(
+            header_dict
+        )
+        self.robo_params.update(calibration_settings)
+        if calibration_settings['auto_mix_calibration_mode'] != (
+                MIX_CALIBRATION_MODE_OFF):
+            raise AutoMixCalibrationValidationError(
+                'auto_mix_calibration_mode is a calibration-only workflow. '
+                'It cannot run through normal Auto mode because normal Auto '
+                'constructs recipes, optimizer state, and batch lifecycle '
+                'records. Use the dedicated supervised calibration runner '
+                'after its controller/Pi resource-preflight extension is '
+                'validated.'
+            )
 
     def _initialize_auto_stability_observer(self):
         '''Initialize the Stage-12 observer for a real monitor run.

@@ -1038,6 +1038,46 @@ tests passed. Stage 13G-C2b must connect this fixed contract through a dedicated
 calibration-only controller entry point and retain the same fail-closed
 preflight, acknowledgement, and raw-scan boundaries.
 
+### Stage 13G-C2b calibration execution boundary — 2026-10-16
+
+Stage 13G-C2b adds a hardware-free calibration execution state machine and a
+normal-Auto rejection gate. An enabled `auto_mix_calibration_mode` is parsed
+while `AutoContr` is still disconnected, then rejected from ordinary `-m auto`;
+it cannot accidentally construct a GP, generate recipes, enter a batch
+lifecycle, or interpret the assay as a stability run.
+
+The isolated executor accepts only a fully validated C2a plan and an injected
+adapter. Before its first transfer it requires an all-resources report tied to
+the exact plate generation/revision, the reviewed first/second source names and
+volumes, available source volume for both transfers, one ordinary P20 tip, one
+ordinary P300 tip, eleven *separate* dedicated P300 mix tips, and reader
+coverage at both 520 and 730 nm. It then requires the existing no-motion Pi
+calibration acknowledgement. Only after both barriers pass can it enact the
+immutable sequence:
+
+```text
+5 uL Acid Red 1 -> 195 uL copper sulfate dye -> baseline scan
+-> (one acknowledged mix -> one scan) x10
+```
+
+Every transfer, mix, and scan is dispatched exactly once by the adapter. A
+missing resource, rejected Pi preflight, rejected mix, malformed
+acknowledgement, or adapter exception halts the sequence; no automatic retry
+or continuation is allowed. The state machine intentionally imports no
+controller, reader, socket, Armchair, or OT-2 module and was validated only
+with a fake adapter.
+
+The currently deployed version-1 Pi calibration preflight cannot provide the
+required ordinary-transfer source/tip proof, and C2a does not yet establish a
+dedicated Pi container for the selected reader well. Therefore C2b **does not
+yet expose a runnable CLI or physical controller entry point**. The next stage
+must add a narrow paired Auto-main resource-preflight/container-binding
+extension and then a dedicated controller adapter; no water or dye experiment
+is authorized from C2b alone. Python 3.9.6 compilation, 43 focused
+configuration/protocol/plan/execution and existing targeted-stability
+regression tests passed. No robot, plate reader, socket, or live workbook was
+accessed.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
