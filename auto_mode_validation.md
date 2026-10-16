@@ -1106,13 +1106,54 @@ The v2 capability validator also requires the pre-existing v1 calibration
 preflight/mix commands, so a partial Pi implementation cannot advertise
 readiness.
 
-Only the pure Lab-PC schemas, local packet registry, and synthetic validation
-exist on `Auto-RTG` at this point. The separate Auto-main handler has **not**
-been edited from this checkout; it must implement the same no-motion behavior,
-native source/tip accounting, vacant-well binding, and snapshot capability
-before a Lab-PC controller adapter is enabled. Python 3.9.6 compilation and 50
-focused calibration/stability regression tests passed. No physical endpoint,
-reader, socket, workbook, or robot was accessed.
+The paired Auto-main C2d implementation now supplies the matching v2
+no-motion handlers: it binds the verified vacant reader location as one
+calibration `Well96`, then uses the Pi's native source/dead-volume and tip
+simulation for the exact first/second assay transfers. Its snapshot advertises
+the complete v1/v2 command set. The controller must still validate that exact
+evidence before any calibration execution is enabled. Python 3.9.6
+compilation and focused calibration/stability regression tests passed. No
+physical endpoint, reader, socket, workbook, or robot was accessed.
+
+### Stage 13G-C2eA controller preflight bridge — 2026-10-16
+
+Stage C2eA adds the narrow Lab-PC controller transport and hardware-free
+orchestrator for the paired calibration preflight. It is deliberately not a
+CLI launcher and is never called through normal `-m auto`; enabled calibration
+Header settings continue to be rejected by `AutoContr` before that workflow
+can create recipes, model state, batches, or stability observations.
+
+For one already-built immutable C2a plan, the bridge permits only this order:
+
+```text
+read-only Pi snapshot
+-> v1 no-motion calibration preflight
+-> v2 vacant-reader-well binding
+-> v2 native source/tip resource preflight
+-> durable accepted-preflight JSON record
+```
+
+The controller transport exposes no transfer, pipette-mix, home, reader macro,
+tip, or normal execution operation. Any missing/incompatible v2 capability,
+malformed acknowledgement, stale identity, source/tip deficit, rejected
+well-binding, or rejected preflight aborts before the following request. The
+durable record identifies the calibration ID, bound logical/physical well,
+assay profile, immutable plate identity, the exact Pi acknowledgements, and
+the intended eleven scans; it explicitly records that physical execution has
+not started and automatic retry is forbidden.
+
+The legacy reader API offers no read-only query of a named protocol's
+wavelength range. C2eA therefore verifies only that an existing scan protocol
+has been named; it records `deferred_until_first_raw_scan` instead of claiming
+that 520/730 nm coverage is proven. C2eB must validate that coverage directly
+from the first immutable raw scan before the first pipette-mix cycle.
+
+Python 3.9.6 compilation, 36 focused C1–C2eA configuration/plan/protocol/
+resource/preflight tests, controller AST packet-only checks, and whitespace
+diff validation passed. No controller launcher, robot, Pi connection, reader,
+workbook, or physical command was run. C2eB remains required to attach the
+approved preflight bridge to the established transfer and selected-well scan
+paths; no water or dye commissioning run is authorized from C2eA alone.
 
 ### Stage 12 optical-stability planning record — revised future stages
 

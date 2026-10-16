@@ -170,6 +170,19 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_MODE_OFF,
     parse_auto_mix_calibration_header_settings,
 )
+from auto_mix_calibration_preflight import (
+    run_auto_mix_calibration_pi_preflight,
+)
+from auto_mix_calibration_protocol import (
+    MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_PREFLIGHT_COMMAND,
+)
+from auto_mix_calibration_resources import (
+    MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_BIND_WELL_COMMAND,
+    MIX_CALIBRATION_RESOURCE_PREFLIGHT_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_RESOURCE_PREFLIGHT_COMMAND,
+)
 
 from heatmap import plate, heat_map
 from googleapiclient.errors import HttpError
@@ -324,6 +337,87 @@ def init_parser():
     parser.add_argument('--no-sim',help='won\'t run simulation at the start.',action='store_true')
     parser.add_argument('--no-pr', help='won\'t invoke platereader, even in simulation mode',action='store_true')
     return parser
+
+
+class AutoMixCalibrationPiPreflightTransport(object):
+    '''Translate only the C2eA no-liquid packet exchange for one controller.
+
+    This transport intentionally exposes no transfer, mix, home, reader, or
+    tip operation.  C2eB will own the separately reviewed execution adapter.
+    Keeping the socket wrapper this narrow prevents the controller preflight
+    bridge from becoming an alternate general robot-control path.
+    '''
+
+    def __init__(self, portal):
+        self.portal = portal
+
+    @staticmethod
+    def _unpack_single_response(packet_type, payload, expected_type):
+        if packet_type != expected_type:
+            raise RuntimeError(
+                'Calibration preflight expected {!r}, received {!r}.'.format(
+                    expected_type, packet_type
+                )
+            )
+        if not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Calibration preflight received malformed {!r} payload.'
+                .format(expected_type)
+            )
+        return payload[0]
+
+    def get_robot_state_snapshot(self):
+        self.portal.send_pack('get_robot_state_snapshot')
+        packet_type, _, payload = self.portal.recv_pack()
+        return self._unpack_single_response(
+            packet_type, payload, 'robot_state_snapshot'
+        )
+
+    def _request(self, command, acknowledgement, request):
+        self.portal.send_pack(command, request)
+        packet_type, _, payload = self.portal.recv_pack()
+        return self._unpack_single_response(
+            packet_type, payload, acknowledgement
+        )
+
+    def request_pi_preflight(self, request):
+        return self._request(
+            MIX_CALIBRATION_PREFLIGHT_COMMAND,
+            MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT,
+            request
+        )
+
+    def request_pi_well_binding(self, request):
+        return self._request(
+            MIX_CALIBRATION_BIND_WELL_COMMAND,
+            MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT,
+            request
+        )
+
+    def request_pi_resource_preflight(self, request):
+        return self._request(
+            MIX_CALIBRATION_RESOURCE_PREFLIGHT_COMMAND,
+            MIX_CALIBRATION_RESOURCE_PREFLIGHT_ACKNOWLEDGEMENT,
+            request
+        )
+
+
+def run_auto_mix_calibration_controller_preflight(
+        plan, portal, reader_scan_protocol, record_path=None):
+    '''Run only the approved C2eA calibration preflight through a controller.
+
+    This function is intentionally not a command-line launcher and is not
+    called by normal Auto.  It supplies the exact controller socket transport
+    to the hardware-free bridge; C2eB will later add the separately approved
+    transfer/scan execution adapter.
+    '''
+    return run_auto_mix_calibration_pi_preflight(
+        plan=plan,
+        transport=AutoMixCalibrationPiPreflightTransport(portal),
+        packet_registry=dict(Armchair.PACK_TYPES),
+        reader_scan_protocol=reader_scan_protocol,
+        record_path=record_path
+    )
 
 def main(serveraddr):
     '''
