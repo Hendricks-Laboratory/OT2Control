@@ -153,13 +153,47 @@ tip-shortage rejection without state mutation, registered-plate identity,
 live-instrument range and capacity-agreement rejection, one-target mix
 execution, dedicated-tip discard/replacement after success only, no post-fault
 tip motion after a synthetic target-well mix fault, unchanged target volume,
-exact 1 mm targeted-mix geometry, one-cycle repetition, and clearance
+exact 2 mm targeted-mix geometry, one-cycle repetition, and clearance
 restoration after both success and a synthetic pipette fault. This is static
 and synthetic evidence only. Before Stage 13C can
 use the capability, the
 exact Auto-main commit needs its established bundle deployment and a human
 supervised, chemistry-free Pi mixing dry debug that confirms the target well,
 tip sequence, acknowledgement, and no change to ordinary Auto behavior.
+
+## Stage 13G C2d calibration binding/resource preflight — 2026-10-16
+
+Stage 13G C2d extends the supervised calibration contract from v1 to
+`auto-mix-calibration-v2`. It is Pi-side accounting support only and has not
+been deployed or physically debugged.
+
+- Four append-only ghost packets add a no-motion well binding request/result
+  (`0x25`/`0x26`) and a no-motion resource-preflight request/result
+  (`0x27`/`0x28`). Existing packet identifiers are unchanged.
+- Binding claims exactly one requested, addressable vacant `Well96` at the
+  registered plate-reader deck/location. It rejects stale plate revisions,
+  logical-name collisions, or any already occupied physical well. An accepted
+  binding creates only an in-memory container record; it does not home, move,
+  scan, transfer, consume a tip, change the plate cursor, or change inventory.
+- Resource preflight accepts only the paired Lab-PC's canonical reviewed assay
+  profiles: `water_safety_20ul_first` (`20` then `180` uL) or
+  `qc_two_dye_5ul_red` (`5` then `195` uL). For each named source,
+  it invokes the existing Pi `_simulate_preflight_source` path, preserving the
+  live container volume, calibrated dead volume, same-name backup selection,
+  and installed-pipette substep routing without changing source state.
+- It independently checks one P20 transfer tip, one P300 transfer tip, and
+  eleven dedicated P300 calibration-cycle/restoration tips. The P300 count is
+  checked as the combined twelve-tip requirement. A rejection returns empty
+  evidence lists so the controller cannot mistake a partial plan for approval.
+- The snapshot now advertises v2 and both optional C2d commands. Ordinary Auto
+  transfers, standard stability mixing, preparation, plate replacement, and
+  existing calibration v1 mix execution remain unchanged.
+
+Hardware-free Python 3.9 tests cover binding success/collision rejection,
+both transfer profiles, native dead-volume/source exhaustion behavior,
+combined P300 shortage rejection, no mutation during resource checks, packet
+registration, and explicit no-motion handler structure. This is static and
+synthetic evidence only; C2d itself adds no runnable controller path.
 
 ## Validation and deployment limits
 

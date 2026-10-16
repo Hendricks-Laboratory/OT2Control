@@ -1152,7 +1152,10 @@ class OT2Robot():
     # Supervised Stage 13G calibration is a fixed, calibration-only contract.
     # It is not a production stability setting and does not relax the normal
     # completed-well 50 percent mix-volume guard.
-    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v1'
+    # v2 adds a separately acknowledged reader-well binding and a full
+    # no-motion source/tip resource preflight.  The calibration transfer path
+    # must not begin until both have produced positive Pi-side evidence.
+    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v2'
     AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL = 200.0
     AUTO_MIX_CALIBRATION_BASE_VOLUME_UL = 180.0
     AUTO_MIX_CALIBRATION_TRIGGER_VOLUME_UL = 20.0
@@ -1160,6 +1163,11 @@ class OT2Robot():
     AUTO_MIX_CALIBRATION_CYCLE_COUNT = 10
     AUTO_MIX_CALIBRATION_CLEARANCE_MM = 2.0
     AUTO_MIX_CALIBRATION_REQUIRED_NEW_TIPS = 11
+    AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION = 1
+    AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES = {
+        'water_safety_20ul_first': (20.0, 180.0),
+        'qc_two_dye_5ul_red': (5.0, 195.0)
+    }
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
 
@@ -4270,6 +4278,374 @@ class OT2Robot():
             }]
         return response
 
+    def _validate_auto_mix_calibration_binding_request(self, request):
+        '''Validate one no-motion claim of a specific vacant reader well.'''
+        required = {
+            'schema_version', 'binding_id', 'calibration_id', 'wellname',
+            'reader_well', 'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation',
+            'expected_final_well_volume_uL'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('calibration well-binding request has an invalid schema.')
+        if request['schema_version'] != self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION:
+            raise ValueError('calibration well-binding request uses an unsupported schema.')
+        for field_name in ('binding_id', 'calibration_id', 'wellname',
+                           'reader_well', 'expected_loc'):
+            if (not isinstance(request[field_name], str)
+                    or not request[field_name].strip()):
+                raise ValueError('calibration well-binding {} is invalid.'.format(
+                    field_name
+                ))
+        for field_name in ('expected_deck_pos', 'expected_plate_mapping_revision',
+                           'expected_plate_generation'):
+            value = request[field_name]
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 0):
+                raise ValueError('calibration well-binding {} is invalid.'.format(
+                    field_name
+                ))
+        expected_loc = request['expected_loc'].strip().upper()
+        reader_well = request['reader_well'].strip().upper()
+        if reader_well != expected_loc:
+            raise ValueError(
+                'calibration reader_well must match the requested physical location.'
+            )
+        if not request['wellname'].strip().startswith('autowell'):
+            raise ValueError('calibration binding may address an Auto well only.')
+        if request['expected_deck_pos'] not in (4, 7):
+            raise ValueError('calibration binding requires a reader deck position.')
+        expected_volume = self._preflight_number(
+            request['expected_final_well_volume_uL'],
+            'calibration final well volume', minimum=1e-12
+        )
+        if not math.isclose(
+                expected_volume, self.AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
+                rel_tol=0, abs_tol=1e-9):
+            raise ValueError('calibration binding requires the fixed 200 uL well volume.')
+        return {
+            'schema_version': self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION,
+            'binding_id': request['binding_id'].strip(),
+            'calibration_id': request['calibration_id'].strip(),
+            'wellname': request['wellname'].strip(),
+            'reader_well': reader_well,
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': expected_loc,
+            'expected_plate_mapping_revision': request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': request['expected_plate_generation'],
+            'expected_final_well_volume_uL': expected_volume
+        }
+
+    def _auto_mix_calibration_binding_response(self, request):
+        '''Return a versioned binding acknowledgement without movement.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION,
+            'record_type': 'auto_mix_calibration_well_bound',
+            'binding_id': request.get('binding_id'),
+            'calibration_id': request.get('calibration_id'),
+            'accepted': False,
+            'message': '',
+            'wellname': request.get('wellname'),
+            'reader_well': request.get('reader_well'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'plate_mapping_revision': int(
+                getattr(self, 'plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
+            'well_was_vacant': False,
+            'binding_created': False
+        }
+
+    def _bind_auto_mix_calibration_well(self, request):
+        '''Create one in-memory calibration well binding, with no robot motion.'''
+        normalized = self._validate_auto_mix_calibration_binding_request(request)
+        if (normalized['expected_plate_mapping_revision']
+                != self.plate_mapping_revision
+                or normalized['expected_plate_generation']
+                != self.plate_generation):
+            raise ValueError('calibration plate mapping changed; retry before binding.')
+        bindings = getattr(self, '_auto_mix_calibration_bindings', {})
+        if (normalized['calibration_id'] in bindings
+                or any(record.get('binding_id') == normalized['binding_id']
+                       for record in bindings.values())):
+            raise ValueError('calibration well binding was already issued.')
+        try:
+            target_wrapper = self.lab_deck[normalized['expected_deck_pos']]
+        except (IndexError, TypeError):
+            target_wrapper = None
+        if (target_wrapper is None
+                or getattr(target_wrapper, 'name', None)
+                not in ('platereader4', 'platereader7')):
+            raise ValueError('calibration target plate is not registered.')
+        labware = getattr(target_wrapper, 'labware', None)
+        try:
+            wells_by_name = labware.wells_by_name()
+        except (AttributeError, TypeError):
+            raise ValueError('calibration target plate has no addressable wells.')
+        if normalized['expected_loc'] not in wells_by_name:
+            raise ValueError('calibration target location is not on the reader plate.')
+        if normalized['wellname'] in self.containers:
+            raise ValueError('calibration target logical well is already allocated.')
+        for container in self.containers.values():
+            if (isinstance(container, Well96)
+                    and int(getattr(container, 'deck_pos', -1))
+                    == normalized['expected_deck_pos']
+                    and str(getattr(container, 'loc', '')).upper()
+                    == normalized['expected_loc']):
+                raise ValueError('calibration target location is already occupied.')
+
+        # This is an in-memory accounting record only.  It does not call the
+        # protocol, access a pipette, consume liquid, or advance the existing
+        # plate cursor; later controller-owned transfer calls address this
+        # exact Well96 object by its logical Auto name.
+        target = Well96(
+            normalized['wellname'], normalized['expected_deck_pos'],
+            normalized['expected_loc'], labware, vol=0, conc=1
+        )
+        self.containers[normalized['wellname']] = target
+        bindings[normalized['calibration_id']] = dict(normalized)
+        self._auto_mix_calibration_bindings = bindings
+        return normalized
+
+    def _validate_auto_mix_calibration_resource_request(self, request):
+        '''Validate exact source/tip evidence required before calibration transfers.'''
+        required = {
+            'schema_version', 'resource_preflight_id', 'binding_id',
+            'calibration_id', 'assay_profile', 'wellname', 'expected_deck_pos',
+            'expected_loc', 'expected_plate_mapping_revision',
+            'expected_plate_generation', 'source_requirements',
+            'ordinary_transfer_tip_requirements',
+            'dedicated_mix_tip_requirements'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('calibration resource preflight has an invalid schema.')
+        if request['schema_version'] != self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION:
+            raise ValueError('calibration resource preflight uses an unsupported schema.')
+        for field_name in ('resource_preflight_id', 'binding_id',
+                           'calibration_id', 'assay_profile', 'wellname',
+                           'expected_loc'):
+            if (not isinstance(request[field_name], str)
+                    or not request[field_name].strip()):
+                raise ValueError('calibration resource preflight {} is invalid.'.format(
+                    field_name
+                ))
+        for field_name in ('expected_deck_pos', 'expected_plate_mapping_revision',
+                           'expected_plate_generation'):
+            value = request[field_name]
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 0):
+                raise ValueError('calibration resource preflight {} is invalid.'.format(
+                    field_name
+                ))
+        profile = request['assay_profile'].strip().lower()
+        try:
+            expected_volumes = self.AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES[
+                profile
+            ]
+        except KeyError:
+            raise ValueError('calibration assay_profile is unsupported.')
+        if (not request['wellname'].strip().startswith('autowell')
+                or request['expected_deck_pos'] not in (4, 7)):
+            raise ValueError('calibration resource preflight requires an Auto reader well.')
+        source_requirements = request['source_requirements']
+        if not isinstance(source_requirements, list) or len(source_requirements) != 2:
+            raise ValueError('calibration source requirements are incomplete.')
+        normalized_sources = []
+        for source, slot, required_volume in zip(
+                source_requirements, ('first', 'second'), expected_volumes):
+            if (not isinstance(source, dict)
+                    or set(source) != {
+                        'slot', 'source_container', 'required_volume_uL'
+                    }
+                    or source.get('slot') != slot
+                    or not isinstance(source.get('source_container'), str)
+                    or not source['source_container'].strip()
+                    or source.get('required_volume_uL') != required_volume):
+                raise ValueError('calibration source requirement is not reviewed.')
+            normalized_sources.append({
+                'slot': slot,
+                'source_container': source['source_container'].strip(),
+                'required_volume_uL': required_volume
+            })
+        if (normalized_sources[0]['source_container'].casefold()
+                == normalized_sources[1]['source_container'].casefold()):
+            raise ValueError('calibration base and trigger sources must differ.')
+        normalized_tip_requirements = []
+        for requirements, expected in (
+                (request['ordinary_transfer_tip_requirements'],
+                 (('p20', 1), ('p300', 1))),
+                (request['dedicated_mix_tip_requirements'], (('p300', 11),))):
+            if not isinstance(requirements, list) or len(requirements) != len(expected):
+                raise ValueError('calibration tip requirements are incomplete.')
+            normalized_group = []
+            for requirement, (pipette, required_tips) in zip(requirements, expected):
+                if (not isinstance(requirement, dict)
+                        or set(requirement) != {'pipette', 'required_new_tips'}
+                        or requirement.get('pipette') != pipette
+                        or requirement.get('required_new_tips') != required_tips):
+                    raise ValueError('calibration tip requirement is not reviewed.')
+                normalized_group.append({
+                    'pipette': pipette,
+                    'required_new_tips': required_tips
+                })
+            normalized_tip_requirements.append(normalized_group)
+        return {
+            'schema_version': self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION,
+            'resource_preflight_id': request['resource_preflight_id'].strip(),
+            'binding_id': request['binding_id'].strip(),
+            'calibration_id': request['calibration_id'].strip(),
+            'assay_profile': profile,
+            'wellname': request['wellname'].strip(),
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': request['expected_loc'].strip().upper(),
+            'expected_plate_mapping_revision': request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': request['expected_plate_generation'],
+            'source_requirements': normalized_sources,
+            'ordinary_transfer_tip_requirements': normalized_tip_requirements[0],
+            'dedicated_mix_tip_requirements': normalized_tip_requirements[1]
+        }
+
+    def _auto_mix_calibration_resource_response(self, request):
+        '''Return a no-motion resource acknowledgement with no partial approvals.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': self.AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION,
+            'record_type': 'auto_mix_calibration_resources_preflight',
+            'resource_preflight_id': request.get('resource_preflight_id'),
+            'binding_id': request.get('binding_id'),
+            'calibration_id': request.get('calibration_id'),
+            'assay_profile': request.get('assay_profile'),
+            'wellname': request.get('wellname'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'expected_plate_mapping_revision': request.get(
+                'expected_plate_mapping_revision'
+            ),
+            'expected_plate_generation': request.get('expected_plate_generation'),
+            'accepted': False,
+            'message': '',
+            'source_requirements': [],
+            'ordinary_transfer_tip_requirements': [],
+            'dedicated_mix_tip_requirements': []
+        }
+
+    def _get_auto_mix_calibration_resource_pipette(self, pipette_name):
+        '''Return one configured P20/P300 and its unused-tip evidence.'''
+        required_size = {'p20': 20.0, 'p300': 300.0}[pipette_name]
+        matches = []
+        for arm, details in self.pipettes.items():
+            size = self._preflight_number(
+                details.get('size'), '{} pipette size'.format(arm),
+                minimum=1e-12
+            )
+            if math.isclose(size, required_size, rel_tol=0, abs_tol=1e-9):
+                matches.append((arm, details))
+        if len(matches) != 1:
+            raise ValueError('calibration requires exactly one configured {}.'.format(
+                pipette_name
+            ))
+        arm, details = matches[0]
+        pipette = details.get('pipette')
+        if pipette is None:
+            raise ValueError('calibration {} pipette is unavailable.'.format(
+                pipette_name
+            ))
+        return {
+            'pipette_arm': arm,
+            'available_new_tips': self._count_available_tips(
+                pipette, details.get('configured_tip_wells')
+            )
+        }
+
+    def _build_auto_mix_calibration_resource_preflight(self, request):
+        '''Use live Pi inventory to simulate all calibration resources atomically.'''
+        normalized = self._validate_auto_mix_calibration_resource_request(request)
+        binding = getattr(self, '_auto_mix_calibration_bindings', {}).get(
+            normalized['calibration_id']
+        )
+        binding_identity = (
+            'binding_id', 'wellname', 'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation'
+        )
+        if binding is None or any(
+                binding.get(field_name) != normalized[field_name]
+                for field_name in binding_identity):
+            raise ValueError('calibration resource preflight lacks its accepted well binding.')
+        target = self.containers.get(normalized['wellname'])
+        if (target is None or not isinstance(target, Well96)
+                or int(getattr(target, 'deck_pos', -1))
+                != normalized['expected_deck_pos']
+                or str(getattr(target, 'loc', '')).upper()
+                != normalized['expected_loc']):
+            raise ValueError('calibration bound well no longer matches the request.')
+        if (normalized['expected_plate_mapping_revision']
+                != self.plate_mapping_revision
+                or normalized['expected_plate_generation']
+                != self.plate_generation):
+            raise ValueError('calibration plate mapping changed; retry before transfer.')
+
+        source_evidence = []
+        for requirement in normalized['source_requirements']:
+            result = self._simulate_preflight_source({
+                'source_chemical_name': requirement['source_container'],
+                'transfer_steps': [{
+                    'destination_name': normalized['wellname'],
+                    'volume_uL': requirement['required_volume_uL']
+                }]
+            }, 0.0)
+            if result['deficits']:
+                raise ValueError(result['deficits'][0]['message'])
+            descriptors, active_index = self._get_preflight_source_containers(
+                requirement['source_container']
+            )
+            available_volume_uL = sum(
+                max(0.0, descriptor['current_volume_uL']
+                    - descriptor['dead_volume_uL'])
+                for descriptor in descriptors[active_index:]
+            )
+            source_evidence.append(dict(requirement,
+                                        available_volume_uL=available_volume_uL))
+
+        p20 = self._get_auto_mix_calibration_resource_pipette('p20')
+        p300 = self._get_auto_mix_calibration_resource_pipette('p300')
+        ordinary_requirements = []
+        for requirement in normalized['ordinary_transfer_tip_requirements']:
+            pipette_state = p20 if requirement['pipette'] == 'p20' else p300
+            if pipette_state['available_new_tips'] < requirement['required_new_tips']:
+                raise ValueError('calibration has insufficient unused {} tips.'.format(
+                    requirement['pipette']
+                ))
+            ordinary_requirements.append(dict(
+                requirement,
+                available_new_tips=pipette_state['available_new_tips']
+            ))
+        mix_requirement = normalized['dedicated_mix_tip_requirements'][0]
+        # The P300 ordinary 195/180 uL transfer and all eleven dedicated
+        # calibration mix/restoration tips are distinct resources.  Validate
+        # their combined capacity, while reporting the exact request groups.
+        total_p300_tips = (
+            1 + mix_requirement['required_new_tips']
+        )
+        if p300['available_new_tips'] < total_p300_tips:
+            raise ValueError(
+                'calibration needs {} unused P300 tips for its transfer and '
+                'all mix cycles.'.format(total_p300_tips)
+            )
+        mix_requirements = [dict(
+            mix_requirement, available_new_tips=p300['available_new_tips']
+        )]
+        return {
+            'source_requirements': source_evidence,
+            'ordinary_transfer_tip_requirements': ordinary_requirements,
+            'dedicated_mix_tip_requirements': mix_requirements
+        }
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -4300,7 +4676,9 @@ class OT2Robot():
                 'execute_auto_preparation_groups',
                 'mix_auto_completed_well',
                 'preflight_auto_mix_calibration',
-                'mix_auto_calibration_well'
+                'mix_auto_calibration_well',
+                'bind_auto_mix_calibration_well',
+                'preflight_auto_mix_calibration_resources'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -4453,6 +4831,55 @@ class OT2Robot():
                                                       'trigger_chemical_name'
                                                   ))
         self.portal.send_pack('auto_mix_calibration_preflight', response)
+
+    @exec_func('bind_auto_mix_calibration_well', 1, False, exec_funcs)
+    def _exec_bind_auto_mix_calibration_well(self, request):
+        '''Bind one reviewed vacant reader well without any physical operation.'''
+        response = self._auto_mix_calibration_binding_response(request)
+        try:
+            binding = self._bind_auto_mix_calibration_well(request)
+            response.update({
+                'binding_id': binding['binding_id'],
+                'calibration_id': binding['calibration_id'],
+                'wellname': binding['wellname'],
+                'reader_well': binding['reader_well'],
+                'expected_deck_pos': binding['expected_deck_pos'],
+                'expected_loc': binding['expected_loc'],
+                'plate_mapping_revision': self.plate_mapping_revision,
+                'plate_generation': self.plate_generation,
+                'well_was_vacant': True,
+                'binding_created': True,
+                'accepted': True,
+                'message': (
+                    'calibration reader well bound in memory; no robot, '
+                    'liquid, tip, or plate cursor state was changed.'
+                )
+            })
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+        self.portal.send_pack('auto_mix_calibration_well_bound', response)
+
+    @exec_func('preflight_auto_mix_calibration_resources', 1, False, exec_funcs)
+    def _exec_preflight_auto_mix_calibration_resources(self, request):
+        '''Return native Pi source/tip evidence without reserving resources.'''
+        response = self._auto_mix_calibration_resource_response(request)
+        try:
+            evidence = self._build_auto_mix_calibration_resource_preflight(
+                request
+            )
+            response.update(evidence)
+            response.update({
+                'accepted': True,
+                'message': (
+                    'calibration source and tip preflight passed using live '
+                    'Pi inventory; no liquid, tip, or source state changed.'
+                )
+            })
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+        self.portal.send_pack(
+            'auto_mix_calibration_resources_preflight', response
+        )
 
     @exec_func('mix_auto_calibration_well', 1, False, exec_funcs)
     def _exec_mix_auto_calibration_well(self, request):

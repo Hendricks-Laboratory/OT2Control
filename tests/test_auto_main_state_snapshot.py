@@ -107,7 +107,7 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual('Auto-main', snapshot['runtime_role'])
         self.assertEqual('auto-main-state-v10', snapshot['protocol_version'])
         self.assertEqual(
-            'auto-mix-calibration-v1',
+            'auto-mix-calibration-v2',
             snapshot['auto_mix_calibration_protocol_version']
         )
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
@@ -127,7 +127,9 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
                 'execute_auto_preparation_groups',
                 'mix_auto_completed_well',
                 'preflight_auto_mix_calibration',
-                'mix_auto_calibration_well'
+                'mix_auto_calibration_well',
+                'bind_auto_mix_calibration_well',
+                'preflight_auto_mix_calibration_resources'
         ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
         self.assertEqual(0, snapshot['tip_inventory_revision'])
@@ -195,6 +197,14 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual(b'\x1E', packet_types['auto_preparation_groups_executed'])
         self.assertEqual(b'\x1F', packet_types['mix_auto_completed_well'])
         self.assertEqual(b'\x20', packet_types['auto_completed_well_mixed'])
+        self.assertEqual(b'\x25', packet_types['bind_auto_mix_calibration_well'])
+        self.assertEqual(b'\x26', packet_types['auto_mix_calibration_well_bound'])
+        self.assertEqual(
+            b'\x27', packet_types['preflight_auto_mix_calibration_resources']
+        )
+        self.assertEqual(
+            b'\x28', packet_types['auto_mix_calibration_resources_preflight']
+        )
         self.assertIn('get_robot_state_snapshot', ghost_types)
         self.assertIn('robot_state_snapshot', ghost_types)
         self.assertIn('preflight_transfer_plan', ghost_types)
@@ -209,6 +219,10 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertIn('auto_preparation_groups_executed', ghost_types)
         self.assertIn('mix_auto_completed_well', ghost_types)
         self.assertIn('auto_completed_well_mixed', ghost_types)
+        self.assertIn('bind_auto_mix_calibration_well', ghost_types)
+        self.assertIn('auto_mix_calibration_well_bound', ghost_types)
+        self.assertIn('preflight_auto_mix_calibration_resources', ghost_types)
+        self.assertIn('auto_mix_calibration_resources_preflight', ghost_types)
 
     def test_preparation_execution_is_a_structured_ghost_acknowledgement(self):
         """A ghost preparation result must not be followed by ``ready``."""
