@@ -11,6 +11,7 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_MODE_TWO_DYE,
     MIX_CALIBRATION_MODE_WATER_SAFETY,
     MIX_CALIBRATION_P300_VOLUME_UL,
+    MIX_CALIBRATION_TARGET_READER_WELL_HEADER,
     MIX_CALIBRATION_TRIGGER_VOLUME_UL,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
     parse_auto_mix_calibration_header_settings,
@@ -26,12 +27,14 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
         )
         self.assertIsNone(settings['auto_mix_calibration_base_reagent'])
         self.assertIsNone(settings['auto_mix_calibration_trigger_reagent'])
+        self.assertIsNone(settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER])
 
     def test_water_safety_mode_has_reviewed_fixed_motion_conditions(self):
         settings = parse_auto_mix_calibration_header_settings({
             'auto_mix_calibration_mode': 'water safety',
             'auto_mix_calibration_base_reagent': 'Calibration Base Water',
             'auto_mix_calibration_trigger_reagent': 'Calibration Trigger Water',
+            'auto_mix_calibration_target_reader_well': 'c4',
         })
         self.assertEqual(
             MIX_CALIBRATION_MODE_WATER_SAFETY,
@@ -58,6 +61,9 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             settings['auto_mix_calibration_cycle_count']
         )
         self.assertEqual(
+            'C4', settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER]
+        )
+        self.assertEqual(
             MIX_CALIBRATION_WELL_CLEARANCE_MM,
             settings['auto_mix_calibration_well_clearance_mm']
         )
@@ -67,6 +73,7 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
             'auto_mix_calibration_mode': 'dye',
             'auto_mix_calibration_base_reagent': 'Copper Sulfate Dye',
             'auto_mix_calibration_trigger_reagent': 'Acid Red 1',
+            'auto_mix_calibration_target_reader_well': 'C4',
         })
         self.assertEqual(
             MIX_CALIBRATION_MODE_TWO_DYE,
@@ -77,11 +84,26 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
                 {
                     'auto_mix_calibration_mode': 'two_dye',
                     'auto_mix_calibration_base_reagent': 'Water',
+                    'auto_mix_calibration_target_reader_well': 'C4',
                 },
                 {
                     'auto_mix_calibration_mode': 'two_dye',
                     'auto_mix_calibration_base_reagent': 'Water',
                     'auto_mix_calibration_trigger_reagent': 'water',
+                    'auto_mix_calibration_target_reader_well': 'C4',
+                },
+                {
+                    'auto_mix_calibration_mode': 'two_dye',
+                    'auto_mix_calibration_base_reagent': 'Base',
+                    'auto_mix_calibration_trigger_reagent': 'Trigger',
+                    'auto_mix_calibration_target_reader_well': 'Q99',
+                },
+                {
+                    'auto_mix_calibration_mode': 'two_dye',
+                    'auto_mix_calibration_base_reagent': 'Base',
+                    'auto_mix_calibration_trigger_reagent': 'Trigger',
+                    'auto_mix_calibration_target_reader_well': 'C4',
+                    'auto_stability_mode': 'monitor',
                 },
                 {'auto_mix_calibration_mode': 'unknown'},
         ):

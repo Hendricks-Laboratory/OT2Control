@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-10-08
+**Updated through:** 2026-10-16
 
 ---
 
@@ -988,6 +988,43 @@ passed. No controller execution path calls the new packets yet; no reader,
 robot, Pi deployment, water debug, or dye assay was run. Physical clearance,
 mixing quality, and the number of production cycles remain unvalidated until
 the later supervised calibration workflow and its water-first test.
+
+### Stage 13G-C1 calibration-only execution-plan boundary — 2026-10-16
+
+Stage 13G-C1 adds no controller execution path. It introduces a pure
+`auto_mix_calibration_plan.py` builder that receives already-resolved source,
+logical-well, reader-layout, and plate-identity inputs from a future
+controller stage and produces one fixed, strictly validated calibration
+schedule:
+
+```text
+Pi no-motion calibration preflight
+→ ordinary 180 uL base transfer
+→ ordinary 20 uL trigger transfer
+→ selected-well baseline scan 00
+→ (one 150 uL Pi mix → one selected-well raw scan) × 10
+```
+
+The calibration Header now requires exactly one user-facing physical target,
+`auto_mix_calibration_target_reader_well` (`A1` through `H12`). The plan
+derives the corresponding OT-2 location and reader deck through the existing
+controller translator, so an operator never enters conflicting reader and
+robot coordinates. Enabled calibration also rejects any non-off
+`auto_stability_mode`; the generated plan explicitly marks ordinary Auto and
+ordinary stability execution as forbidden. It records eleven unmerged scan
+intents—baseline index 0 followed by post-mix indices 1 through 10—and each
+mix action has a unique, ordered, non-retryable Pi request.
+
+The plan builder imports only the calibration configuration and packet-contract
+modules. It contains no controller, reader, socket, robot, filesystem, or
+spreadsheet-I/O import and therefore cannot create a physical action. It does
+not yet resolve spreadsheet sources, perform inventory preflight, initialize a
+robot, create a well, send a packet, transfer liquid, scan a plate, write an
+output, or change a model. Python 3.9.6 compilation and 34 focused
+configuration/protocol/plan plus existing targeted-stability regression tests
+passed. The next stage, 13G-C2, must connect this plan through a dedicated
+calibration-only controller entry point and retain the same fail-closed
+preflight, acknowledgement, and raw-scan boundaries.
 
 ### Stage 12 optical-stability planning record — revised future stages
 

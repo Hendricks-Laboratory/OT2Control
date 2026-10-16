@@ -11,6 +11,7 @@ silently alter normal Auto execution.
 '''
 
 import math
+import re
 
 
 MIX_CALIBRATION_MODE_OFF = 'off'
@@ -26,6 +27,17 @@ MIX_CALIBRATION_TRIGGER_VOLUME_UL = 20.0
 MIX_CALIBRATION_P300_VOLUME_UL = 150.0
 MIX_CALIBRATION_CYCLE_COUNT = 10
 MIX_CALIBRATION_WELL_CLEARANCE_MM = 2.0
+
+# The physical reader well is the one user-facing target selector.  The
+# controller will derive the corresponding OT-2 location and reader deck from
+# the established reader-layout translator; users must never enter both forms
+# of coordinate and risk a disagreement.
+MIX_CALIBRATION_TARGET_READER_WELL_HEADER = (
+    'auto_mix_calibration_target_reader_well'
+)
+MIX_CALIBRATION_READER_WELL_PATTERN = re.compile(
+    r'^[A-H](?:[1-9]|1[0-2])$'
+)
 
 
 class AutoMixCalibrationValidationError(ValueError):
@@ -53,6 +65,33 @@ def _require_name(value, field_name):
             .format(field_name)
         )
     return str(value).strip()
+
+
+def _require_reader_well(value):
+    normalized = _require_name(
+        value, MIX_CALIBRATION_TARGET_READER_WELL_HEADER
+    ).upper()
+    if not MIX_CALIBRATION_READER_WELL_PATTERN.match(normalized):
+        raise AutoMixCalibrationValidationError(
+            '{} must be a plate-reader well from A1 through H12. Received '
+            '{!r}.'.format(
+                MIX_CALIBRATION_TARGET_READER_WELL_HEADER, value
+            )
+        )
+    return normalized
+
+
+def _require_stability_mode_is_off(header):
+    '''Prevent an opt-in calibration from being mistaken for Auto stability.'''
+    raw_value = _canonical_text(_header_value(
+        header, 'auto_stability_mode', MIX_CALIBRATION_MODE_OFF
+    ))
+    if raw_value not in ('', 'off', 'false', 'no', '0'):
+        raise AutoMixCalibrationValidationError(
+            'auto_mix_calibration_mode is an independent calibration-only '
+            'mode and cannot be combined with auto_stability_mode={!r}.'
+            .format(_header_value(header, 'auto_stability_mode', ''))
+        )
 
 
 def _require_exact_fixed_configuration():
@@ -126,6 +165,7 @@ def parse_auto_mix_calibration_header_settings(header):
         'auto_mix_calibration_mode': mode,
         'auto_mix_calibration_base_reagent': None,
         'auto_mix_calibration_trigger_reagent': None,
+        MIX_CALIBRATION_TARGET_READER_WELL_HEADER: None,
         'auto_mix_calibration_final_well_volume_uL': (
             MIX_CALIBRATION_FINAL_WELL_VOLUME_UL
         ),
@@ -142,6 +182,8 @@ def parse_auto_mix_calibration_header_settings(header):
     if mode == MIX_CALIBRATION_MODE_OFF:
         return settings
 
+    _require_stability_mode_is_off(header)
+
     base_reagent = _require_name(
         _header_value(header, 'auto_mix_calibration_base_reagent'),
         'auto_mix_calibration_base_reagent'
@@ -157,4 +199,7 @@ def parse_auto_mix_calibration_header_settings(header):
         )
     settings['auto_mix_calibration_base_reagent'] = base_reagent
     settings['auto_mix_calibration_trigger_reagent'] = trigger_reagent
+    settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER] = _require_reader_well(
+        _header_value(header, MIX_CALIBRATION_TARGET_READER_WELL_HEADER)
+    )
     return settings
