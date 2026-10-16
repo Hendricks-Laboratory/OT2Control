@@ -946,6 +946,49 @@ decision-snapshot immutability, companion-model provenance, extended audit
 records, and the fail-closed plate-replacement boundary before any chemistry
 or unattended use.
 
+### Stage 13G-B supervised mix-calibration Pi boundary — 2026-10-16
+
+Stage 13G is a deliberately separate, supervised calibration workflow for
+selecting a future production well-mixing cycle count. It is **not** the
+ordinary stability mixer and must not be used to infer stability chemistry.
+The reviewed calibration geometry is exactly one P300 `mix(1, 150 uL, well,
+rate=1.0)` at 2 mm aspirate and dispense clearance in one 200 uL well. The
+planned controller workflow will assemble the well from one 180 uL base source
+and one final 20 uL trigger source, acquire a baseline, then perform ten
+separate mix/scan cycles. The staged two-dye assay uses robot-added
+copper/EDTA base followed by Acid Red 1 trigger; a water-only run is the first
+physical gate.
+
+Stage 13G-A added only the inert Header/configuration contract. Stage 13G-B
+adds the paired Lab-PC/Auto-main packet registry, a separate versioned Pi
+snapshot capability, a no-motion calibration preflight, and a distinct Pi
+well-mix primitive. The preflight verifies one registered plate-reader
+location, exact 200/150 uL/ten-cycle/2 mm values, explicit distinct base and
+trigger source identities, a verified loaded P300 whose actual range includes
+150 uL, and at least eleven unused P300 tips. Eleven tips conservatively cover
+the first mix after a potentially dirty P300 plus every individual mix/scan
+cycle and final clean-tip restoration. It consumes no liquid or tips, and it
+records only an in-memory authorization binding the first action to that exact
+preflight.
+
+Each later Pi mix action independently revalidates plate identity, native
+well binding, exactly two recorded base-then-trigger transfers (180 then 20
+uL), final 200 uL well volume, P300 identity/range, current tip availability,
+strict cycle order, and non-replayed action IDs. A failed or replayed request
+does not move hardware; an exception after a mix begins is intentionally not
+converted to a success acknowledgement. The pre-existing production targeted
+stability mixer remains its own 20 uL, one-cycle, 1 mm path with its existing
+50% well-volume guard; this stage does not alter it.
+
+Python 3.9 compilation, packet-pair source checks, geometry-isolation checks,
+seven Lab-PC pure-contract tests, five new Pi stub tests, the existing 15 Pi
+snapshot tests, 12 existing production targeted-mix tests, 17 existing
+Lab-PC handshake tests, and the complete 50-test Auto-main isolated suite
+passed. No controller execution path calls the new packets yet; no reader,
+robot, Pi deployment, water debug, or dye assay was run. Physical clearance,
+mixing quality, and the number of production cycles remain unvalidated until
+the later supervised calibration workflow and its water-first test.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
