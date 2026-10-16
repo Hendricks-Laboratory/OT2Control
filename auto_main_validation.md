@@ -4,7 +4,7 @@
 **Branch context:** Raspberry Pi Auto runtime  
 **Protected Pi baseline:** `main`  
 **Active Pi development branch:** `Auto-main`  
-**Updated through:** 2026-09-24
+**Updated through:** 2026-10-16
 
 ---
 
@@ -31,6 +31,29 @@ Auto-specific runtime code is deployed only in the separate
 `/root/OT2Control-Auto-main` worktree through a verified, fast-forward Git
 bundle. A Git branch or validation record is not itself a Pi deployment and is
 not physical-run clearance.
+
+### Laboratory-PC checkout policy — 2026-10-16
+
+Use `/Users/ryangrossman/Documents/GitHub/OT2Control` as the **only canonical
+GitHub Desktop repository** for both Lab-PC `Auto-RTG` work and Pi-side
+`Auto-main` work. Select the intended branch within that one repository before
+reviewing, staging, or committing:
+
+- `Auto-RTG` for controller, optimizer, spreadsheet, and reporting work;
+- `Auto-main` only for reviewed Pi packet and `ot2_robot.py` support work.
+
+`/Users/ryangrossman/Documents/GitHub/OT2Control-Auto-main` is a retained,
+independent safety-copy clone from the checkout-recovery incident. It is **not
+a working repository**: do not open it in GitHub Desktop, edit files there,
+stage from it, or deploy from it. It remains untouched only until the current
+canonical `Auto-main` work has been independently confirmed and archived by a
+deliberate user decision.
+
+Before any implementation or commit checkpoint, confirm the repository root
+is the canonical `.../GitHub/OT2Control` path and inspect branch plus status.
+Do not create another full clone or use a second local checkout for a branch;
+that is what previously caused changes to be invisible in the GitHub Desktop
+repository the operator was viewing.
 
 ## Implemented Auto-main support at this checkpoint
 
