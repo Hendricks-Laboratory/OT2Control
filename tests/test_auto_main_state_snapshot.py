@@ -86,6 +86,9 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
             'AUTO_MAIN_PROTOCOL_VERSION': _class_assignment_value(
                 self.class_node, 'AUTO_MAIN_PROTOCOL_VERSION'
             ),
+            'AUTO_MIX_CALIBRATION_PROTOCOL_VERSION': _class_assignment_value(
+                self.class_node, 'AUTO_MIX_CALIBRATION_PROTOCOL_VERSION'
+            ),
             'TARE_CALIBRATION_ID': _class_assignment_value(
                 self.class_node, 'TARE_CALIBRATION_ID'
             ),
@@ -103,6 +106,10 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual(1, snapshot['snapshot_schema_version'])
         self.assertEqual('Auto-main', snapshot['runtime_role'])
         self.assertEqual('auto-main-state-v10', snapshot['protocol_version'])
+        self.assertEqual(
+            'auto-mix-calibration-v1',
+            snapshot['auto_mix_calibration_protocol_version']
+        )
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
                          snapshot['tare_calibration_id'])
         self.assertEqual({
@@ -118,7 +125,9 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
                 'register_auto_plate_generation',
                 'reserve_auto_preparation_groups',
                 'execute_auto_preparation_groups',
-                'mix_auto_completed_well'
+                'mix_auto_completed_well',
+                'preflight_auto_mix_calibration',
+                'mix_auto_calibration_well'
         ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
         self.assertEqual(0, snapshot['tip_inventory_revision'])

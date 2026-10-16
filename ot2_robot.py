@@ -699,6 +699,13 @@ class Well96(Well):
     # mixers use 100.0, but that is not an evidence-based setting for a shallow
     # reaction well.  Keep the new well-only path at the documented baseline.
     TARGETED_MIX_RATE = 1.0
+    # The supervised dye/water calibration is intentionally separate from
+    # ``mix_targeted``. Its 150 uL / 2 mm motion must not silently alter the
+    # lower-volume production stability mixer.
+    CALIBRATION_MIX_ASPIRATE_CLEARANCE_MM = 2.0
+    CALIBRATION_MIX_DISPENSE_CLEARANCE_MM = 2.0
+    CALIBRATION_MIX_VOLUME_UL = 150.0
+    CALIBRATION_MIX_RATE = 1.0
 
     @property
     def disp_height(self):
@@ -732,6 +739,31 @@ class Well96(Well):
         finally:
             # Do not leave low 96-well clearances behind for an unrelated
             # later operation if the mix or the surrounding protocol faults.
+            pipette.well_bottom_clearance.aspirate = previous_aspirate
+            pipette.well_bottom_clearance.dispense = previous_dispense
+
+    def mix_calibration(self, pipette):
+        '''Perform exactly one reviewed calibration mix in one 96-well well.
+
+        This is called once per controller-owned mix/reader-scan cycle.  Its
+        fixed volume and geometry deliberately cannot be varied by a packet
+        or spreadsheet value.  As for the ordinary targeted path, clearance
+        restoration happens even when the Opentrons mix primitive faults.
+        '''
+        previous_aspirate = pipette.well_bottom_clearance.aspirate
+        previous_dispense = pipette.well_bottom_clearance.dispense
+        pipette.well_bottom_clearance.aspirate = (
+            self.CALIBRATION_MIX_ASPIRATE_CLEARANCE_MM
+        )
+        pipette.well_bottom_clearance.dispense = (
+            self.CALIBRATION_MIX_DISPENSE_CLEARANCE_MM
+        )
+        try:
+            pipette.mix(
+                1, self.CALIBRATION_MIX_VOLUME_UL, self.get_well(),
+                rate=self.CALIBRATION_MIX_RATE
+            )
+        finally:
             pipette.well_bottom_clearance.aspirate = previous_aspirate
             pipette.well_bottom_clearance.dispense = previous_dispense
 
@@ -1116,6 +1148,18 @@ class OT2Robot():
     AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL = 5.0
     AUTO_COMPLETED_WELL_MIX_MAX_CYCLES = 10
     AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL = 300.0
+
+    # Supervised Stage 13G calibration is a fixed, calibration-only contract.
+    # It is not a production stability setting and does not relax the normal
+    # completed-well 50 percent mix-volume guard.
+    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v1'
+    AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL = 200.0
+    AUTO_MIX_CALIBRATION_BASE_VOLUME_UL = 180.0
+    AUTO_MIX_CALIBRATION_TRIGGER_VOLUME_UL = 20.0
+    AUTO_MIX_CALIBRATION_VOLUME_UL = 150.0
+    AUTO_MIX_CALIBRATION_CYCLE_COUNT = 10
+    AUTO_MIX_CALIBRATION_CLEARANCE_MM = 2.0
+    AUTO_MIX_CALIBRATION_REQUIRED_NEW_TIPS = 11
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
 
@@ -2171,6 +2215,515 @@ class OT2Robot():
             'pipette_arm': None,
             'mix_volume_uL': None,
             'cycle_count': None,
+            'required_new_tips': None,
+            'available_new_tips': None,
+            'tip_policy': 'dedicated_discarded',
+            'physical_execution_started': False,
+            'started_at_utc': None,
+            'completed_at_utc': None
+        }
+
+    def _validate_auto_mix_calibration_request(self, request, identity_field,
+                                               include_cycle_index):
+        '''Normalize the fixed supervised calibration packet without motion.'''
+        required = {
+            'schema_version', identity_field, 'calibration_id',
+            'calibration_mode', 'wellname', 'expected_deck_pos',
+            'expected_loc', 'expected_plate_mapping_revision',
+            'expected_plate_generation', 'base_chemical_name',
+            'trigger_chemical_name', 'expected_final_well_volume_uL',
+            'mix_volume_uL', 'total_cycle_count', 'well_clearance_mm'
+        }
+        if include_cycle_index:
+            required.update(('cycle_index', 'preflight_id'))
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('Auto mix calibration request has an invalid schema.')
+        if request['schema_version'] != 1:
+            raise ValueError('Auto mix calibration request uses an unsupported schema.')
+        for field_name in (
+                identity_field, 'calibration_id', 'calibration_mode',
+                'wellname', 'expected_loc', 'base_chemical_name',
+                'trigger_chemical_name'):
+            if (not isinstance(request[field_name], str)
+                    or not request[field_name].strip()):
+                raise ValueError(
+                    'Auto mix calibration {} is invalid.'.format(field_name)
+                )
+        mode = request['calibration_mode'].strip().lower()
+        if mode not in ('water_safety', 'two_dye'):
+            raise ValueError(
+                'Auto mix calibration mode must be water_safety or two_dye.'
+            )
+        if (request['base_chemical_name'].strip().casefold()
+                == request['trigger_chemical_name'].strip().casefold()):
+            raise ValueError(
+                'Auto mix calibration base and trigger sources must differ.'
+            )
+        for field_name in (
+                'expected_deck_pos', 'expected_plate_mapping_revision',
+                'expected_plate_generation'):
+            value = request[field_name]
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 0):
+                raise ValueError(
+                    'Auto mix calibration {} is invalid.'.format(field_name)
+                )
+        if (not request['wellname'].strip().startswith('autowell')
+                or request['expected_deck_pos'] not in (4, 7)):
+            raise ValueError(
+                'Auto mix calibration must address an Auto well on plate '
+                'reader deck position 4 or 7.'
+            )
+        normalized = {
+            'schema_version': 1,
+            identity_field: request[identity_field].strip(),
+            'calibration_id': request['calibration_id'].strip(),
+            'calibration_mode': mode,
+            'wellname': request['wellname'].strip(),
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': request['expected_loc'].strip().upper(),
+            'expected_plate_mapping_revision': request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': request['expected_plate_generation'],
+            'base_chemical_name': request['base_chemical_name'].strip(),
+            'trigger_chemical_name': request['trigger_chemical_name'].strip(),
+            'expected_final_well_volume_uL': self._preflight_number(
+                request['expected_final_well_volume_uL'],
+                'Auto mix calibration final well volume', minimum=1e-12
+            ),
+            'mix_volume_uL': self._preflight_number(
+                request['mix_volume_uL'], 'Auto mix calibration mix volume',
+                minimum=1e-12
+            ),
+            'well_clearance_mm': self._preflight_number(
+                request['well_clearance_mm'],
+                'Auto mix calibration well clearance', minimum=0.0
+            ),
+            'total_cycle_count': request['total_cycle_count']
+        }
+        expected_values = (
+            ('expected_final_well_volume_uL',
+             self.AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL),
+            ('mix_volume_uL', self.AUTO_MIX_CALIBRATION_VOLUME_UL),
+            ('well_clearance_mm', self.AUTO_MIX_CALIBRATION_CLEARANCE_MM)
+        )
+        for field_name, expected_value in expected_values:
+            if not math.isclose(
+                    normalized[field_name], expected_value,
+                    rel_tol=0, abs_tol=1e-9):
+                raise ValueError(
+                    'Auto mix calibration {} must equal {}.'.format(
+                        field_name, expected_value
+                    )
+                )
+        if (isinstance(normalized['total_cycle_count'], bool)
+                or normalized['total_cycle_count']
+                != self.AUTO_MIX_CALIBRATION_CYCLE_COUNT):
+            raise ValueError(
+                'Auto mix calibration total_cycle_count must equal {}.'
+                .format(self.AUTO_MIX_CALIBRATION_CYCLE_COUNT)
+            )
+        if include_cycle_index:
+            cycle_index = request['cycle_index']
+            if (isinstance(cycle_index, bool) or not isinstance(cycle_index, int)
+                    or cycle_index < 1
+                    or cycle_index > self.AUTO_MIX_CALIBRATION_CYCLE_COUNT):
+                raise ValueError(
+                    'Auto mix calibration cycle_index must be from 1 through {}.'
+                    .format(self.AUTO_MIX_CALIBRATION_CYCLE_COUNT)
+                )
+            normalized['cycle_index'] = cycle_index
+            if (not isinstance(request['preflight_id'], str)
+                    or not request['preflight_id'].strip()):
+                raise ValueError(
+                    'Auto mix calibration preflight_id is invalid.'
+                )
+            normalized['preflight_id'] = request['preflight_id'].strip()
+        return normalized
+
+    def _get_auto_mix_calibration_p300(self):
+        '''Return the verified P300 state shared by calibration preflight/action.'''
+        pipette_arm = self._get_auto_completed_well_mix_p300_arm(
+            dict((arm, details['size']) for arm, details in
+                 self.pipettes.items())
+        )
+        details = self.pipettes[pipette_arm]
+        pipette = details.get('pipette')
+        if pipette is None or not hasattr(pipette, 'has_tip'):
+            raise ValueError('Auto mix calibration pipette state is unavailable.')
+        pipette_min_volume_uL = self._preflight_number(
+            getattr(pipette, 'min_volume', None),
+            'Auto mix calibration pipette minimum volume', minimum=1e-12
+        )
+        pipette_max_volume_uL = self._preflight_number(
+            getattr(pipette, 'max_volume', None),
+            'Auto mix calibration pipette maximum volume', minimum=1e-12
+        )
+        configured_size_uL = self._preflight_number(
+            details.get('size'), 'Auto mix calibration configured pipette size',
+            minimum=1e-12
+        )
+        if (not math.isclose(
+                configured_size_uL, pipette_max_volume_uL,
+                rel_tol=0, abs_tol=1e-9)
+                or not math.isclose(
+                    pipette_max_volume_uL,
+                    self.AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL,
+                    rel_tol=0, abs_tol=1e-9)):
+            raise ValueError(
+                'Auto mix calibration requires a loaded configured P300.'
+            )
+        if (self.AUTO_MIX_CALIBRATION_VOLUME_UL
+                < pipette_min_volume_uL - 1e-9
+                or self.AUTO_MIX_CALIBRATION_VOLUME_UL
+                > pipette_max_volume_uL + 1e-9):
+            raise ValueError(
+                'Auto mix calibration 150 uL volume is outside P300 limits.'
+            )
+        return {
+            'pipette_arm': pipette_arm,
+            'pipette': pipette,
+            'pipette_min_volume_uL': pipette_min_volume_uL,
+            'pipette_max_volume_uL': pipette_max_volume_uL
+        }
+
+    def _validate_auto_mix_calibration_plate(self, normalized,
+                                              require_unallocated_target):
+        '''Verify the planned reader plate and physical target location only.'''
+        if (normalized['expected_plate_mapping_revision']
+                != self.plate_mapping_revision
+                or normalized['expected_plate_generation']
+                != self.plate_generation):
+            raise ValueError(
+                'Auto mix calibration plate mapping changed; retry before '
+                'continuing.'
+            )
+        try:
+            target_labware = self.lab_deck[normalized['expected_deck_pos']]
+        except (IndexError, TypeError):
+            target_labware = None
+        if (target_labware is None
+                or getattr(target_labware, 'name', None)
+                not in ('platereader4', 'platereader7')):
+            raise ValueError(
+                'Auto mix calibration target plate is not registered.'
+            )
+        labware = getattr(target_labware, 'labware', None)
+        try:
+            wells_by_name = labware.wells_by_name()
+        except (AttributeError, TypeError):
+            raise ValueError(
+                'Auto mix calibration target plate has no addressable wells.'
+            )
+        if normalized['expected_loc'] not in wells_by_name:
+            raise ValueError(
+                'Auto mix calibration target location is not on the '
+                'registered plate.'
+            )
+        if (require_unallocated_target
+                and normalized['wellname'] in self.containers):
+            raise ValueError(
+                'Auto mix calibration target well is already allocated; '
+                'preflight must occur before any transfer.'
+            )
+        return target_labware
+
+    def _validate_auto_mix_calibration_sources(self, normalized):
+        '''Require the two explicit source identities before calibration starts.'''
+        for field_name in ('base_chemical_name', 'trigger_chemical_name'):
+            chemical_name = normalized[field_name]
+            source = self.containers.get(chemical_name)
+            if source is None or isinstance(source, Well96):
+                raise ValueError(
+                    'Auto mix calibration {} is not an available source '
+                    'container.'.format(field_name)
+                )
+
+    def _build_auto_mix_calibration_preflight(self, request):
+        '''Build a read-only full-session calibration readiness record.'''
+        normalized = self._validate_auto_mix_calibration_request(
+            request, 'preflight_id', include_cycle_index=False
+        )
+        sessions = getattr(self, '_auto_mix_calibration_sessions', {})
+        if normalized['calibration_id'] in sessions:
+            raise ValueError(
+                'Auto mix calibration session was already started and cannot '
+                'be reused.'
+            )
+        preflights = getattr(self, '_auto_mix_calibration_preflights', {})
+        if normalized['calibration_id'] in preflights:
+            raise ValueError(
+                'Auto mix calibration preflight was already issued and '
+                'cannot be reused.'
+            )
+        self._validate_auto_mix_calibration_plate(
+            normalized, require_unallocated_target=True
+        )
+        self._validate_auto_mix_calibration_sources(normalized)
+        pipette_state = self._get_auto_mix_calibration_p300()
+        available_new_tips = self._count_available_tips(
+            pipette_state['pipette'],
+            self.pipettes[pipette_state['pipette_arm']].get(
+                'configured_tip_wells'
+            )
+        )
+        if available_new_tips < self.AUTO_MIX_CALIBRATION_REQUIRED_NEW_TIPS:
+            raise ValueError(
+                'Auto mix calibration needs {} unused {} tips for all {} '
+                'separate mix/scan cycles and final clean restoration, but '
+                'only {} are available.'.format(
+                    self.AUTO_MIX_CALIBRATION_REQUIRED_NEW_TIPS,
+                    pipette_state['pipette_arm'],
+                    self.AUTO_MIX_CALIBRATION_CYCLE_COUNT,
+                    available_new_tips
+                )
+            )
+        plan = dict(normalized)
+        plan.update({
+            'pipette_arm': pipette_state['pipette_arm'],
+            'pipette_min_volume_uL': pipette_state['pipette_min_volume_uL'],
+            'pipette_max_volume_uL': pipette_state['pipette_max_volume_uL'],
+            'required_new_tips': self.AUTO_MIX_CALIBRATION_REQUIRED_NEW_TIPS,
+            'available_new_tips': available_new_tips
+        })
+        return plan
+
+    def _auto_mix_calibration_preflight_response(self, request):
+        '''Create the no-motion acknowledgement shape for a calibration check.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': 1,
+            'record_type': 'auto_mix_calibration_preflight',
+            'preflight_id': request.get('preflight_id'),
+            'calibration_id': request.get('calibration_id'),
+            'accepted': False,
+            'message': '',
+            'wellname': request.get('wellname'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'base_chemical_name': request.get('base_chemical_name'),
+            'trigger_chemical_name': request.get('trigger_chemical_name'),
+            'plate_mapping_revision': int(
+                getattr(self, 'plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
+            'pipette_arm': None,
+            'mix_volume_uL': None,
+            'total_cycle_count': None,
+            'well_clearance_mm': None,
+            'required_new_tips': None,
+            'available_new_tips': None,
+            'tip_policy': 'dedicated_discarded'
+        }
+
+    def _build_auto_mix_calibration_action_plan(self, request):
+        '''Build one post-scan-safe fixed calibration mix without movement.'''
+        normalized = self._validate_auto_mix_calibration_request(
+            request, 'action_id', include_cycle_index=True
+        )
+        action_ids = getattr(self, '_auto_mix_calibration_action_ids', set())
+        if normalized['action_id'] in action_ids:
+            raise ValueError(
+                'Auto mix calibration action_id was already used and cannot '
+                'be replayed.'
+            )
+        sessions = getattr(self, '_auto_mix_calibration_sessions', {})
+        preflights = getattr(self, '_auto_mix_calibration_preflights', {})
+        preflight = preflights.get(normalized['calibration_id'])
+        if preflight is None:
+            raise ValueError(
+                'Auto mix calibration requires its immediately preceding '
+                'approved preflight.'
+            )
+        if preflight.get('preflight_id') != normalized['preflight_id']:
+            raise ValueError(
+                'Auto mix calibration action does not match its preflight.'
+            )
+        for field_name in (
+                'calibration_mode', 'wellname', 'expected_deck_pos',
+                'expected_loc', 'expected_plate_mapping_revision',
+                'expected_plate_generation', 'base_chemical_name',
+                'trigger_chemical_name'):
+            if preflight.get(field_name) != normalized[field_name]:
+                raise ValueError(
+                    'Auto mix calibration action identity differs from its '
+                    'preflight.'
+                )
+        session = sessions.get(normalized['calibration_id'])
+        session_identity = (
+            'calibration_mode', 'wellname', 'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation',
+            'base_chemical_name', 'trigger_chemical_name'
+        )
+        if session is None:
+            if normalized['cycle_index'] != 1:
+                raise ValueError(
+                    'Auto mix calibration must begin with cycle_index 1.'
+                )
+        else:
+            if session.get('status') == 'completed':
+                raise ValueError(
+                    'Auto mix calibration session is complete and cannot be '
+                    'reused.'
+                )
+            if session.get('next_cycle_index') != normalized['cycle_index']:
+                raise ValueError(
+                    'Auto mix calibration cycle order is invalid.'
+                )
+            for field_name in session_identity:
+                if session.get(field_name) != normalized[field_name]:
+                    raise ValueError(
+                        'Auto mix calibration session identity changed.'
+                    )
+        target_labware = self._validate_auto_mix_calibration_plate(
+            normalized, require_unallocated_target=False
+        )
+        target = self.containers.get(normalized['wellname'])
+        if target is None or not isinstance(target, Well96):
+            raise ValueError(
+                'Auto mix calibration target is not a 96-well reaction well.'
+            )
+        if (str(getattr(target, 'name', '')) != normalized['wellname']
+                or int(getattr(target, 'deck_pos', -1))
+                != normalized['expected_deck_pos']
+                or str(getattr(target, 'loc', '')).upper()
+                != normalized['expected_loc']
+                or getattr(target, 'labware', None)
+                is not getattr(target_labware, 'labware', None)):
+            raise ValueError(
+                'Auto mix calibration target no longer matches the expected '
+                'registered plate well.'
+            )
+        additions = []
+        history = getattr(target, 'history', None)
+        if not isinstance(history, list):
+            raise ValueError('Auto mix calibration target has no transfer history.')
+        for entry in history:
+            if not isinstance(entry, tuple) or len(entry) != 3:
+                raise ValueError('Auto mix calibration target history is invalid.')
+            volume_uL = self._preflight_number(
+                entry[2], 'Auto mix calibration history volume'
+            )
+            if volume_uL > 0:
+                additions.append((entry[1], volume_uL))
+        expected_additions = (
+            (normalized['base_chemical_name'],
+             self.AUTO_MIX_CALIBRATION_BASE_VOLUME_UL),
+            (normalized['trigger_chemical_name'],
+             self.AUTO_MIX_CALIBRATION_TRIGGER_VOLUME_UL)
+        )
+        if len(additions) != len(expected_additions):
+            raise ValueError(
+                'Auto mix calibration target must contain exactly the base '
+                'and final trigger transfers.'
+            )
+        for observed, expected in zip(additions, expected_additions):
+            if (observed[0] != expected[0]
+                    or not math.isclose(
+                        observed[1], expected[1], rel_tol=0, abs_tol=1e-9)):
+                raise ValueError(
+                    'Auto mix calibration transfer history does not match '
+                    'the reviewed base/trigger sequence.'
+                )
+        well_volume_uL = self._preflight_number(
+            getattr(target, 'vol', None),
+            'Auto mix calibration target well volume', minimum=1e-12
+        )
+        if not math.isclose(
+                well_volume_uL, self.AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
+                rel_tol=0, abs_tol=1e-9):
+            raise ValueError(
+                'Auto mix calibration target well volume must equal {} uL.'
+                .format(self.AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL)
+            )
+        pipette_state = self._get_auto_mix_calibration_p300()
+        details = self.pipettes[pipette_state['pipette_arm']]
+        use_existing_clean_tip = (
+            bool(pipette_state['pipette'].has_tip)
+            and details.get('last_used') == 'clean'
+        )
+        required_new_tips = 1 + int(not use_existing_clean_tip)
+        available_new_tips = self._count_available_tips(
+            pipette_state['pipette'], details.get('configured_tip_wells')
+        )
+        if available_new_tips < required_new_tips:
+            raise ValueError(
+                'Auto mix calibration cycle needs {} unused {} tip(s), but '
+                'only {} are available.'.format(
+                    required_new_tips, pipette_state['pipette_arm'],
+                    available_new_tips
+                )
+            )
+        plan = dict(normalized)
+        plan.update({
+            'target': target,
+            'pipette_arm': pipette_state['pipette_arm'],
+            'use_existing_clean_tip': use_existing_clean_tip,
+            'required_new_tips': required_new_tips,
+            'available_new_tips': available_new_tips
+        })
+        return plan
+
+    def _execute_auto_mix_calibration_action_plan(self, plan):
+        '''Perform one fixed calibration mix and restore a clean P300 tip.'''
+        pipette_details = self.pipettes[plan['pipette_arm']]
+        pipette = pipette_details['pipette']
+        if not plan['use_existing_clean_tip']:
+            if bool(pipette.has_tip):
+                pipette.drop_tip()
+            pipette_details['last_used'] = 'clean'
+            pipette.pick_up_tip()
+        pipette_details['last_used'] = plan['wellname']
+        self.protocol._commands.append(
+            'HEAD: {} : Auto mix calibration cycle {}/{} started {} at {}:{} '
+            'using fixed {}uL at {}mm clearance'.format(
+                datetime.now(pytz.timezone('US/Pacific')).strftime(
+                    '%d-%b-%Y %H:%M:%S:%f'
+                ), plan['cycle_index'], plan['total_cycle_count'],
+                plan['wellname'], plan['expected_deck_pos'],
+                plan['expected_loc'], plan['mix_volume_uL'],
+                plan['well_clearance_mm']
+            )
+        )
+        plan['target'].mix_calibration(pipette)
+        if bool(pipette.has_tip):
+            pipette.drop_tip()
+        pipette.pick_up_tip()
+        pipette_details['last_used'] = 'clean'
+        self.protocol._commands.append(
+            'HEAD: {} : Auto mix calibration cycle {}/{} completed {} at {}:{}'
+            .format(
+                datetime.now(pytz.timezone('US/Pacific')).strftime(
+                    '%d-%b-%Y %H:%M:%S:%f'
+                ), plan['cycle_index'], plan['total_cycle_count'],
+                plan['wellname'], plan['expected_deck_pos'],
+                plan['expected_loc']
+            )
+        )
+
+    def _auto_mix_calibration_action_response(self, request):
+        '''Create the acknowledgement shape for one calibration mix action.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': 1,
+            'record_type': 'auto_calibration_well_mixed',
+            'action_id': request.get('action_id'),
+            'calibration_id': request.get('calibration_id'),
+            'preflight_id': request.get('preflight_id'),
+            'accepted': False,
+            'message': '',
+            'cycle_index': request.get('cycle_index'),
+            'wellname': request.get('wellname'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'plate_mapping_revision': int(
+                getattr(self, 'plate_mapping_revision', 0)
+            ),
+            'plate_generation': int(getattr(self, 'plate_generation', 0)),
+            'pipette_arm': None,
+            'mix_volume_uL': None,
+            'well_clearance_mm': None,
             'required_new_tips': None,
             'available_new_tips': None,
             'tip_policy': 'dedicated_discarded',
@@ -3728,6 +4281,13 @@ class OT2Robot():
             'snapshot_schema_version': 1,
             'runtime_role': 'Auto-main',
             'protocol_version': self.AUTO_MAIN_PROTOCOL_VERSION,
+            # This optional extension is intentionally versioned separately
+            # from the base v10 compatibility contract. Ordinary Auto runs do
+            # not require it and therefore remain compatible with an earlier
+            # validated Auto-main deployment.
+            'auto_mix_calibration_protocol_version': (
+                self.AUTO_MIX_CALIBRATION_PROTOCOL_VERSION
+            ),
             'tare_calibration_id': self.TARE_CALIBRATION_ID,
             'tare_calibration_g': dict(self.TARE_CALIBRATION_G),
             'supported_commands': [
@@ -3738,7 +4298,9 @@ class OT2Robot():
                 'register_auto_plate_generation',
                 'reserve_auto_preparation_groups',
                 'execute_auto_preparation_groups',
-                'mix_auto_completed_well'
+                'mix_auto_completed_well',
+                'preflight_auto_mix_calibration',
+                'mix_auto_calibration_well'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -3837,6 +4399,125 @@ class OT2Robot():
             'completed_at_utc': datetime.now(pytz.utc).isoformat()
         })
         self.portal.send_pack('auto_completed_well_mixed', response)
+
+    @exec_func('preflight_auto_mix_calibration', 1, False, exec_funcs)
+    def _exec_preflight_auto_mix_calibration(self, request):
+        '''Report whether the full supervised calibration can start safely.
+
+        It does not reserve tips, create a destination well, consume liquid,
+        or change inventory.  It does retain one in-memory authorization
+        record, binding the later action to this exact preflight so the first
+        physical mix cannot bypass the before-transfer check.
+        '''
+        response = self._auto_mix_calibration_preflight_response(request)
+        try:
+            plan = self._build_auto_mix_calibration_preflight(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+            self.portal.send_pack('auto_mix_calibration_preflight', response)
+            return
+        response.update({
+            'preflight_id': plan['preflight_id'],
+            'calibration_id': plan['calibration_id'],
+            'wellname': plan['wellname'],
+            'expected_deck_pos': plan['expected_deck_pos'],
+            'expected_loc': plan['expected_loc'],
+            'base_chemical_name': plan['base_chemical_name'],
+            'trigger_chemical_name': plan['trigger_chemical_name'],
+            'pipette_arm': plan['pipette_arm'],
+            'mix_volume_uL': plan['mix_volume_uL'],
+            'total_cycle_count': plan['total_cycle_count'],
+            'well_clearance_mm': plan['well_clearance_mm'],
+            'required_new_tips': plan['required_new_tips'],
+            'available_new_tips': plan['available_new_tips'],
+            'accepted': True,
+            'message': (
+                'Auto mix calibration preflight passed; no physical robot or '
+                'inventory state was changed.'
+            )
+        })
+        preflights = getattr(self, '_auto_mix_calibration_preflights', None)
+        if preflights is None:
+            preflights = {}
+            self._auto_mix_calibration_preflights = preflights
+        preflights[plan['calibration_id']] = dict((field_name, plan[field_name])
+                                                  for field_name in (
+                                                      'preflight_id',
+                                                      'calibration_mode',
+                                                      'wellname',
+                                                      'expected_deck_pos',
+                                                      'expected_loc',
+                                                      'expected_plate_mapping_revision',
+                                                      'expected_plate_generation',
+                                                      'base_chemical_name',
+                                                      'trigger_chemical_name'
+                                                  ))
+        self.portal.send_pack('auto_mix_calibration_preflight', response)
+
+    @exec_func('mix_auto_calibration_well', 1, False, exec_funcs)
+    def _exec_mix_auto_calibration_well(self, request):
+        '''Perform one non-replayable calibration mix between reader scans.'''
+        response = self._auto_mix_calibration_action_response(request)
+        try:
+            plan = self._build_auto_mix_calibration_action_plan(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+            self.portal.send_pack('auto_calibration_well_mixed', response)
+            return
+
+        action_ids = getattr(self, '_auto_mix_calibration_action_ids', None)
+        if action_ids is None:
+            action_ids = set()
+            self._auto_mix_calibration_action_ids = action_ids
+        sessions = getattr(self, '_auto_mix_calibration_sessions', None)
+        if sessions is None:
+            sessions = {}
+            self._auto_mix_calibration_sessions = sessions
+        session = sessions.get(plan['calibration_id'])
+        if session is None:
+            session = dict((field_name, plan[field_name]) for field_name in (
+                'calibration_mode', 'wellname', 'expected_deck_pos',
+                'expected_loc', 'expected_plate_mapping_revision',
+                'expected_plate_generation', 'base_chemical_name',
+                'trigger_chemical_name'
+            ))
+            sessions[plan['calibration_id']] = session
+        # Record the attempted physical operation before calling the robot.
+        # If it faults after movement begins, neither this action nor its
+        # partially completed session can be replayed in the same process.
+        action_ids.add(plan['action_id'])
+        session['status'] = 'physical_execution_started'
+        session['next_cycle_index'] = plan['cycle_index']
+        response.update({
+            'action_id': plan['action_id'],
+            'calibration_id': plan['calibration_id'],
+            'cycle_index': plan['cycle_index'],
+            'wellname': plan['wellname'],
+            'expected_deck_pos': plan['expected_deck_pos'],
+            'expected_loc': plan['expected_loc'],
+            'pipette_arm': plan['pipette_arm'],
+            'mix_volume_uL': plan['mix_volume_uL'],
+            'well_clearance_mm': plan['well_clearance_mm'],
+            'required_new_tips': plan['required_new_tips'],
+            'available_new_tips': plan['available_new_tips'],
+            'physical_execution_started': True,
+            'started_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self._execute_auto_mix_calibration_action_plan(plan)
+        session['next_cycle_index'] = plan['cycle_index'] + 1
+        session['status'] = (
+            'completed' if plan['cycle_index']
+            == self.AUTO_MIX_CALIBRATION_CYCLE_COUNT else 'awaiting_next_cycle'
+        )
+        response.update({
+            'accepted': True,
+            'message': (
+                'Auto mix calibration cycle completed with a dedicated '
+                'discarded P300 tip.'
+            ),
+            'completed_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self.portal.send_pack('auto_calibration_well_mixed', response)
 
     @exec_func('reserve_auto_preparation_groups', 1, False, exec_funcs)
     def _exec_reserve_auto_preparation_groups(self, request):
