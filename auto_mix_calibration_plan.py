@@ -27,7 +27,7 @@ from auto_mix_calibration_protocol import (
 )
 
 
-MIX_CALIBRATION_PLAN_VERSION = 3
+MIX_CALIBRATION_PLAN_VERSION = 4
 MIX_CALIBRATION_BASELINE_SCAN_INDEX = 0
 MIX_CALIBRATION_EXPECTED_SCAN_COUNT = 1 + MIX_CALIBRATION_CYCLE_COUNT
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
@@ -122,6 +122,37 @@ def resolve_auto_mix_calibration_target(reader_well, reader_location_mapping):
     }
 
 
+def resolve_auto_mix_calibration_deck_target(
+        deck_reader_well, legacy_header_reader_well, reader_location_mapping):
+    '''Resolve the Deck Positions target and reject stale duplicate Headers.
+
+    ``deck_reader_well`` is the existing controller-preserved, reader-facing
+    first usable plate well. It is the only routing authority. Older
+    workbooks may contain the former duplicate Header field; it is accepted
+    only when it resolves to the same reader-facing well and is never used to
+    select a different physical target.
+    '''
+    target = resolve_auto_mix_calibration_target(
+        deck_reader_well, reader_location_mapping
+    )
+    legacy_reader_well = None
+    if legacy_header_reader_well is not None:
+        legacy_target = resolve_auto_mix_calibration_target(
+            legacy_header_reader_well, reader_location_mapping
+        )
+        legacy_reader_well = legacy_target['reader_well']
+        if legacy_reader_well != target['reader_well']:
+            raise AutoMixCalibrationPlanError(
+                'Legacy calibration Header well {} conflicts with Deck '
+                'Positions first usable reader well {}. Remove the legacy '
+                'Header row or make it match before calibration preflight.'
+                .format(legacy_reader_well, target['reader_well'])
+            )
+    target['target_source'] = 'deck_positions_first_usable'
+    target['legacy_header_reader_well'] = legacy_reader_well
+    return target
+
+
 def _build_scan_step(scan_index, cycle_index, wellname, target, prerequisite):
     if scan_index == MIX_CALIBRATION_BASELINE_SCAN_INDEX:
         reason = 'baseline_after_second_transfer_before_mix'
@@ -144,7 +175,8 @@ def _build_scan_step(scan_index, cycle_index, wellname, target, prerequisite):
 
 def build_auto_mix_calibration_run_plan(
         settings, calibration_id, logical_wellname, source_container_names,
-        reader_location_mapping, plate_mapping_revision, plate_generation):
+        reader_location_mapping, plate_mapping_revision, plate_generation,
+        deck_reader_well):
     '''Build one profile-locked transfer, baseline, then mix/scan plan.
 
     ``source_container_names`` deliberately uses first/second keys. The current
@@ -201,7 +233,8 @@ def build_auto_mix_calibration_run_plan(
         raise AutoMixCalibrationPlanError(
             'The resolved first and second source containers must differ.'
         )
-    target = resolve_auto_mix_calibration_target(
+    target = resolve_auto_mix_calibration_deck_target(
+        deck_reader_well,
         settings.get(MIX_CALIBRATION_TARGET_READER_WELL_HEADER),
         reader_location_mapping
     )
@@ -354,6 +387,12 @@ def validate_auto_mix_calibration_run_plan(plan):
             or target.get('expected_loc') != preflight['expected_loc']
             or target.get('expected_labware_name')
             != 'platereader{}'.format(preflight['expected_deck_pos'])
+            or target.get('target_source') != 'deck_positions_first_usable'
+            or (target.get('legacy_header_reader_well') is not None
+                and (not isinstance(
+                    target.get('legacy_header_reader_well'), str)
+                     or target['legacy_header_reader_well']
+                     != target.get('reader_well')))
             or not isinstance(target.get('reader_well'), str)
             or not target['reader_well'].strip()
             or plan.get('logical_wellname') != preflight['wellname']

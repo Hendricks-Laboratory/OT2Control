@@ -34808,6 +34808,9 @@ class AutoMixCalibrationContr(Controller):
                 'mix_calibration mode requires Header '
                 'auto_mix_calibration_mode=water_safety or two_dye.'
             )
+        self.calibration_deck_reader_well = self.robo_params.get(
+            'platereader_input_first_usable'
+        )
         self.calibration_scan_protocol = self._get_calibration_scan_protocol()
         self.calibration_source_names = (
             self._resolve_calibration_source_container_names()
@@ -34820,14 +34823,13 @@ class AutoMixCalibrationContr(Controller):
         )
         print(
             '<<controller>> supervised mix calibration configured: profile={}, '
-            'first source={}, second source={}, reader well={}, scan protocol={}. '
+            'first source={}, second source={}, Deck Positions reader well={}, '
+            'scan protocol={}. '
             'Normal Auto/optimizer execution is disabled.'.format(
                 self.calibration_settings[MIX_CALIBRATION_ASSAY_PROFILE_HEADER],
                 self.calibration_source_names['first'],
                 self.calibration_source_names['second'],
-                self.calibration_settings[
-                    'auto_mix_calibration_target_reader_well'
-                ],
+                self.calibration_deck_reader_well,
                 self.calibration_scan_protocol,
             )
         )
@@ -34962,6 +34964,7 @@ class AutoMixCalibrationContr(Controller):
             reader_location_mapping=dict(self.PLATEREADER_INDEX_TRANSLATOR),
             plate_mapping_revision=mapping_revision,
             plate_generation=plate_generation,
+            deck_reader_well=self.calibration_deck_reader_well,
         )
 
     @staticmethod

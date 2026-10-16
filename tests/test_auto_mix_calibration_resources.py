@@ -47,6 +47,7 @@ def _plan():
         reader_location_mapping={'C4': ('B3', 'platereader4')},
         plate_mapping_revision=4,
         plate_generation=2,
+        deck_reader_well='C4',
     )
 
 
@@ -160,6 +161,7 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
             reader_location_mapping={'C4': ('B3', 'platereader4')},
             plate_mapping_revision=4,
             plate_generation=2,
+            deck_reader_well='C4',
         )
         request = build_auto_mix_calibration_resource_preflight_request(
             plan, 'water-calibration-001-binding'

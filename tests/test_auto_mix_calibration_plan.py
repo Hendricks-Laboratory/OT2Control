@@ -18,6 +18,7 @@ from auto_mix_calibration_plan import (
     AutoMixCalibrationPlanError,
     MIX_CALIBRATION_EXPECTED_SCAN_COUNT,
     build_auto_mix_calibration_run_plan,
+    resolve_auto_mix_calibration_deck_target,
     resolve_auto_mix_calibration_target,
     validate_auto_mix_calibration_run_plan,
 )
@@ -31,13 +32,12 @@ def _settings():
         ),
         MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'acid_red_1',
         MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'copper_sulfate_dye',
-        'auto_mix_calibration_target_reader_well': 'C4',
     })
 
 
 def _mapping():
-    # Matches the established controller translator for reader C4.
-    return {'C4': ('B3', 'platereader4')}
+    # Matches the established controller translator for reader A1.
+    return {'A1': ('E1', 'platereader4'), 'C4': ('B3', 'platereader4')}
 
 
 def _plan():
@@ -52,6 +52,7 @@ def _plan():
         reader_location_mapping=_mapping(),
         plate_mapping_revision=4,
         plate_generation=2,
+        deck_reader_well='A1',
     )
 
 
@@ -79,10 +80,39 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
         self.assertEqual(4, target['expected_deck_pos'])
         self.assertEqual('platereader4', target['expected_labware_name'])
 
+    def test_deck_positions_is_the_target_authority_without_a_header_row(self):
+        target = resolve_auto_mix_calibration_deck_target(
+            'a1', None, _mapping()
+        )
+        self.assertEqual('A1', target['reader_well'])
+        self.assertEqual('E1', target['expected_loc'])
+        self.assertEqual('deck_positions_first_usable',
+                         target['target_source'])
+        self.assertIsNone(target['legacy_header_reader_well'])
+
+    def test_legacy_header_must_match_deck_positions_before_preflight(self):
+        matching = resolve_auto_mix_calibration_deck_target(
+            'A1', 'a1', _mapping()
+        )
+        self.assertEqual('A1', matching['legacy_header_reader_well'])
+        with self.assertRaises(AutoMixCalibrationPlanError):
+            resolve_auto_mix_calibration_deck_target('A1', 'C4', _mapping())
+
+    def test_deck_positions_can_select_the_other_reader_plate(self):
+        target = resolve_auto_mix_calibration_deck_target(
+            'A12', None, {'A12': ('A1', 'platereader7')}
+        )
+        self.assertEqual('A12', target['reader_well'])
+        self.assertEqual('A1', target['expected_loc'])
+        self.assertEqual(7, target['expected_deck_pos'])
+
     def test_exact_plan_is_pdf_ordered_then_ten_mix_scan_pairs(self):
         plan = _plan()
         self.assertFalse(plan['normal_auto_execution_permitted'])
         self.assertFalse(plan['normal_stability_execution_permitted'])
+        self.assertEqual('A1', plan['target']['reader_well'])
+        self.assertEqual('deck_positions_first_usable',
+                         plan['target']['target_source'])
         self.assertEqual(
             MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
             plan['assay_profile']
@@ -141,6 +171,9 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
                     record_in_aggregate=True
                 ),
                 lambda plan: plan.update(normal_auto_execution_permitted=True),
+                lambda plan: plan['target'].update(
+                    target_source='legacy_header'
+                ),
                 lambda plan: plan['execution_steps'].__setitem__(
                     4, copy.deepcopy(plan['execution_steps'][3])
                 ),
@@ -167,6 +200,7 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
                 reader_location_mapping=_mapping(),
                 plate_mapping_revision=4,
                 plate_generation=2,
+                deck_reader_well='A1',
             )
 
 

@@ -1207,6 +1207,39 @@ human-supervised, water-first commissioning run after combined-file review;
 physical clearance, transfer behavior, reader protocol behavior, and mixing
 quality are not established by static or synthetic validation.
 
+### Stage 13G-C2eC Deck Positions calibration-target correction — 2026-10-16
+
+The initial calibration Header required a second reader-well declaration even
+though Deck Positions already owns the established reader-facing first usable
+well. That duplicate could disagree with the ordinary Auto plate start (for
+example, Header `C4` versus Deck Positions `A1`) and would make a calibration
+target ambiguous. C2eC makes the controller-preserved Deck Positions value the
+only calibration routing authority. It continues through the existing
+reader-to-robot mapping before the immutable v1/v2 plan is built.
+
+The former Header value is now optional legacy compatibility metadata only.
+When present, it is normalized and must equal the Deck Positions value; any
+mismatch fails during plan construction before the controller requests a Pi
+snapshot, sends a calibration packet, transfers liquid, mixes, homes, or
+scans. Plan schema v4 records the Deck Positions provenance and the optional
+matching legacy value. The reviewed transfer volumes, tip requirements,
+150 uL P300/2 mm mix request, scan sequence, ordinary Auto mode, stability
+mode, packet schemas, and Auto-main physical handlers are unchanged.
+
+Hardware-free validation used Python 3.9.6 compilation, AST parsing and
+duplicate-method checks, targeted configuration/plan/preflight/resource/
+execution/reporting tests, the Stage 12/13 stability regression suite, and
+the complete local 510-test suite. New tests cover a Header-free target,
+matching and mismatched legacy Headers, both `platereader4` and
+`platereader7` mappings, provenance tampering, and a read-only local Git
+comparison of the paired `Auto-main` packet registry, handlers, snapshot
+capabilities, protocol version, and acknowledgements. The current local
+`Auto-main` revision provides all required v1/v2 calibration commands and
+packet pairs. No Pi, reader, socket, workbook, controller launcher, or
+physical command was accessed. A supervised water run must still confirm that
+the revision deployed on the Pi advertises the same complete snapshot before
+any liquid-handling step.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,

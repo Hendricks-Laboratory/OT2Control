@@ -106,6 +106,18 @@ def _require_reader_well(value):
     return normalized
 
 
+def _optional_legacy_reader_well(value):
+    '''Normalize a legacy duplicate Header value without making it required.
+
+    Deck Positions owns the calibration target.  This Header value exists only
+    so older workbooks can be rejected safely if their stale duplicate value
+    disagrees with the Deck Positions starting well.
+    '''
+    if value is None or not str(value).strip():
+        return None
+    return _require_reader_well(value)
+
+
 def _require_stability_mode_is_off(header):
     '''Prevent an opt-in calibration from being mistaken for Auto stability.'''
     raw_value = _canonical_text(_header_value(
@@ -270,7 +282,9 @@ def _settings_template(mode, profile=None):
 def parse_auto_mix_calibration_header_settings(header):
     '''Return inert or fully specified PDF-aligned calibration settings.
 
-    Header values identify source reagents and one reader coordinate. The
+    Header values identify source reagents. Deck Positions is the single
+    authority for the reader-facing calibration well. The optional legacy
+    target-well Header value is retained only as a later mismatch guard. The
     selected assay profile, rather than ordinary Input Template transfers,
     owns the fixed transfer quantities. This prevents an arbitrary recipe from
     being confused with the supervised mixing calibration.
@@ -325,8 +339,10 @@ def parse_auto_mix_calibration_header_settings(header):
     settings[MIX_CALIBRATION_ASSAY_PROFILE_HEADER] = profile
     settings[MIX_CALIBRATION_FIRST_REAGENT_HEADER] = first_reagent
     settings[MIX_CALIBRATION_SECOND_REAGENT_HEADER] = second_reagent
-    settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER] = _require_reader_well(
-        _header_value(header, MIX_CALIBRATION_TARGET_READER_WELL_HEADER)
+    settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER] = (
+        _optional_legacy_reader_well(
+            _header_value(header, MIX_CALIBRATION_TARGET_READER_WELL_HEADER)
+        )
     )
     return settings
 

@@ -175,6 +175,12 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
                 with self.assertRaises(AutoMixCalibrationValidationError):
                     parse_auto_mix_calibration_header_settings(header)
 
+    def test_enabled_mode_no_longer_requires_a_duplicate_target_well_header(self):
+        header = _two_dye_header()
+        del header[MIX_CALIBRATION_TARGET_READER_WELL_HEADER]
+        settings = parse_auto_mix_calibration_header_settings(header)
+        self.assertIsNone(settings[MIX_CALIBRATION_TARGET_READER_WELL_HEADER])
+
     def test_two_dye_resolved_source_metadata_requires_pdf_identity_and_values(self):
         settings = parse_auto_mix_calibration_header_settings(_two_dye_header())
         accepted = validate_auto_mix_calibration_profile_source_metadata(
