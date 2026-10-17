@@ -1240,6 +1240,51 @@ physical command was accessed. A supervised water run must still confirm that
 the revision deployed on the Pi advertises the same complete snapshot before
 any liquid-handling step.
 
+### Stage 13G-C2eD exact-profile Pi history guard and water commissioning findings — 2026-10-16
+
+The first controlled water commissioning attempts exposed two Pi-side guard
+defects after the calibration-only route had already passed its no-motion
+checks. Both failures were fail-closed: neither began a P300 mix.
+
+The first defect was an obsolete Pi assumption that the two transfers were
+always `180` then `20` uL. That order is incompatible with the reviewed water
+profile, `water_safety_20ul_first`, which intentionally transfers `20` then
+`180` uL. The paired Lab-PC/Auto-main v3 contract therefore carries an
+immutable `assay_profile`, `first_transfer_volume_uL`, and
+`second_transfer_volume_uL` in every calibration preflight and mix request.
+The Pi accepts only the exact reviewed sequence for the selected profile:
+
+```text
+water_safety_20ul_first: 20 uL -> 180 uL
+qc_two_dye_5ul_red:       5 uL -> 195 uL
+```
+
+The second controlled water attempt confirmed the corrected ordered
+transfers, the selected-well baseline scan, and terminal traceback capture,
+then stopped before cycle 1 mixing because the Pi preflight handler had not
+persisted those three v3 identity values in its in-memory authorization
+record. The resulting action/preflight mismatch was correctly rejected before
+P300 motion. Auto-main commit `740b78f` persists the profile and exact
+volumes, and adds a handler-level regression test that exercises the actual
+preflight-storage path rather than constructing a synthetic record by hand.
+
+Hardware-free validation after that correction used Python 3.9.6:
+
+- Auto-main full suite: 59 passed;
+- paired PC/Pi calibration contract suite: 50 passed;
+- the complete Lab-PC suite was already passing at 511 tests for the paired
+  v3 contract revision; and
+- Python compilation, AST duplicate-method checks, and whitespace diff checks
+  passed.
+
+The current v3 persistence correction is **statically and synthetically
+validated only**. It has not yet received a successful controlled water run
+with the deployed `740b78f` Pi commit. A future retry must use a fresh,
+unallocated calibration well because the failed commissioning attempt already
+performed both water transfers and its baseline scan. It must not be treated as
+evidence for physical mixing quality, dye-assay convergence, production
+stability scheduling, or unattended operation.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
