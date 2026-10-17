@@ -41,7 +41,7 @@ class _Well96(object):
 
 class _PlateLabware(object):
     def wells_by_name(self):
-        return {'B3': object(), 'C3': object()}
+        return {'B3': object(), 'C3': object(), 'E1': object()}
 
 
 class _PlateWrapper(object):
@@ -187,21 +187,23 @@ class AutoMainMixCalibrationResourceTests(unittest.TestCase):
         robot.plate_generation = 0
         return robot
 
-    def test_binding_claims_one_vacant_location_without_resource_mutation(self):
+    def test_binding_preserves_reader_coordinate_and_claims_translated_location(self):
         robot = self._robot()
         before = dict(robot.containers)
+        request = self._binding_request()
+        request.update({'reader_well': 'A1', 'expected_loc': 'E1'})
 
         binding = robot._bind_auto_mix_calibration_well(
-            self._binding_request()
+            request
         )
 
-        self.assertEqual('B3', binding['reader_well'])
+        self.assertEqual('A1', binding['reader_well'])
         self.assertEqual(set(before).union({'autowell-calibration-a'}),
                          set(robot.containers))
         target = robot.containers['autowell-calibration-a']
         self.assertIsInstance(target, _Well96)
         self.assertEqual(0, target.vol)
-        self.assertEqual('B3', target.loc)
+        self.assertEqual('E1', target.loc)
         self.assertEqual(4, target.deck_pos)
         self.assertEqual(500.0, robot.containers['BaseC1.0'].vol)
         self.assertEqual(500.0, robot.containers['TriggerC1.0'].vol)

@@ -4307,10 +4307,12 @@ class OT2Robot():
                 ))
         expected_loc = request['expected_loc'].strip().upper()
         reader_well = request['reader_well'].strip().upper()
-        if reader_well != expected_loc:
-            raise ValueError(
-                'calibration reader_well must match the requested physical location.'
-            )
+        # ``reader_well`` is the human-facing coordinate from Deck Positions,
+        # while ``expected_loc`` is the translated physical OT-2 location on
+        # the selected plate-reader labware.  For example, controller reader
+        # A1 maps to physical platereader4 E1.  The Pi must preserve both
+        # identities for audit/reader parsing, and must use only expected_loc
+        # plus deck/revision guards for its physical binding decision.
         if not request['wellname'].strip().startswith('autowell'):
             raise ValueError('calibration binding may address an Auto well only.')
         if request['expected_deck_pos'] not in (4, 7):
