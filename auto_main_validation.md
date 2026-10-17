@@ -195,6 +195,37 @@ combined P300 shortage rejection, no mutation during resource checks, packet
 registration, and explicit no-motion handler structure. This is static and
 synthetic evidence only; C2d itself adds no runnable controller path.
 
+## Stage 13G C2eD v3 calibration-profile history guard — 2026-10-16
+
+The initial v2 Pi calibration guard retained stale fixed `180` then `20` uL
+history assumptions. That was incompatible with the reviewed
+`water_safety_20ul_first` profile, which transfers `20` then `180` uL, and
+would also have rejected the reviewed `qc_two_dye_5ul_red` `5` then `195` uL
+profile. The paired v3 contract now transports the immutable assay profile and
+ordered first/second transfer volumes in every preflight and action request.
+The Pi validates both against its local reviewed profile map before any
+calibration action, then validates the actual destination-well history against
+those same values.
+
+During the first v3 water commissioning attempt, the Pi correctly completed
+the two reviewed water transfers and the controller completed baseline scan
+00, but the first P300 mix action was rejected before motion. The preflight
+handler had not retained the new profile/volume fields in its in-memory
+authorization record, so the action identity could not match it. Commit
+`740b78f` adds those fields to the persisted identity and a handler-level
+regression test that executes the real preflight handler and verifies its
+stored record contains every later action-identity field.
+
+The correction changes no calibration geometry, pipette selection, 150 uL
+P300 mix volume, 2 mm clearance, transfer order, reader mapping, tip policy,
+ordinary Auto transfer behavior, targeted stability mixing, or preparation
+behavior. Python 3.9.6 compilation, the 59-test Auto-main suite, and the
+50-test paired Lab-PC/Pi calibration contract suite passed. This is static and
+synthetic evidence only. The `740b78f` Auto-main commit must be deployed with
+the paired v3 Lab-PC controller before a fresh-well, supervised water retry;
+the previously used well must not be reused because it contains the two
+already-executed water transfers.
+
 ## Validation and deployment limits
 
 The historical evidence for this branch consists of static/source-level
