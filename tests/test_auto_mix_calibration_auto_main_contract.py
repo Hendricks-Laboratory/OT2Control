@@ -7,6 +7,7 @@ acknowledgement, packet-code, handler, and snapshot contracts required by the
 calibration controller before a supervised water debug is considered.
 '''
 
+import os
 import pathlib
 import subprocess
 import unittest
@@ -29,6 +30,15 @@ def _repository_root():
 
 
 def _read_auto_main(path):
+    worktree = os.environ.get('OT2CONTROL_AUTO_MAIN_WORKTREE')
+    if worktree:
+        source_path = pathlib.Path(worktree).resolve() / path
+        if not source_path.is_file():
+            raise AssertionError(
+                'Configured Auto-main worktree is missing {}: {}'
+                .format(path, source_path)
+            )
+        return source_path.read_text(encoding='utf-8')
     result = subprocess.run(
         ['git', 'show', 'Auto-main:{}'.format(path)],
         cwd=str(_repository_root()), check=False, text=True,
@@ -79,7 +89,7 @@ class AutoMixCalibrationAutoMainContractTests(unittest.TestCase):
             'auto_mix_calibration_resources_preflight',
         )
         self.assertIn("'auto_mix_calibration_protocol_version'", source)
-        self.assertIn("'auto-mix-calibration-v2'", source)
+        self.assertIn("'auto-mix-calibration-v3'", source)
         for command in commands:
             self.assertIn("@exec_func('{}'".format(command), source)
             self.assertIn("'{}'".format(command), source)

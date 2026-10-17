@@ -14,15 +14,17 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_MODE_WATER_SAFETY,
     MIX_CALIBRATION_P300_VOLUME_UL,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
+    get_auto_mix_calibration_profile_mode,
+    get_auto_mix_calibration_profile_transfer_volumes,
 )
 
 
-MIX_CALIBRATION_SCHEMA_VERSION = 1
+MIX_CALIBRATION_SCHEMA_VERSION = 2
 MIX_CALIBRATION_PREFLIGHT_COMMAND = 'preflight_auto_mix_calibration'
 MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT = 'auto_mix_calibration_preflight'
 MIX_CALIBRATION_COMMAND = 'mix_auto_calibration_well'
 MIX_CALIBRATION_ACKNOWLEDGEMENT = 'auto_calibration_well_mixed'
-MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v1'
+MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
 MIX_CALIBRATION_REQUIRED_P300_TIPS = 11
 MIX_CALIBRATION_TIP_POLICY = 'dedicated_discarded'
 
@@ -71,7 +73,8 @@ def _validate_common_request(request, identity_field):
         'schema_version', identity_field, 'calibration_id',
         'calibration_mode', 'wellname', 'expected_deck_pos', 'expected_loc',
         'expected_plate_mapping_revision', 'expected_plate_generation',
-        'base_chemical_name', 'trigger_chemical_name',
+        'assay_profile', 'base_chemical_name', 'trigger_chemical_name',
+        'first_transfer_volume_uL', 'second_transfer_volume_uL',
         'expected_final_well_volume_uL', 'mix_volume_uL',
         'total_cycle_count', 'well_clearance_mm'
     }
@@ -89,6 +92,22 @@ def _validate_common_request(request, identity_field):
         raise AutoMixCalibrationProtocolError(
             'calibration_mode must be water_safety or two_dye.'
         )
+    assay_profile = _require_string(
+        request['assay_profile'], 'assay_profile'
+    ).lower()
+    try:
+        expected_mode = get_auto_mix_calibration_profile_mode(assay_profile)
+        expected_first_volume_uL, expected_second_volume_uL = (
+            get_auto_mix_calibration_profile_transfer_volumes(assay_profile)
+        )
+    except ValueError as exc:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration assay_profile is unsupported: {}.'.format(exc)
+        )
+    if mode != expected_mode:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration assay_profile does not match calibration_mode.'
+        )
     normalized = {
         'schema_version': MIX_CALIBRATION_SCHEMA_VERSION,
         identity_field: _require_string(request[identity_field], identity_field),
@@ -96,6 +115,7 @@ def _validate_common_request(request, identity_field):
             request['calibration_id'], 'calibration_id'
         ),
         'calibration_mode': mode,
+        'assay_profile': assay_profile,
         'wellname': _require_string(request['wellname'], 'wellname'),
         'expected_deck_pos': _require_nonnegative_integer(
             request['expected_deck_pos'], 'expected_deck_pos'
@@ -116,6 +136,14 @@ def _validate_common_request(request, identity_field):
         ),
         'trigger_chemical_name': _require_string(
             request['trigger_chemical_name'], 'trigger_chemical_name'
+        ),
+        'first_transfer_volume_uL': _require_exact_number(
+            request['first_transfer_volume_uL'], expected_first_volume_uL,
+            'first_transfer_volume_uL'
+        ),
+        'second_transfer_volume_uL': _require_exact_number(
+            request['second_transfer_volume_uL'], expected_second_volume_uL,
+            'second_transfer_volume_uL'
         ),
         'expected_final_well_volume_uL': _require_exact_number(
             request['expected_final_well_volume_uL'],
@@ -351,7 +379,8 @@ def _mix_request_fields():
         'schema_version', 'action_id', 'calibration_id', 'calibration_mode',
         'preflight_id', 'cycle_index', 'wellname', 'expected_deck_pos', 'expected_loc',
         'expected_plate_mapping_revision', 'expected_plate_generation',
-        'base_chemical_name', 'trigger_chemical_name',
+        'assay_profile', 'base_chemical_name', 'trigger_chemical_name',
+        'first_transfer_volume_uL', 'second_transfer_volume_uL',
         'expected_final_well_volume_uL', 'mix_volume_uL',
         'total_cycle_count', 'well_clearance_mm'
     )

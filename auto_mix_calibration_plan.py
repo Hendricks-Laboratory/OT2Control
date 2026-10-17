@@ -27,7 +27,7 @@ from auto_mix_calibration_protocol import (
 )
 
 
-MIX_CALIBRATION_PLAN_VERSION = 4
+MIX_CALIBRATION_PLAN_VERSION = 5
 MIX_CALIBRATION_BASELINE_SCAN_INDEX = 0
 MIX_CALIBRATION_EXPECTED_SCAN_COUNT = 1 + MIX_CALIBRATION_CYCLE_COUNT
 _IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$')
@@ -254,10 +254,14 @@ def build_auto_mix_calibration_run_plan(
         'expected_loc': target['expected_loc'],
         'expected_plate_mapping_revision': plate_mapping_revision,
         'expected_plate_generation': plate_generation,
-        # Compatibility names are identity-only Pi preflight fields; they do
-        # not select transfer ordering or volumes.
+        # The Pi receives the immutable profile and both reviewed transfer
+        # volumes. It then validates the physical well history against this
+        # exact plan rather than an unrelated legacy transfer assumption.
+        'assay_profile': profile,
         'base_chemical_name': first_container,
         'trigger_chemical_name': second_container,
+        'first_transfer_volume_uL': first_volume,
+        'second_transfer_volume_uL': second_volume,
         'expected_final_well_volume_uL': MIX_CALIBRATION_FINAL_WELL_VOLUME_UL,
         'mix_volume_uL': MIX_CALIBRATION_P300_VOLUME_UL,
         'total_cycle_count': MIX_CALIBRATION_CYCLE_COUNT,

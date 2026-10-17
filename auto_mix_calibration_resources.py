@@ -1,4 +1,4 @@
-'''Pure version-2 resource contract for supervised mix calibration.
+'''Pure version-3 resource contract for supervised mix calibration.
 
 The version-1 calibration packet proves only the dedicated P300 well-mix
 setup.  This module adds the separate no-motion binding and resource-preflight
@@ -17,7 +17,7 @@ from auto_mix_calibration_protocol import (
 
 
 MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION = 1
-MIX_CALIBRATION_RESOURCE_PROTOCOL_VERSION = 'auto-mix-calibration-v2'
+MIX_CALIBRATION_RESOURCE_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
 MIX_CALIBRATION_BIND_WELL_COMMAND = 'bind_auto_mix_calibration_well'
 MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT = (
     'auto_mix_calibration_well_bound'

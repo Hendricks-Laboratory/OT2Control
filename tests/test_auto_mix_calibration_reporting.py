@@ -59,7 +59,7 @@ def _plan():
 
 def _pi_preflight_ack(request, accepted=True):
     return {
-        'schema_version': 1,
+        'schema_version': 2,
         'record_type': 'auto_mix_calibration_preflight',
         'preflight_id': request['preflight_id'],
         'calibration_id': request['calibration_id'],
@@ -84,7 +84,7 @@ def _pi_preflight_ack(request, accepted=True):
 
 def _mix_ack(request):
     return {
-        'schema_version': 1,
+        'schema_version': 2,
         'record_type': 'auto_calibration_well_mixed',
         'action_id': request['action_id'],
         'calibration_id': request['calibration_id'],

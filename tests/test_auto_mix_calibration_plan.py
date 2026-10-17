@@ -117,6 +117,18 @@ class AutoMixCalibrationPlanTests(unittest.TestCase):
             MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
             plan['assay_profile']
         )
+        self.assertEqual(
+            MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
+            plan['preflight_request']['assay_profile']
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
+            plan['preflight_request']['first_transfer_volume_uL']
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
+            plan['preflight_request']['second_transfer_volume_uL']
+        )
         self.assertEqual(200.0, plan['expected_final_well_volume_uL'])
         self.assertEqual(11, plan['expected_scan_count'])
         self.assertEqual(MIX_CALIBRATION_EXPECTED_SCAN_COUNT,

@@ -78,7 +78,7 @@ def _snapshot():
 
 def _v1_ack(request, accepted=True):
     return {
-        'schema_version': 1,
+        'schema_version': 2,
         'record_type': 'auto_mix_calibration_preflight',
         'preflight_id': request['preflight_id'],
         'calibration_id': request['calibration_id'],

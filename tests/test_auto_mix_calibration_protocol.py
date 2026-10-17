@@ -17,9 +17,10 @@ from auto_mix_calibration_protocol import (
 
 def _base_request():
     return {
-        'schema_version': 1,
+        'schema_version': 2,
         'calibration_id': 'mix-cal-2026-10-16-a',
         'calibration_mode': 'water_safety',
+        'assay_profile': 'water_safety_20ul_first',
         'wellname': 'autowell7C1.0',
         'expected_deck_pos': 4,
         'expected_loc': 'B3',
@@ -27,6 +28,8 @@ def _base_request():
         'expected_plate_generation': 0,
         'base_chemical_name': 'CalibrationBaseWaterC1.0',
         'trigger_chemical_name': 'CalibrationTriggerWaterC1.0',
+        'first_transfer_volume_uL': 20.0,
+        'second_transfer_volume_uL': 180.0,
         'expected_final_well_volume_uL': 200.0,
         'mix_volume_uL': 150.0,
         'total_cycle_count': 10,
@@ -46,6 +49,9 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
                 ('expected_final_well_volume_uL', 199.0),
                 ('total_cycle_count', 9),
                 ('well_clearance_mm', 1.0),
+                ('first_transfer_volume_uL', 180.0),
+                ('second_transfer_volume_uL', 20.0),
+                ('assay_profile', 'qc_two_dye_5ul_red'),
                 ('base_chemical_name', 'calibrationtriggerwaterc1.0')):
             invalid = dict(request)
             invalid[field_name] = value
@@ -70,7 +76,7 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
         preflight_request = _base_request()
         preflight_request['preflight_id'] = 'preflight-a'
         preflight_ack = {
-            'schema_version': 1,
+            'schema_version': 2,
             'record_type': 'auto_mix_calibration_preflight',
             'preflight_id': 'preflight-a',
             'calibration_id': preflight_request['calibration_id'],
@@ -101,7 +107,7 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
             'cycle_index': 1
         })
         action_ack = {
-            'schema_version': 1,
+            'schema_version': 2,
             'record_type': 'auto_calibration_well_mixed',
             'action_id': 'cycle-01',
             'calibration_id': action_request['calibration_id'],
