@@ -66,6 +66,14 @@ class _Pipette(object):
         self.has_tip = False
 
 
+class _Portal(object):
+    def __init__(self):
+        self.sent_packets = []
+
+    def send_pack(self, packet_name, payload):
+        self.sent_packets.append((packet_name, payload))
+
+
 class _PytzStub(object):
     utc = timezone.utc
 
@@ -101,6 +109,8 @@ def _robot_calibration_class():
         '_validate_auto_mix_calibration_plate',
         '_validate_auto_mix_calibration_sources',
         '_build_auto_mix_calibration_preflight',
+        '_auto_mix_calibration_preflight_response',
+        '_exec_preflight_auto_mix_calibration',
         '_build_auto_mix_calibration_action_plan',
         '_execute_auto_mix_calibration_action_plan'
     }
@@ -231,6 +241,27 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         self.assertEqual(11, plan['available_new_tips'])
         self.assertEqual('right', plan['pipette_arm'])
         self.assertNotIn('_auto_mix_calibration_sessions', robot.__dict__)
+
+    def test_preflight_handler_persists_full_action_identity(self):
+        robot, _, _ = self._robot(allocated_target=False)
+        robot.portal = _Portal()
+        request = self._request()
+
+        robot._exec_preflight_auto_mix_calibration(request)
+
+        self.assertEqual('auto_mix_calibration_preflight',
+                         robot.portal.sent_packets[-1][0])
+        self.assertTrue(robot.portal.sent_packets[-1][1]['accepted'])
+        stored = robot._auto_mix_calibration_preflights[
+            request['calibration_id']
+        ]
+        for field_name in (
+                'preflight_id', 'calibration_mode', 'wellname',
+                'expected_deck_pos', 'expected_loc',
+                'expected_plate_mapping_revision', 'expected_plate_generation',
+                'base_chemical_name', 'trigger_chemical_name', 'assay_profile',
+                'first_transfer_volume_uL', 'second_transfer_volume_uL'):
+            self.assertEqual(request[field_name], stored[field_name])
 
     def test_preflight_rejects_allocated_target_insufficient_tips_or_bad_geometry(self):
         cases = [

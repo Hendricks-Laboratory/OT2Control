@@ -4873,7 +4873,10 @@ class OT2Robot():
                                                       'expected_plate_mapping_revision',
                                                       'expected_plate_generation',
                                                       'base_chemical_name',
-                                                      'trigger_chemical_name'
+                                                      'trigger_chemical_name',
+                                                      'assay_profile',
+                                                      'first_transfer_volume_uL',
+                                                      'second_transfer_volume_uL'
                                                   ))
         self.portal.send_pack('auto_mix_calibration_preflight', response)
 
