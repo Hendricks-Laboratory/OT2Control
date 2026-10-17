@@ -231,6 +231,45 @@ class AutoMixCalibrationExecutionTests(unittest.TestCase):
                  and isinstance(node.func, ast.Attribute)]
         self.assertIn('_initialize_auto_mix_calibration_configuration', calls)
 
+    def test_calibration_runner_records_phase_and_traceback_on_failure(self):
+        repository_root = os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        ))
+        controller_path = os.path.join(repository_root, 'controller.py')
+        with open(controller_path, encoding='utf-8') as source_file:
+            tree = ast.parse(source_file.read())
+        calibration_class = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef)
+            and node.name == 'AutoMixCalibrationContr'
+        )
+        run_protocol = next(
+            node for node in calibration_class.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == 'run_protocol'
+        )
+        decorator_names = [
+            decorator.id for decorator in run_protocol.decorator_list
+            if isinstance(decorator, ast.Name)
+        ]
+        self.assertIn('terminal_output_capture_guard', decorator_names)
+        string_values = [
+            node.value for node in ast.walk(run_protocol)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        self.assertIn(
+            'Pi initialization acknowledgement',
+            string_values
+        )
+        self.assertIn(
+            'Auto-main compatibility snapshot',
+            string_values
+        )
+        self.assertIn(
+            '<<controller>> mix calibration failed during {}: {}: {}',
+            string_values
+        )
+
     def test_execution_boundary_remains_hardware_free(self):
         repository_root = os.path.dirname(os.path.dirname(
             os.path.abspath(__file__)

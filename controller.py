@@ -35041,6 +35041,7 @@ class AutoMixCalibrationContr(Controller):
             os.path.join(root, 'mix_calibration_execution.json')
         )
 
+    @terminal_output_capture_guard
     def run_protocol(self, simulate=False, no_pr=False, port=50000):
         '''Run one confirmed calibration; normal Auto remains unavailable.'''
         if simulate or no_pr:
@@ -35050,18 +35051,23 @@ class AutoMixCalibrationContr(Controller):
             )
         connection_created = False
         completed = False
+        phase = 'controller and plate-reader initialization'
         try:
             self.create_connection(simulate=False, no_pr=False, port=port)
             connection_created = True
             # Complete normal Pi initialization before reading the identity
             # that fixes this calibration's selected physical reader well.
+            phase = 'Pi initialization acknowledgement'
             self.portal.burn_pipe()
             preflight_transport = AutoMixCalibrationPiPreflightTransport(
                 self.portal
             )
+            phase = 'Auto-main compatibility snapshot'
             initial_snapshot = preflight_transport.get_robot_state_snapshot()
+            phase = 'calibration plan construction'
             plan = self._build_calibration_plan_from_snapshot(initial_snapshot)
             reporter = AutoMixCalibrationReporter(self.out_path, plan, {})
+            phase = 'no-motion calibration resource preflight'
             preflight_record = run_auto_mix_calibration_controller_preflight(
                 plan=plan,
                 portal=self.portal,
@@ -35072,10 +35078,12 @@ class AutoMixCalibrationContr(Controller):
             )
             reporter.preflight_record = dict(preflight_record)
             adapter = AutoMixCalibrationExecutionAdapter(self, reporter)
+            phase = 'calibration execution'
             execution_record = execute_auto_mix_calibration_plan_after_preflight(
                 plan, preflight_record, adapter,
                 expected_reader_scan_protocol=self.calibration_scan_protocol
             )
+            phase = 'calibration reporting'
             execution_record['completed_at_utc'] = self._calibration_utc_now()
             execution_record['reporting'] = reporter.finalize()
             execution_record['execution_record_path'] = (
@@ -35087,6 +35095,18 @@ class AutoMixCalibrationContr(Controller):
                 .format(execution_record['reporting']['metrics_path'])
             )
             completed = True
+        except Exception as error:
+            # The calibration route does not use normal Auto's decorated
+            # execution wrapper.  Record the phase here before the shared
+            # terminal-capture guard writes the complete traceback, so an
+            # interrupted run folder identifies whether failure preceded
+            # preflight or could have followed a physical action.
+            print(
+                '<<controller>> mix calibration failed during {}: {}: {}'
+                .format(phase, type(error).__name__, error),
+                file=sys.stderr
+            )
+            raise
         finally:
             if connection_created and completed:
                 self.close_connection()
