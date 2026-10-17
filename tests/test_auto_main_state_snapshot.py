@@ -107,7 +107,7 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual('Auto-main', snapshot['runtime_role'])
         self.assertEqual('auto-main-state-v10', snapshot['protocol_version'])
         self.assertEqual(
-            'auto-mix-calibration-v2',
+            'auto-mix-calibration-v3',
             snapshot['auto_mix_calibration_protocol_version']
         )
         self.assertEqual('ot2control_tube_tares_2026_07_v1',

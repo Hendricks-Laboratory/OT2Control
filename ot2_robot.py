@@ -1152,13 +1152,12 @@ class OT2Robot():
     # Supervised Stage 13G calibration is a fixed, calibration-only contract.
     # It is not a production stability setting and does not relax the normal
     # completed-well 50 percent mix-volume guard.
-    # v2 adds a separately acknowledged reader-well binding and a full
-    # no-motion source/tip resource preflight.  The calibration transfer path
-    # must not begin until both have produced positive Pi-side evidence.
-    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v2'
+    # v3 adds the immutable assay profile and ordered transfer volumes to the
+    # calibration packet. The Pi validates the post-transfer well history
+    # against that exact reviewed sequence rather than legacy constants.
+    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
+    AUTO_MIX_CALIBRATION_SCHEMA_VERSION = 2
     AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL = 200.0
-    AUTO_MIX_CALIBRATION_BASE_VOLUME_UL = 180.0
-    AUTO_MIX_CALIBRATION_TRIGGER_VOLUME_UL = 20.0
     AUTO_MIX_CALIBRATION_VOLUME_UL = 150.0
     AUTO_MIX_CALIBRATION_CYCLE_COUNT = 10
     AUTO_MIX_CALIBRATION_CLEARANCE_MM = 2.0
@@ -1167,6 +1166,10 @@ class OT2Robot():
     AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES = {
         'water_safety_20ul_first': (20.0, 180.0),
         'qc_two_dye_5ul_red': (5.0, 195.0)
+    }
+    AUTO_MIX_CALIBRATION_PROFILE_MODES = {
+        'water_safety_20ul_first': 'water_safety',
+        'qc_two_dye_5ul_red': 'two_dye'
     }
 
     exec_funcs = {} #a dictionary mapping armchair commands to their appropriate handler func
@@ -2239,19 +2242,21 @@ class OT2Robot():
             'calibration_mode', 'wellname', 'expected_deck_pos',
             'expected_loc', 'expected_plate_mapping_revision',
             'expected_plate_generation', 'base_chemical_name',
-            'trigger_chemical_name', 'expected_final_well_volume_uL',
+            'trigger_chemical_name', 'assay_profile',
+            'first_transfer_volume_uL', 'second_transfer_volume_uL',
+            'expected_final_well_volume_uL',
             'mix_volume_uL', 'total_cycle_count', 'well_clearance_mm'
         }
         if include_cycle_index:
             required.update(('cycle_index', 'preflight_id'))
         if not isinstance(request, dict) or set(request) != required:
             raise ValueError('Auto mix calibration request has an invalid schema.')
-        if request['schema_version'] != 1:
+        if request['schema_version'] != self.AUTO_MIX_CALIBRATION_SCHEMA_VERSION:
             raise ValueError('Auto mix calibration request uses an unsupported schema.')
         for field_name in (
                 identity_field, 'calibration_id', 'calibration_mode',
                 'wellname', 'expected_loc', 'base_chemical_name',
-                'trigger_chemical_name'):
+                'trigger_chemical_name', 'assay_profile'):
             if (not isinstance(request[field_name], str)
                     or not request[field_name].strip()):
                 raise ValueError(
@@ -2261,6 +2266,22 @@ class OT2Robot():
         if mode not in ('water_safety', 'two_dye'):
             raise ValueError(
                 'Auto mix calibration mode must be water_safety or two_dye.'
+            )
+        assay_profile = request['assay_profile'].strip().lower()
+        try:
+            expected_first_volume_uL, expected_second_volume_uL = (
+                self.AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES[
+                    assay_profile
+                ]
+            )
+            expected_mode = self.AUTO_MIX_CALIBRATION_PROFILE_MODES[
+                assay_profile
+            ]
+        except KeyError:
+            raise ValueError('Auto mix calibration assay_profile is unsupported.')
+        if mode != expected_mode:
+            raise ValueError(
+                'Auto mix calibration assay_profile does not match mode.'
             )
         if (request['base_chemical_name'].strip().casefold()
                 == request['trigger_chemical_name'].strip().casefold()):
@@ -2283,10 +2304,11 @@ class OT2Robot():
                 'reader deck position 4 or 7.'
             )
         normalized = {
-            'schema_version': 1,
+            'schema_version': self.AUTO_MIX_CALIBRATION_SCHEMA_VERSION,
             identity_field: request[identity_field].strip(),
             'calibration_id': request['calibration_id'].strip(),
             'calibration_mode': mode,
+            'assay_profile': assay_profile,
             'wellname': request['wellname'].strip(),
             'expected_deck_pos': request['expected_deck_pos'],
             'expected_loc': request['expected_loc'].strip().upper(),
@@ -2296,6 +2318,14 @@ class OT2Robot():
             'expected_plate_generation': request['expected_plate_generation'],
             'base_chemical_name': request['base_chemical_name'].strip(),
             'trigger_chemical_name': request['trigger_chemical_name'].strip(),
+            'first_transfer_volume_uL': self._preflight_number(
+                request['first_transfer_volume_uL'],
+                'Auto mix calibration first transfer volume', minimum=1e-12
+            ),
+            'second_transfer_volume_uL': self._preflight_number(
+                request['second_transfer_volume_uL'],
+                'Auto mix calibration second transfer volume', minimum=1e-12
+            ),
             'expected_final_well_volume_uL': self._preflight_number(
                 request['expected_final_well_volume_uL'],
                 'Auto mix calibration final well volume', minimum=1e-12
@@ -2323,6 +2353,17 @@ class OT2Robot():
                 raise ValueError(
                     'Auto mix calibration {} must equal {}.'.format(
                         field_name, expected_value
+                    )
+                )
+        for field_name, expected_value in (
+                ('first_transfer_volume_uL', expected_first_volume_uL),
+                ('second_transfer_volume_uL', expected_second_volume_uL)):
+            if not math.isclose(
+                    normalized[field_name], expected_value,
+                    rel_tol=0, abs_tol=1e-9):
+                raise ValueError(
+                    'Auto mix calibration {} must equal {} for {}.'.format(
+                        field_name, expected_value, assay_profile
                     )
                 )
         if (isinstance(normalized['total_cycle_count'], bool)
@@ -2501,7 +2542,7 @@ class OT2Robot():
         '''Create the no-motion acknowledgement shape for a calibration check.'''
         request = request if isinstance(request, dict) else {}
         return {
-            'schema_version': 1,
+            'schema_version': self.AUTO_MIX_CALIBRATION_SCHEMA_VERSION,
             'record_type': 'auto_mix_calibration_preflight',
             'preflight_id': request.get('preflight_id'),
             'calibration_id': request.get('calibration_id'),
@@ -2552,7 +2593,8 @@ class OT2Robot():
                 'calibration_mode', 'wellname', 'expected_deck_pos',
                 'expected_loc', 'expected_plate_mapping_revision',
                 'expected_plate_generation', 'base_chemical_name',
-                'trigger_chemical_name'):
+                'trigger_chemical_name', 'assay_profile',
+                'first_transfer_volume_uL', 'second_transfer_volume_uL'):
             if preflight.get(field_name) != normalized[field_name]:
                 raise ValueError(
                     'Auto mix calibration action identity differs from its '
@@ -2562,7 +2604,8 @@ class OT2Robot():
         session_identity = (
             'calibration_mode', 'wellname', 'expected_deck_pos', 'expected_loc',
             'expected_plate_mapping_revision', 'expected_plate_generation',
-            'base_chemical_name', 'trigger_chemical_name'
+            'assay_profile', 'base_chemical_name', 'trigger_chemical_name',
+            'first_transfer_volume_uL', 'second_transfer_volume_uL'
         )
         if session is None:
             if normalized['cycle_index'] != 1:
@@ -2617,9 +2660,9 @@ class OT2Robot():
                 additions.append((entry[1], volume_uL))
         expected_additions = (
             (normalized['base_chemical_name'],
-             self.AUTO_MIX_CALIBRATION_BASE_VOLUME_UL),
+             normalized['first_transfer_volume_uL']),
             (normalized['trigger_chemical_name'],
-             self.AUTO_MIX_CALIBRATION_TRIGGER_VOLUME_UL)
+             normalized['second_transfer_volume_uL'])
         )
         if len(additions) != len(expected_additions):
             raise ValueError(
@@ -2714,7 +2757,7 @@ class OT2Robot():
         '''Create the acknowledgement shape for one calibration mix action.'''
         request = request if isinstance(request, dict) else {}
         return {
-            'schema_version': 1,
+            'schema_version': self.AUTO_MIX_CALIBRATION_SCHEMA_VERSION,
             'record_type': 'auto_calibration_well_mixed',
             'action_id': request.get('action_id'),
             'calibration_id': request.get('calibration_id'),
@@ -4908,7 +4951,8 @@ class OT2Robot():
                 'calibration_mode', 'wellname', 'expected_deck_pos',
                 'expected_loc', 'expected_plate_mapping_revision',
                 'expected_plate_generation', 'base_chemical_name',
-                'trigger_chemical_name'
+                'trigger_chemical_name', 'assay_profile',
+                'first_transfer_volume_uL', 'second_transfer_volume_uL'
             ))
             sessions[plan['calibration_id']] = session
         # Record the attempted physical operation before calling the robot.

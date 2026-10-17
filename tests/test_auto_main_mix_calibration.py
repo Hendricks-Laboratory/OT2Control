@@ -25,15 +25,16 @@ class _Source(object):
 
 
 class _TargetWell(_Well96):
-    def __init__(self, base_name, trigger_name):
+    def __init__(self, base_name, trigger_name, first_volume_uL=20.0,
+                 second_volume_uL=180.0):
         self.name = 'autowell7C1.0'
         self.deck_pos = 4
         self.loc = 'B3'
         self.labware = object()
         self.vol = 200.0
         self.history = [
-            ('time-1', base_name, 180.0),
-            ('time-2', trigger_name, 20.0)
+            ('time-1', base_name, first_volume_uL),
+            ('time-2', trigger_name, second_volume_uL)
         ]
         self.calibration_calls = []
         self.raise_on_mix = False
@@ -165,10 +166,11 @@ def _well96_calibration_class():
 class AutoMainMixCalibrationTests(unittest.TestCase):
     def _request(self, identity_field='preflight_id'):
         request = {
-            'schema_version': 1,
+            'schema_version': 2,
             identity_field: 'calibration-{}'.format(identity_field),
             'calibration_id': 'calibration-session-a',
             'calibration_mode': 'water_safety',
+            'assay_profile': 'water_safety_20ul_first',
             'wellname': 'autowell7C1.0',
             'expected_deck_pos': 4,
             'expected_loc': 'B3',
@@ -176,6 +178,8 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
             'expected_plate_generation': 0,
             'base_chemical_name': 'CalibrationBaseWaterC1.0',
             'trigger_chemical_name': 'CalibrationTriggerWaterC1.0',
+            'first_transfer_volume_uL': 20.0,
+            'second_transfer_volume_uL': 180.0,
             'expected_final_well_volume_uL': 200.0,
             'mix_volume_uL': 150.0,
             'total_cycle_count': 10,
@@ -259,7 +263,10 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'expected_plate_mapping_revision': 0,
                 'expected_plate_generation': 0,
                 'base_chemical_name': request['base_chemical_name'],
-                'trigger_chemical_name': request['trigger_chemical_name']
+                'trigger_chemical_name': request['trigger_chemical_name'],
+                'assay_profile': request['assay_profile'],
+                'first_transfer_volume_uL': request['first_transfer_volume_uL'],
+                'second_transfer_volume_uL': request['second_transfer_volume_uL']
             }
         }
         plan = robot._build_auto_mix_calibration_action_plan(request)
@@ -290,7 +297,10 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'expected_plate_mapping_revision': 0,
                 'expected_plate_generation': 0,
                 'base_chemical_name': next_request['base_chemical_name'],
-                'trigger_chemical_name': next_request['trigger_chemical_name']
+                'trigger_chemical_name': next_request['trigger_chemical_name'],
+                'assay_profile': next_request['assay_profile'],
+                'first_transfer_volume_uL': next_request['first_transfer_volume_uL'],
+                'second_transfer_volume_uL': next_request['second_transfer_volume_uL']
             }
         }
         robot._auto_mix_calibration_preflights = {
@@ -303,7 +313,10 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'expected_plate_mapping_revision': 0,
                 'expected_plate_generation': 0,
                 'base_chemical_name': next_request['base_chemical_name'],
-                'trigger_chemical_name': next_request['trigger_chemical_name']
+                'trigger_chemical_name': next_request['trigger_chemical_name'],
+                'assay_profile': next_request['assay_profile'],
+                'first_transfer_volume_uL': next_request['first_transfer_volume_uL'],
+                'second_transfer_volume_uL': next_request['second_transfer_volume_uL']
             }
         }
         robot._auto_mix_calibration_action_ids = set()
@@ -341,13 +354,47 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'expected_plate_mapping_revision': 0,
                 'expected_plate_generation': 0,
                 'base_chemical_name': request['base_chemical_name'],
-                'trigger_chemical_name': request['trigger_chemical_name']
+                'trigger_chemical_name': request['trigger_chemical_name'],
+                'assay_profile': request['assay_profile'],
+                'first_transfer_volume_uL': request['first_transfer_volume_uL'],
+                'second_transfer_volume_uL': request['second_transfer_volume_uL']
             }
         }
         with self.assertRaisesRegex(ValueError, 'exactly the base'):
             robot._build_auto_mix_calibration_action_plan(
                 request
             )
+
+    def test_action_accepts_each_profile_exactly_as_transferred(self):
+        robot, target, _ = self._robot(allocated_target=True)
+        target.history = [
+            ('time-1', 'CalibrationBaseWaterC1.0', 5.0),
+            ('time-2', 'CalibrationTriggerWaterC1.0', 195.0)
+        ]
+        request = self._request('action_id')
+        request.update({
+            'calibration_mode': 'two_dye',
+            'assay_profile': 'qc_two_dye_5ul_red',
+            'first_transfer_volume_uL': 5.0,
+            'second_transfer_volume_uL': 195.0,
+        })
+        robot._auto_mix_calibration_preflights = {
+            request['calibration_id']: dict(
+                (field_name, request[field_name]) for field_name in (
+                    'preflight_id', 'calibration_mode', 'assay_profile',
+                    'wellname', 'expected_deck_pos', 'expected_loc',
+                    'expected_plate_mapping_revision',
+                    'expected_plate_generation', 'base_chemical_name',
+                    'trigger_chemical_name', 'first_transfer_volume_uL',
+                    'second_transfer_volume_uL'
+                )
+            )
+        }
+        self.assertEqual(
+            1, robot._build_auto_mix_calibration_action_plan(request)[
+                'cycle_index'
+            ]
+        )
 
 
 if __name__ == '__main__':
