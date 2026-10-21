@@ -21,6 +21,11 @@ class _Well96(_WellBase):
 
 
 class _Source(object):
+    def __init__(self, aspiratible_vol=500.0):
+        self.aspiratible_vol = aspiratible_vol
+
+
+class _MultiContainer(object):
     pass
 
 
@@ -111,6 +116,10 @@ def _robot_calibration_class():
         '_build_auto_mix_calibration_preflight',
         '_auto_mix_calibration_preflight_response',
         '_exec_preflight_auto_mix_calibration',
+        '_validate_auto_mix_calibration_transfer_request',
+        '_auto_mix_calibration_transfer_response',
+        '_build_auto_mix_calibration_transfer_plan',
+        '_exec_transfer_auto_mix_calibration_source',
         '_build_auto_mix_calibration_action_plan',
         '_execute_auto_mix_calibration_action_plan'
     }
@@ -142,7 +151,8 @@ def _robot_calibration_class():
         'datetime': datetime,
         'math': math,
         'pytz': _PytzStub,
-        'Well96': _Well96
+        'Well96': _Well96,
+        'MultiContainer': _MultiContainer,
     }
     exec(compile(module, str(ROBOT_SOURCE), 'exec'), namespace)
     return namespace['OT2Robot']
@@ -234,6 +244,117 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         robot.protocol = type('Protocol', (), {'_commands': []})()
         return robot, target, pipette
 
+    @staticmethod
+    def _awaiting_first_mix_session(request):
+        return {
+            'status': 'awaiting_first_mix',
+            'next_cycle_index': 1,
+            'calibration_mode': request['calibration_mode'],
+            'wellname': request['wellname'],
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': request['expected_loc'],
+            'expected_plate_mapping_revision': request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': request[
+                'expected_plate_generation'
+            ],
+            'base_chemical_name': request['base_chemical_name'],
+            'trigger_chemical_name': request['trigger_chemical_name'],
+            'assay_profile': request['assay_profile'],
+            'first_transfer_volume_uL': request[
+                'first_transfer_volume_uL'
+            ],
+            'second_transfer_volume_uL': request[
+                'second_transfer_volume_uL'
+            ],
+        }
+
+    @staticmethod
+    def _transfer_request(action_request, transfer_index):
+        source_name = (
+            action_request['base_chemical_name'] if transfer_index == 1
+            else action_request['trigger_chemical_name']
+        )
+        volume_uL = (
+            action_request['first_transfer_volume_uL'] if transfer_index == 1
+            else action_request['second_transfer_volume_uL']
+        )
+        return {
+            'schema_version': 1,
+            'transfer_id': '{}-transfer-{}'.format(
+                action_request['calibration_id'], transfer_index
+            ),
+            'calibration_id': action_request['calibration_id'],
+            'preflight_id': action_request['preflight_id'],
+            'binding_id': 'binding-a',
+            'resource_preflight_id': 'resources-a',
+            'transfer_index': transfer_index,
+            'wellname': action_request['wellname'],
+            'expected_deck_pos': action_request['expected_deck_pos'],
+            'expected_loc': action_request['expected_loc'],
+            'expected_plate_mapping_revision': action_request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': action_request[
+                'expected_plate_generation'
+            ],
+            'assay_profile': action_request['assay_profile'],
+            'source_chemical_name': source_name,
+            'destination_wellname': action_request['wellname'],
+            'volume_uL': volume_uL,
+        }
+
+    def _configure_exact_transfer_evidence(self, robot, action_request):
+        identity_fields = (
+            'wellname', 'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation',
+            'assay_profile'
+        )
+        preflight = dict(
+            (field_name, action_request[field_name])
+            for field_name in (
+                'preflight_id', 'calibration_mode', 'base_chemical_name',
+                'trigger_chemical_name', 'first_transfer_volume_uL',
+                'second_transfer_volume_uL'
+            ) + identity_fields
+        )
+        binding = dict(
+            (field_name, action_request[field_name])
+            for field_name in identity_fields
+        )
+        binding['binding_id'] = 'binding-a'
+        resources = dict(
+            (field_name, action_request[field_name])
+            for field_name in identity_fields
+        )
+        resources.update({
+            'resource_preflight_id': 'resources-a',
+            'source_requirements': [
+                {
+                    'source_container': action_request['base_chemical_name'],
+                    'required_volume_uL': action_request[
+                        'first_transfer_volume_uL'
+                    ],
+                },
+                {
+                    'source_container': action_request['trigger_chemical_name'],
+                    'required_volume_uL': action_request[
+                        'second_transfer_volume_uL'
+                    ],
+                },
+            ],
+        })
+        robot._auto_mix_calibration_preflights = {
+            action_request['calibration_id']: preflight
+        }
+        robot._auto_mix_calibration_bindings = {
+            action_request['calibration_id']: binding
+        }
+        robot._auto_mix_calibration_resource_preflights = {
+            action_request['calibration_id']: resources
+        }
+
     def test_preflight_accepts_only_complete_exact_session_before_transfer(self):
         robot, _, _ = self._robot(allocated_target=False)
         plan = robot._build_auto_mix_calibration_preflight(self._request())
@@ -300,6 +421,9 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'second_transfer_volume_uL': request['second_transfer_volume_uL']
             }
         }
+        robot._auto_mix_calibration_sessions = {
+            request['calibration_id']: self._awaiting_first_mix_session(request)
+        }
         plan = robot._build_auto_mix_calibration_action_plan(request)
         self.assertEqual(150.0, plan['mix_volume_uL'])
         self.assertEqual(2, plan['required_new_tips'])
@@ -355,6 +479,62 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
             next_request
         )['cycle_index'])
 
+    def test_exact_source_transfers_are_ordered_no_fallback_and_non_replayable(self):
+        robot, target, _ = self._robot(allocated_target=True)
+        target.history = []
+        target.vol = 0.0
+        robot.portal = _Portal()
+        action_request = self._request('action_id')
+        self._configure_exact_transfer_evidence(robot, action_request)
+        events = []
+
+        robot._prepare_transfer_pipettes = lambda source: events.append(
+            ('prepare', source)
+        )
+        robot._get_preffered_pipette = lambda volume: (
+            'left' if volume <= 20.0 else 'right'
+        )
+
+        def fake_transfer(source, destination, volume, allow_auto_make=True):
+            events.append((source, destination, volume, allow_auto_make))
+            target.history.append(('synthetic', source, volume))
+            target.vol += volume
+
+        robot._transfer_step = fake_transfer
+        first = self._transfer_request(action_request, 1)
+        robot._exec_transfer_auto_mix_calibration_source(first)
+        first_ack = robot.portal.sent_packets[-1][1]
+        self.assertTrue(first_ack['accepted'])
+        self.assertEqual('awaiting_second_transfer', robot._auto_mix_calibration_sessions[
+            action_request['calibration_id']
+        ]['status'])
+
+        second = self._transfer_request(action_request, 2)
+        robot._exec_transfer_auto_mix_calibration_source(second)
+        second_ack = robot.portal.sent_packets[-1][1]
+        self.assertTrue(second_ack['accepted'])
+        self.assertEqual('awaiting_first_mix', robot._auto_mix_calibration_sessions[
+            action_request['calibration_id']
+        ]['status'])
+        self.assertEqual([
+            ('prepare', action_request['base_chemical_name']),
+            (action_request['base_chemical_name'], action_request['wellname'],
+             20.0, False),
+            ('prepare', action_request['trigger_chemical_name']),
+            (action_request['trigger_chemical_name'], action_request['wellname'],
+             180.0, False),
+        ], events)
+
+        robot._exec_transfer_auto_mix_calibration_source(first)
+        replay_ack = robot.portal.sent_packets[-1][1]
+        self.assertFalse(replay_ack['accepted'])
+        self.assertEqual(4, len(events))
+
+        invalid = dict(second)
+        invalid['transfer_index'] = 1.0
+        with self.assertRaises(ValueError):
+            robot._validate_auto_mix_calibration_transfer_request(invalid)
+
     def test_calibration_well_primitive_is_fixed_150_ul_two_mm_and_restores(self):
         well = _well96_calibration_class()()
         target_well = object()
@@ -391,6 +571,9 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                 'second_transfer_volume_uL': request['second_transfer_volume_uL']
             }
         }
+        robot._auto_mix_calibration_sessions = {
+            request['calibration_id']: self._awaiting_first_mix_session(request)
+        }
         with self.assertRaisesRegex(ValueError, 'exactly the base'):
             robot._build_auto_mix_calibration_action_plan(
                 request
@@ -420,6 +603,9 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
                     'second_transfer_volume_uL'
                 )
             )
+        }
+        robot._auto_mix_calibration_sessions = {
+            request['calibration_id']: self._awaiting_first_mix_session(request)
         }
         self.assertEqual(
             1, robot._build_auto_mix_calibration_action_plan(request)[

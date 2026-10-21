@@ -107,7 +107,7 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
         self.assertEqual('Auto-main', snapshot['runtime_role'])
         self.assertEqual('auto-main-state-v10', snapshot['protocol_version'])
         self.assertEqual(
-            'auto-mix-calibration-v3',
+            'auto-mix-calibration-v4',
             snapshot['auto_mix_calibration_protocol_version']
         )
         self.assertEqual('ot2control_tube_tares_2026_07_v1',
@@ -129,7 +129,8 @@ class AutoMainStateSnapshotTests(unittest.TestCase):
                 'preflight_auto_mix_calibration',
                 'mix_auto_calibration_well',
                 'bind_auto_mix_calibration_well',
-                'preflight_auto_mix_calibration_resources'
+                'preflight_auto_mix_calibration_resources',
+                'transfer_auto_mix_calibration_source'
         ], snapshot['supported_commands'])
         self.assertEqual(0, snapshot['source_inventory_revision'])
         self.assertEqual(0, snapshot['tip_inventory_revision'])

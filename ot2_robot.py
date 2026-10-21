@@ -4738,6 +4738,7 @@ class OT2Robot():
                 )
         transfer_index = request['transfer_index']
         if (isinstance(transfer_index, bool)
+                or not isinstance(transfer_index, int)
                 or transfer_index not in (1, 2)):
             raise ValueError('calibration transfer_index must be 1 or 2.')
         normalized = {

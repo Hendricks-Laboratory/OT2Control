@@ -39,6 +39,10 @@ class _Well96(object):
         self.conc = conc
 
 
+class _MultiContainer(object):
+    pass
+
+
 class _PlateLabware(object):
     def wells_by_name(self):
         return {'B3': object(), 'C3': object(), 'E1': object()}
@@ -95,7 +99,11 @@ def _resource_robot_class():
             decorator_list=[]
         )], type_ignores=[]
     ))
-    namespace = {'math': math, 'Well96': _Well96}
+    namespace = {
+        'math': math,
+        'Well96': _Well96,
+        'MultiContainer': _MultiContainer,
+    }
     exec(compile(module, str(ROBOT_SOURCE), 'exec'), namespace)
     return namespace['OT2Robot']
 
