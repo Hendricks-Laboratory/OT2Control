@@ -466,6 +466,7 @@ def validate_mix_calibration_transfer_request(request):
         'volume_uL': request['volume_uL']
     }
     if (isinstance(normalized['transfer_index'], bool)
+            or not isinstance(normalized['transfer_index'], int)
             or normalized['transfer_index'] not in (1, 2)):
         raise AutoMixCalibrationProtocolError(
             'Calibration transfer_index must be 1 or 2.'

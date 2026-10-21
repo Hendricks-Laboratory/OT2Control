@@ -181,6 +181,12 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
             'volume_uL': 20.0,
         }
         normalized = validate_mix_calibration_transfer_request(request)
+        for invalid_index in (True, 1.0, '1', 0, 3):
+            invalid = dict(request)
+            invalid['transfer_index'] = invalid_index
+            with self.subTest(invalid_index=invalid_index):
+                with self.assertRaises(AutoMixCalibrationProtocolError):
+                    validate_mix_calibration_transfer_request(invalid)
         acknowledgement = dict(normalized)
         acknowledgement.update({
             'record_type': MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT,
