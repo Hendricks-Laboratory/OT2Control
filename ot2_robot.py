@@ -4853,10 +4853,14 @@ class OT2Robot():
                 'calibration transfer does not match its accepted C2eA '
                 'authorization.'
             )
+        # The well-binding packet intentionally establishes only the physical
+        # plate identity.  It has no assay-profile field: the calibration
+        # preflight and resource preflight are the two records that bind the
+        # reviewed profile to that physical well.  Do not require a binding
+        # record to prove data it was never designed to carry.
         for field_name in (
                 'wellname', 'expected_deck_pos', 'expected_loc',
-                'expected_plate_mapping_revision', 'expected_plate_generation',
-                'assay_profile'):
+                'expected_plate_mapping_revision', 'expected_plate_generation'):
             if (preflight.get(field_name) != normalized[field_name]
                     or binding.get(field_name) != normalized[field_name]
                     or resources.get(field_name) != normalized[field_name]):
@@ -4864,6 +4868,13 @@ class OT2Robot():
                     'calibration transfer identity changed after C2eA '
                     'preflight.'
                 )
+        if (preflight.get('assay_profile') != normalized['assay_profile']
+                or resources.get('assay_profile')
+                != normalized['assay_profile']):
+            raise ValueError(
+                'calibration transfer assay profile changed after C2eA '
+                'preflight.'
+            )
         expected_source = (
             preflight['base_chemical_name'] if normalized['transfer_index'] == 1
             else preflight['trigger_chemical_name']

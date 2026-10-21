@@ -306,27 +306,27 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         }
 
     def _configure_exact_transfer_evidence(self, robot, action_request):
-        identity_fields = (
+        physical_identity_fields = (
             'wellname', 'expected_deck_pos', 'expected_loc',
-            'expected_plate_mapping_revision', 'expected_plate_generation',
-            'assay_profile'
+            'expected_plate_mapping_revision', 'expected_plate_generation'
         )
+        preflight_identity_fields = physical_identity_fields + ('assay_profile',)
         preflight = dict(
             (field_name, action_request[field_name])
             for field_name in (
                 'preflight_id', 'calibration_mode', 'base_chemical_name',
                 'trigger_chemical_name', 'first_transfer_volume_uL',
                 'second_transfer_volume_uL'
-            ) + identity_fields
+            ) + preflight_identity_fields
         )
         binding = dict(
             (field_name, action_request[field_name])
-            for field_name in identity_fields
+            for field_name in physical_identity_fields
         )
         binding['binding_id'] = 'binding-a'
         resources = dict(
             (field_name, action_request[field_name])
-            for field_name in identity_fields
+            for field_name in preflight_identity_fields
         )
         resources.update({
             'resource_preflight_id': 'resources-a',
@@ -486,6 +486,12 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         robot.portal = _Portal()
         action_request = self._request('action_id')
         self._configure_exact_transfer_evidence(robot, action_request)
+        self.assertNotIn(
+            'assay_profile',
+            robot._auto_mix_calibration_bindings[
+                action_request['calibration_id']
+            ]
+        )
         events = []
 
         robot._prepare_transfer_pipettes = lambda source: events.append(
@@ -534,6 +540,18 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         invalid['transfer_index'] = 1.0
         with self.assertRaises(ValueError):
             robot._validate_auto_mix_calibration_transfer_request(invalid)
+
+    def test_source_transfer_rejects_profile_mismatch_before_motion(self):
+        robot, _, _ = self._robot(allocated_target=True)
+        action_request = self._request('action_id')
+        self._configure_exact_transfer_evidence(robot, action_request)
+        robot._auto_mix_calibration_resource_preflights[
+            action_request['calibration_id']
+        ]['assay_profile'] = 'wrong_profile'
+        with self.assertRaisesRegex(ValueError, 'assay profile changed'):
+            robot._build_auto_mix_calibration_transfer_plan(
+                self._transfer_request(action_request, 1)
+            )
 
     def test_calibration_well_primitive_is_fixed_150_ul_two_mm_and_restores(self):
         well = _well96_calibration_class()()
