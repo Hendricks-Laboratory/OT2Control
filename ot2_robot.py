@@ -1152,10 +1152,10 @@ class OT2Robot():
     # Supervised Stage 13G calibration is a fixed, calibration-only contract.
     # It is not a production stability setting and does not relax the normal
     # completed-well 50 percent mix-volume guard.
-    # v3 adds the immutable assay profile and ordered transfer volumes to the
-    # calibration packet. The Pi validates the post-transfer well history
-    # against that exact reviewed sequence rather than legacy constants.
-    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
+    # v4 adds the source-bound, non-replayable transfer packet. The Pi
+    # validates the post-transfer well history against the exact reviewed
+    # sequence rather than permitting normal source switching or ``make``.
+    AUTO_MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v4'
     AUTO_MIX_CALIBRATION_SCHEMA_VERSION = 2
     AUTO_MIX_CALIBRATION_FINAL_WELL_VOLUME_UL = 200.0
     AUTO_MIX_CALIBRATION_VOLUME_UL = 150.0
@@ -2483,10 +2483,10 @@ class OT2Robot():
         for field_name in ('base_chemical_name', 'trigger_chemical_name'):
             chemical_name = normalized[field_name]
             source = self.containers.get(chemical_name)
-            if source is None or isinstance(source, Well96):
+            if source is None or isinstance(source, (Well96, MultiContainer)):
                 raise ValueError(
-                    'Auto mix calibration {} is not an available source '
-                    'container.'.format(field_name)
+                    'Auto mix calibration {} must be one exact physical '
+                    'source container.'.format(field_name)
                 )
 
     def _build_auto_mix_calibration_preflight(self, request):
@@ -2608,10 +2608,10 @@ class OT2Robot():
             'first_transfer_volume_uL', 'second_transfer_volume_uL'
         )
         if session is None:
-            if normalized['cycle_index'] != 1:
-                raise ValueError(
-                    'Auto mix calibration must begin with cycle_index 1.'
-                )
+            raise ValueError(
+                'Auto mix calibration requires both exact source transfers '
+                'before its first mix cycle.'
+            )
         else:
             if session.get('status') == 'completed':
                 raise ValueError(
@@ -2627,6 +2627,12 @@ class OT2Robot():
                     raise ValueError(
                         'Auto mix calibration session identity changed.'
                     )
+            if (normalized['cycle_index'] == 1
+                    and session.get('status') != 'awaiting_first_mix'):
+                raise ValueError(
+                    'Auto mix calibration must complete its two exact source '
+                    'transfers before the first mix cycle.'
+                )
         target_labware = self._validate_auto_mix_calibration_plate(
             normalized, require_unallocated_target=False
         )
@@ -4637,6 +4643,12 @@ class OT2Robot():
 
         source_evidence = []
         for requirement in normalized['source_requirements']:
+            source = self.containers.get(requirement['source_container'])
+            if source is None or isinstance(source, (Well96, MultiContainer)):
+                raise ValueError(
+                    'calibration source {} must remain one exact physical '
+                    'container.'.format(requirement['source_container'])
+                )
             result = self._simulate_preflight_source({
                 'source_chemical_name': requirement['source_container'],
                 'transfer_steps': [{
@@ -4691,6 +4703,266 @@ class OT2Robot():
             'dedicated_mix_tip_requirements': mix_requirements
         }
 
+    def _validate_auto_mix_calibration_transfer_request(self, request):
+        '''Normalize one source-bound calibration transfer without motion.'''
+        required = {
+            'schema_version', 'transfer_id', 'calibration_id', 'preflight_id',
+            'binding_id', 'resource_preflight_id', 'transfer_index',
+            'wellname', 'expected_deck_pos', 'expected_loc',
+            'expected_plate_mapping_revision', 'expected_plate_generation',
+            'assay_profile', 'source_chemical_name',
+            'destination_wellname', 'volume_uL'
+        }
+        if not isinstance(request, dict) or set(request) != required:
+            raise ValueError('calibration transfer has an invalid schema.')
+        if request['schema_version'] != 1:
+            raise ValueError('calibration transfer uses an unsupported schema.')
+        for field_name in (
+                'transfer_id', 'calibration_id', 'preflight_id', 'binding_id',
+                'resource_preflight_id', 'wellname', 'expected_loc',
+                'assay_profile', 'source_chemical_name',
+                'destination_wellname'):
+            if (not isinstance(request[field_name], str)
+                    or not request[field_name].strip()):
+                raise ValueError(
+                    'calibration transfer {} is invalid.'.format(field_name)
+                )
+        for field_name in (
+                'expected_deck_pos', 'expected_plate_mapping_revision',
+                'expected_plate_generation'):
+            value = request[field_name]
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or value < 0):
+                raise ValueError(
+                    'calibration transfer {} is invalid.'.format(field_name)
+                )
+        transfer_index = request['transfer_index']
+        if (isinstance(transfer_index, bool)
+                or transfer_index not in (1, 2)):
+            raise ValueError('calibration transfer_index must be 1 or 2.')
+        normalized = {
+            'schema_version': 1,
+            'transfer_id': request['transfer_id'].strip(),
+            'calibration_id': request['calibration_id'].strip(),
+            'preflight_id': request['preflight_id'].strip(),
+            'binding_id': request['binding_id'].strip(),
+            'resource_preflight_id': request['resource_preflight_id'].strip(),
+            'transfer_index': transfer_index,
+            'wellname': request['wellname'].strip(),
+            'expected_deck_pos': request['expected_deck_pos'],
+            'expected_loc': request['expected_loc'].strip().upper(),
+            'expected_plate_mapping_revision': request[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': request['expected_plate_generation'],
+            'assay_profile': request['assay_profile'].strip().lower(),
+            'source_chemical_name': request['source_chemical_name'].strip(),
+            'destination_wellname': request['destination_wellname'].strip(),
+            'volume_uL': self._preflight_number(
+                request['volume_uL'], 'calibration transfer volume',
+                minimum=1e-12
+            )
+        }
+        if (not normalized['wellname'].startswith('autowell')
+                or normalized['destination_wellname']
+                != normalized['wellname']
+                or normalized['expected_deck_pos'] not in (4, 7)):
+            raise ValueError(
+                'calibration transfer must address its Auto well on the '
+                'registered reader plate.'
+            )
+        try:
+            expected_volumes = self.AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES[
+                normalized['assay_profile']
+            ]
+        except KeyError:
+            raise ValueError('calibration transfer assay_profile is unsupported.')
+        if not math.isclose(
+                normalized['volume_uL'],
+                expected_volumes[normalized['transfer_index'] - 1],
+                rel_tol=0, abs_tol=1e-9):
+            raise ValueError(
+                'calibration transfer volume does not match its reviewed '
+                'profile position.'
+            )
+        return normalized
+
+    def _auto_mix_calibration_transfer_response(self, request):
+        '''Return one source-transfer acknowledgement shell without motion.'''
+        request = request if isinstance(request, dict) else {}
+        return {
+            'schema_version': 1,
+            'record_type': 'auto_mix_calibration_source_transferred',
+            'transfer_id': request.get('transfer_id'),
+            'calibration_id': request.get('calibration_id'),
+            'preflight_id': request.get('preflight_id'),
+            'binding_id': request.get('binding_id'),
+            'resource_preflight_id': request.get('resource_preflight_id'),
+            'transfer_index': request.get('transfer_index'),
+            'wellname': request.get('wellname'),
+            'expected_deck_pos': request.get('expected_deck_pos'),
+            'expected_loc': request.get('expected_loc'),
+            'expected_plate_mapping_revision': request.get(
+                'expected_plate_mapping_revision'
+            ),
+            'expected_plate_generation': request.get(
+                'expected_plate_generation'
+            ),
+            'assay_profile': request.get('assay_profile'),
+            'source_chemical_name': request.get('source_chemical_name'),
+            'destination_wellname': request.get('destination_wellname'),
+            'volume_uL': request.get('volume_uL'),
+            'accepted': False,
+            'message': '',
+            'pipette_arm': None,
+            'physical_execution_started': False,
+            'started_at_utc': None,
+            'completed_at_utc': None
+        }
+
+    def _build_auto_mix_calibration_transfer_plan(self, request):
+        '''Bind one reviewed source addition to the accepted C2eA evidence.'''
+        normalized = self._validate_auto_mix_calibration_transfer_request(
+            request
+        )
+        transfer_ids = getattr(self, '_auto_mix_calibration_transfer_ids', set())
+        if normalized['transfer_id'] in transfer_ids:
+            raise ValueError(
+                'calibration transfer_id was already used and cannot be replayed.'
+            )
+        preflight = getattr(self, '_auto_mix_calibration_preflights', {}).get(
+            normalized['calibration_id']
+        )
+        binding = getattr(self, '_auto_mix_calibration_bindings', {}).get(
+            normalized['calibration_id']
+        )
+        resources = getattr(
+            self, '_auto_mix_calibration_resource_preflights', {}
+        ).get(normalized['calibration_id'])
+        if preflight is None or binding is None or resources is None:
+            raise ValueError(
+                'calibration transfer requires accepted C2eA preflight, '
+                'well binding, and resource evidence.'
+            )
+        if (preflight.get('preflight_id') != normalized['preflight_id']
+                or binding.get('binding_id') != normalized['binding_id']
+                or resources.get('resource_preflight_id')
+                != normalized['resource_preflight_id']):
+            raise ValueError(
+                'calibration transfer does not match its accepted C2eA '
+                'authorization.'
+            )
+        for field_name in (
+                'wellname', 'expected_deck_pos', 'expected_loc',
+                'expected_plate_mapping_revision', 'expected_plate_generation',
+                'assay_profile'):
+            if (preflight.get(field_name) != normalized[field_name]
+                    or binding.get(field_name) != normalized[field_name]
+                    or resources.get(field_name) != normalized[field_name]):
+                raise ValueError(
+                    'calibration transfer identity changed after C2eA '
+                    'preflight.'
+                )
+        expected_source = (
+            preflight['base_chemical_name'] if normalized['transfer_index'] == 1
+            else preflight['trigger_chemical_name']
+        )
+        expected_volume = (
+            preflight['first_transfer_volume_uL']
+            if normalized['transfer_index'] == 1
+            else preflight['second_transfer_volume_uL']
+        )
+        if (normalized['source_chemical_name'] != expected_source
+                or not math.isclose(
+                    normalized['volume_uL'], expected_volume,
+                    rel_tol=0, abs_tol=1e-9)):
+            raise ValueError(
+                'calibration transfer does not match its reviewed source '
+                'order or volume.'
+            )
+        resource_source = resources['source_requirements'][
+            normalized['transfer_index'] - 1
+        ]
+        if (resource_source['source_container']
+                != normalized['source_chemical_name']
+                or not math.isclose(
+                    resource_source['required_volume_uL'],
+                    normalized['volume_uL'], rel_tol=0, abs_tol=1e-9)):
+            raise ValueError(
+                'calibration transfer differs from accepted resource evidence.'
+            )
+        sessions = getattr(self, '_auto_mix_calibration_sessions', {})
+        session = sessions.get(normalized['calibration_id'])
+        if normalized['transfer_index'] == 1:
+            if session is not None:
+                raise ValueError('calibration source sequence was already started.')
+        else:
+            if (session is None
+                    or session.get('status') != 'awaiting_second_transfer'
+                    or session.get('next_transfer_index') != 2):
+                raise ValueError(
+                    'calibration second source transfer is not yet authorized.'
+                )
+        target_labware = self._validate_auto_mix_calibration_plate(
+            normalized, require_unallocated_target=False
+        )
+        target = self.containers.get(normalized['wellname'])
+        if (target is None or not isinstance(target, Well96)
+                or str(getattr(target, 'name', '')) != normalized['wellname']
+                or int(getattr(target, 'deck_pos', -1))
+                != normalized['expected_deck_pos']
+                or str(getattr(target, 'loc', '')).upper()
+                != normalized['expected_loc']
+                or getattr(target, 'labware', None)
+                is not getattr(target_labware, 'labware', None)):
+            raise ValueError(
+                'calibration transfer target no longer matches its bound '
+                'reader well.'
+            )
+        additions = []
+        for entry in getattr(target, 'history', []):
+            if not isinstance(entry, tuple) or len(entry) != 3:
+                raise ValueError('calibration target history is invalid.')
+            volume_uL = self._preflight_number(
+                entry[2], 'calibration target history volume'
+            )
+            if volume_uL > 0:
+                additions.append((entry[1], volume_uL))
+        expected_additions = (
+            [] if normalized['transfer_index'] == 1 else [
+                (preflight['base_chemical_name'],
+                 preflight['first_transfer_volume_uL'])
+            ]
+        )
+        if len(additions) != len(expected_additions):
+            raise ValueError(
+                'calibration target history does not match its source '
+                'transfer order.'
+            )
+        for observed, expected in zip(additions, expected_additions):
+            if (observed[0] != expected[0]
+                    or not math.isclose(
+                        observed[1], expected[1], rel_tol=0, abs_tol=1e-9)):
+                raise ValueError(
+                    'calibration target history does not match its first '
+                    'source transfer.'
+                )
+        source = self.containers.get(normalized['source_chemical_name'])
+        if source is None or isinstance(source, (Well96, MultiContainer)):
+            raise ValueError(
+                'calibration transfer source must remain one exact physical '
+                'container.'
+            )
+        available_volume = self._preflight_number(
+            getattr(source, 'aspiratible_vol', None),
+            'calibration transfer source volume', minimum=0.0
+        )
+        if available_volume + 1e-9 < normalized['volume_uL']:
+            raise ValueError('calibration transfer source is no longer sufficient.')
+        pipette_arm = self._get_preffered_pipette(normalized['volume_uL'])
+        return dict(normalized, target=target, source=source,
+                    pipette_arm=pipette_arm)
+
     def _build_robot_state_snapshot(self):
         '''
         Returns a small, JSON-serializable compatibility snapshot for the Auto
@@ -4723,7 +4995,8 @@ class OT2Robot():
                 'preflight_auto_mix_calibration',
                 'mix_auto_calibration_well',
                 'bind_auto_mix_calibration_well',
-                'preflight_auto_mix_calibration_resources'
+                'preflight_auto_mix_calibration_resources',
+                'transfer_auto_mix_calibration_source'
             ],
             'source_inventory_revision': int(
                 getattr(self, 'source_inventory_revision', 0)
@@ -4912,8 +5185,11 @@ class OT2Robot():
         '''Return native Pi source/tip evidence without reserving resources.'''
         response = self._auto_mix_calibration_resource_response(request)
         try:
-            evidence = self._build_auto_mix_calibration_resource_preflight(
+            normalized = self._validate_auto_mix_calibration_resource_request(
                 request
+            )
+            evidence = self._build_auto_mix_calibration_resource_preflight(
+                normalized
             )
             response.update(evidence)
             response.update({
@@ -4923,11 +5199,120 @@ class OT2Robot():
                     'Pi inventory; no liquid, tip, or source state changed.'
                 )
             })
+            preflights = getattr(
+                self, '_auto_mix_calibration_resource_preflights', None
+            )
+            if preflights is None:
+                preflights = {}
+                self._auto_mix_calibration_resource_preflights = preflights
+            preflights[normalized['calibration_id']] = copy.deepcopy(
+                normalized
+            )
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             response['message'] = str(exc)
         self.portal.send_pack(
             'auto_mix_calibration_resources_preflight', response
         )
+
+    @exec_func('transfer_auto_mix_calibration_source', 1, False, exec_funcs)
+    def _exec_transfer_auto_mix_calibration_source(self, request):
+        '''Perform exactly one source-bound calibration addition without fallback.'''
+        response = self._auto_mix_calibration_transfer_response(request)
+        try:
+            plan = self._build_auto_mix_calibration_transfer_plan(request)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            response['message'] = str(exc)
+            self.portal.send_pack(
+                'auto_mix_calibration_source_transferred', response
+            )
+            return
+
+        transfer_ids = getattr(self, '_auto_mix_calibration_transfer_ids', None)
+        if transfer_ids is None:
+            transfer_ids = set()
+            self._auto_mix_calibration_transfer_ids = transfer_ids
+        sessions = getattr(self, '_auto_mix_calibration_sessions', None)
+        if sessions is None:
+            sessions = {}
+            self._auto_mix_calibration_sessions = sessions
+        session = sessions.get(plan['calibration_id'])
+        if session is None:
+            session = {
+                'calibration_mode': self.AUTO_MIX_CALIBRATION_PROFILE_MODES[
+                    plan['assay_profile']
+                ],
+                'wellname': plan['wellname'],
+                'expected_deck_pos': plan['expected_deck_pos'],
+                'expected_loc': plan['expected_loc'],
+                'expected_plate_mapping_revision': plan[
+                    'expected_plate_mapping_revision'
+                ],
+                'expected_plate_generation': plan[
+                    'expected_plate_generation'
+                ],
+                'assay_profile': plan['assay_profile'],
+                'base_chemical_name': self._auto_mix_calibration_preflights[
+                    plan['calibration_id']
+                ]['base_chemical_name'],
+                'trigger_chemical_name': self._auto_mix_calibration_preflights[
+                    plan['calibration_id']
+                ]['trigger_chemical_name'],
+                'first_transfer_volume_uL': self._auto_mix_calibration_preflights[
+                    plan['calibration_id']
+                ]['first_transfer_volume_uL'],
+                'second_transfer_volume_uL': self._auto_mix_calibration_preflights[
+                    plan['calibration_id']
+                ]['second_transfer_volume_uL']
+            }
+            sessions[plan['calibration_id']] = session
+        # Persist the attempted transfer before a physical command. A fault
+        # after aspiration cannot become a silent retry or source switch.
+        transfer_ids.add(plan['transfer_id'])
+        session['status'] = 'physical_execution_started'
+        session['next_transfer_index'] = plan['transfer_index']
+        response.update({
+            'transfer_id': plan['transfer_id'],
+            'calibration_id': plan['calibration_id'],
+            'preflight_id': plan['preflight_id'],
+            'binding_id': plan['binding_id'],
+            'resource_preflight_id': plan['resource_preflight_id'],
+            'transfer_index': plan['transfer_index'],
+            'wellname': plan['wellname'],
+            'expected_deck_pos': plan['expected_deck_pos'],
+            'expected_loc': plan['expected_loc'],
+            'expected_plate_mapping_revision': plan[
+                'expected_plate_mapping_revision'
+            ],
+            'expected_plate_generation': plan['expected_plate_generation'],
+            'assay_profile': plan['assay_profile'],
+            'source_chemical_name': plan['source_chemical_name'],
+            'destination_wellname': plan['destination_wellname'],
+            'volume_uL': plan['volume_uL'],
+            'pipette_arm': plan['pipette_arm'],
+            'physical_execution_started': True,
+            'started_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self._prepare_transfer_pipettes(plan['source_chemical_name'])
+        self._transfer_step(
+            plan['source_chemical_name'], plan['destination_wellname'],
+            plan['volume_uL'], allow_auto_make=False
+        )
+        if plan['transfer_index'] == 1:
+            session['status'] = 'awaiting_second_transfer'
+            session['next_transfer_index'] = 2
+        else:
+            session['status'] = 'awaiting_first_mix'
+            session['next_transfer_index'] = 3
+            session['next_cycle_index'] = 1
+        response.update({
+            'accepted': True,
+            'message': (
+                'calibration source transfer completed using its exact '
+                'preflight-bound container without automatic fallback.'
+            ),
+            'completed_at_utc': datetime.now(pytz.utc).isoformat()
+        })
+        self.portal.send_pack('auto_mix_calibration_source_transferred', response)
 
     @exec_func('mix_auto_calibration_well', 1, False, exec_funcs)
     def _exec_mix_auto_calibration_well(self, request):
@@ -5191,6 +5576,13 @@ class OT2Robot():
         if not self.simulate:
             time.sleep(pause_time)
 
+    def _prepare_transfer_pipettes(self, src):
+        '''Apply the established clean-tip gate before a source transfer.'''
+        for arm in self.pipettes.keys():
+            if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
+                self._get_clean_tips()
+                break #cause now they're clean
+
     @exec_func('transfer', 1, True, exec_funcs)
     def _exec_transfer(self, src, transfer_steps):
         '''
@@ -5199,11 +5591,8 @@ class OT2Robot():
             str src: the chem_name of the source well  
             list<tuple<str,float>> transfer_steps: each element is a dst, vol pair  
         '''
-        #check to make sure that both tips are not dirty with a chemical other than the one you will pipette
-        for arm in self.pipettes.keys():
-            if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
-                self._get_clean_tips()
-                break; #cause now they're clean
+        # Preserve the legacy transfer cleaning behavior for normal packets.
+        self._prepare_transfer_pipettes(src)
         for dst, vol in transfer_steps:
             self._transfer_step(src,dst,vol)
             new_tip=False #don't want to use a new tip_next_time
@@ -5219,7 +5608,7 @@ class OT2Robot():
         pack_type, _, _ = self.portal.recv_pack()
         assert (pack_type == 'continue'), "Was stopped waiting for continue, but recieved, {}".format(pack_type)
 
-    def _transfer_step(self, src, dst, vol):
+    def _transfer_step(self, src, dst, vol, allow_auto_make=True):
         '''
         used to execute a single tranfer from src to dst. Handles things like selecting
         appropriately sized pipettes. If you need
@@ -5237,7 +5626,10 @@ class OT2Robot():
         
         #transfer the liquid in as many steps are necessary
         for i in range(n_substeps):
-            self._liquid_transfer(src, dst, substep_vol, arm)
+            self._liquid_transfer(
+                src, dst, substep_vol, arm,
+                allow_auto_make=allow_auto_make
+            )
         self.dump_well_histories()
         return
 
@@ -5280,7 +5672,7 @@ class OT2Robot():
                  self.pipettes.items())
         )
 
-    def _liquid_transfer(self, src, dst, vol, arm):
+    def _liquid_transfer(self, src, dst, vol, arm, allow_auto_make=True):
         '''
         the lowest of the low. Transfer liquid from one container to another. And mark the tip
         as dirty with src, and update the volumes of the containers it uses  
@@ -5315,6 +5707,8 @@ class OT2Robot():
                 self.pipettes[arm]['last_used'] = src
                 sufficient_vol=True
             except EmptyReagent as e:
+                if not allow_auto_make:
+                    raise
                 src_raw_name = self._get_reagent(e.chem_name)
                 src_conc = self._get_conc(e.chem_name)
                 try:
