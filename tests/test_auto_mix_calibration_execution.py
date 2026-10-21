@@ -158,56 +158,41 @@ class _Adapter(object):
 
 
 class AutoMixCalibrationExecutionTests(unittest.TestCase):
-    def test_two_dye_execution_is_exactly_ordered_without_retry(self):
+    def test_legacy_execution_entry_fails_closed_without_c2ea_evidence(self):
         adapter = _Adapter()
-        record = execute_auto_mix_calibration_plan(_plan(), adapter)
-        self.assertEqual(11, len(record['scan_records']))
-        self.assertEqual(10, len(record['mix_acknowledgements']))
-        self.assertEqual([
-            ('resource-preflight', 'dye-calibration-001'),
-            ('pi-preflight', 'dye-calibration-001-preflight'),
-            ('transfer', 'AcidRed1C1.44', 'autowell-calibration-001', 5.0),
-            ('transfer', 'CopperSulfateDyeC8.0', 'autowell-calibration-001',
-             195.0),
-            ('scan', 0), ('mix', 1), ('scan', 1), ('mix', 2), ('scan', 2),
-        ], adapter.calls[:9])
-        self.assertEqual(('mix', 10), adapter.calls[-2])
-        self.assertEqual(('scan', 10), adapter.calls[-1])
+        with self.assertRaises(AutoMixCalibrationExecutionError):
+            execute_auto_mix_calibration_plan(_plan(), adapter)
+        self.assertEqual([], adapter.calls)
 
-    def test_incomplete_resource_proof_blocks_before_pi_or_transfer(self):
+    def test_legacy_entry_never_runs_resource_preflight_or_transfer(self):
         adapter = _Adapter()
         adapter.resource_preflight['ordinary_transfer_tip_requirements'][0][
             'available_new_tips'
         ] = 0
         with self.assertRaises(AutoMixCalibrationExecutionError):
             execute_auto_mix_calibration_plan(_plan(), adapter)
-        self.assertEqual([('resource-preflight', 'dye-calibration-001')],
-                         adapter.calls)
+        self.assertEqual([], adapter.calls)
 
-    def test_missing_analysis_wavelength_blocks_before_liquid_handling(self):
+    def test_legacy_entry_never_runs_reader_or_liquid_operations(self):
         adapter = _Adapter()
         adapter.resource_preflight['reader_wavelengths_nm'] = [300, 520, 1000]
         with self.assertRaises(AutoMixCalibrationExecutionError):
             execute_auto_mix_calibration_plan(_plan(), adapter)
-        self.assertEqual([('resource-preflight', 'dye-calibration-001')],
-                         adapter.calls)
+        self.assertEqual([], adapter.calls)
 
-    def test_pi_preflight_rejection_blocks_transfers(self):
+    def test_legacy_entry_never_sends_pi_preflight(self):
         adapter = _Adapter()
         adapter.reject_preflight = True
         with self.assertRaises(AutoMixCalibrationExecutionError):
             execute_auto_mix_calibration_plan(_plan(), adapter)
-        self.assertEqual(['resource-preflight', 'pi-preflight'],
-                         [call[0] for call in adapter.calls])
+        self.assertEqual([], adapter.calls)
 
-    def test_mix_rejection_is_not_retried_or_followed_by_scan(self):
+    def test_legacy_entry_never_sends_mix_or_scan(self):
         adapter = _Adapter()
         adapter.reject_mix_cycle = 3
         with self.assertRaises(AutoMixCalibrationExecutionError):
             execute_auto_mix_calibration_plan(_plan(), adapter)
-        self.assertEqual(1, adapter.calls.count(('mix', 3)))
-        self.assertNotIn(('scan', 3), adapter.calls)
-        self.assertNotIn(('mix', 4), adapter.calls)
+        self.assertEqual([], adapter.calls)
 
     def test_normal_auto_constructor_has_a_calibration_only_rejection_gate(self):
         repository_root = os.path.dirname(os.path.dirname(

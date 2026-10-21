@@ -156,13 +156,12 @@ def run_auto_mix_calibration_pi_preflight(
 
     Ordering is intentional and must remain:
 
-    ``v1 calibration preflight -> v2 well binding -> v2 resource preflight``.
+    ``calibration preflight -> well binding -> resource preflight``.
 
-    The version-1 request requires the logical calibration well to be absent;
-    only a successful version-1 acknowledgement permits the version-2 binding
-    that creates it.  The resource request then proves source/tip availability
-    for that exact bound well.  No transfer, mixing, homing, reader macro, or
-    scan exists in this module.
+    The calibration preflight requires the logical well to be absent; only its
+    successful acknowledgement permits the binding that creates it. The
+    resource request then proves source/tip availability for that exact bound
+    well. No transfer, mixing, homing, reader macro, or scan exists here.
     '''
     plan = validate_auto_mix_calibration_run_plan(plan)
     reader_scan_protocol = _require_reader_scan_protocol(reader_scan_protocol)
@@ -170,10 +169,9 @@ def run_auto_mix_calibration_pi_preflight(
 
     snapshot = transport.get_robot_state_snapshot()
     try:
-        # The v2 validator intentionally includes the pre-existing v1
-        # preflight/mix commands and packet codes.  Calling the older v1-only
-        # capability validator here would reject a correctly deployed v2 Pi
-        # merely because its advertised protocol version is now v2.
+        # The paired capability validator includes every required preflight,
+        # source-transfer, and mix command. A partially deployed Pi must fail
+        # here, before the binding changes controller-visible state.
         validate_auto_mix_calibration_resource_capability(
             snapshot, packet_registry
         )

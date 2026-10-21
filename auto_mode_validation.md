@@ -1207,6 +1207,45 @@ human-supervised, water-first commissioning run after combined-file review;
 physical clearance, transfer behavior, reader protocol behavior, and mixing
 quality are not established by static or synthetic validation.
 
+### Calibration-transfer compatibility hardening — 2026-10-21
+
+Static review after the calibration commissioning errors identified that C2eB
+had reused the generic Pi `transfer` packet. That route is appropriate for
+ordinary Auto operation, but it can legitimately switch a `MultiContainer` to
+another same-name source or call the legacy `make more` fallback. Neither
+behavior is permissible for a one-well calibration whose two measured sources
+are deliberately singular and profile-locked.
+
+The paired uncommitted Auto-RTG/Auto-main hardening patch replaces that path
+with the versioned `auto-mix-calibration-v4` source-transfer contract:
+
+```text
+transfer_auto_mix_calibration_source (0x29)
+-> auto_mix_calibration_source_transferred (0x2A)
+```
+
+Each addition carries the accepted C2eA preflight, binding, and resource IDs;
+its immutable reader-well identity; source identity; profile position; and
+exact volume. Auto-main rejects a `Well96` or `MultiContainer` source,
+rechecks live aspiratible volume, persists an attempted transfer ID before a
+physical action, rejects replay/out-of-order transfers, and invokes the normal
+pipette-selection/transfer primitive with automatic `make more` disabled. It
+also applies the same established clean-tip gate as an ordinary transfer. The
+mix action cannot start until both acknowledged source additions have produced
+the exact reviewed target-well history. This changes only calibration mode;
+ordinary Auto, stability, preparation, and generic transfer behavior retain
+their existing route and fallback semantics.
+
+The patch also makes accepted source/mix acknowledgements require ordered
+timezone-bearing ISO-8601 timestamps and makes calibration error cleanup reset
+the Armchair error state before using the normal Pi `save -> close` shutdown
+handshake. Hardware-free evidence: Python 3.9 compilation, whitespace checks,
+AST packet/duplicate-method/source-route checks, 25 focused calibration tests,
+and the complete 513-test suite passed against the paired local Auto-main
+worktree. It is **not deployed or physically validated**: a controlled,
+human-supervised water calibration remains required after both paired commits
+are independently reviewed, published, and installed on the lab PC/Pi.
+
 ### Stage 13G-C2eC Deck Positions calibration-target correction — 2026-10-16
 
 The initial calibration Header required a second reader-well declaration even

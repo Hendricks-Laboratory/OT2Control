@@ -13,6 +13,7 @@ from auto_mix_calibration import (
     parse_auto_mix_calibration_header_settings,
 )
 from auto_mix_calibration_plan import build_auto_mix_calibration_run_plan
+from auto_mix_calibration_protocol import MIX_CALIBRATION_TRANSFER_COMMAND
 from auto_mix_calibration_resources import (
     AutoMixCalibrationResourceError,
     MIX_CALIBRATION_BIND_WELL_COMMAND,
@@ -209,7 +210,7 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
                 acknowledgement, request
             )
 
-    def test_v2_capability_requires_new_packet_pairs_and_commands(self):
+    def test_v4_capability_requires_all_packet_pairs_and_commands(self):
         snapshot = {
             'auto_mix_calibration_protocol_version': (
                 MIX_CALIBRATION_RESOURCE_PROTOCOL_VERSION
@@ -219,6 +220,7 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
                 'mix_auto_calibration_well',
                 MIX_CALIBRATION_BIND_WELL_COMMAND,
                 MIX_CALIBRATION_RESOURCE_PREFLIGHT_COMMAND,
+                MIX_CALIBRATION_TRANSFER_COMMAND,
             ],
         }
         packet_registry = {
@@ -230,6 +232,8 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
             'auto_mix_calibration_well_bound': b'\x26',
             'preflight_auto_mix_calibration_resources': b'\x27',
             'auto_mix_calibration_resources_preflight': b'\x28',
+            MIX_CALIBRATION_TRANSFER_COMMAND: b'\x29',
+            'auto_mix_calibration_source_transferred': b'\x2A',
         }
         self.assertTrue(validate_auto_mix_calibration_resource_capability(
             snapshot, packet_registry
@@ -245,7 +249,7 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
                 incomplete, packet_registry
             )
 
-    def test_local_armchair_registry_contains_exact_v2_ghost_packet_pairs(self):
+    def test_local_armchair_registry_contains_exact_v4_ghost_packet_pairs(self):
         repository_root = os.path.dirname(os.path.dirname(
             os.path.abspath(__file__)
         ))
@@ -259,7 +263,9 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
                 ('bind_auto_mix_calibration_well', "b'\\x25'"),
                 ('auto_mix_calibration_well_bound', "b'\\x26'"),
                 ('preflight_auto_mix_calibration_resources', "b'\\x27'"),
-                ('auto_mix_calibration_resources_preflight', "b'\\x28'")):
+                ('auto_mix_calibration_resources_preflight', "b'\\x28'"),
+                ('transfer_auto_mix_calibration_source', "b'\\x29'"),
+                ('auto_mix_calibration_source_transferred', "b'\\x2A'")):
             self.assertIn("'{}':{}".format(name, code), source_text)
 
 

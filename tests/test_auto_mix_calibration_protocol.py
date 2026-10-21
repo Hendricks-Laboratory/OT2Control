@@ -7,11 +7,15 @@ from auto_mix_calibration_protocol import (
     MIX_CALIBRATION_COMMAND,
     MIX_CALIBRATION_PREFLIGHT_COMMAND,
     MIX_CALIBRATION_PROTOCOL_VERSION,
+    MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_TRANSFER_COMMAND,
     validate_mix_calibration_acknowledgement,
     validate_mix_calibration_capability,
     validate_mix_calibration_preflight_acknowledgement,
     validate_mix_calibration_preflight_request,
     validate_mix_calibration_request,
+    validate_mix_calibration_transfer_acknowledgement,
+    validate_mix_calibration_transfer_request,
 )
 
 
@@ -140,7 +144,8 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
                 MIX_CALIBRATION_PROTOCOL_VERSION
             ),
             'supported_commands': [
-                MIX_CALIBRATION_PREFLIGHT_COMMAND, MIX_CALIBRATION_COMMAND
+                MIX_CALIBRATION_PREFLIGHT_COMMAND, MIX_CALIBRATION_COMMAND,
+                MIX_CALIBRATION_TRANSFER_COMMAND
             ]
         }
         packets = {
@@ -148,11 +153,52 @@ class AutoMixCalibrationProtocolTests(unittest.TestCase):
             'auto_mix_calibration_preflight': b'\x22',
             'mix_auto_calibration_well': b'\x23',
             'auto_calibration_well_mixed': b'\x24',
+            MIX_CALIBRATION_TRANSFER_COMMAND: b'\x29',
+            MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT: b'\x2A',
         }
         self.assertTrue(validate_mix_calibration_capability(snapshot, packets))
         packets['mix_auto_calibration_well'] = b'\x25'
         with self.assertRaises(AutoMixCalibrationProtocolError):
             validate_mix_calibration_capability(snapshot, packets)
+
+    def test_source_transfer_acknowledgement_is_exact_and_non_replayable(self):
+        request = {
+            'schema_version': 1,
+            'transfer_id': 'mix-cal-2026-10-16-a-transfer-1',
+            'calibration_id': 'mix-cal-2026-10-16-a',
+            'preflight_id': 'preflight-a',
+            'binding_id': 'binding-a',
+            'resource_preflight_id': 'resources-a',
+            'transfer_index': 1,
+            'wellname': 'autowell7C1.0',
+            'expected_deck_pos': 4,
+            'expected_loc': 'B3',
+            'expected_plate_mapping_revision': 0,
+            'expected_plate_generation': 0,
+            'assay_profile': 'water_safety_20ul_first',
+            'source_chemical_name': 'CalibrationBaseWaterC1.0',
+            'destination_wellname': 'autowell7C1.0',
+            'volume_uL': 20.0,
+        }
+        normalized = validate_mix_calibration_transfer_request(request)
+        acknowledgement = dict(normalized)
+        acknowledgement.update({
+            'record_type': MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT,
+            'accepted': True,
+            'message': 'completed without automatic fallback',
+            'pipette_arm': 'left',
+            'physical_execution_started': True,
+            'started_at_utc': '2026-10-16T12:00:00+00:00',
+            'completed_at_utc': '2026-10-16T12:00:01+00:00',
+        })
+        self.assertTrue(validate_mix_calibration_transfer_acknowledgement(
+            acknowledgement, request
+        )['accepted'])
+        acknowledgement['volume_uL'] = 21.0
+        with self.assertRaises(AutoMixCalibrationProtocolError):
+            validate_mix_calibration_transfer_acknowledgement(
+                acknowledgement, request
+            )
 
 
 if __name__ == '__main__':

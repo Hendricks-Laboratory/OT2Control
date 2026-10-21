@@ -5,6 +5,7 @@ It defines the exact packet and capability boundary for the calibration-only
 150 uL P300 assay before a controller execution workflow is connected.
 '''
 
+import datetime
 import math
 
 from auto_mix_calibration import (
@@ -24,7 +25,12 @@ MIX_CALIBRATION_PREFLIGHT_COMMAND = 'preflight_auto_mix_calibration'
 MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT = 'auto_mix_calibration_preflight'
 MIX_CALIBRATION_COMMAND = 'mix_auto_calibration_well'
 MIX_CALIBRATION_ACKNOWLEDGEMENT = 'auto_calibration_well_mixed'
-MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
+MIX_CALIBRATION_TRANSFER_COMMAND = 'transfer_auto_mix_calibration_source'
+MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT = (
+    'auto_mix_calibration_source_transferred'
+)
+MIX_CALIBRATION_TRANSFER_SCHEMA_VERSION = 1
+MIX_CALIBRATION_PROTOCOL_VERSION = 'auto-mix-calibration-v4'
 MIX_CALIBRATION_REQUIRED_P300_TIPS = 11
 MIX_CALIBRATION_TIP_POLICY = 'dedicated_discarded'
 
@@ -66,6 +72,21 @@ def _require_exact_number(value, expected, field_name):
             '{} must equal {}.'.format(field_name, expected)
         )
     return expected
+
+
+def _require_utc_timestamp(value, field_name):
+    text = _require_string(value, field_name)
+    try:
+        timestamp = datetime.datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        raise AutoMixCalibrationProtocolError(
+            '{} must be an ISO-8601 timestamp.'.format(field_name)
+        )
+    if timestamp.tzinfo is None:
+        raise AutoMixCalibrationProtocolError(
+            '{} must include a timezone.'.format(field_name)
+        )
+    return timestamp.astimezone(datetime.timezone.utc)
 
 
 def _validate_common_request(request, identity_field):
@@ -369,8 +390,183 @@ def validate_mix_calibration_acknowledgement(acknowledgement, request):
             raise AutoMixCalibrationProtocolError(
                 'Accepted calibration action has invalid {}.'.format(field_name)
             )
-    for field_name in ('started_at_utc', 'completed_at_utc'):
-        _require_string(acknowledgement[field_name], field_name)
+    started_at = _require_utc_timestamp(
+        acknowledgement['started_at_utc'], 'started_at_utc'
+    )
+    completed_at = _require_utc_timestamp(
+        acknowledgement['completed_at_utc'], 'completed_at_utc'
+    )
+    if completed_at < started_at:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration mix completion precedes its start.'
+        )
+    return dict(acknowledgement)
+
+
+def validate_mix_calibration_transfer_request(request):
+    '''Validate one exact, non-replayable calibration-source transfer.
+
+    This is deliberately distinct from the legacy generic ``transfer`` packet.
+    The Pi must bind it to the approved calibration preflight, physical reader
+    well, reviewed profile order, and an exact single physical source before it
+    is permitted to aspirate.  That prevents source switching and automatic
+    ``make more`` behavior from entering a supervised calibration assay.
+    '''
+    required = {
+        'schema_version', 'transfer_id', 'calibration_id', 'preflight_id',
+        'binding_id', 'resource_preflight_id', 'transfer_index', 'wellname',
+        'expected_deck_pos', 'expected_loc',
+        'expected_plate_mapping_revision', 'expected_plate_generation',
+        'assay_profile', 'source_chemical_name', 'destination_wellname',
+        'volume_uL'
+    }
+    if not isinstance(request, dict) or set(request) != required:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer request has an invalid schema.'
+        )
+    if request['schema_version'] != MIX_CALIBRATION_TRANSFER_SCHEMA_VERSION:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer request uses an unsupported schema.'
+        )
+    normalized = {
+        'schema_version': MIX_CALIBRATION_TRANSFER_SCHEMA_VERSION,
+        'transfer_id': _require_string(request['transfer_id'], 'transfer_id'),
+        'calibration_id': _require_string(
+            request['calibration_id'], 'calibration_id'
+        ),
+        'preflight_id': _require_string(request['preflight_id'], 'preflight_id'),
+        'binding_id': _require_string(request['binding_id'], 'binding_id'),
+        'resource_preflight_id': _require_string(
+            request['resource_preflight_id'], 'resource_preflight_id'
+        ),
+        'transfer_index': request['transfer_index'],
+        'wellname': _require_string(request['wellname'], 'wellname'),
+        'expected_deck_pos': _require_nonnegative_integer(
+            request['expected_deck_pos'], 'expected_deck_pos'
+        ),
+        'expected_loc': _require_string(
+            request['expected_loc'], 'expected_loc'
+        ).upper(),
+        'expected_plate_mapping_revision': _require_nonnegative_integer(
+            request['expected_plate_mapping_revision'],
+            'expected_plate_mapping_revision'
+        ),
+        'expected_plate_generation': _require_nonnegative_integer(
+            request['expected_plate_generation'], 'expected_plate_generation'
+        ),
+        'assay_profile': _require_string(
+            request['assay_profile'], 'assay_profile'
+        ).lower(),
+        'source_chemical_name': _require_string(
+            request['source_chemical_name'], 'source_chemical_name'
+        ),
+        'destination_wellname': _require_string(
+            request['destination_wellname'], 'destination_wellname'
+        ),
+        'volume_uL': request['volume_uL']
+    }
+    if (isinstance(normalized['transfer_index'], bool)
+            or normalized['transfer_index'] not in (1, 2)):
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer_index must be 1 or 2.'
+        )
+    if (not normalized['wellname'].startswith('autowell')
+            or normalized['destination_wellname'] != normalized['wellname']):
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer destination must be its Auto reader well.'
+        )
+    if normalized['expected_deck_pos'] not in (4, 7):
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer must address plate-reader deck position 4 or 7.'
+        )
+    try:
+        expected_volumes = get_auto_mix_calibration_profile_transfer_volumes(
+            normalized['assay_profile']
+        )
+    except ValueError as exc:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer assay_profile is unsupported: {}.'.format(exc)
+        )
+    normalized['volume_uL'] = _require_exact_number(
+        normalized['volume_uL'],
+        expected_volumes[normalized['transfer_index'] - 1],
+        'volume_uL'
+    )
+    return normalized
+
+
+def validate_mix_calibration_transfer_acknowledgement(acknowledgement, request):
+    '''Validate one accepted/rejected calibration transfer without retrying it.'''
+    request = validate_mix_calibration_transfer_request(request)
+    required = {
+        'schema_version', 'record_type', 'transfer_id', 'calibration_id',
+        'preflight_id', 'binding_id', 'resource_preflight_id',
+        'transfer_index', 'wellname', 'expected_deck_pos', 'expected_loc',
+        'expected_plate_mapping_revision', 'expected_plate_generation',
+        'assay_profile', 'source_chemical_name', 'destination_wellname',
+        'volume_uL', 'accepted', 'message', 'pipette_arm',
+        'physical_execution_started', 'started_at_utc', 'completed_at_utc'
+    }
+    if not isinstance(acknowledgement, dict) or set(acknowledgement) != required:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer acknowledgement has an invalid schema.'
+        )
+    if (acknowledgement['schema_version']
+            != MIX_CALIBRATION_TRANSFER_SCHEMA_VERSION
+            or acknowledgement['record_type']
+            != MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT
+            or not isinstance(acknowledgement['accepted'], bool)
+            or not isinstance(acknowledgement['physical_execution_started'], bool)):
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer acknowledgement has an invalid record.'
+        )
+    _require_string(acknowledgement['message'], 'acknowledgement.message')
+    for field_name in (
+            'transfer_id', 'calibration_id', 'preflight_id', 'binding_id',
+            'resource_preflight_id', 'transfer_index', 'wellname',
+            'expected_deck_pos', 'expected_plate_mapping_revision',
+            'expected_plate_generation', 'assay_profile',
+            'source_chemical_name', 'destination_wellname'):
+        if acknowledgement[field_name] != request[field_name]:
+            raise AutoMixCalibrationProtocolError(
+                'Calibration transfer acknowledgement {} does not match the '
+                'request.'.format(field_name)
+            )
+    if (not isinstance(acknowledgement['expected_loc'], str)
+            or acknowledgement['expected_loc'].strip().upper()
+            != request['expected_loc']):
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer acknowledgement expected_loc does not match '
+            'the request.'
+        )
+    _require_exact_number(
+        acknowledgement['volume_uL'], request['volume_uL'],
+        'acknowledgement.volume_uL'
+    )
+    if not acknowledgement['accepted']:
+        if (acknowledgement['physical_execution_started']
+                or acknowledgement['pipette_arm'] is not None
+                or acknowledgement['started_at_utc'] is not None
+                or acknowledgement['completed_at_utc'] is not None):
+            raise AutoMixCalibrationProtocolError(
+                'Rejected calibration transfer contains execution evidence.'
+            )
+        return dict(acknowledgement)
+    if (not acknowledgement['physical_execution_started']
+            or acknowledgement['pipette_arm'] not in ('left', 'right')):
+        raise AutoMixCalibrationProtocolError(
+            'Accepted calibration transfer lacks execution evidence.'
+        )
+    started_at = _require_utc_timestamp(
+        acknowledgement['started_at_utc'], 'started_at_utc'
+    )
+    completed_at = _require_utc_timestamp(
+        acknowledgement['completed_at_utc'], 'completed_at_utc'
+    )
+    if completed_at < started_at:
+        raise AutoMixCalibrationProtocolError(
+            'Calibration transfer completion precedes its start.'
+        )
     return dict(acknowledgement)
 
 
@@ -407,6 +603,7 @@ def validate_mix_calibration_capability(snapshot, packet_registry):
     required_commands = (
         MIX_CALIBRATION_PREFLIGHT_COMMAND,
         MIX_CALIBRATION_COMMAND,
+        MIX_CALIBRATION_TRANSFER_COMMAND,
     )
     supported = snapshot.get('supported_commands')
     if not isinstance(supported, list) or any(
@@ -419,6 +616,8 @@ def validate_mix_calibration_capability(snapshot, packet_registry):
         (MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT, b'\x22'),
         (MIX_CALIBRATION_COMMAND, b'\x23'),
         (MIX_CALIBRATION_ACKNOWLEDGEMENT, b'\x24'),
+        (MIX_CALIBRATION_TRANSFER_COMMAND, b'\x29'),
+        (MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT, b'\x2A'),
     )
     for packet_name, expected_code in expected_packets:
         if packet_registry.get(packet_name) != expected_code:

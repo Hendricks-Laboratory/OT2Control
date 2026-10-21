@@ -43,7 +43,7 @@ class Armchair():
     '''
 
     FTP_EOF = 'AFKJldkjvaJKDvJDFDFGHowCouldYouEverHaveThisInAFile'.encode('ascii')
-    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F','save':b'\x10','get_robot_state_snapshot':b'\x11','robot_state_snapshot':b'\x12','preflight_transfer_plan':b'\x13','transfer_plan_preflight':b'\x14','refresh_source_container_mass':b'\x15','source_container_mass_refreshed':b'\x16','reset_pipette_tip_racks':b'\x17','pipette_tip_racks_reset':b'\x18','register_auto_plate_generation':b'\x19','auto_plate_generation_registered':b'\x1A','reserve_auto_preparation_groups':b'\x1B','auto_preparation_groups_reserved':b'\x1C','execute_auto_preparation_groups':b'\x1D','auto_preparation_groups_executed':b'\x1E','mix_auto_completed_well':b'\x1F','auto_completed_well_mixed':b'\x20','preflight_auto_mix_calibration':b'\x21','auto_mix_calibration_preflight':b'\x22','mix_auto_calibration_well':b'\x23','auto_calibration_well_mixed':b'\x24','bind_auto_mix_calibration_well':b'\x25','auto_mix_calibration_well_bound':b'\x26','preflight_auto_mix_calibration_resources':b'\x27','auto_mix_calibration_resources_preflight':b'\x28'})
+    PACK_TYPES = bidict({'init':b'\x00','close':b'\x01','error':b'\x02','ready':b'\x03','transfer':b'\x04','init_containers':b'\x05','sending_files':b'\x06','pause':b'\x07','stop':b'\x08','continue':b'\x09','stopped':b'\x0A','loc_req':b'\x0B','loc_resp':b'\x0C','home':b'\x0D','make':b'\x0E','mix':b'\x0F','save':b'\x10','get_robot_state_snapshot':b'\x11','robot_state_snapshot':b'\x12','preflight_transfer_plan':b'\x13','transfer_plan_preflight':b'\x14','refresh_source_container_mass':b'\x15','source_container_mass_refreshed':b'\x16','reset_pipette_tip_racks':b'\x17','pipette_tip_racks_reset':b'\x18','register_auto_plate_generation':b'\x19','auto_plate_generation_registered':b'\x1A','reserve_auto_preparation_groups':b'\x1B','auto_preparation_groups_reserved':b'\x1C','execute_auto_preparation_groups':b'\x1D','auto_preparation_groups_executed':b'\x1E','mix_auto_completed_well':b'\x1F','auto_completed_well_mixed':b'\x20','preflight_auto_mix_calibration':b'\x21','auto_mix_calibration_preflight':b'\x22','mix_auto_calibration_well':b'\x23','auto_calibration_well_mixed':b'\x24','bind_auto_mix_calibration_well':b'\x25','auto_mix_calibration_well_bound':b'\x26','preflight_auto_mix_calibration_resources':b'\x27','auto_mix_calibration_resources_preflight':b'\x28','transfer_auto_mix_calibration_source':b'\x29','auto_mix_calibration_source_transferred':b'\x2A'})
     GHOST_TYPES = ['continue', 'stopped', 'loc_resp','loc_req', 'save',
                    'get_robot_state_snapshot', 'robot_state_snapshot',
                    'preflight_transfer_plan', 'transfer_plan_preflight',
@@ -67,6 +67,8 @@ class Armchair():
                    'auto_mix_calibration_well_bound',
                    'preflight_auto_mix_calibration_resources',
                    'auto_mix_calibration_resources_preflight',
+                   'transfer_auto_mix_calibration_source',
+                   'auto_mix_calibration_source_transferred',
                    'error']
     #These are necessary because we never want to wait on a
     #buffer. These packs should be send as soon as possible

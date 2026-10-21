@@ -1,4 +1,4 @@
-'''Pure version-3 resource contract for supervised mix calibration.
+'''Pure version-4 resource contract for supervised mix calibration.
 
 The version-1 calibration packet proves only the dedicated P300 well-mix
 setup.  This module adds the separate no-motion binding and resource-preflight
@@ -13,11 +13,12 @@ from auto_mix_calibration_plan import validate_auto_mix_calibration_run_plan
 from auto_mix_calibration_protocol import (
     MIX_CALIBRATION_COMMAND,
     MIX_CALIBRATION_PREFLIGHT_COMMAND,
+    MIX_CALIBRATION_TRANSFER_COMMAND,
 )
 
 
 MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION = 1
-MIX_CALIBRATION_RESOURCE_PROTOCOL_VERSION = 'auto-mix-calibration-v3'
+MIX_CALIBRATION_RESOURCE_PROTOCOL_VERSION = 'auto-mix-calibration-v4'
 MIX_CALIBRATION_BIND_WELL_COMMAND = 'bind_auto_mix_calibration_well'
 MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT = (
     'auto_mix_calibration_well_bound'
@@ -393,7 +394,7 @@ def _validate_acknowledged_tips(records, requested):
 
 
 def validate_auto_mix_calibration_resource_capability(snapshot, packet_registry):
-    '''Require exact v2 capability without altering normal Auto compatibility.'''
+    '''Require exact v4 capability without altering normal Auto compatibility.'''
     if not isinstance(snapshot, dict):
         raise AutoMixCalibrationResourceError(
             'Calibration resources require an Auto-main state snapshot.'
@@ -410,6 +411,7 @@ def validate_auto_mix_calibration_resource_capability(snapshot, packet_registry)
         MIX_CALIBRATION_COMMAND,
         MIX_CALIBRATION_BIND_WELL_COMMAND,
         MIX_CALIBRATION_RESOURCE_PREFLIGHT_COMMAND,
+        MIX_CALIBRATION_TRANSFER_COMMAND,
     )
     supported = snapshot.get('supported_commands')
     if not isinstance(supported, list) or any(
@@ -426,6 +428,8 @@ def validate_auto_mix_calibration_resource_capability(snapshot, packet_registry)
         (MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT, b'\x26'),
         (MIX_CALIBRATION_RESOURCE_PREFLIGHT_COMMAND, b'\x27'),
         (MIX_CALIBRATION_RESOURCE_PREFLIGHT_ACKNOWLEDGEMENT, b'\x28'),
+        (MIX_CALIBRATION_TRANSFER_COMMAND, b'\x29'),
+        ('auto_mix_calibration_source_transferred', b'\x2A'),
     )
     for name, code in expected_packets:
         if packet_registry.get(name) != code:

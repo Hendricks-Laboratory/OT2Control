@@ -59,6 +59,8 @@ def _packet_registry():
         'auto_mix_calibration_well_bound': b'\x26',
         'preflight_auto_mix_calibration_resources': b'\x27',
         'auto_mix_calibration_resources_preflight': b'\x28',
+        'transfer_auto_mix_calibration_source': b'\x29',
+        'auto_mix_calibration_source_transferred': b'\x2A',
     }
 
 
@@ -72,6 +74,7 @@ def _snapshot():
             'mix_auto_calibration_well',
             'bind_auto_mix_calibration_well',
             'preflight_auto_mix_calibration_resources',
+            'transfer_auto_mix_calibration_source',
         ],
     }
 

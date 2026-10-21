@@ -193,6 +193,8 @@ from auto_mix_calibration_protocol import (
     MIX_CALIBRATION_COMMAND,
     MIX_CALIBRATION_PREFLIGHT_ACKNOWLEDGEMENT,
     MIX_CALIBRATION_PREFLIGHT_COMMAND,
+    MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT,
+    MIX_CALIBRATION_TRANSFER_COMMAND,
 )
 from auto_mix_calibration_resources import (
     MIX_CALIBRATION_BIND_WELL_ACKNOWLEDGEMENT,
@@ -34754,18 +34756,18 @@ class AutoMixCalibrationExecutionAdapter(object):
         self.controller = controller
         self.reporter = reporter
 
-    def transfer(self, source, destination, volume_uL):
-        '''Send one ordinary single-destination transfer and wait for it.'''
-        self.controller.portal.send_pack(
-            'transfer', source, [(destination, float(volume_uL))]
-        )
-        # Retain the established Pi completion barrier. This deliberately does
-        # not choose or alter the ordinary transfer pipette.
-        self.controller.portal.burn_pipe()
-        print(
-            '<<controller>> calibration transfer completed: {} -> {} '
-            '({} uL).'.format(source, destination, volume_uL)
-        )
+    def request_pi_transfer(self, request):
+        '''Run one exact source-bound calibration transfer with Pi evidence.'''
+        self.controller.portal.send_pack(MIX_CALIBRATION_TRANSFER_COMMAND, request)
+        packet_type, _, payload = self.controller.portal.recv_pack()
+        if packet_type != MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT or \
+                not isinstance(payload, tuple) or len(payload) != 1:
+            raise RuntimeError(
+                'Calibration transfer expected {!r}, received {!r}.'.format(
+                    MIX_CALIBRATION_TRANSFER_ACKNOWLEDGEMENT, packet_type
+                )
+            )
+        return payload[0]
 
     def request_pi_mix(self, request):
         self.controller.portal.send_pack(MIX_CALIBRATION_COMMAND, request)
@@ -35112,11 +35114,18 @@ class AutoMixCalibrationContr(Controller):
                 self.close_connection()
             elif connection_created:
                 # A failed transfer, scan, or mix has no automatic replay
-                # path. Close the controller channel without constructing
-                # additional protocol rows; durable evidence remains intact.
+                # path. A Pi-side execution error places Armchair in its
+                # error state, where a direct ``close`` packet is rejected.
+                # Reset only that transport state, then use the established
+                # close sequence; this neither retries an action nor creates
+                # a replacement protocol row.
                 try:
-                    self.portal.send_pack('close')
-                    self.portal.close()
+                    if getattr(self.portal, 'state', None) == 1:
+                        self.portal.reset_error()
+                        self.close_connection()
+                    else:
+                        self.portal.send_pack('close')
+                        self.portal.close()
                 finally:
                     print(
                         '<<controller>> calibration stopped after an error; '

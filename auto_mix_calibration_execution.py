@@ -14,6 +14,8 @@ from auto_mix_calibration_plan import validate_auto_mix_calibration_run_plan
 from auto_mix_calibration_protocol import (
     validate_mix_calibration_acknowledgement,
     validate_mix_calibration_preflight_acknowledgement,
+    validate_mix_calibration_transfer_acknowledgement,
+    validate_mix_calibration_transfer_request,
 )
 from auto_mix_calibration_resources import (
     build_auto_mix_calibration_resource_preflight_request,
@@ -175,80 +177,27 @@ def execute_auto_mix_calibration_plan(plan, adapter):
 
     ``adapter`` is intentionally a minimal capability interface:
 
-    * ``preflight_resources(plan)`` -> strict all-resources report;
-    * ``request_pi_preflight(request)`` -> Pi no-motion acknowledgement;
-    * ``transfer(source, destination, volume_uL)`` -> ordinary transfer;
-    * ``scan(scan_step)`` -> selected-well raw scan token/record;
-    * ``request_pi_mix(request)`` -> one Pi mix acknowledgement.
+    This historical entry point is retained solely to reject unsafe callers.
+    C2eB now requires the persisted C2eA binding/resource evidence consumed by
+    ``execute_auto_mix_calibration_plan_after_preflight()``.
 
     There are no automatic retries.  Any exception or rejected acknowledgement
     stops immediately and returns no permission to replay a transfer or mix.
     This function does not know how to open a socket, drive a reader, or move
     hardware; production wiring remains a later, separately audited adapter.
     '''
-    plan = validate_auto_mix_calibration_run_plan(plan)
-    required_methods = (
-        'preflight_resources', 'request_pi_preflight', 'transfer', 'scan',
-        'request_pi_mix'
+    # This legacy entry point predates the explicit C2eA binding/resource
+    # barrier.  It formerly sent generic ``transfer`` packets, which permits
+    # the Pi's ordinary same-name fallback behavior.  That is unsafe for this
+    # one-well assay because each source is deliberately singular and
+    # measured.  Keep the public name only as a clear, fail-closed migration
+    # boundary; production must consume a completed C2eA record below.
+    del adapter
+    validate_auto_mix_calibration_run_plan(plan)
+    raise AutoMixCalibrationExecutionError(
+        'Calibration execution requires a completed C2eA preflight record; '
+        'use execute_auto_mix_calibration_plan_after_preflight().'
     )
-    for method_name in required_methods:
-        if not callable(getattr(adapter, method_name, None)):
-            raise AutoMixCalibrationExecutionError(
-                'Calibration adapter lacks {}().'.format(method_name)
-            )
-
-    resource_preflight = validate_auto_mix_calibration_resource_preflight(
-        plan, adapter.preflight_resources(copy.deepcopy(plan))
-    )
-    preflight_ack = validate_mix_calibration_preflight_acknowledgement(
-        adapter.request_pi_preflight(copy.deepcopy(plan['preflight_request'])),
-        plan['preflight_request']
-    )
-    if not preflight_ack['accepted']:
-        raise AutoMixCalibrationExecutionError(
-            'Pi rejected calibration before liquid handling: {}.'
-            .format(preflight_ack['message'])
-        )
-
-    execution_record = {
-        'calibration_id': plan['calibration_id'],
-        'logical_wellname': plan['logical_wellname'],
-        'resource_preflight': resource_preflight,
-        'pi_preflight': preflight_ack,
-        'completed_step_ids': ['pi-preflight'],
-        'scan_records': [],
-        'mix_acknowledgements': [],
-    }
-    for transfer_step in plan['transfer_steps']:
-        adapter.transfer(
-            transfer_step['source_chemical_name'],
-            transfer_step['destination_wellname'],
-            transfer_step['volume_uL']
-        )
-        execution_record['completed_step_ids'].append(
-            transfer_step['step_id']
-        )
-
-    for scan_step in plan['scan_steps']:
-        if scan_step['scan_index']:
-            mix_step = plan['mix_steps'][scan_step['cycle_index'] - 1]
-            acknowledgement = validate_mix_calibration_acknowledgement(
-                adapter.request_pi_mix(copy.deepcopy(mix_step['request'])),
-                mix_step['request']
-            )
-            if not acknowledgement['accepted']:
-                raise AutoMixCalibrationExecutionError(
-                    'Pi rejected calibration mix cycle {} before physical '
-                    'execution: {}.'.format(
-                        scan_step['cycle_index'], acknowledgement['message']
-                    )
-                )
-            execution_record['mix_acknowledgements'].append(acknowledgement)
-            execution_record['completed_step_ids'].append(mix_step['step_id'])
-        scan_record = adapter.scan(copy.deepcopy(scan_step))
-        execution_record['scan_records'].append(copy.deepcopy(scan_record))
-        execution_record['completed_step_ids'].append(scan_step['step_id'])
-    return execution_record
 
 
 def _validate_completed_controller_preflight(
@@ -380,6 +329,56 @@ def _validate_completed_controller_preflight(
     }
 
 
+def _build_calibration_transfer_request(
+        plan, preflight_evidence, transfer_step, transfer_index):
+    '''Bind one source addition to the accepted C2eA evidence exactly once.'''
+    try:
+        transfer_index = int(transfer_index)
+    except (TypeError, ValueError):
+        raise AutoMixCalibrationExecutionError(
+            'Calibration transfer index is invalid.'
+        )
+    if transfer_index not in (1, 2):
+        raise AutoMixCalibrationExecutionError(
+            'Calibration transfer index must be 1 or 2.'
+        )
+    if transfer_step != plan['transfer_steps'][transfer_index - 1]:
+        raise AutoMixCalibrationExecutionError(
+            'Calibration transfer order does not match the reviewed plan.'
+        )
+    pi_preflight = preflight_evidence['pi_preflight']
+    well_binding = preflight_evidence['well_binding']
+    resource_preflight = preflight_evidence['resource_preflight']
+    request = {
+        'schema_version': 1,
+        'transfer_id': '{}-transfer-{}'.format(
+            plan['calibration_id'], transfer_index
+        ),
+        'calibration_id': plan['calibration_id'],
+        'preflight_id': pi_preflight['preflight_id'],
+        'binding_id': well_binding['binding_id'],
+        'resource_preflight_id': (
+            resource_preflight['resource_preflight_id']
+        ),
+        'transfer_index': transfer_index,
+        'wellname': plan['logical_wellname'],
+        'expected_deck_pos': plan['target']['expected_deck_pos'],
+        'expected_loc': plan['target']['expected_loc'],
+        'expected_plate_mapping_revision': plan['plate_mapping_revision'],
+        'expected_plate_generation': plan['plate_generation'],
+        'assay_profile': plan['assay_profile'],
+        'source_chemical_name': transfer_step['source_chemical_name'],
+        'destination_wellname': transfer_step['destination_wellname'],
+        'volume_uL': transfer_step['volume_uL'],
+    }
+    try:
+        return validate_mix_calibration_transfer_request(request)
+    except (TypeError, ValueError) as exc:
+        raise AutoMixCalibrationExecutionError(
+            'Calibration transfer request is invalid: {}.'.format(exc)
+        )
+
+
 def _validate_scan_record(scan_record, scan_step, require_qc_wavelengths):
     '''Validate one controller-owned unmerged scan record.
 
@@ -428,7 +427,7 @@ def execute_auto_mix_calibration_plan_after_preflight(
     recipe, optimizer, aggregate-scan, or automatic retry capability.
     '''
     plan = validate_auto_mix_calibration_run_plan(plan)
-    for method_name in ('transfer', 'scan', 'request_pi_mix'):
+    for method_name in ('request_pi_transfer', 'scan', 'request_pi_mix'):
         if not callable(getattr(adapter, method_name, None)):
             raise AutoMixCalibrationExecutionError(
                 'Calibration execution adapter lacks {}().'.format(
@@ -444,16 +443,34 @@ def execute_auto_mix_calibration_plan_after_preflight(
         'logical_wellname': plan['logical_wellname'],
         'preflight_evidence': preflight_evidence,
         'completed_step_ids': ['pi-preflight'],
+        'transfer_acknowledgements': [],
         'scan_records': [],
         'mix_acknowledgements': [],
         'automatic_retry_permitted': False,
     }
-    for transfer_step in plan['transfer_steps']:
-        adapter.transfer(
-            transfer_step['source_chemical_name'],
-            transfer_step['destination_wellname'],
-            transfer_step['volume_uL']
+    for transfer_index, transfer_step in enumerate(
+            plan['transfer_steps'], start=1):
+        transfer_request = _build_calibration_transfer_request(
+            plan, preflight_evidence, transfer_step, transfer_index
         )
+        try:
+            acknowledgement = validate_mix_calibration_transfer_acknowledgement(
+                adapter.request_pi_transfer(copy.deepcopy(transfer_request)),
+                transfer_request
+            )
+        except (TypeError, ValueError) as exc:
+            raise AutoMixCalibrationExecutionError(
+                'Calibration transfer acknowledgement is invalid: {}.'
+                .format(exc)
+            )
+        if not acknowledgement['accepted']:
+            raise AutoMixCalibrationExecutionError(
+                'Pi rejected calibration transfer {} before physical '
+                'execution: {}.'.format(
+                    transfer_index, acknowledgement['message']
+                )
+            )
+        execution_record['transfer_acknowledgements'].append(acknowledgement)
         execution_record['completed_step_ids'].append(
             transfer_step['step_id']
         )

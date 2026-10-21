@@ -109,6 +109,26 @@ def _mix_ack(request):
     }
 
 
+def _transfer_ack(request, accepted=True):
+    acknowledgement = dict(request)
+    acknowledgement.update({
+        'record_type': 'auto_mix_calibration_source_transferred',
+        'accepted': accepted,
+        'message': 'completed' if accepted else 'declined',
+        'pipette_arm': (
+            'left' if request['transfer_index'] == 1 else 'right'
+        ) if accepted else None,
+        'physical_execution_started': accepted,
+        'started_at_utc': (
+            '2026-10-16T12:00:00+00:00' if accepted else None
+        ),
+        'completed_at_utc': (
+            '2026-10-16T12:00:01+00:00' if accepted else None
+        ),
+    })
+    return acknowledgement
+
+
 def _preflight_record(plan):
     binding_request = build_auto_mix_calibration_well_binding_request(plan)
     resource_request = build_auto_mix_calibration_resource_preflight_request(
@@ -177,8 +197,13 @@ class _Adapter(object):
         self.include_730 = include_730
         self.calls = []
 
-    def transfer(self, source, destination, volume_uL):
-        self.calls.append(('transfer', source, destination, volume_uL))
+    def request_pi_transfer(self, request):
+        self.calls.append((
+            'transfer', request['transfer_index'],
+            request['source_chemical_name'], request['destination_wellname'],
+            request['volume_uL']
+        ))
+        return _transfer_ack(request)
 
     def request_pi_mix(self, request):
         self.calls.append(('mix', request['cycle_index']))
@@ -212,9 +237,12 @@ class AutoMixCalibrationC2eBC3Tests(unittest.TestCase):
         )
         self.assertEqual(11, len(record['scan_records']))
         self.assertEqual(10, len(record['mix_acknowledgements']))
+        self.assertEqual(2, len(record['transfer_acknowledgements']))
         self.assertEqual([
-            ('transfer', 'acid_red_1C1.44', 'autowell-calibration-002', 5.0),
-            ('transfer', 'copper_sulfate_dyeC8.0', 'autowell-calibration-002', 195.0),
+            ('transfer', 1, 'acid_red_1C1.44',
+             'autowell-calibration-002', 5.0),
+            ('transfer', 2, 'copper_sulfate_dyeC8.0',
+             'autowell-calibration-002', 195.0),
             ('scan', 0), ('mix', 1), ('scan', 1), ('mix', 2), ('scan', 2),
         ], adapter.calls[:7])
         self.assertEqual(('mix', 10), adapter.calls[-2])
