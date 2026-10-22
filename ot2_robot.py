@@ -5603,8 +5603,11 @@ class OT2Robot():
         calibration transfer already binds one volume and its selected arm in
         C2eA.  Cleaning an unselected, unmounted arm would consume a tip
         without protecting the reviewed transfer.  For that calibration-only
-        route, restore an unmounted arm's bookkeeping to ``clean`` and fail
-        closed if an unselected arm unexpectedly retains a contaminated tip.
+        route, restore an unmounted arm's bookkeeping to ``clean``.  When an
+        unselected arm still carries a contaminated tip from the preceding
+        reviewed source addition, discard that tip without picking a
+        replacement.  This is the established contamination-control action,
+        but avoids the old generic gate's unnecessary fresh tip pickup.
         '''
         source_name = plan['source_chemical_name']
         selected_arm = plan['pipette_arm']
@@ -5628,11 +5631,12 @@ class OT2Robot():
                 # unmounted arm without a robot command or tip consumption.
                 details['last_used'] = 'clean'
             elif details['last_used'] not in allowed_last_used:
-                raise ValueError(
-                    'calibration transfer refuses to use its selected arm '
-                    'while the unselected {} arm retains a contaminated tip.'
-                    .format(arm)
-                )
+                # The first calibration addition can legitimately leave its
+                # P20 tip mounted and source-marked.  Drop it before the
+                # second P300 addition, but deliberately do not replace it:
+                # that arm is not selected for this reviewed transfer.
+                pipette.drop_tip()
+                details['last_used'] = 'clean'
 
         selected = self.pipettes[selected_arm]
         pipette = selected['pipette']

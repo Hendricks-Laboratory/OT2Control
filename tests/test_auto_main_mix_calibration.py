@@ -562,10 +562,11 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         self.assertEqual([], p300.calls)
         self.assertTrue(p300.has_tip)
 
-    def test_transfer_refuses_dirty_unselected_mounted_tip(self):
+    def test_second_transfer_discards_dirty_unused_tip_without_replacement(self):
         robot, _, _ = self._robot(allocated_target=True,
                                   p300_has_clean_tip=True)
-        robot.pipettes['left']['last_used'] = 'OtherChemicalC1.0'
+        left_pipette = robot.pipettes['left']['pipette']
+        robot.pipettes['left']['last_used'] = 'CalibrationBaseWaterC1.0'
         plan = {
             'source_chemical_name': 'CalibrationTriggerWaterC1.0',
             'volume_uL': 180.0,
@@ -573,8 +574,11 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         }
         robot._get_preffered_pipette = lambda volume: 'right'
 
-        with self.assertRaisesRegex(ValueError, 'unselected left arm'):
-            robot._prepare_auto_mix_calibration_transfer_pipettes(plan)
+        robot._prepare_auto_mix_calibration_transfer_pipettes(plan)
+
+        self.assertEqual([('drop_tip',)], left_pipette.calls)
+        self.assertFalse(left_pipette.has_tip)
+        self.assertEqual('clean', robot.pipettes['left']['last_used'])
 
     def test_source_transfer_rejects_profile_mismatch_before_motion(self):
         robot, _, _ = self._robot(allocated_target=True)
