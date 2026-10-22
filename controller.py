@@ -35126,10 +35126,18 @@ class AutoMixCalibrationContr(Controller):
                 try:
                     if getattr(self.portal, 'state', None) == 1:
                         self.portal.reset_error()
-                        self.close_connection()
-                    else:
-                        self.portal.send_pack('close')
-                        self.portal.close()
+                    self.close_connection()
+                except Exception as cleanup_error:
+                    # Preserve the original calibration failure as the
+                    # terminal exception.  A legacy transport cleanup fault
+                    # must not overwrite the Pi error that prompted this
+                    # fail-closed shutdown.
+                    print(
+                        '<<controller warning>> calibration cleanup was '
+                        'incomplete after the primary failure: {}: {}'
+                        .format(type(cleanup_error).__name__, cleanup_error),
+                        file=sys.stderr
+                    )
                 finally:
                     print(
                         '<<controller>> calibration stopped after an error; '

@@ -174,7 +174,18 @@ class Armchair():
         '''
         self.error_payload = payload
         self.state = 1
-        raise ConnectionError('Armchair Error: error pack recieved')
+        error_value = (
+            payload[0]
+            if isinstance(payload, tuple) and len(payload) == 1
+            else payload
+        )
+        if isinstance(error_value, BaseException):
+            error_text = '{}: {}'.format(
+                type(error_value).__name__, error_value
+            )
+        else:
+            error_text = repr(error_value)
+        raise ConnectionError('Armchair Error from Pi: {}'.format(error_text))
 
     def reset_error(self):
         '''

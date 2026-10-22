@@ -61,6 +61,35 @@ def _plan():
     )
 
 
+def _armchair_error_handler():
+    '''Extract the error boundary without importing socket dependencies.'''
+    repository_root = os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)
+    ))
+    armchair_path = os.path.join(repository_root, 'Armchair', 'armchair.py')
+    with open(armchair_path, encoding='utf-8') as source_file:
+        source = source_file.read()
+    tree = ast.parse(source)
+    armchair_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == 'Armchair'
+    )
+    error_handler = next(
+        node for node in armchair_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == '_handle_error_pack'
+    )
+    module = ast.fix_missing_locations(ast.Module(
+        body=[ast.ClassDef(
+            name='Armchair', bases=[], keywords=[],
+            body=[copy.deepcopy(error_handler)], decorator_list=[]
+        )], type_ignores=[]
+    ))
+    namespace = {}
+    exec(compile(module, armchair_path, 'exec'), namespace)
+    return namespace['Armchair']
+
+
 def _pi_preflight_ack(request, accepted=True):
     return {
         'schema_version': 2,
@@ -233,6 +262,18 @@ class _Adapter(object):
 
 
 class AutoMixCalibrationC2eBC3Tests(unittest.TestCase):
+    def test_armchair_pi_error_reports_the_original_exception(self):
+        armchair_class = _armchair_error_handler()
+        portal = armchair_class()
+        portal.state = 0
+        with self.assertRaisesRegex(
+                ConnectionError, 'ValueError: synthetic Pi transfer failure'):
+            portal._handle_error_pack((ValueError(
+                'synthetic Pi transfer failure'
+            ),))
+        self.assertEqual(1, portal.state)
+        self.assertIsInstance(portal.error_payload[0], ValueError)
+
     def test_raw_reader_declaration_reindexes_legacy_positional_spectrum(self):
         with tempfile.TemporaryDirectory() as directory:
             raw_path = os.path.join(directory, 'scan_00.csv')
