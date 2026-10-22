@@ -119,6 +119,7 @@ def _robot_calibration_class():
         '_validate_auto_mix_calibration_transfer_request',
         '_auto_mix_calibration_transfer_response',
         '_build_auto_mix_calibration_transfer_plan',
+        '_prepare_auto_mix_calibration_transfer_pipettes',
         '_exec_transfer_auto_mix_calibration_source',
         '_build_auto_mix_calibration_action_plan',
         '_execute_auto_mix_calibration_action_plan'
@@ -494,8 +495,8 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         )
         events = []
 
-        robot._prepare_transfer_pipettes = lambda source: events.append(
-            ('prepare', source)
+        robot._prepare_auto_mix_calibration_transfer_pipettes = lambda plan: events.append(
+            ('prepare', plan['source_chemical_name'], plan['pipette_arm'])
         )
         robot._get_preffered_pipette = lambda volume: (
             'left' if volume <= 20.0 else 'right'
@@ -523,10 +524,10 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
             action_request['calibration_id']
         ]['status'])
         self.assertEqual([
-            ('prepare', action_request['base_chemical_name']),
+            ('prepare', action_request['base_chemical_name'], 'left'),
             (action_request['base_chemical_name'], action_request['wellname'],
              20.0, False),
-            ('prepare', action_request['trigger_chemical_name']),
+            ('prepare', action_request['trigger_chemical_name'], 'right'),
             (action_request['trigger_chemical_name'], action_request['wellname'],
              180.0, False),
         ], events)
@@ -540,6 +541,40 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         invalid['transfer_index'] = 1.0
         with self.assertRaises(ValueError):
             robot._validate_auto_mix_calibration_transfer_request(invalid)
+
+    def test_second_transfer_does_not_pick_an_unmounted_unused_arm(self):
+        robot, _, p300 = self._robot(allocated_target=True,
+                                     p300_has_clean_tip=True)
+        left_pipette = robot.pipettes['left']['pipette']
+        left_pipette.has_tip = False
+        robot.pipettes['left']['last_used'] = 'CalibrationBaseWaterC1.0'
+        plan = {
+            'source_chemical_name': 'CalibrationTriggerWaterC1.0',
+            'volume_uL': 180.0,
+            'pipette_arm': 'right',
+        }
+        robot._get_preffered_pipette = lambda volume: 'right'
+
+        robot._prepare_auto_mix_calibration_transfer_pipettes(plan)
+
+        self.assertEqual([], left_pipette.calls)
+        self.assertEqual('clean', robot.pipettes['left']['last_used'])
+        self.assertEqual([], p300.calls)
+        self.assertTrue(p300.has_tip)
+
+    def test_transfer_refuses_dirty_unselected_mounted_tip(self):
+        robot, _, _ = self._robot(allocated_target=True,
+                                  p300_has_clean_tip=True)
+        robot.pipettes['left']['last_used'] = 'OtherChemicalC1.0'
+        plan = {
+            'source_chemical_name': 'CalibrationTriggerWaterC1.0',
+            'volume_uL': 180.0,
+            'pipette_arm': 'right',
+        }
+        robot._get_preffered_pipette = lambda volume: 'right'
+
+        with self.assertRaisesRegex(ValueError, 'unselected left arm'):
+            robot._prepare_auto_mix_calibration_transfer_pipettes(plan)
 
     def test_source_transfer_rejects_profile_mismatch_before_motion(self):
         robot, _, _ = self._robot(allocated_target=True)

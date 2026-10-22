@@ -5304,7 +5304,7 @@ class OT2Robot():
             'physical_execution_started': True,
             'started_at_utc': datetime.now(pytz.utc).isoformat()
         })
-        self._prepare_transfer_pipettes(plan['source_chemical_name'])
+        self._prepare_auto_mix_calibration_transfer_pipettes(plan)
         self._transfer_step(
             plan['source_chemical_name'], plan['destination_wellname'],
             plan['volume_uL'], allow_auto_make=False
@@ -5594,6 +5594,54 @@ class OT2Robot():
             if self.pipettes[arm]['last_used'] not in ['WaterC1.0', 'clean', src]:
                 self._get_clean_tips()
                 break #cause now they're clean
+
+    def _prepare_auto_mix_calibration_transfer_pipettes(self, plan):
+        '''Prepare only the reviewed calibration transfer arm for one source.
+
+        Ordinary transfers use the legacy all-arm hygiene gate because a
+        subsequent protocol step may select either pipette.  A supervised
+        calibration transfer already binds one volume and its selected arm in
+        C2eA.  Cleaning an unselected, unmounted arm would consume a tip
+        without protecting the reviewed transfer.  For that calibration-only
+        route, restore an unmounted arm's bookkeeping to ``clean`` and fail
+        closed if an unselected arm unexpectedly retains a contaminated tip.
+        '''
+        source_name = plan['source_chemical_name']
+        selected_arm = plan['pipette_arm']
+        if selected_arm not in self.pipettes:
+            raise ValueError(
+                'calibration transfer selected pipette arm is unavailable.'
+            )
+        if self._get_preffered_pipette(plan['volume_uL']) != selected_arm:
+            raise ValueError(
+                'calibration transfer pipette selection changed after '
+                'preflight.'
+            )
+        allowed_last_used = ['WaterC1.0', 'clean', source_name]
+        for arm, details in self.pipettes.items():
+            pipette = details['pipette']
+            if arm == selected_arm:
+                continue
+            if not pipette.has_tip:
+                # A dropped tip cannot carry liquid.  The legacy transfer
+                # routine asserts bookkeeping for both arms, so normalize the
+                # unmounted arm without a robot command or tip consumption.
+                details['last_used'] = 'clean'
+            elif details['last_used'] not in allowed_last_used:
+                raise ValueError(
+                    'calibration transfer refuses to use its selected arm '
+                    'while the unselected {} arm retains a contaminated tip.'
+                    .format(arm)
+                )
+
+        selected = self.pipettes[selected_arm]
+        pipette = selected['pipette']
+        if pipette.has_tip and selected['last_used'] not in allowed_last_used:
+            pipette.drop_tip()
+            selected['last_used'] = 'clean'
+        if not pipette.has_tip:
+            pipette.pick_up_tip()
+            selected['last_used'] = 'clean'
 
     @exec_func('transfer', 1, True, exec_funcs)
     def _exec_transfer(self, src, transfer_steps):
