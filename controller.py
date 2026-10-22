@@ -186,6 +186,7 @@ from auto_mix_calibration_preflight import (
 )
 from auto_mix_calibration_reporting import (
     AutoMixCalibrationReporter,
+    reindex_calibration_reader_spectrum_from_raw_file,
     write_auto_mix_calibration_execution_record,
 )
 from auto_mix_calibration_protocol import (
@@ -35023,9 +35024,12 @@ class AutoMixCalibrationContr(Controller):
         # a metric that names it. A reporting failure can then never leave a
         # durable manifest pointing to an unmoved reader artifact.
         shutil.move(source_path, destination_path)
+        spectrum = reindex_calibration_reader_spectrum_from_raw_file(
+            scan_data[scan_step['wellname']], destination_path
+        )
         metric = reporter.record_scan(
             scan_step,
-            scan_data[scan_step['wellname']],
+            spectrum,
             scan_started_at_utc,
             scan_completed_at_utc,
         )

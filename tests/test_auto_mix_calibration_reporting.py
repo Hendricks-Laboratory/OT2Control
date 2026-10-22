@@ -25,7 +25,11 @@ from auto_mix_calibration_execution import (
     execute_auto_mix_calibration_plan_after_preflight,
 )
 from auto_mix_calibration_plan import build_auto_mix_calibration_run_plan
-from auto_mix_calibration_reporting import AutoMixCalibrationReporter
+from auto_mix_calibration_reporting import (
+    AutoMixCalibrationReporter,
+    AutoMixCalibrationReportingError,
+    reindex_calibration_reader_spectrum_from_raw_file,
+)
 from auto_mix_calibration_resources import (
     build_auto_mix_calibration_resource_preflight_request,
     build_auto_mix_calibration_well_binding_request,
@@ -229,6 +233,45 @@ class _Adapter(object):
 
 
 class AutoMixCalibrationC2eBC3Tests(unittest.TestCase):
+    def test_raw_reader_declaration_reindexes_legacy_positional_spectrum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw_path = os.path.join(directory, 'scan_00.csv')
+            with open(raw_path, 'w', encoding='latin-1') as raw_file:
+                raw_file.write('Wavelengths: 300nm...1000nm, 1nm steps\n')
+            spectrum = pd.Series(
+                [float(index) for index in range(701)],
+                index=range(1, 702)
+            )
+            reindexed = reindex_calibration_reader_spectrum_from_raw_file(
+                spectrum, raw_path
+            )
+            self.assertEqual(300.0, reindexed.index[0])
+            self.assertEqual(1000.0, reindexed.index[-1])
+            self.assertEqual(220.0, reindexed.loc[520.0])
+            self.assertEqual(430.0, reindexed.loc[730.0])
+
+    def test_raw_reader_declaration_rejects_mismatched_sample_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw_path = os.path.join(directory, 'scan_00.csv')
+            with open(raw_path, 'w', encoding='latin-1') as raw_file:
+                raw_file.write('Wavelengths: 300nm...302nm, 1nm steps\n')
+            with self.assertRaisesRegex(
+                    AutoMixCalibrationReportingError, 'sample count'):
+                reindex_calibration_reader_spectrum_from_raw_file(
+                    pd.Series([0.1, 0.2], index=[1, 2]), raw_path
+                )
+
+    def test_raw_reader_declaration_rejects_missing_grid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw_path = os.path.join(directory, 'scan_00.csv')
+            with open(raw_path, 'w', encoding='latin-1') as raw_file:
+                raw_file.write('No wavelength declaration\n')
+            with self.assertRaisesRegex(
+                    AutoMixCalibrationReportingError, 'does not declare'):
+                reindex_calibration_reader_spectrum_from_raw_file(
+                    pd.Series([0.1], index=[1]), raw_path
+                )
+
     def test_execution_consumes_preflight_then_orders_transfer_scan_mix(self):
         plan = _plan()
         adapter = _Adapter()
@@ -351,6 +394,14 @@ class AutoMixCalibrationC2eBC3Tests(unittest.TestCase):
         self.assertIn("exec_macro('PlateOut')", raw_scan_source)
         self.assertLess(
             raw_scan_source.index('shutil.move(source_path, destination_path)'),
+            raw_scan_source.index(
+                'reindex_calibration_reader_spectrum_from_raw_file('
+            )
+        )
+        self.assertLess(
+            raw_scan_source.index(
+                'reindex_calibration_reader_spectrum_from_raw_file('
+            ),
             raw_scan_source.index('reporter.record_scan(')
         )
 

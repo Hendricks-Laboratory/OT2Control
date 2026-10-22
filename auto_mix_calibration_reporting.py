@@ -12,6 +12,7 @@ import datetime
 import json
 import math
 import os
+import re
 from tempfile import NamedTemporaryFile
 
 import matplotlib.pyplot as plt
@@ -126,6 +127,108 @@ def _normalized_spectrum(spectrum):
             'Calibration reader scan has no usable unique spectrum.'
         )
     return normalized.sort_index()
+
+
+_READER_WAVELENGTH_DECLARATION = re.compile(
+    r'^\s*Wavelengths:\s*'
+    r'(?P<start>[0-9]+(?:\.[0-9]+)?)\s*nm\s*\.\.\.\s*'
+    r'(?P<stop>[0-9]+(?:\.[0-9]+)?)\s*nm\s*,\s*'
+    r'(?P<step>[0-9]+(?:\.[0-9]+)?)\s*nm\s+steps?\s*$',
+    re.IGNORECASE
+)
+
+
+def reindex_calibration_reader_spectrum_from_raw_file(spectrum, raw_scan_path):
+    '''Attach the reader-declared physical wavelength axis to one spectrum.
+
+    The legacy controller reader parser returns a selected-well spectrum with
+    a positional ``1..N`` index.  That is adequate for older workflows which
+    treat a scan as an ordered signal, but a supervised mix calibration makes
+    explicit wavelength claims (including 520 and 730 nm).  Reconstructing
+    that axis here, from the immutable raw reader declaration, keeps this
+    calibration-only correction out of the legacy parser.
+
+    The supplied values must exactly match the inclusive physical grid.  A
+    malformed or truncated raw file therefore fails before any calibration
+    metric or manifest is written with a false wavelength identity.
+    '''
+    if not isinstance(raw_scan_path, str) or not raw_scan_path.strip():
+        raise AutoMixCalibrationReportingError(
+            'Calibration raw scan path must be a nonblank string.'
+        )
+    if not os.path.isfile(raw_scan_path):
+        raise AutoMixCalibrationReportingError(
+            'Calibration raw scan file does not exist: {}.'.format(
+                raw_scan_path
+            )
+        )
+    if isinstance(spectrum, pd.DataFrame):
+        if spectrum.shape[1] != 1:
+            raise AutoMixCalibrationReportingError(
+                'Calibration reader scan must contain exactly one selected well.'
+            )
+        spectrum = spectrum.iloc[:, 0]
+    if not isinstance(spectrum, pd.Series):
+        raise AutoMixCalibrationReportingError(
+            'Calibration reader scan must be provided as a pandas Series.'
+        )
+    try:
+        absorbance = pd.to_numeric(spectrum, errors='raise').astype(float)
+    except (TypeError, ValueError):
+        raise AutoMixCalibrationReportingError(
+            'Calibration reader scan has nonnumeric absorbance data.'
+        )
+    if absorbance.empty or not absorbance.apply(math.isfinite).all():
+        raise AutoMixCalibrationReportingError(
+            'Calibration reader scan has nonfinite absorbance data.'
+        )
+
+    declaration = None
+    try:
+        with open(raw_scan_path, encoding='latin-1') as raw_scan_file:
+            for line in raw_scan_file:
+                match = _READER_WAVELENGTH_DECLARATION.match(line.rstrip('\r\n'))
+                if match:
+                    declaration = match
+                    break
+    except (IOError, OSError) as exc:
+        raise AutoMixCalibrationReportingError(
+            'Could not read calibration raw scan file {}: {}.'.format(
+                raw_scan_path, exc
+            )
+        )
+    if declaration is None:
+        raise AutoMixCalibrationReportingError(
+            'Calibration raw scan does not declare its wavelength grid.'
+        )
+    start = float(declaration.group('start'))
+    stop = float(declaration.group('stop'))
+    step = float(declaration.group('step'))
+    if not (math.isfinite(start) and math.isfinite(stop)
+            and math.isfinite(step) and step > 0 and stop >= start):
+        raise AutoMixCalibrationReportingError(
+            'Calibration raw scan declares an invalid wavelength grid.'
+        )
+    span_in_steps = (stop - start) / step
+    nearest_step_count = int(round(span_in_steps))
+    if not math.isclose(span_in_steps, nearest_step_count, rel_tol=0,
+                        abs_tol=1e-9):
+        raise AutoMixCalibrationReportingError(
+            'Calibration raw scan wavelength grid is not evenly divisible '
+            'by its stated step.'
+        )
+    wavelengths = [start + (index * step)
+                   for index in range(nearest_step_count + 1)]
+    if len(absorbance) != len(wavelengths):
+        raise AutoMixCalibrationReportingError(
+            'Calibration reader sample count {} does not match its declared '
+            'wavelength grid count {}.'.format(
+                len(absorbance), len(wavelengths)
+            )
+        )
+    return _normalized_spectrum(
+        pd.Series(absorbance.values, index=wavelengths)
+    )
 
 
 def _exact_wavelength_value(spectrum, wavelength_nm):
