@@ -74,9 +74,13 @@ class _Pipette(object):
 class _Portal(object):
     def __init__(self):
         self.sent_packets = []
+        self.closed = False
 
     def send_pack(self, packet_name, payload):
         self.sent_packets.append((packet_name, payload))
+
+    def close(self):
+        self.closed = True
 
 
 class _PytzStub(object):
@@ -122,7 +126,8 @@ def _robot_calibration_class():
         '_prepare_auto_mix_calibration_transfer_pipettes',
         '_exec_transfer_auto_mix_calibration_source',
         '_build_auto_mix_calibration_action_plan',
-        '_execute_auto_mix_calibration_action_plan'
+        '_execute_auto_mix_calibration_action_plan',
+        '_exec_close'
     }
     members = []
     for node in robot_class.body:
@@ -242,7 +247,12 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         target.labware = robot.lab_deck[4].labware
         robot.plate_mapping_revision = 0
         robot.plate_generation = 0
-        robot.protocol = type('Protocol', (), {'_commands': []})()
+        robot.protocol = type(
+            'Protocol', (), {
+                '_commands': [],
+                'home': lambda protocol: setattr(protocol, 'homed', True)
+            }
+        )()
         return robot, target, pipette
 
     @staticmethod
@@ -579,6 +589,37 @@ class AutoMainMixCalibrationTests(unittest.TestCase):
         self.assertEqual([('drop_tip',)], left_pipette.calls)
         self.assertFalse(left_pipette.has_tip)
         self.assertEqual('clean', robot.pipettes['left']['last_used'])
+
+    def test_shutdown_skips_tipless_calibration_arm_and_drops_mounted_tip(self):
+        robot, _, p300 = self._robot(allocated_target=True,
+                                     p300_has_clean_tip=True)
+        left_pipette = robot.pipettes['left']['pipette']
+        left_pipette.has_tip = False
+        robot.temp_module = None
+        robot.portal = _Portal()
+
+        robot._exec_close(17)
+
+        self.assertEqual([], left_pipette.calls)
+        self.assertEqual([('drop_tip',)], p300.calls)
+        self.assertFalse(p300.has_tip)
+        self.assertTrue(robot.protocol.homed)
+        self.assertEqual([('ready', 17)], robot.portal.sent_packets)
+        self.assertTrue(robot.portal.closed)
+
+    def test_shutdown_preserves_normal_two_tip_cleanup(self):
+        robot, _, p300 = self._robot(allocated_target=True,
+                                     p300_has_clean_tip=True)
+        left_pipette = robot.pipettes['left']['pipette']
+        robot.temp_module = None
+        robot.portal = _Portal()
+
+        robot._exec_close(18)
+
+        self.assertEqual([('drop_tip',)], left_pipette.calls)
+        self.assertEqual([('drop_tip',)], p300.calls)
+        self.assertFalse(left_pipette.has_tip)
+        self.assertFalse(p300.has_tip)
 
     def test_source_transfer_rejects_profile_mismatch_before_motion(self):
         robot, _, _ = self._robot(allocated_target=True)

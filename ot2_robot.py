@@ -5871,7 +5871,11 @@ class OT2Robot():
         #drop pipettes
         for arm_dict in self.pipettes.values():
             pipette = arm_dict['pipette']
-            pipette.drop_tip()
+            # Calibration deliberately leaves an unused arm tipless after
+            # its one source transfer.  Normal Auto runs still drop both
+            # mounted tips here; a tipless arm has nothing to discard.
+            if bool(pipette.has_tip):
+                pipette.drop_tip()
         self.protocol.home()
         self.portal.send_pack('ready', cid)
         #kill link
