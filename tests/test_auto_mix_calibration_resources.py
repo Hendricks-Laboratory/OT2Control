@@ -174,6 +174,35 @@ class AutoMixCalibrationResourceTests(unittest.TestCase):
             'required_volume_uL'
         ])
 
+    def test_water_matched_profile_retains_the_reviewed_5_195_allocation(self):
+        settings = parse_auto_mix_calibration_header_settings({
+            'auto_mix_calibration_mode': 'water_safety',
+            MIX_CALIBRATION_ASSAY_PROFILE_HEADER: 'water_matched_5ul_195ul',
+            MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'water_first',
+            MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'water_second',
+        })
+        plan = build_auto_mix_calibration_run_plan(
+            settings=settings,
+            calibration_id='water-matched-calibration-001',
+            logical_wellname='autowell-calibration-002',
+            source_container_names={
+                'first': 'WaterFirstC1.0', 'second': 'WaterSecondC1.0'
+            },
+            reader_location_mapping={'C4': ('B3', 'platereader4')},
+            plate_mapping_revision=4,
+            plate_generation=2,
+            deck_reader_well='C4',
+        )
+        request = build_auto_mix_calibration_resource_preflight_request(
+            plan, 'water-matched-calibration-001-binding'
+        )
+        self.assertEqual(5.0, request['source_requirements'][0][
+            'required_volume_uL'
+        ])
+        self.assertEqual(195.0, request['source_requirements'][1][
+            'required_volume_uL'
+        ])
+
     def test_insufficient_accepted_source_or_tip_evidence_is_rejected(self):
         request = build_auto_mix_calibration_resource_preflight_request(
             _plan(), 'dye-calibration-001-binding'

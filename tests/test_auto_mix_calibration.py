@@ -13,6 +13,7 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_MODE_WATER_SAFETY,
     MIX_CALIBRATION_P300_VOLUME_UL,
     MIX_CALIBRATION_PROFILE_QC_TWO_DYE_5UL_RED,
+    MIX_CALIBRATION_PROFILE_WATER_MATCHED,
     MIX_CALIBRATION_QC_ANALYSIS_WAVELENGTHS_NM,
     MIX_CALIBRATION_QC_TWO_DYE_FIRST_VOLUME_UL,
     MIX_CALIBRATION_QC_TWO_DYE_SECOND_VOLUME_UL,
@@ -20,6 +21,8 @@ from auto_mix_calibration import (
     MIX_CALIBRATION_TARGET_READER_WELL_HEADER,
     MIX_CALIBRATION_WATER_SAFETY_FIRST_VOLUME_UL,
     MIX_CALIBRATION_WATER_SAFETY_SECOND_VOLUME_UL,
+    MIX_CALIBRATION_WATER_MATCHED_FIRST_VOLUME_UL,
+    MIX_CALIBRATION_WATER_MATCHED_SECOND_VOLUME_UL,
     MIX_CALIBRATION_WELL_CLEARANCE_MM,
     parse_auto_mix_calibration_header_settings,
     validate_auto_mix_calibration_profile_source_metadata,
@@ -87,6 +90,28 @@ class AutoMixCalibrationHeaderTests(unittest.TestCase):
         self.assertEqual(
             MIX_CALIBRATION_WELL_CLEARANCE_MM,
             settings['auto_mix_calibration_well_clearance_mm']
+        )
+
+    def test_water_matched_profile_has_the_two_dye_transfer_geometry(self):
+        settings = parse_auto_mix_calibration_header_settings({
+            'auto_mix_calibration_mode': 'water_safety',
+            MIX_CALIBRATION_ASSAY_PROFILE_HEADER: (
+                MIX_CALIBRATION_PROFILE_WATER_MATCHED
+            ),
+            MIX_CALIBRATION_FIRST_REAGENT_HEADER: 'Calibration First Water',
+            MIX_CALIBRATION_SECOND_REAGENT_HEADER: 'Calibration Second Water',
+        })
+        self.assertEqual(
+            MIX_CALIBRATION_PROFILE_WATER_MATCHED,
+            settings[MIX_CALIBRATION_ASSAY_PROFILE_HEADER]
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_WATER_MATCHED_FIRST_VOLUME_UL,
+            settings['auto_mix_calibration_first_volume_uL']
+        )
+        self.assertEqual(
+            MIX_CALIBRATION_WATER_MATCHED_SECOND_VOLUME_UL,
+            settings['auto_mix_calibration_second_volume_uL']
         )
 
     def test_two_dye_profile_is_pdf_ordered_and_locks_assay_values(self):
