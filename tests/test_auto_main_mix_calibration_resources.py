@@ -132,6 +132,7 @@ class AutoMainMixCalibrationResourceTests(unittest.TestCase):
     def _resource_request(profile='water_safety_20ul_first'):
         first_volume, second_volume = {
             'water_safety_20ul_first': (20.0, 180.0),
+            'water_matched_5ul_195ul': (5.0, 195.0),
             'qc_two_dye_5ul_red': (5.0, 195.0)
         }[profile]
         return {
@@ -295,6 +296,18 @@ class AutoMainMixCalibrationResourceTests(unittest.TestCase):
 
         evidence = robot._build_auto_mix_calibration_resource_preflight(
             self._resource_request('qc_two_dye_5ul_red')
+        )
+
+        self.assertEqual([5.0, 195.0], [
+            item['required_volume_uL'] for item in evidence['source_requirements']
+        ])
+
+    def test_water_matched_resource_preflight_uses_reviewed_five_then_195_volumes(self):
+        robot = self._robot()
+        robot._bind_auto_mix_calibration_well(self._binding_request())
+
+        evidence = robot._build_auto_mix_calibration_resource_preflight(
+            self._resource_request('water_matched_5ul_195ul')
         )
 
         self.assertEqual([5.0, 195.0], [

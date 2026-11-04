@@ -1165,10 +1165,12 @@ class OT2Robot():
     AUTO_MIX_CALIBRATION_RESOURCE_SCHEMA_VERSION = 1
     AUTO_MIX_CALIBRATION_RESOURCE_PROFILE_VOLUMES = {
         'water_safety_20ul_first': (20.0, 180.0),
+        'water_matched_5ul_195ul': (5.0, 195.0),
         'qc_two_dye_5ul_red': (5.0, 195.0)
     }
     AUTO_MIX_CALIBRATION_PROFILE_MODES = {
         'water_safety_20ul_first': 'water_safety',
+        'water_matched_5ul_195ul': 'water_safety',
         'qc_two_dye_5ul_red': 'two_dye'
     }
 
