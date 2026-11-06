@@ -56,7 +56,14 @@ def _robot_preflight_class():
                         id='AUTO_COMPLETED_WELL_MIX_MAX_FRACTION',
                         ctx=ast.Store()
                     )],
-                    value=ast.Constant(value=0.50)
+                    value=ast.Constant(value=0.75)
+                ),
+                ast.Assign(
+                    targets=[ast.Name(
+                        id='AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL',
+                        ctx=ast.Store()
+                    )],
+                    value=ast.Constant(value=150.0)
                 ),
                 ast.Assign(
                     targets=[ast.Name(
@@ -217,8 +224,8 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
         request['targeted_mix_plan'] = [{
             'wellname': 'autowell0C1.0',
             'trigger_chemical_name': 'reagent_bC1.0',
-            'mix_volume_uL': 20.0,
-            'cycle_count': 1,
+            'mix_volume_uL': 150.0,
+            'cycle_count': 5,
             'expected_well_volume_uL': 200.0
         }]
         return request
@@ -268,8 +275,8 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
             'wellname': 'autowell0C1.0',
             'trigger_chemical_name': 'reagent_bC1.0',
             'pipette_arm': 'left',
-            'mix_volume_uL': 20.0,
-            'cycle_count': 1,
+            'mix_volume_uL': 150.0,
+            'cycle_count': 5,
             'required_new_tips': 2,
             'post_mix_tip_policy': 'dedicated_discarded_with_clean_replacement'
         }, targeted_requirements[0])
@@ -329,6 +336,25 @@ class AutoMainTransferPreflightTests(unittest.TestCase):
         self.assertEqual(2, result['schema_version'])
         self.assertEqual([], result['targeted_mix_requirements'])
         self.assertEqual('invalid_request', result['deficits'][0]['deficit_type'])
+
+    def test_targeted_mix_preflight_rejects_over_limit_or_too_small_well(self):
+        for mix_volume_uL, expected_well_volume_uL in (
+                (150.1, 200.0), (150.0, 199.9)):
+            with self.subTest(
+                    mix_volume_uL=mix_volume_uL,
+                    expected_well_volume_uL=expected_well_volume_uL):
+                request = self._targeted_mix_request()
+                request['targeted_mix_plan'][0]['mix_volume_uL'] = mix_volume_uL
+                request['targeted_mix_plan'][0]['expected_well_volume_uL'] = (
+                    expected_well_volume_uL
+                )
+                result = self._build_robot()._build_transfer_plan_preflight(
+                    request
+                )
+                self.assertFalse(result['passed'])
+                self.assertEqual(
+                    'invalid_request', result['deficits'][0]['deficit_type']
+                )
 
     def test_multicontainer_aggregate_ignores_sub_dead_source_deficits(self):
         """An empty primary cannot reduce a usable backup's inventory."""

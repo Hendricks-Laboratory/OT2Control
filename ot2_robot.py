@@ -700,8 +700,8 @@ class Well96(Well):
     # reaction well.  Keep the new well-only path at the documented baseline.
     TARGETED_MIX_RATE = 1.0
     # The supervised dye/water calibration is intentionally separate from
-    # ``mix_targeted``. Its 150 uL / 2 mm motion must not silently alter the
-    # lower-volume production stability mixer.
+    # ``mix_targeted``. Its matching 150 uL / 2 mm geometry must not silently
+    # alter the production mix's five-cycle execution policy.
     CALIBRATION_MIX_ASPIRATE_CLEARANCE_MM = 2.0
     CALIBRATION_MIX_DISPENSE_CLEARANCE_MM = 2.0
     CALIBRATION_MIX_VOLUME_UL = 150.0
@@ -1140,7 +1140,12 @@ class OT2Robot():
     # verified Auto reaction well.  These are conservative execution bounds,
     # not chemistry settings: the controller will later select the requested
     # mix volume/cycles inside these fixed Pi-side limits.
-    AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.50
+    #
+    # A 150 uL stroke is permitted only for a verified 200 uL-or-greater
+    # finished reaction well.  The fraction check below is deliberately kept
+    # alongside this absolute ceiling: neither condition alone is sufficient.
+    AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.75
+    AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL = 150.0
     # This is intentionally the generic pre-selection floor. After selecting
     # the established preparation-style mixing pipette, the Pi verifies the
     # actual loaded instrument's own ``min_volume`` and ``max_volume`` rather
@@ -1151,7 +1156,7 @@ class OT2Robot():
 
     # Supervised Stage 13G calibration is a fixed, calibration-only contract.
     # It is not a production stability setting and does not relax the normal
-    # completed-well 50 percent mix-volume guard.
+    # completed-well production-mix safety limits.
     # v4 adds the source-bound, non-replayable transfer packet. The Pi
     # validates the post-transfer well history against the exact reviewed
     # sequence rather than permitting normal source switching or ``make``.
@@ -1917,7 +1922,7 @@ class OT2Robot():
 
         Ordinary reagent transfers retain the established smallest-suitable
         pipette routing.  A completed-well stability mix is different: its
-        20 uL volume is a mixing aliquot, not a metered reagent addition, and
+        mixing aliquot is not a metered reagent addition, and
         Stage 13 deliberately standardizes it on one P300.  Do not silently
         fall back to a P20 or P1000 if hardware configuration changes.
         '''
@@ -1985,6 +1990,16 @@ class OT2Robot():
             raise ValueError(
                 'completed-well mix cycle_count exceeds the Pi safety limit.'
             )
+        normalized_volume_uL = self._preflight_number(
+            request['mix_volume_uL'],
+            'completed-well mix volume',
+            minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
+        )
+        if (normalized_volume_uL
+                > self.AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL + 1e-9):
+            raise ValueError(
+                'completed-well mix volume exceeds the Pi safety limit.'
+            )
         return {
             'schema_version': 1,
             'action_id': request['action_id'].strip(),
@@ -1996,11 +2011,7 @@ class OT2Robot():
             ),
             'expected_plate_generation': request['expected_plate_generation'],
             'trigger_chemical_name': request['trigger_chemical_name'].strip(),
-            'mix_volume_uL': self._preflight_number(
-                request['mix_volume_uL'],
-                'completed-well mix volume',
-                minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
-            ),
+            'mix_volume_uL': normalized_volume_uL,
             'cycle_count': request['cycle_count']
         }
 
@@ -2070,8 +2081,9 @@ class OT2Robot():
             getattr(target, 'vol', None), 'completed-well mix target volume',
             minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
         )
-        maximum_mix_volume_uL = (
-            well_volume_uL * self.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION
+        maximum_mix_volume_uL = min(
+            well_volume_uL * self.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION,
+            self.AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL
         )
         if normalized['mix_volume_uL'] > maximum_mix_volume_uL + 1e-9:
             raise ValueError(
@@ -2081,7 +2093,7 @@ class OT2Robot():
         # This is intentionally separate from reagent-transfer routing. The
         # targeted mix is standardized on exactly one P300 so a changed deck
         # configuration fails closed instead of silently selecting a P20 or
-        # P1000 based on a 20 uL mixing aliquot.
+        # P1000 based on a mixing aliquot.
         pipette_arm = self._get_auto_completed_well_mix_p300_arm(
             dict((arm, details['size']) for arm, details in
                  self.pipettes.items())
@@ -3016,6 +3028,12 @@ class OT2Robot():
                 'targeted mix volume for {}'.format(wellname),
                 minimum=self.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL
             )
+            if (mix_volume_uL
+                    > self.AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL + 1e-9):
+                raise ValueError(
+                    'targeted mix volume for {} exceeds the Pi safety limit.'
+                    .format(wellname)
+                )
             expected_well_volume_uL = self._preflight_number(
                 mix_specification['expected_well_volume_uL'],
                 'expected well volume for {}'.format(wellname),

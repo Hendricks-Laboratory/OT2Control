@@ -210,7 +210,8 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         )()
         robot.plate_mapping_revision = 5
         robot.plate_generation = 2
-        robot.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.50
+        robot.AUTO_COMPLETED_WELL_MIX_MAX_FRACTION = 0.75
+        robot.AUTO_COMPLETED_WELL_MIX_MAX_VOLUME_UL = 150.0
         robot.AUTO_COMPLETED_WELL_MIX_MIN_VOLUME_UL = 5.0
         robot.AUTO_COMPLETED_WELL_MIX_MAX_CYCLES = 10
         robot.AUTO_COMPLETED_WELL_MIX_REQUIRED_PIPETTE_VOLUME_UL = 300.0
@@ -228,8 +229,8 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
             'expected_plate_mapping_revision': 5,
             'expected_plate_generation': 2,
             'trigger_chemical_name': 'sodium_borohydrideC6.25',
-            'mix_volume_uL': 100.0,
-            'cycle_count': 3
+            'mix_volume_uL': 150.0,
+            'cycle_count': 5
         }
         request.update(overrides)
         return request
@@ -244,7 +245,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         self.assertTrue(plan['use_existing_clean_tip'])
         self.assertEqual(1, plan['required_new_tips'])
         self.assertEqual(2, plan['available_new_tips'])
-        self.assertEqual(100.0, plan['maximum_mix_volume_uL'])
+        self.assertEqual(150.0, plan['maximum_mix_volume_uL'])
         self.assertEqual(20.0, plan['pipette_min_volume_uL'])
         self.assertEqual(300.0, plan['pipette_max_volume_uL'])
         self.assertEqual(200.0, target.vol)
@@ -283,7 +284,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
             self._request(wellname='WaterC1.0'),
             self._request(expected_loc='A1'),
             self._request(expected_plate_mapping_revision=4),
-            self._request(mix_volume_uL=101.0),
+            self._request(mix_volume_uL=150.1),
             self._request(cycle_count=11)
         ]
         for request in cases:
@@ -293,6 +294,13 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
                     robot._build_auto_completed_well_mix_plan(request)
                 self.assertEqual([], pipette.calls)
                 self.assertEqual(200.0, target.vol)
+
+        robot, target, pipette = self._robot()
+        target.vol = 199.9
+        with self.assertRaisesRegex(ValueError, 'conservative fraction'):
+            robot._build_auto_completed_well_mix_plan(self._request())
+        self.assertEqual([], pipette.calls)
+        self.assertEqual(199.9, target.vol)
 
         robot, target, pipette = self._robot()
         target.history[-1] = (
@@ -355,7 +363,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
             ('pick_up_tip',)
         ], pipette.calls)
         self.assertEqual([
-            (pipette, 100.0, 3)
+            (pipette, 150.0, 5)
         ], target.targeted_mix_calls)
         self.assertTrue(pipette.has_tip)
         self.assertEqual('clean', robot.pipettes['right']['last_used'])
@@ -374,7 +382,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
 
         self.assertEqual([], pipette.calls)
         self.assertEqual([
-            (pipette, 100.0, 3)
+            (pipette, 150.0, 5)
         ], target.targeted_mix_calls)
         self.assertTrue(pipette.has_tip)
         self.assertEqual('autowell7C1.0', robot.pipettes['right']['last_used'])
@@ -396,7 +404,7 @@ class AutoMainCompletedWellMixTests(unittest.TestCase):
         self.assertEqual('drop_tip', pipette.calls[0][0])
         self.assertEqual('pick_up_tip', pipette.calls[1][0])
         self.assertEqual([
-            (pipette, 100.0, 3)
+            (pipette, 150.0, 5)
         ], robot.containers['autowell7C1.0'].targeted_mix_calls)
         self.assertEqual('drop_tip', pipette.calls[2][0])
         self.assertEqual('pick_up_tip', pipette.calls[3][0])
