@@ -19,8 +19,8 @@ def _request():
         'expected_plate_mapping_revision': 3,
         'expected_plate_generation': 1,
         'trigger_chemical_name': 'sodium_borohydrideC6.25',
-        'mix_volume_uL': 20.0,
-        'cycle_count': 1
+        'mix_volume_uL': 150.0,
+        'cycle_count': 5
     }
 
 
@@ -56,12 +56,13 @@ class TargetedMixWireContractTests(unittest.TestCase):
         request['expected_loc'] = ' a1 '
         normalized = validate_targeted_mix_request(request)
         self.assertEqual('A1', normalized['expected_loc'])
-        self.assertEqual(20.0, normalized['mix_volume_uL'])
+        self.assertEqual(150.0, normalized['mix_volume_uL'])
 
     def test_request_rejects_non_auto_or_non_reader_targets(self):
         for field_name, value in (
                 ('wellname', 'manualwell0'),
                 ('expected_deck_pos', 3),
+                ('mix_volume_uL', 150.1),
                 ('cycle_count', 0),
                 ('cycle_count', 11)):
             request = _request()

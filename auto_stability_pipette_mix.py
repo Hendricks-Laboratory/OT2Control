@@ -16,12 +16,16 @@ TARGETED_MIX_COMMAND = 'mix_auto_completed_well'
 TARGETED_MIX_ACKNOWLEDGEMENT = 'auto_completed_well_mixed'
 TARGETED_MIX_RECORD_TYPE = 'auto_completed_well_mixed'
 TARGETED_MIX_TIP_POLICY = 'dedicated_discarded'
-# These are deliberately controller-owned fixed safety defaults for the first
-# targeted-mix implementation. They are not worksheet-tunable: the Pi still
-# validates the eventual physical well volume, selected P300 limits, and its
-# conservative fraction immediately before movement.
-TARGETED_MIX_DEFAULT_VOLUME_UL = 20.0
-TARGETED_MIX_DEFAULT_CYCLE_COUNT = 1
+# These are deliberately controller-owned fixed safety defaults. They are not
+# worksheet-tunable: the Pi independently validates the verified well volume,
+# selected P300 limits, and the conservative fraction before movement.
+#
+# Five 150 uL strokes provide a conservative provisional mix for a completed
+# 200 uL reaction well while retaining the separately reviewed 2 mm geometry.
+# This is intentionally independent of the supervised calibration profile.
+TARGETED_MIX_DEFAULT_VOLUME_UL = 150.0
+TARGETED_MIX_DEFAULT_CYCLE_COUNT = 5
+TARGETED_MIX_MAX_VOLUME_UL = 150.0
 
 
 class AutoStabilityPipetteMixContractError(ValueError):
@@ -133,6 +137,11 @@ def validate_targeted_mix_request(request):
     if normalized['cycle_count'] < 1 or normalized['cycle_count'] > 10:
         raise AutoStabilityPipetteMixContractError(
             'Targeted stability-mix cycle_count must be from 1 through 10.'
+        )
+    if normalized['mix_volume_uL'] > TARGETED_MIX_MAX_VOLUME_UL:
+        raise AutoStabilityPipetteMixContractError(
+            'Targeted stability-mix volume must not exceed {} uL.'
+            .format(TARGETED_MIX_MAX_VOLUME_UL)
         )
     return normalized
 

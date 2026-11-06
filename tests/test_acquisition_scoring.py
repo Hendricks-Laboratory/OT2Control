@@ -3097,8 +3097,8 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
             '_request_auto_main_transfer_plan_preflight',
             '_preflight_auto_next_batch_on_pi'
         ], extra_namespace={
-            'TARGETED_MIX_DEFAULT_VOLUME_UL': 20.0,
-            'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 1,
+            'TARGETED_MIX_DEFAULT_VOLUME_UL': 150.0,
+            'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 5,
             'canonical_reagent_name': (
                 lambda value: str(value).strip().replace(' ', '_')
             )
@@ -3275,8 +3275,8 @@ class AutoMainTransferPlanPreflightTests(unittest.TestCase):
         self.assertEqual([{
             'wellname': 'autowell0C1.0',
             'trigger_chemical_name': 'reagent_aC1.0',
-            'mix_volume_uL': 20.0,
-            'cycle_count': 1,
+            'mix_volume_uL': 150.0,
+            'cycle_count': 5,
             'expected_well_volume_uL': 200.0
         }], request['targeted_mix_plan'])
 
