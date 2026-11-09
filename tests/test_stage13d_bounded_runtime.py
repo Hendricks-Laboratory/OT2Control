@@ -46,8 +46,8 @@ def _load_methods(method_names):
         'STABILITY_MIXING_MODE_PIPETTE_MIX': 'pipette_mix',
         'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
         'STABILITY_SCAN_SCHEDULE_EACH_COMPLETION': 'each_completion',
-        'TARGETED_MIX_DEFAULT_VOLUME_UL': 20.0,
-        'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 1,
+        'TARGETED_MIX_DEFAULT_VOLUME_UL': 150.0,
+        'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 5,
         'build_stability_monitoring_policy': (
             build_stability_monitoring_policy
         ),
@@ -62,6 +62,7 @@ class _ObserverStub(object):
         self.completed_windows = []
         self.reservations = []
         self.completed_scans = []
+        self.reserved_raw_scans = []
         self._active = [
             {
                 'wellname': 'autowell0C1.0',
@@ -80,6 +81,9 @@ class _ObserverStub(object):
         return []
 
     def reserve_raw_scan(self, batch_number, wellnames, reader_locations):
+        self.reserved_raw_scans.append((
+            batch_number, list(wellnames), list(reader_locations)
+        ))
         reservation = {
             'raw_scan_basename': 'stability_batch_004_active_set_scan_0001',
             'raw_scan_relative_path': os.path.join(
@@ -213,6 +217,8 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
 
         self.assertEqual('identity', calls[0][0])
         self.assertEqual('build', calls[1][0])
+        self.assertEqual(150.0, calls[1][1]['mix_volume_uL'])
+        self.assertEqual(5, calls[1][1]['cycle_count'])
         self.assertEqual('acknowledged_mix', calls[2][0])
         self.assertEqual(('plan', 'autowell0C1.0'), calls[3])
         self.assertEqual('scan', calls[4][0])
@@ -309,6 +315,104 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
             self.assertEqual('pipette_mix', completed['mixing_mode'])
             self.assertEqual(0.0, completed['shake_duration_s'])
             self.assertEqual('each_completion', completed['observation_reason'])
+
+    def test_cross_batch_reader_scan_keeps_prior_well_without_remixing_it(self):
+        """Later-batch scans may retain only same-plate in-window evidence.
+
+        This is the controller-side contract exercised by the Stage-13F water
+        debug.  The prior-batch well must remain in the reader layout, but no
+        second Pi targeted-mix command or shake may be emitted for it.
+        """
+        controller = self._controller()
+        controller.robo_params.update({
+            'auto_stability_decision_horizon_s': 30.0,
+            'auto_stability_max_observation_window_s': 90.0,
+        })
+        plan = {
+            'scan_wellnames': ['autowell0C1.0', 'autowell8C1.0'],
+            'reader_locations': ['A1', 'A2'],
+            'targeted_mix_acknowledgement_required': True,
+            'active_batch_numbers': [0, 4],
+            'retired_wellnames': [],
+            'triggering_wellname': 'autowell8C1.0',
+            'deck_pos': 4,
+            'plate_generation': 0,
+            'plate_mapping_revision': 0,
+        }
+        controller._plan_auto_stability_post_mix_active_set = (
+            lambda wellname: plan
+        )
+        location_calls = []
+        controller._get_auto_stability_reader_locations = (
+            lambda wellnames: location_calls.append(list(wellnames)) or
+            ['A1', 'A2']
+        )
+        controller._cached_reader_locs = {
+            'autowell0C1.0': SimpleNamespace(deck_pos=4),
+            'autowell8C1.0': SimpleNamespace(deck_pos=4),
+        }
+        controller._get_auto_stability_scan_protocol = lambda: 'UVVis'
+        controller._auto_stability_utc_now = (
+            lambda: '2026-10-02T12:00:00+00:00'
+        )
+        controller.portal = _PortalStub()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            os.makedirs(os.path.join(
+                temporary_directory, 'stability', 'raw_scans'
+            ))
+            reader_calls = []
+            controller.pr = _PlateReaderStub(
+                temporary_directory, reader_calls
+            )
+            controller._run_auto_stability_post_mix_active_set_scan(
+                plan,
+                observation_reason='each_completion',
+                mixing_mode='pipette_mix'
+            )
+
+        self.assertEqual(
+            [('send_pack', ('home',)), ('burn_pipe', ())],
+            controller.portal.calls
+        )
+        self.assertEqual([['autowell0C1.0', 'autowell8C1.0']], location_calls)
+        self.assertEqual(
+            [(4, ['autowell0C1.0', 'autowell8C1.0'], ['A1', 'A2'])],
+            controller.auto_stability_observer.reserved_raw_scans
+        )
+        self.assertEqual(
+            [('macro', 'PlateIn'),
+             ('run_protocol', 'UVVis',
+              'stability_batch_004_active_set_scan_0001',
+              ['A1', 'A2'], False),
+             ('macro', 'PlateOut')],
+            reader_calls
+        )
+        completed = controller.auto_stability_observer.completed_scans[0]
+        self.assertEqual('each_completion', completed['observation_reason'])
+        self.assertEqual('pipette_mix', completed['mixing_mode'])
+        self.assertEqual(0.0, completed['shake_duration_s'])
+
+    def test_one_window_policy_rejects_prior_batch_reader_evidence(self):
+        """A legacy one-window run must fail closed on mixed batches."""
+        controller = self._controller()
+        plan = {
+            'scan_wellnames': ['autowell0C1.0', 'autowell8C1.0'],
+            'reader_locations': ['A1', 'A2'],
+            'targeted_mix_acknowledgement_required': True,
+            'active_batch_numbers': [0, 4],
+            'retired_wellnames': [],
+            'triggering_wellname': 'autowell8C1.0',
+            'deck_pos': 4,
+            'plate_generation': 0,
+            'plate_mapping_revision': 0,
+        }
+        with self.assertRaisesRegex(RuntimeError, 'non-current batch'):
+            controller._run_auto_stability_post_mix_active_set_scan(
+                plan,
+                observation_reason='each_completion',
+                mixing_mode='pipette_mix'
+            )
 
 
 if __name__ == '__main__':
