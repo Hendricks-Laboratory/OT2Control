@@ -287,6 +287,38 @@ python3.9 -m py_compile controller.py optimizers.py
 
 Use the active Python 3.9 environment. If `python3.9` is unavailable, report that clearly rather than silently validating with an incompatible interpreter.
 
+#### Repository-local hardware-free test environment
+
+For source inspection, compilation, isolated unit tests, synthetic tests, and
+saved-fixture regression tests, use the repository-local environment:
+
+```text
+.venv/bin/python
+```
+
+It is an ignored, test-only Python 3.9 environment. It contains the scientific,
+optimization, spreadsheet, and controller-import dependencies needed for
+hardware-free verification; it is not a replacement for the lab-PC deployment
+environment and must never be used to operate laboratory hardware. Use a
+repository-local bytecode cache so macOS cache permissions cannot mask a source
+validation result:
+
+```text
+PYTHONPYCACHEPREFIX="$PWD/.venv/pycache" .venv/bin/python -m py_compile ...
+```
+
+When an isolated import requires the legacy Opentrons package, direct its local
+configuration writes into the ignored test environment and do not initialize a
+robot, reader, or controller:
+
+```text
+OT_API_CONFIG_DIR="$PWD/.venv/opentrons_config" .venv/bin/python ...
+```
+
+The test environment's package versions may differ from the production pins
+where no compatible local wheel exists. State that limitation explicitly and do
+not treat a passing local test as a deployment or physical-execution claim.
+
 Also perform relevant checks:
 
 - AST parse and duplicate-method detection.
