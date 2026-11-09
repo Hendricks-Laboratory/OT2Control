@@ -56,6 +56,7 @@ METRIC_STATUS_NO_POST_PEAK_DECLINE = 'no_post_peak_decline'
 # opts into adaptive retirement, every existing workbook maps to the fixed
 # window policy below.
 STABILITY_RETIREMENT_POLICY_FIXED_WINDOW = 'fixed_window'
+STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU = 'adaptive_plateau'
 
 
 def _is_blank(value):
@@ -96,6 +97,28 @@ def _parse_positive_finite(value, header_name):
     if not math.isfinite(numeric_value) or numeric_value <= 0.0:
         raise AutoStabilityValidationError(
             'Header value {} must be a finite positive number; received '
+            '{!r}.'.format(header_name, value)
+        )
+    return float(numeric_value)
+
+
+def _parse_nonnegative_finite(value, header_name):
+    '''Parse one finite, nonnegative scientific setting.'''
+    if _is_blank(value):
+        raise AutoStabilityValidationError(
+            'Header value {} is required for adaptive stability retirement.'
+            .format(header_name)
+        )
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        raise AutoStabilityValidationError(
+            'Header value {} must be a finite nonnegative number; received '
+            '{!r}.'.format(header_name, value)
+        )
+    if not math.isfinite(numeric_value) or numeric_value < 0.0:
+        raise AutoStabilityValidationError(
+            'Header value {} must be a finite nonnegative number; received '
             '{!r}.'.format(header_name, value)
         )
     return float(numeric_value)
@@ -194,6 +217,7 @@ def parse_auto_stability_header_settings(header_values):
             'auto_stability_decision_horizon_s': None,
             'auto_stability_max_observation_window_s': None,
             'auto_stability_retirement_policy': None,
+            'auto_stability_plateau_max_absorbance_slope_per_s': None,
         }
 
     trigger_reagent = canonical_reagent_name(
@@ -339,6 +363,54 @@ def parse_auto_stability_header_settings(header_values):
             'leave both optional values blank so they inherit '
             'auto_stability_observation_window_s.'
         )
+
+    raw_retirement_policy = _canonical_token(
+        header_values.get(
+            'auto_stability_retirement_policy',
+            STABILITY_RETIREMENT_POLICY_FIXED_WINDOW
+        )
+    )
+    retirement_policy_aliases = {
+        '': STABILITY_RETIREMENT_POLICY_FIXED_WINDOW,
+        'fixed': STABILITY_RETIREMENT_POLICY_FIXED_WINDOW,
+        'fixed_window': STABILITY_RETIREMENT_POLICY_FIXED_WINDOW,
+        'adaptive': STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU,
+        'adaptive_plateau': STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU,
+    }
+    if raw_retirement_policy not in retirement_policy_aliases:
+        raise AutoStabilityValidationError(
+            'Header value auto_stability_retirement_policy must be '
+            'fixed_window or adaptive_plateau. Received: {!r}.'.format(
+                raw_retirement_policy
+            )
+        )
+    retirement_policy = retirement_policy_aliases[raw_retirement_policy]
+    plateau_max_absorbance_slope_per_s = None
+    if retirement_policy == STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU:
+        if not (
+                mode == STABILITY_MODE_STABILITY_ONLY
+                and mixing_mode == STABILITY_MIXING_MODE_PIPETTE_MIX
+                and scan_schedule == STABILITY_SCAN_SCHEDULE_EACH_COMPLETION):
+            raise AutoStabilityValidationError(
+                'auto_stability_retirement_policy=adaptive_plateau is '
+                'currently supported only for '
+                'auto_stability_mode=stability_only with the paired '
+                'pipette_mix/each_completion policy.'
+            )
+        plateau_max_absorbance_slope_per_s = _parse_nonnegative_finite(
+            header_values.get(
+                'auto_stability_plateau_max_absorbance_slope_per_s'
+            ),
+            'auto_stability_plateau_max_absorbance_slope_per_s'
+        )
+    elif not _is_blank(
+            header_values.get(
+                'auto_stability_plateau_max_absorbance_slope_per_s'
+            )):
+        raise AutoStabilityValidationError(
+            'auto_stability_plateau_max_absorbance_slope_per_s is only used '
+            'with auto_stability_retirement_policy=adaptive_plateau.'
+        )
     # The later bounded post-batch drain continues to use this interval for
     # un-mixed cadence scans even under ``each_completion``.  It is therefore
     # required for both scientifically valid policy pairs.
@@ -374,8 +446,9 @@ def parse_auto_stability_header_settings(header_values):
         'auto_stability_mixing_mode': mixing_mode,
         'auto_stability_decision_horizon_s': decision_horizon_s,
         'auto_stability_max_observation_window_s': max_observation_window_s,
-        'auto_stability_retirement_policy': (
-            STABILITY_RETIREMENT_POLICY_FIXED_WINDOW
+        'auto_stability_retirement_policy': retirement_policy,
+        'auto_stability_plateau_max_absorbance_slope_per_s': (
+            plateau_max_absorbance_slope_per_s
         ),
     }
 

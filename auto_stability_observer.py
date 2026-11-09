@@ -37,8 +37,10 @@ from auto_stability_per_trigger import (
 # the scan's filename/audit anchor. Existing reporting readers ignore fields
 # they do not need and continue to read older run-local manifests by name.
 # Version 7 adds explicit fixed-horizon and maximum-window lifecycle events
-# for cross-batch decision-snapshot auditability.
-STABILITY_OBSERVER_SCHEMA_VERSION = 7
+# for cross-batch decision-snapshot auditability. Version 8 adds auditable
+# raw-evidence adaptive retirement events; it never changes reader scheduling
+# itself or substitutes synthetic debug evidence for a physical observation.
+STABILITY_OBSERVER_SCHEMA_VERSION = 8
 
 ACTIVATION_STATUS_PENDING = 'pending_trigger_completion'
 ACTIVATION_STATUS_ACTIVE = 'active'
@@ -88,6 +90,10 @@ MANIFEST_COLUMNS = (
     'decision_horizon_s',
     'max_observation_window_s',
     'retirement_reason',
+    'lifecycle_state',
+    'plateau_post_peak_observation_count',
+    'plateau_recent_interval_slopes_absorbance_per_s',
+    'plateau_max_absorbance_slope_per_s',
     'notes',
 )
 
@@ -1126,3 +1132,97 @@ class AutoStabilityObserver:
                 retirement_reason='maximum_observation_window_expired'
             )
         return completed
+
+    def record_adaptive_lifecycle_retirements(
+            self, lifecycle_records, monitoring_policy):
+        '''Durably retire only controller-evaluated adaptive terminal wells.
+
+        The controller supplies lifecycle results derived from immutable,
+        blank-corrected raw reader files. This observer intentionally refuses
+        maximum-window retirement here because the established
+        ``complete_expired_observation_windows`` path owns that boundary.
+        Thus an unavailable raw file can only leave a well active until the
+        maximum window; it cannot create a speculative early retirement.
+        '''
+        if not isinstance(lifecycle_records, dict):
+            raise AutoStabilityObserverError(
+                'Adaptive lifecycle records must be a dictionary by wellname.'
+            )
+        if not isinstance(monitoring_policy, dict):
+            raise AutoStabilityObserverError(
+                'Adaptive monitoring policy must be a dictionary.'
+            )
+        if monitoring_policy.get('adaptive_retirement_enabled') is not True:
+            return []
+        events = []
+        for wellname, lifecycle in lifecycle_records.items():
+            wellname = self._require_wellname(wellname)
+            record = self._active_wells.get(wellname)
+            if record is None or record['activation_status'] != ACTIVATION_STATUS_ACTIVE:
+                raise AutoStabilityObserverError(
+                    'Adaptive retirement requires an active completed well: {}.'
+                    .format(wellname)
+                )
+            if not isinstance(lifecycle, dict) or lifecycle.get('retired') is not True:
+                continue
+            retirement_reason = lifecycle.get('retirement_reason')
+            if retirement_reason not in (
+                    'plateau_confirmed', 'terminal_low_signal'):
+                raise AutoStabilityObserverError(
+                    'Adaptive retirement for {} has unsupported reason {!r}.'
+                    .format(wellname, retirement_reason)
+                )
+            if lifecycle.get('decision_ready') is not True:
+                raise AutoStabilityObserverError(
+                    'Adaptive retirement for {} is not decision-ready.'
+                    .format(wellname)
+                )
+            plateau = lifecycle.get('plateau') or {}
+            record['activation_status'] = ACTIVATION_STATUS_WINDOW_COMPLETE
+            event_type = (
+                'observation_plateau_confirmed'
+                if retirement_reason == 'plateau_confirmed'
+                else 'observation_terminal_qc_excluded'
+            )
+            events.append(self._append_event(
+                event_type,
+                batch_number=record['batch_number'],
+                wellname=wellname,
+                transfer_volume_uL=record['transfer_volume_uL'],
+                trigger_command_id=record['trigger_command_id'],
+                activation_status=ACTIVATION_STATUS_WINDOW_COMPLETE,
+                trigger_completion_sequence=(
+                    record['trigger_completion_sequence']
+                ),
+                plate_generation=record.get('plate_generation', ''),
+                plate_mapping_revision=record.get(
+                    'plate_mapping_revision', ''
+                ),
+                plate_deck_pos=record.get('deck_pos', ''),
+                reader_location=record.get('reader_location', ''),
+                decision_horizon_s=monitoring_policy['decision_horizon_s'],
+                max_observation_window_s=(
+                    monitoring_policy['max_observation_window_s']
+                ),
+                retirement_reason=retirement_reason,
+                lifecycle_state=lifecycle.get('state', ''),
+                plateau_post_peak_observation_count=plateau.get(
+                    'post_peak_observation_count', ''
+                ),
+                plateau_recent_interval_slopes_absorbance_per_s=';'.join(
+                    str(value) for value in plateau.get(
+                        'recent_interval_slopes_absorbance_per_s', []
+                    )
+                ),
+                plateau_max_absorbance_slope_per_s=monitoring_policy[
+                    'plateau_max_absorbance_slope_per_s'
+                ],
+                notes=(
+                    'Adaptive retirement was derived from immutable '
+                    'blank-corrected raw reader evidence after the fixed '
+                    'decision horizon and before the maximum observation '
+                    'window. Recorded stability scan count: {}.'
+                    .format(record['observation_count'])
+                )
+            ))
+        return events

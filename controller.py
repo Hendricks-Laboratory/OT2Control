@@ -129,6 +129,7 @@ from auto_preparation import (
 from auto_stability import (
     AutoStabilityValidationError,
     STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE,
+    STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU,
     STABILITY_MIXING_MODE_PIPETTE_MIX,
     STABILITY_MODE_MONITOR,
     STABILITY_MODE_STABILITY_ONLY,
@@ -139,7 +140,10 @@ from auto_stability import (
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
 )
-from auto_stability_lifecycle import build_stability_monitoring_policy
+from auto_stability_lifecycle import (
+    build_stability_monitoring_policy,
+    evaluate_well_monitoring_lifecycle,
+)
 from auto_stability_debug import (
     SYNTHETIC_COMPANION_EVIDENCE_SOURCE,
     build_synthetic_companion_evidence,
@@ -5961,7 +5965,9 @@ class AutoContr(Controller):
                     '<<controller>> Auto stability-only selection '
                     'configured: reference-peak absorbance bounds=[{}, {}], '
                     'signal confidence z={}, replicate log10 loss-rate SD '
-                    'limit={}, trigger={}. '
+                    'limit={}, trigger={}, decision horizon={} s, maximum '
+                    'window={} s, retirement policy={}, plateau slope '
+                    'threshold={}. '
                     'No wavelength target, target stopping, or lambda '
                     'selection gate is configured.'.format(
                         stability_settings['auto_stability_min_peak_absorbance'],
@@ -5973,6 +5979,18 @@ class AutoContr(Controller):
                             'auto_stability_replicate_log10_loss_rate_sd_max'
                         ],
                         stability_settings['auto_stability_trigger_reagent'],
+                        stability_settings[
+                            'auto_stability_decision_horizon_s'
+                        ],
+                        stability_settings[
+                            'auto_stability_max_observation_window_s'
+                        ],
+                        stability_settings[
+                            'auto_stability_retirement_policy'
+                        ],
+                        stability_settings[
+                            'auto_stability_plateau_max_absorbance_slope_per_s'
+                        ],
                     )
                 )
                 if stability_settings['auto_stability_debug_mode'] == (
@@ -6191,15 +6209,26 @@ class AutoContr(Controller):
             )
         return False
 
-    def _get_auto_stability_fixed_window_policy(self):
-        '''Return the non-adaptive decision/max lifecycle policy.
+    def _get_auto_stability_monitoring_policy(self):
+        '''Return the explicitly configured decision/max lifecycle policy.
 
         Older Header files map their one observation window to both values in
-        ``parse_auto_stability_header_settings``. Stage 13D-E may provide a
-        shorter comparable decision horizon for stability-only runs, but it
-        still uses only the validated fixed maximum-window retirement rule;
-        adaptive plateau retirement remains deliberately disabled.
+        ``parse_auto_stability_header_settings``. The fixed-window policy is
+        the default. Adaptive plateau retirement is available only after the
+        Header parser has accepted its paired stability-only targeted-mix
+        policy and explicit slope threshold.
         '''
+        retirement_policy = self.robo_params.get(
+            'auto_stability_retirement_policy', 'fixed_window'
+        )
+        adaptive_retirement_enabled = (
+            retirement_policy == STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU
+        )
+        slope_threshold = self.robo_params.get(
+            'auto_stability_plateau_max_absorbance_slope_per_s'
+        )
+        if not adaptive_retirement_enabled:
+            slope_threshold = 0.0
         return build_stability_monitoring_policy(
             decision_horizon_s=self.robo_params.get(
                 'auto_stability_decision_horizon_s',
@@ -6209,11 +6238,115 @@ class AutoContr(Controller):
                 'auto_stability_max_observation_window_s',
                 self.robo_params['auto_stability_observation_window_s']
             ),
-            adaptive_retirement_enabled=False,
+            adaptive_retirement_enabled=adaptive_retirement_enabled,
             plateau_min_tail_observation_count=3,
             plateau_consecutive_interval_count=2,
-            plateau_max_absorbance_slope_per_s=0.0,
+            plateau_max_absorbance_slope_per_s=slope_threshold,
         )
+
+    def _get_auto_stability_fixed_window_policy(self):
+        '''Return the configured policy through the legacy helper name.
+
+        Existing source-level tests and integrations call this method. The
+        Header still defaults to fixed-window behavior, so retaining the
+        spelling avoids a needless interface break while the scheduler uses
+        the more accurately named method above.
+        '''
+        return self._get_auto_stability_monitoring_policy()
+
+    def _get_auto_stability_raw_lifecycle_observations(self, active_records):
+        '''Return real raw-reader observations in observer monotonic time.
+
+        This is intentionally a read-only bridge between immutable Stage-12D
+        spectra and Stage-14B scheduling. It never permits synthetic debug
+        companion evidence, never reads a current plate mapping, and fails
+        closed: a loading problem leaves the affected well active until the
+        established maximum-window path retires it.
+        '''
+        active_records = list(active_records or [])
+        active_by_well = {
+            record['wellname']: record for record in active_records
+        }
+        if not active_by_well:
+            return {}
+        try:
+            records = self._build_auto_stability_reporting_records(
+                use_debug_evidence=False
+            )
+        except Exception as exc:
+            print(
+                '<<controller warning>> Adaptive stability retirement could '
+                'not load immutable raw-reader evidence; active wells remain '
+                'under maximum-window monitoring: {}.'.format(exc)
+            )
+            return {}
+        observations_by_well = {}
+        for row in records.get('trajectory_rows', []):
+            wellname = row.get('wellname')
+            if wellname not in active_by_well:
+                continue
+            if not row.get('metric_eligible_interval'):
+                continue
+            elapsed_s = row.get('elapsed_s_from_trigger_to_scan_start')
+            absorbance = row.get('reference_absorbance')
+            if elapsed_s is None or absorbance is None:
+                continue
+            try:
+                timestamp_s = (
+                    float(active_by_well[wellname]['activation_monotonic_s'])
+                    + float(elapsed_s)
+                )
+                absorbance = float(absorbance)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(timestamp_s) or not math.isfinite(absorbance):
+                continue
+            observations_by_well.setdefault(wellname, []).append({
+                'timestamp_s': timestamp_s,
+                'reference_absorbance': absorbance,
+                'lambda_max_nm': row.get('lambda_max_nm'),
+            })
+        return observations_by_well
+
+    def _record_auto_stability_adaptive_retirements(
+            self, monitoring_policy, now_monotonic_s):
+        '''Record safe early retirements using only raw physical evidence.'''
+        if not monitoring_policy['adaptive_retirement_enabled']:
+            return {}
+        observer = self.auto_stability_observer
+        active_records = observer.get_active_wells()
+        observations_by_well = (
+            self._get_auto_stability_raw_lifecycle_observations(active_records)
+        )
+        lifecycle_records = {}
+        for record in active_records:
+            wellname = record['wellname']
+            try:
+                lifecycle = evaluate_well_monitoring_lifecycle(
+                    trigger_timestamp_s=record['activation_monotonic_s'],
+                    now_timestamp_s=now_monotonic_s,
+                    observations=observations_by_well.get(wellname, []),
+                    minimum_peak_absorbance=self.robo_params[
+                        'auto_stability_min_peak_absorbance'
+                    ],
+                    policy=monitoring_policy,
+                    trigger_completed=True,
+                )
+            except Exception as exc:
+                print(
+                    '<<controller warning>> Adaptive stability lifecycle '
+                    'evaluation for {} was unavailable; it remains active '
+                    'until its maximum window: {}.'.format(wellname, exc)
+                )
+                continue
+            if lifecycle.get('retirement_reason') in (
+                    'plateau_confirmed', 'terminal_low_signal'):
+                lifecycle_records[wellname] = lifecycle
+        if lifecycle_records:
+            observer.record_adaptive_lifecycle_retirements(
+                lifecycle_records, monitoring_policy
+            )
+        return observations_by_well
 
     def _uses_auto_stability_cross_batch_scheduler(self):
         '''Return whether the separately validated cross-batch path is active.
@@ -6275,27 +6408,34 @@ class AutoContr(Controller):
     def _plan_auto_stability_post_mix_active_set(self, triggering_wellname):
         '''Return one current-plate plan after durable mix acknowledgements.'''
         observer = self.auto_stability_observer
-        max_window_s = self.robo_params.get(
-            'auto_stability_max_observation_window_s',
-            self.robo_params['auto_stability_observation_window_s']
-        )
+        monitoring_policy = self._get_auto_stability_monitoring_policy()
+        max_window_s = monitoring_policy['max_observation_window_s']
         # Reader staging can cross a maximum-window boundary. Retire those
         # wells durably, then replan; never allow a planner-only retirement
         # to silently alter the manifest or reader layout.
         for unused_attempt in range(2):
+            now_monotonic_s = time.monotonic()
             observer.complete_expired_observation_windows(
                 max_window_s,
-                now_monotonic_s=time.monotonic()
+                now_monotonic_s=now_monotonic_s
+            )
+            if not observer.get_active_wells():
+                return None
+            observations_by_well = (
+                self._record_auto_stability_adaptive_retirements(
+                    monitoring_policy, now_monotonic_s
+                )
             )
             if not observer.get_active_wells():
                 return None
             plan = observer.plan_stage13_post_mix_active_set(
                 triggering_wellname=triggering_wellname,
                 now_monotonic_s=time.monotonic(),
-                monitoring_policy=self._get_auto_stability_fixed_window_policy(),
+                monitoring_policy=monitoring_policy,
                 minimum_peak_absorbance=self.robo_params[
                     'auto_stability_min_peak_absorbance'
-                ]
+                ],
+                observations_by_well=observations_by_well,
             )
             if not plan['retired_wellnames']:
                 if not self._uses_auto_stability_cross_batch_scheduler() and (
@@ -7194,10 +7334,8 @@ class AutoContr(Controller):
             return
 
         settings = self.robo_params
-        observation_window_s = settings.get(
-            'auto_stability_max_observation_window_s',
-            settings['auto_stability_observation_window_s']
-        )
+        monitoring_policy = self._get_auto_stability_monitoring_policy()
+        observation_window_s = monitoring_policy['max_observation_window_s']
         scan_schedule = settings['auto_stability_scan_schedule']
         scan_interval_s = settings['auto_stability_scan_interval_s']
 
@@ -7206,6 +7344,9 @@ class AutoContr(Controller):
             observer.complete_expired_observation_windows(
                 observation_window_s,
                 now_monotonic_s=now_monotonic_s
+            )
+            self._record_auto_stability_adaptive_retirements(
+                monitoring_policy, now_monotonic_s
             )
             active_records = observer.get_active_wells()
             if not active_records:
@@ -31673,7 +31814,8 @@ class AutoContr(Controller):
                     })
         return spectra_by_raw_scan, qc_rows
 
-    def _build_auto_stability_reporting_records(self, metric_window_s=None):
+    def _build_auto_stability_reporting_records(
+            self, metric_window_s=None, use_debug_evidence=True):
         '''Derive stability records from immutable scans for one fixed window.
 
         This shared, read-only helper lets Stage 12E use the exact same
@@ -31700,7 +31842,9 @@ class AutoContr(Controller):
                     'trigger_transfer_completed',
                     'stage13_physical_identity_registered',
                     'decision_horizon_reached',
-                    'observation_window_completed'):
+                    'observation_window_completed',
+                    'observation_plateau_confirmed',
+                    'observation_terminal_qc_excluded'):
                 continue
             lifecycle_rows.append({
                 'event_type': row.get('event_type', ''),
@@ -31719,6 +31863,16 @@ class AutoContr(Controller):
                     'max_observation_window_s', ''
                 ),
                 'retirement_reason': row.get('retirement_reason', ''),
+                'lifecycle_state': row.get('lifecycle_state', ''),
+                'plateau_post_peak_observation_count': row.get(
+                    'plateau_post_peak_observation_count', ''
+                ),
+                'plateau_recent_interval_slopes_absorbance_per_s': row.get(
+                    'plateau_recent_interval_slopes_absorbance_per_s', ''
+                ),
+                'plateau_max_absorbance_slope_per_s': row.get(
+                    'plateau_max_absorbance_slope_per_s', ''
+                ),
                 'notes': row.get('notes', ''),
             })
         spectra_by_raw_scan, load_qc_rows = (
@@ -31726,8 +31880,10 @@ class AutoContr(Controller):
         )
         evidence_source = 'raw_reader'
         debug_evidence_rows = []
-        if self.robo_params.get('auto_stability_debug_mode') == (
-                STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
+        if (
+                use_debug_evidence
+                and self.robo_params.get('auto_stability_debug_mode') == (
+                    STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE)):
             # Preserve and validate every real raw reader file first. The
             # fixture can never conceal an absent/malformed manifest-linked
             # spectrum because its builder requires that exact pair to have

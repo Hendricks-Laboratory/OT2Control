@@ -46,6 +46,7 @@ def _load_methods(method_names):
         'STABILITY_MIXING_MODE_PIPETTE_MIX': 'pipette_mix',
         'STABILITY_MODE_STABILITY_ONLY': 'stability_only',
         'STABILITY_SCAN_SCHEDULE_EACH_COMPLETION': 'each_completion',
+        'STABILITY_RETIREMENT_POLICY_ADAPTIVE_PLATEAU': 'adaptive_plateau',
         'TARGETED_MIX_DEFAULT_VOLUME_UL': 150.0,
         'TARGETED_MIX_DEFAULT_CYCLE_COUNT': 5,
         'build_stability_monitoring_policy': (
@@ -137,6 +138,7 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
         cls.AutoController = _load_methods([
             '_uses_auto_stability_pipette_mix_schedule',
             '_uses_auto_stability_cross_batch_scheduler',
+            '_get_auto_stability_monitoring_policy',
             '_get_auto_stability_fixed_window_policy',
             '_get_auto_stability_latest_active_wellname',
             '_confirm_auto_stability_trigger_step_completion',
@@ -239,6 +241,18 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
         self.assertFalse(policy['adaptive_retirement_enabled'])
         self.assertEqual(90.0, policy['decision_horizon_s'])
         self.assertEqual(90.0, policy['max_observation_window_s'])
+
+    def test_adaptive_policy_uses_the_explicit_header_threshold(self):
+        controller = self._controller()
+        controller.robo_params.update({
+            'auto_stability_retirement_policy': 'adaptive_plateau',
+            'auto_stability_plateau_max_absorbance_slope_per_s': 0.002,
+        })
+        policy = controller._get_auto_stability_monitoring_policy()
+        self.assertTrue(policy['adaptive_retirement_enabled'])
+        self.assertAlmostEqual(
+            policy['plateau_max_absorbance_slope_per_s'], 0.002
+        )
 
     def test_cross_batch_path_requires_shorter_targeted_stability_horizon(self):
         controller = self._controller()

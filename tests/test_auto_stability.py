@@ -88,6 +88,9 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             settings['auto_stability_retirement_policy'], 'fixed_window'
         )
         self.assertIsNone(
+            settings['auto_stability_plateau_max_absorbance_slope_per_s']
+        )
+        self.assertIsNone(
             settings['auto_stability_replicate_log10_loss_rate_sd_max']
         )
 
@@ -120,6 +123,42 @@ class AutoStabilityConfigurationTests(unittest.TestCase):
             parse_auto_stability_header_settings(_monitor_header(
                 auto_stability_decision_horizon_s='120',
                 auto_stability_max_observation_window_s='900',
+            ))
+
+    def test_adaptive_retirement_requires_explicit_supported_policy(self):
+        header = _monitor_header(
+            auto_stability_mode='stability_only',
+            auto_stability_scan_schedule='each_completion',
+            auto_stability_mixing_mode='pipette_mix',
+            auto_stability_max_peak_absorbance='0.90',
+            auto_stability_signal_confidence_z='1.96',
+            auto_stability_replicate_log10_loss_rate_sd_max='0.20',
+            auto_stability_decision_horizon_s='120',
+            auto_stability_max_observation_window_s='900',
+            auto_stability_retirement_policy='adaptive_plateau',
+            auto_stability_plateau_max_absorbance_slope_per_s='0.002',
+        )
+        settings = parse_auto_stability_header_settings(header)
+        self.assertEqual(
+            settings['auto_stability_retirement_policy'], 'adaptive_plateau'
+        )
+        self.assertAlmostEqual(
+            settings['auto_stability_plateau_max_absorbance_slope_per_s'],
+            0.002
+        )
+        with self.assertRaisesRegex(AutoStabilityValidationError, 'required'):
+            parse_auto_stability_header_settings(dict(
+                header,
+                auto_stability_plateau_max_absorbance_slope_per_s=''
+            ))
+        with self.assertRaisesRegex(AutoStabilityValidationError, 'only'):
+            parse_auto_stability_header_settings(_monitor_header(
+                auto_stability_retirement_policy='adaptive_plateau',
+                auto_stability_plateau_max_absorbance_slope_per_s='0.002',
+            ))
+        with self.assertRaisesRegex(AutoStabilityValidationError, 'only used'):
+            parse_auto_stability_header_settings(_monitor_header(
+                auto_stability_plateau_max_absorbance_slope_per_s='0.002',
             ))
 
     def test_monitor_requires_explicit_scientific_settings(self):

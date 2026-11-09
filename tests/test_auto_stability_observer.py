@@ -53,7 +53,7 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual(
             event['schema_version'], STABILITY_OBSERVER_SCHEMA_VERSION
         )
-        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 7)
+        self.assertEqual(STABILITY_OBSERVER_SCHEMA_VERSION, 8)
 
         completion = self.observer.confirm_trigger_transfer_completed(
             'autowell0C1.0'
@@ -236,6 +236,78 @@ class AutoStabilityObserverTests(unittest.TestCase):
             self._manifest_rows()[-1]['event_type'],
             'observation_window_completed'
         )
+
+    def test_adaptive_retirement_records_reason_and_plateau_audit(self):
+        self.observer.record_trigger_transfer_dispatched(
+            0, 'autowell0C1.0', 20.0, 1
+        )
+        self.observer.confirm_trigger_transfer_completed('autowell0C1.0')
+        events = self.observer.record_adaptive_lifecycle_retirements(
+            {
+                'autowell0C1.0': {
+                    'retired': True,
+                    'decision_ready': True,
+                    'state': 'plateau_confirmed',
+                    'retirement_reason': 'plateau_confirmed',
+                    'plateau': {
+                        'post_peak_observation_count': 3,
+                        'recent_interval_slopes_absorbance_per_s': [
+                            -0.001, -0.0005,
+                        ],
+                    },
+                },
+            },
+            {
+                'adaptive_retirement_enabled': True,
+                'decision_horizon_s': 30.0,
+                'max_observation_window_s': 90.0,
+                'plateau_max_absorbance_slope_per_s': 0.002,
+            }
+        )
+        self.assertEqual(['observation_plateau_confirmed'], [
+            event['event_type'] for event in events
+        ])
+        self.assertEqual([], self.observer.get_active_wells())
+        row = self._manifest_rows()[-1]
+        self.assertEqual('plateau_confirmed', row['retirement_reason'])
+        self.assertEqual('plateau_confirmed', row['lifecycle_state'])
+        self.assertEqual('3', row['plateau_post_peak_observation_count'])
+        self.assertEqual(
+            '-0.001;-0.0005',
+            row['plateau_recent_interval_slopes_absorbance_per_s']
+        )
+
+    def test_adaptive_retirement_refuses_unsupported_or_early_result(self):
+        self.observer.record_trigger_transfer_dispatched(
+            0, 'autowell0C2.0', 20.0, 2
+        )
+        self.observer.confirm_trigger_transfer_completed('autowell0C2.0')
+        policy = {
+            'adaptive_retirement_enabled': True,
+            'decision_horizon_s': 30.0,
+            'max_observation_window_s': 90.0,
+            'plateau_max_absorbance_slope_per_s': 0.002,
+        }
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'not decision-ready'):
+            self.observer.record_adaptive_lifecycle_retirements(
+                {
+                    'autowell0C2.0': {
+                        'retired': True,
+                        'decision_ready': False,
+                        'retirement_reason': 'plateau_confirmed',
+                    },
+                }, policy
+            )
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'unsupported'):
+            self.observer.record_adaptive_lifecycle_retirements(
+                {
+                    'autowell0C2.0': {
+                        'retired': True,
+                        'decision_ready': True,
+                        'retirement_reason': 'maximum_observation_window_expired',
+                    },
+                }, policy
+            )
 
     def test_cadence_never_schedules_a_reader_start_after_window_end(self):
         monotonic_time = [10.0]
