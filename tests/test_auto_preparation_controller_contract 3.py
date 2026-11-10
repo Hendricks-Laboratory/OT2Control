@@ -1,0 +1,219 @@
+'''Source-level Stage 9A/9C checks without importing hardware modules.'''
+
+import ast
+import os
+import unittest
+
+from auto_live_run_state import EVENT_TYPES
+
+
+REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONTROLLER_PATH = os.path.join(REPOSITORY_ROOT, 'controller.py')
+PREPARATION_PATH = os.path.join(REPOSITORY_ROOT, 'auto_preparation.py')
+
+
+class AutoPreparationControllerContractTests(unittest.TestCase):
+    '''Guard the staged, fail-closed grouped-preparation controller boundary.'''
+
+    @classmethod
+    def setUpClass(cls):
+        with open(CONTROLLER_PATH, 'r', encoding='utf-8') as source_file:
+            cls.source = source_file.read()
+        with open(PREPARATION_PATH, 'r', encoding='utf-8') as source_file:
+            cls.preparation_source = source_file.read()
+        cls.tree = ast.parse(cls.source, filename=CONTROLLER_PATH)
+        cls.auto_class = next(
+            node for node in cls.tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'AutoContr'
+        )
+        cls.controller_class = next(
+            node for node in cls.tree.body
+            if isinstance(node, ast.ClassDef) and node.name == 'Controller'
+        )
+        cls.auto_methods = {
+            node.name: node
+            for node in cls.auto_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+        cls.controller_methods = {
+            node.name: node
+            for node in cls.controller_class.body
+            if isinstance(node, ast.FunctionDef)
+        }
+
+    def test_planning_and_phase_methods_exist_once(self):
+        for method_name in (
+            '_initialize_auto_preparation_plan',
+            '_execute_auto_preparation_phase',
+            '_build_auto_preparation_reservation_request',
+            '_validate_auto_preparation_group_reservation',
+            '_request_auto_preparation_group_reservation',
+            '_build_auto_preparation_execution_request',
+            '_validate_auto_preparation_group_execution',
+            '_request_auto_preparation_group_execution'
+        ):
+            self.assertIn(method_name, self.auto_methods)
+            self.assertEqual(
+                sum(
+                    1 for node in self.auto_class.body
+                    if isinstance(node, ast.FunctionDef) and node.name == method_name
+                ),
+                1
+            )
+
+    def test_planning_runs_before_connection_and_seed_generation(self):
+        initialization = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_preparation_plan']
+        )
+        run_method = ast.get_source_segment(self.source, self.auto_methods['_run'])
+        self.assertIn('build_preparation_manifest(', initialization)
+        self.assertLess(
+            run_method.index('self.create_connection('),
+            run_method.index('self._execute_auto_preparation_phase(')
+        )
+        self.assertLess(
+            run_method.index('self._execute_auto_preparation_phase('),
+            run_method.index('model.generate_initial_design(')
+        )
+
+    def test_phase_reserves_then_executes_before_source_activation(self):
+        phase_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_preparation_phase']
+        )
+        self.assertIn('_build_auto_preparation_reservation_request(', phase_source)
+        self.assertIn('_request_auto_preparation_group_reservation(', phase_source)
+        self.assertIn('_build_auto_preparation_execution_request(', phase_source)
+        self.assertIn('_request_auto_preparation_group_execution(', phase_source)
+        self.assertNotIn('_execute_auto_preparation_entry(', phase_source)
+        self.assertIn('_activate_auto_prepared_sources(', phase_source)
+        self.assertNotIn('execute_protocol_df(', phase_source)
+
+    def test_execution_contract_is_versioned_and_journaled_before_activation(self):
+        phase_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_preparation_phase']
+        )
+        request_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_build_auto_preparation_reservation_request']
+        )
+        validation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_reservation']
+        )
+        execution_validation = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_execution']
+        )
+        self.assertIn("'schema_version': 3", request_source)
+        self.assertIn("'expected_source_inventory_revision'", request_source)
+        self.assertIn("'auto_preparation_groups_reserved'", validation_source)
+        self.assertIn("'stock_uses_temperature_module'", validation_source)
+        self.assertIn("'water_source_policy'", validation_source)
+        self.assertIn("if water_policy == 'auto'", validation_source)
+        self.assertIn("water_policy == 'temperature_controlled'", validation_source)
+        self.assertIn("'water_uses_temperature_module'", validation_source)
+        self.assertIn("'physical_execution_started'", execution_validation)
+        self.assertIn("'auto_preparation_groups_executed'", execution_validation)
+        self.assertIn('_record_auto_live_run_event(', phase_source)
+
+    def test_source_activation_uses_the_planner_manifest_schema(self):
+        '''Activation must consume the same keys emitted by the pure planner.'''
+        activation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_activate_auto_prepared_sources']
+        )
+        legacy_entry_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_execute_auto_preparation_entry']
+        )
+
+        self.assertIn("'stock_source_group'", self.preparation_source)
+        self.assertIn("preparation['stock_source_group']", activation_source)
+        self.assertIn("preparation['stock_source_group']", legacy_entry_source)
+        self.assertIn(
+            "preparation['final_volume_per_tube_uL']",
+            legacy_entry_source
+        )
+        self.assertNotIn('stock_reagent', activation_source)
+        self.assertNotIn('stock_reagent', legacy_entry_source)
+
+    def test_variable_source_binding_is_validated_before_robot_connection(self):
+        '''Prepared variables must bind to working-source provenance early.'''
+        initialization_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_initialize_auto_preparation_plan']
+        )
+        binding_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_resolve_variable_source_bindings']
+        )
+        transfer_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_get_transfer_container']
+        )
+
+        self.assertIn('_resolve_variable_source_bindings(', initialization_source)
+        self.assertIn('build_variable_source_bindings(', binding_source)
+        self.assertIn('variable_source_binding_column_present', binding_source)
+        self.assertIn('variable_source_bindings', transfer_source)
+
+    def test_explicit_destination_tubes_flow_to_the_pi_reservation(self):
+        '''An operator-specified destination plan must not become a hint.'''
+        request_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_build_auto_preparation_reservation_request']
+        )
+        validation_source = ast.get_source_segment(
+            self.source,
+            self.auto_methods['_validate_auto_preparation_group_reservation']
+        )
+        self.assertIn("'requested_destination_tubes'", request_source)
+        self.assertIn("'water_source_policy'", request_source)
+        self.assertIn("requested['requested_destination_tubes']", validation_source)
+        self.assertIn('explicit destination-tube plan', validation_source)
+
+    def test_optional_workbook_field_preserves_legacy_product_columns(self):
+        '''A missing new field must be inserted before, never after, reagent.'''
+        load_source = ast.get_source_segment(
+            self.source,
+            self.controller_methods['_load_rxn_df']
+        )
+        self.assertIn("'variable source concentration (mM)'", load_source)
+        self.assertIn('reagent_column_position', load_source)
+        self.assertIn('rxn_df.insert(', load_source)
+
+    def test_preparation_phase_events_match_live_run_contract(self):
+        '''Each controller-emitted preparation event must be journal-valid.'''
+        phase_node = self.auto_methods['_execute_auto_preparation_phase']
+        event_names = []
+
+        for node in ast.walk(phase_node):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != '_record_auto_live_run_event':
+                continue
+
+            self.assertTrue(node.args)
+            self.assertIsInstance(node.args[0], ast.Constant)
+            event_names.append(node.args[0].value)
+
+        self.assertEqual(
+            event_names,
+            [
+                'auto_preparation_groups_reserved',
+                'auto_preparation_groups_executed',
+                'auto_preparation_sources_activated'
+            ]
+        )
+
+        for event_name in event_names:
+            self.assertIn(event_name, EVENT_TYPES)
+
+
+if __name__ == '__main__':
+    unittest.main()
