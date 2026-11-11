@@ -1484,6 +1484,46 @@ run is not needed to validate this reporting-only stage; the separately
 deferred Stage 14C1 and 14C2 water checkpoints remain required to establish
 their respective physical scheduler behavior.
 
+### Stage 14F1 final stability evidence plot suite — 2026-11-11
+
+Stage 14F1 adds a final, reporting-only visualization layer under:
+
+```text
+Plots/stability/
+```
+
+It consumes only the completed Stage-12D/13/14 reporting records already
+derived from the immutable manifest and raw-reader evidence. It does not open
+a reader file, alter a manifest or CSV, fit a model, change a frozen decision
+snapshot, schedule a scan, send a packet, alter a workbook, or modify
+Auto-main. It therefore cannot affect the physical run that produced the
+records.
+
+The suite contains a paginated per-well trajectory atlas, condition-level
+loss-rate summaries with eligible-replicate denominators, a well lifecycle
+timeline, a raw-scan membership matrix, and a decision-window versus later
+audit-only evidence view. The legacy final trajectory and condition-summary
+filenames remain available for report compatibility. All figures preserve the
+controller's interval-eligibility decision: points from reader intervals that
+were not wholly inside a well's metric window remain visible as audit-only and
+are never rendered as model-facing evidence. DEBUG-only synthetic companion
+evidence receives an explicit visual warning.
+
+For `stability_only`, the existing `auto_plot_profile` now controls only this
+final report suite: `off` remains no figures, while `standard` and
+`final_only` request the same final stability outputs. The ordinary Auto
+lambda-max plot coordinator is still bypassed, so no absent lambda GP is
+plotted and no in-run plotting delay is added. Generated paths are appended to
+the normal plot manifest and linked from the stability-only final report.
+
+Python 3.9 compilation, an AST controller-boundary check, synthetic
+cross-batch/missing-data/debug-label plot tests, the focused 132-test stability
+suite, and the complete 549-test hardware-free suite passed. This validates
+the data/plotting contract only; human visual review of the first controlled
+water-run figures remains required before presenting the plots as a finalized
+laboratory reporting format. The deferred Stage 14C1 and 14C2 physical water
+checkpoints remain unchanged.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,

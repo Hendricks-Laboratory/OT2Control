@@ -664,10 +664,11 @@ class AutoStabilityControllerContractTests(unittest.TestCase):
 
         fake_controller.robo_params['auto_model_checkpoint_mode'] = 'off'
         fake_controller.robo_params['auto_plot_profile'] = 'standard'
-        with self.assertRaisesRegex(
-                AutoStabilityValidationError,
-                'plot_profile=off'):
-            initialize(fake_controller)
+        initialize(fake_controller)
+        self.assertEqual(
+            fake_controller.robo_params['auto_plot_profile'],
+            'standard'
+        )
 
     def test_stability_only_launcher_constructs_but_never_simulates_the_target_free_model(self):
         launch_function = next(

@@ -151,6 +151,7 @@ from auto_stability_debug import (
 )
 from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
+from auto_stability_plotting import write_stability_plot_suite
 from auto_stability_scheduler_audit import (
     build_stability_scheduler_audit_summary,
 )
@@ -5960,13 +5961,14 @@ class AutoContr(Controller):
                         'immutable current-run trajectories required by both '
                         'stability companion models.'
                     )
-                if self.robo_params.get('auto_plot_profile') != 'off':
+                if self.robo_params.get('auto_plot_profile') not in (
+                        'off', 'standard', 'final_only'):
                     raise AutoStabilityValidationError(
-                        'auto_stability_mode=stability_only currently '
-                        'requires auto_plot_profile=off because the ordinary '
-                        'plot suite visualizes the intentionally absent '
-                        'lambda-max GP. Stage-12D stability exports and the '
-                        'stability-only run report remain enabled.'
+                        'auto_stability_mode=stability_only requires '
+                        'auto_plot_profile to be off, standard, or '
+                        'final_only. Ordinary lambda-max plots remain '
+                        'disabled; Stage-14F1 may generate only final '
+                        'reporting-only stability plots.'
                     )
                 print(
                     '<<controller>> Auto stability-only selection '
@@ -28609,93 +28611,29 @@ class AutoContr(Controller):
         return generated_output_paths
 
     def _plot_auto_stability_reporting_artifacts(self):
-        '''Plot Stage-12D derived trajectories without fitting or smoothing.'''
+        '''Write final read-only stability figures from derived run records.
+
+        This final-reporting boundary is intentionally separate from reader
+        scheduling and model refresh.  The suite receives only completed
+        Stage-12D records and writes derived PNGs; it cannot reopen raw scans,
+        change frozen evidence, fit either companion model, or communicate
+        with the robot, Pi, or reader.
+        '''
         summary = getattr(self, 'auto_stability_reporting_summary', None)
         if not isinstance(summary, dict) or 'records' not in summary:
             return []
-        records = summary['records']
         plot_dir = os.path.join(self.out_path, 'Plots', 'stability')
-        os.makedirs(plot_dir, exist_ok=True)
-        output_paths = []
-        trajectories = records.get('trajectory_rows', [])
-        grouped = {}
-        for row in trajectories:
-            if (
-                    row.get('elapsed_s_from_trigger_to_scan_start') is None
-                    or row.get('reference_absorbance') is None):
-                continue
-            grouped.setdefault(row.get('wellname', 'unknown'), []).append(row)
-        if grouped:
-            figure, axis = plt.subplots(figsize=(10, 6))
-            for wellname, rows in sorted(grouped.items()):
-                rows = sorted(
-                    rows,
-                    key=lambda row: row['elapsed_s_from_trigger_to_scan_start']
-                )
-                eligible = [
-                    row for row in rows if row.get('metric_eligible_interval')
-                ]
-                excluded = [
-                    row for row in rows if not row.get('metric_eligible_interval')
-                ]
-                if eligible:
-                    axis.plot(
-                        [row['elapsed_s_from_trigger_to_scan_start'] for row in eligible],
-                        [row['reference_absorbance'] for row in eligible],
-                        marker='o', linewidth=1.5, label=str(wellname)
-                    )
-                if excluded:
-                    axis.scatter(
-                        [row['elapsed_s_from_trigger_to_scan_start'] for row in excluded],
-                        [row['reference_absorbance'] for row in excluded],
-                        marker='x', color='0.4', zorder=3
-                    )
-            axis.set_title('Optical-stability trajectories (fixed per-well reference)')
-            axis.set_xlabel('Elapsed time from trigger to reader scan start (s)')
-            axis.set_ylabel('Blank-corrected absorbance')
-            axis.grid(True, alpha=0.25)
-            axis.text(
-                0.01, 0.01,
-                'Circle/line: full reader interval within window. X: retained for audit, excluded from metric.',
-                transform=axis.transAxes, fontsize=8, va='bottom'
-            )
-            axis.legend(loc='best', fontsize=8)
-            trajectory_path = os.path.join(
-                plot_dir, 'stability_per_well_trajectories_final.png'
-            )
-            figure.savefig(trajectory_path, dpi=300, bbox_inches='tight')
-            plt.close(figure)
-            output_paths.append(trajectory_path)
-        summaries = [
-            row for row in records.get('condition_summaries', [])
-            if row.get('condition_loss_rate_mean_absorbance_per_s') is not None
-        ]
-        if summaries:
-            figure, axis = plt.subplots(figsize=(10, 6))
-            labels = [
-                'condition {}'.format(row.get('reaction_number', '?'))
-                for row in summaries
-            ]
-            values = [
-                row['condition_loss_rate_mean_absorbance_per_s']
-                for row in summaries
-            ]
-            errors = [
-                row.get('condition_loss_rate_sample_sd_absorbance_per_s')
-                or 0.0 for row in summaries
-            ]
-            axis.bar(range(len(values)), values, yerr=errors, capsize=4)
-            axis.set_xticks(range(len(labels)))
-            axis.set_xticklabels(labels, rotation=30, ha='right')
-            axis.set_ylabel('Post-peak absorbance loss rate (absorbance/s)')
-            axis.set_title('Condition-level optical-stability summary')
-            axis.grid(axis='y', alpha=0.25)
-            condition_path = os.path.join(
-                plot_dir, 'stability_condition_loss_rate_final.png'
-            )
-            figure.savefig(condition_path, dpi=300, bbox_inches='tight')
-            plt.close(figure)
-            output_paths.append(condition_path)
+        output_paths = write_stability_plot_suite(
+            summary['records'],
+            plot_dir,
+            decision_horizon_s=self.robo_params.get(
+                'auto_stability_decision_horizon_s'
+            ),
+            maximum_window_s=self.robo_params.get(
+                'auto_stability_max_observation_window_s',
+                self.robo_params.get('auto_stability_observation_window_s')
+            ),
+        )
         summary['plot_paths'] = output_paths
         return output_paths
     
@@ -31607,6 +31545,31 @@ class AutoContr(Controller):
                 'exports were not generated: {}'.format(exc)
             )
 
+        # Stage 14F1 remains a final, read-only reporting layer.  It is not
+        # routed through the ordinary Auto plot coordinator because
+        # stability-only execution intentionally has no lambda-max GP or
+        # lambda plots.  ``off`` retains its established no-plot behavior;
+        # the existing standard/final_only values both request the same final
+        # stability suite without adding an in-run plotting delay.
+        if self.robo_params.get('auto_plot_profile') != 'off':
+            try:
+                stability_plot_paths = (
+                    self._plot_auto_stability_reporting_artifacts()
+                )
+                if stability_plot_paths:
+                    self._append_auto_plot_manifest(
+                        'final_stability', stability_plot_paths
+                    )
+            except Exception as exc:
+                if isinstance(self.auto_stability_reporting_summary, dict):
+                    self.auto_stability_reporting_summary[
+                        'plot_error'
+                    ] = str(exc)
+                print(
+                    '<<controller warning>> final stability-only plot suite '
+                    'was not generated: {}'.format(exc)
+                )
+
         report_path = os.path.join(self.out_path, 'auto_run_report.md')
         lines = [
             '# Auto Stability-Only Run Report',
@@ -31717,6 +31680,36 @@ class AutoContr(Controller):
                 'frozen decision.',
                 '',
             ])
+        stability_plot_error = (
+            self.auto_stability_reporting_summary or {}
+        ).get('plot_error')
+        stability_plot_paths = (
+            self.auto_stability_reporting_summary or {}
+        ).get('plot_paths', [])
+        if stability_plot_error:
+            lines.extend([
+                '## Stability figures',
+                '',
+                '- Final reporting-only stability plots were not generated: '
+                '`{}`.'.format(stability_plot_error),
+                '',
+            ])
+        elif stability_plot_paths:
+            lines.extend([
+                '## Stability figures',
+                '',
+                '- Final reporting-only figures are stored under '
+                '`Plots/stability/`. They distinguish frozen decision-window '
+                'evidence from later audit-only observations and do not alter '
+                'the companion models or scheduler.',
+            ])
+            for plot_path in stability_plot_paths:
+                lines.append(
+                    '- Plot: `{}`.'.format(
+                        os.path.relpath(plot_path, self.out_path)
+                    )
+                )
+            lines.append('')
         if self.robo_params.get('auto_stability_debug_mode') == (
                 STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
             lines.extend([
@@ -32112,6 +32105,7 @@ class AutoContr(Controller):
             if row.get('event_type') not in (
                     'trigger_transfer_completed',
                     'stage13_physical_identity_registered',
+                    'targeted_pipette_mix_acknowledged',
                     'decision_horizon_reached',
                     'observation_window_completed',
                     'observation_plateau_confirmed',
