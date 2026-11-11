@@ -70,12 +70,34 @@ class _ObserverStub(object):
                 'trigger_completion_sequence': 1,
             }
         ]
+        self._completed_records = {
+            'autowell0C1.0': {
+                'wellname': 'autowell0C1.0',
+                'batch_number': 4,
+                'activation_monotonic_s': -1000000000.0,
+                'activation_status': 'observation_window_complete',
+            },
+            'autowell1C1.0': {
+                'wellname': 'autowell1C1.0',
+                'batch_number': 4,
+                'activation_monotonic_s': -1000000000.0,
+                'activation_status': 'active',
+            },
+        }
+        self.decision_horizon_calls = []
 
     def confirm_trigger_transfer_completed(self, wellname, **kwargs):
         self.confirmed.append((wellname, kwargs))
 
     def get_active_wells(self):
         return list(self._active)
+
+    def get_trigger_completed_wells(self, wellnames):
+        return [dict(self._completed_records[wellname]) for wellname in wellnames]
+
+    def record_decision_horizons_reached(self, wellnames, **kwargs):
+        self.decision_horizon_calls.append((list(wellnames), dict(kwargs)))
+        return []
 
     def complete_expired_observation_windows(self, window, now_monotonic_s):
         self.completed_windows.append((window, now_monotonic_s))
@@ -145,6 +167,7 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
             '_confirm_auto_stability_trigger_completion',
             '_run_auto_stability_pipette_mix_completion',
             '_run_auto_stability_post_mix_active_set_scan',
+            '_await_auto_stability_batch_decision_horizon',
         ])
 
     def _controller(self):
@@ -270,6 +293,43 @@ class Stage13DBoundedRuntimeTests(unittest.TestCase):
         self.assertFalse(
             controller._uses_auto_stability_cross_batch_scheduler()
         )
+
+    def test_decision_wait_accepts_a_normal_post_horizon_window_retirement(self):
+        controller = self._controller()
+        controller.robo_params.update({
+            'auto_stability_decision_horizon_s': 30.0,
+            'auto_stability_max_observation_window_s': 90.0,
+            'auto_stability_scan_interval_s': 60.0,
+        })
+
+        controller._await_auto_stability_batch_decision_horizon([
+            'autowell0C1.0', 'autowell1C1.0'
+        ])
+
+        calls = controller.auto_stability_observer.decision_horizon_calls
+        self.assertEqual(1, len(calls))
+        self.assertEqual(
+            ['autowell0C1.0', 'autowell1C1.0'], calls[0][0]
+        )
+        self.assertEqual(30.0, calls[0][1]['decision_horizon_s'])
+        self.assertEqual(90.0, calls[0][1]['max_observation_window_s'])
+        self.assertIsInstance(calls[0][1]['now_monotonic_s'], float)
+
+    def test_decision_wait_rejects_a_wrong_batch_completed_record(self):
+        controller = self._controller()
+        controller.robo_params.update({
+            'auto_stability_decision_horizon_s': 30.0,
+            'auto_stability_max_observation_window_s': 90.0,
+            'auto_stability_scan_interval_s': 60.0,
+        })
+        controller.auto_stability_observer._completed_records[
+            'autowell1C1.0'
+        ]['batch_number'] = 3
+
+        with self.assertRaisesRegex(RuntimeError, 'wrong batch identity'):
+            controller._await_auto_stability_batch_decision_horizon([
+                'autowell0C1.0', 'autowell1C1.0'
+            ])
 
     def test_reader_scan_is_unshaken_and_preserves_plan_mapping(self):
         controller = self._controller()

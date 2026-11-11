@@ -7401,9 +7401,10 @@ class AutoContr(Controller):
         This is the Stage-13D-E boundary that permits a later batch to begin.
         It does not retire the current batch at its decision horizon: all
         still-active wells remain eligible for reader-only scans until their
-        individual maximum windows expire. A missing current-batch active
-        well is a fail-closed provenance error, never a reason to infer a
-        decision snapshot from another batch.
+        individual maximum windows expire. A normal maximum-window retirement
+        after a well's own decision horizon is valid completion evidence, not
+        a lost well. Missing, pending, wrong-batch, or otherwise unverifiable
+        trigger records remain fail-closed provenance errors.
         '''
         observer = self.auto_stability_observer
         if observer is None:
@@ -7434,19 +7435,18 @@ class AutoContr(Controller):
                 max_window_s,
                 now_monotonic_s=now_monotonic_s
             )
-            current_records = [
-                record for record in observer.get_active_wells()
-                if int(record['batch_number']) == current_batch
-            ]
-            current_wellnames = {
+            current_records = observer.get_trigger_completed_wells(
+                sorted(expected_wellnames)
+            )
+            wrong_batch = sorted(
                 record['wellname'] for record in current_records
-            }
-            missing = sorted(expected_wellnames - current_wellnames)
-            if missing:
+                if int(record['batch_number']) != current_batch
+            )
+            if wrong_batch:
                 raise RuntimeError(
-                    'Cross-batch stability scheduling lost current-batch '
-                    'active well(s) before their decision horizon: {}.'
-                    .format(missing)
+                    'Cross-batch stability scheduling found current-batch '
+                    'well record(s) with the wrong batch identity: {}.'
+                    .format(wrong_batch)
                 )
             decision_pending = [
                 record for record in current_records

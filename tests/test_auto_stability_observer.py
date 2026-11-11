@@ -8,6 +8,7 @@ import unittest
 from auto_stability_observer import (
     ACTIVATION_STATUS_ACTIVE,
     ACTIVATION_STATUS_PENDING,
+    ACTIVATION_STATUS_WINDOW_COMPLETE,
     AutoStabilityObserver,
     AutoStabilityObserverError,
     STABILITY_OBSERVER_SCHEMA_VERSION,
@@ -184,6 +185,48 @@ class AutoStabilityObserverTests(unittest.TestCase):
         self.assertEqual([], observer.record_decision_horizons_reached(
             ['autowell0C1.0'], 30, 90, now_monotonic_s=41.0
         ))
+
+    def test_decision_horizon_remains_recordable_after_normal_window_retirement(self):
+        clock = [10.0]
+        observer = AutoStabilityObserver(
+            pr_data_path=self.temporary_directory.name,
+            run_id='DEBUG-STABILITY-RETIRED-DECISION',
+            trigger_reagent='sodium_borohydride',
+            now=lambda: '2026-09-09T11:00:00+00:00',
+            monotonic_clock=lambda: clock[0],
+        )
+        observer.record_trigger_transfer_dispatched(0, 'autowell0C1.0', 20, 1)
+        observer.confirm_trigger_transfer_completed('autowell0C1.0')
+        observer.complete_expired_observation_windows(
+            90, now_monotonic_s=100.0
+        )
+
+        self.assertEqual([], observer.get_active_wells())
+        records = observer.get_trigger_completed_wells(['autowell0C1.0'])
+        self.assertEqual(
+            ACTIVATION_STATUS_WINDOW_COMPLETE,
+            records[0]['activation_status']
+        )
+        events = observer.record_decision_horizons_reached(
+            ['autowell0C1.0'], 30, 90, now_monotonic_s=100.0
+        )
+        self.assertEqual(['decision_horizon_reached'], [
+            event['event_type'] for event in events
+        ])
+        self.assertEqual(
+            ACTIVATION_STATUS_WINDOW_COMPLETE,
+            events[0]['activation_status']
+        )
+        self.assertIn('without reactivating the well', events[0]['notes'])
+
+    def test_completed_trigger_records_reject_pending_or_unknown_wells(self):
+        self.observer.record_trigger_transfer_dispatched(
+            0, 'autowell0C1.0', 20, 1
+        )
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'no completed'):
+            self.observer.get_trigger_completed_wells(['autowell0C1.0'])
+        with self.assertRaisesRegex(AutoStabilityObserverError, 'No stability'):
+            self.observer.get_trigger_completed_wells(['autowell1C1.0'])
 
     def test_active_set_scan_records_one_file_and_a_cadence_deadline(self):
         monotonic_time = [100.0]

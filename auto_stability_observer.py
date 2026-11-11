@@ -365,6 +365,60 @@ class AutoStabilityObserver:
             if record['activation_status'] == ACTIVATION_STATUS_ACTIVE
         ]
 
+    def get_trigger_completed_wells(self, wellnames):
+        '''Return durable completed-trigger records, including normal retirements.
+
+        A maximum-window retirement stops *future reader observations*; it
+        must not erase the completed trigger identity, timing reference, or
+        decision-horizon provenance needed by the cross-batch scheduler.  A
+        pending dispatch is deliberately not returned here, because it has no
+        controller-observed completion time and therefore cannot support a
+        decision snapshot.
+        '''
+        if isinstance(wellnames, str):
+            wellnames = [wellnames]
+        try:
+            normalized_wellnames = [
+                self._require_wellname(value) for value in wellnames
+            ]
+        except TypeError:
+            raise AutoStabilityObserverError(
+                'Completed trigger wellnames must be a wellname or an '
+                'iterable of wellnames.'
+            )
+        if not normalized_wellnames:
+            raise AutoStabilityObserverError(
+                'At least one completed trigger well is required.'
+            )
+        if len(set(normalized_wellnames)) != len(normalized_wellnames):
+            raise AutoStabilityObserverError(
+                'Completed trigger wellnames cannot contain duplicates.'
+            )
+
+        records = []
+        for wellname in normalized_wellnames:
+            record = self._active_wells.get(wellname)
+            if record is None:
+                raise AutoStabilityObserverError(
+                    'No stability trigger record exists for well {}.'.format(
+                        wellname
+                    )
+                )
+            if record['activation_status'] not in (
+                    ACTIVATION_STATUS_ACTIVE,
+                    ACTIVATION_STATUS_WINDOW_COMPLETE):
+                raise AutoStabilityObserverError(
+                    'Stability trigger for well {} has no completed '
+                    'observation lifecycle.'.format(wellname)
+                )
+            if record['activation_monotonic_s'] is None:
+                raise AutoStabilityObserverError(
+                    'Completed stability trigger for well {} has no '
+                    'monotonic activation time.'.format(wellname)
+                )
+            records.append(dict(record))
+        return records
+
     def record_decision_horizons_reached(
             self, wellnames, decision_horizon_s, max_observation_window_s,
             now_monotonic_s=None):
@@ -402,7 +456,10 @@ class AutoStabilityObserver:
             raise AutoStabilityObserverError(
                 'Decision-horizon time must be finite.'
             )
-        normalized_wellnames = self._normalize_active_wellnames(wellnames)
+        normalized_wellnames = [
+            record['wellname']
+            for record in self.get_trigger_completed_wells(wellnames)
+        ]
         events = []
         for wellname in normalized_wellnames:
             record = self._active_wells[wellname]
@@ -421,7 +478,7 @@ class AutoStabilityObserver:
                 wellname=wellname,
                 transfer_volume_uL=record['transfer_volume_uL'],
                 trigger_command_id=record['trigger_command_id'],
-                activation_status=ACTIVATION_STATUS_ACTIVE,
+                activation_status=record['activation_status'],
                 trigger_completion_sequence=(
                     record['trigger_completion_sequence']
                 ),
@@ -435,9 +492,17 @@ class AutoStabilityObserver:
                 max_observation_window_s=max_observation_window_s,
                 notes=(
                     'Fixed decision horizon reached after {} recorded '
-                    'stability scan(s). The well remains active for '
-                    'audit-only observation until a maximum-window '
-                    'retirement event.'.format(record['observation_count'])
+                    'stability scan(s). {}'.format(
+                        record['observation_count'],
+                        'The well remains active for audit-only observation '
+                        'until a maximum-window retirement event.'
+                        if record['activation_status'] == (
+                            ACTIVATION_STATUS_ACTIVE
+                        ) else
+                        'The maximum observation window had already closed; '
+                        'this event records decision readiness without '
+                        'reactivating the well.'
+                    )
                 )
             ))
         return events
