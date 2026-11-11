@@ -1324,6 +1324,89 @@ performed both water transfers and its baseline scan. It must not be treated as
 evidence for physical mixing quality, dye-assay convergence, production
 stability scheduling, or unattended operation.
 
+### Stage 14C1 fixed-window cross-batch water validation — 2026-11-10
+
+Stage 14C1 is the controlled physical validation gate for the fixed-window,
+per-trigger cross-batch scheduler. Its intended proof is narrower than a
+general successful Auto run: after Batch 1 begins, at least one immutable raw
+scan must contain still-active wells from both Batch 0 and Batch 1, without
+another transfer, targeted mix, or shake of the older Batch-0 wells.
+
+The first 2026-11-10 water attempt
+`DEBUGRTG_STAGE14C1_CROSS_BATCH_WATER_2` exposed a controller-side
+retirement-state defect. A valid Batch-0 well that had reached its individual
+maximum observation window could no longer be recognized as a completed
+member of the already-ready decision cohort. The controller failed closed
+before Batch 1 with a cross-batch scheduling error; it did not retry any
+physical action. Auto-RTG commit `e303436` corrected that distinction: a
+decision snapshot may retain a completed well in either the active or the
+normal `observation_window_complete` state, while only active wells remain
+eligible for subsequent scans. Unknown or pending wells still fail closed.
+
+The corrected 2026-11-10 water run
+`DEBUGRTG_STAGE14C1_CROSS_BATCH_WATER_3` completed and cleanly finalized on
+Auto-RTG commit `e303436` with the following deliberately DEBUG-only
+configuration:
+
+- `stability_only`, `pipette_mix`, `each_completion`, and `fixed_window`;
+- 300 s decision horizon and 600 s maximum observation window;
+- two seed conditions in Batch 0, each with three physical replicates;
+- one stability-selected Batch-1 condition with three physical replicates;
+- synthetic companion evidence enabled, with all real reader files preserved
+  but excluded from scientific model interpretation.
+
+The run verified all of the following physical/audit facts:
+
+- both batch preflights passed;
+- all nine final-trigger transfers completed;
+- Auto-main acknowledged exactly one targeted P300 `150 uL x 5` mix for each
+  newly completed well, with no later mix or transfer to an older well;
+- 16 immutable raw reader files, 16 completed manifest records, and 43
+  manifest-to-trajectory memberships were preserved and mutually consistent;
+- every recorded logical-well to reader-well mapping matched the final
+  translated plate map;
+- all nine wells received a frozen 300 s decision snapshot and a final
+  maximum-window trajectory record; and
+- the companion-model audit, condition-level exports, run report, and journal
+  all finalized without a fault event.
+
+This run validates the `e303436` retirement correction, normal fixed-window
+retirement, per-trigger targeted mixing, raw-scan preservation, decision
+snapshot immutability, Batch-1 selection, and final drain behavior. It does
+**not** close the specific Stage 14C1 cross-batch-union gate: no completed raw
+scan had `active_batch_numbers` containing both `0` and `1`.
+
+That limitation is a bounded-test timing configuration issue, not a packet,
+mapping, or scheduler failure. The first Batch-0 trigger completed at
+05:23:36 UTC, while the first Batch-1 raw scan began at 05:46:08 UTC—about
+1,351 s later. The configured 600 s maximum window therefore correctly
+retired every Batch-0 well before that scan. The scheduler must not override
+that scientific maximum merely to force a mixed-batch observation.
+
+The required deferred Stage 14C1 retry is the same controlled water workflow
+with a fresh output directory and:
+
+```text
+auto_stability_decision_horizon_s          300
+auto_stability_max_observation_window_s    1800
+auto_stability_scan_schedule               each_completion
+auto_stability_retirement_policy           fixed_window
+initial_data                               2
+num_duplicates                             3
+max_iterations                             1
+auto_stability_debug_mode                  synthetic_companion_evidence
+```
+
+The 1,800 s maximum window provides a practical margin for the observed
+reader/robot timing. The retry must show at least one raw-scan manifest record
+with active batches `0;1`, preserve correct reader locations and trigger
+times for both batches, show no additional Batch-0 targeted mix packet, and
+complete the final fixed-window drain. It is intentionally deferred until the
+next available controlled water-debug session. Later adaptive-retirement
+validation must remain a separate checkpoint: low-signal water can retire
+older wells at the decision horizon and would mask this fixed-window union
+test.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
