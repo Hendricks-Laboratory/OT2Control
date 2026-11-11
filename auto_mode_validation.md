@@ -1407,6 +1407,42 @@ validation must remain a separate checkpoint: low-signal water can retire
 older wells at the decision horizon and would mask this fixed-window union
 test.
 
+### Stage 14D scheduler audit summary — 2026-11-10
+
+Stage 14D adds a strictly post-run, reporting-only audit artifact:
+
+```text
+pr_data/stability/stability_scheduler_audit_summary.json
+```
+
+It is derived exclusively from the already immutable append-only stability
+manifest. It does not send a Pi packet, access the reader, schedule a scan,
+alter a model, change a workbook setting, or modify Auto-main. The summary
+records the declared stability scheduler configuration; each trigger-complete
+well's batch identity, targeted-mix acknowledgement count, raw-scan
+membership, decision-horizon event, and final lifecycle retirement; completed
+raw-scan membership and logical-to-reader mapping integrity; and explicit
+manifest contradictions. The latter include duplicate mix acknowledgements,
+re-scanning a retired well, changed batch identity, missing trigger
+completion, duplicate/missing raw-scan identifiers, and malformed or
+incomplete scan mappings.
+
+For the narrowly supported `pipette_mix` + `each_completion` route, the audit
+also checks that every trigger-complete well has exactly one acknowledged
+targeted mix. A `no_detected_manifest_violation` result is intentionally
+limited: it means the controller's durable record has none of those detectable
+contradictions. It is not an independent claim that physical robot or reader
+behavior was correct. Raw-file loading/blank correction remains the existing
+Stage-12D reporting responsibility, and controlled water evidence remains
+required for the deferred Stage 14C1 and 14C2 gates.
+
+The JSON write is atomic. If this additional diagnostic cannot be produced,
+the established stability CSV exports remain available and the terminal and
+run report explicitly disclose the missing summary. Python 3.9 compilation,
+source-isolated atomic-write verification, focused Stage 12–14 tests, and the
+complete 539-test hardware-free suite passed. No controlled run is required
+for Stage 14D itself.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,

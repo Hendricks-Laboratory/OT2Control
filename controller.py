@@ -150,6 +150,9 @@ from auto_stability_debug import (
 )
 from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
+from auto_stability_scheduler_audit import (
+    build_stability_scheduler_audit_summary,
+)
 from auto_stability_model import (
     AutoStabilityModel,
     STABILITY_MODEL_STATUS_FIT_FAILED,
@@ -23157,6 +23160,25 @@ class AutoContr(Controller):
                     '- Derived files: `pr_data/stability/` contains timing, '
                     'trajectory, well-metric, condition-summary, and QC CSVs.'
                 )
+                scheduler_audit_error = stability_summary.get(
+                    'scheduler_audit_error'
+                )
+                scheduler_audit_summary = stability_summary.get(
+                    'scheduler_audit_summary'
+                )
+                if scheduler_audit_error:
+                    lines.append(
+                        '- Stage-14D scheduler audit summary was not '
+                        'generated: `{}`.'.format(scheduler_audit_error)
+                    )
+                elif isinstance(scheduler_audit_summary, dict):
+                    lines.append(
+                        '- Stage-14D scheduler audit: '
+                        '`pr_data/stability/stability_scheduler_audit_summary.json` '
+                        '(`{}`).'.format(
+                            scheduler_audit_summary.get('status', 'unknown')
+                        )
+                    )
                 for plot_path in stability_summary.get('plot_paths', []):
                     lines.append(
                         '- Stability plot: `{}`.'.format(
@@ -31616,6 +31638,31 @@ class AutoContr(Controller):
             '- Selection/condition audit: `pr_data/auto_model_performance_log.csv`.',
             '',
         ]
+        scheduler_audit_summary = (
+            self.auto_stability_reporting_summary or {}
+        ).get('scheduler_audit_summary')
+        scheduler_audit_error = (
+            self.auto_stability_reporting_summary or {}
+        ).get('scheduler_audit_error')
+        if scheduler_audit_error:
+            lines.extend([
+                '## Scheduler audit',
+                '',
+                '- Stage-14D scheduler audit summary was not generated: `{}`.'
+                .format(scheduler_audit_error),
+                '',
+            ])
+        elif isinstance(scheduler_audit_summary, dict):
+            lines.extend([
+                '## Scheduler audit',
+                '',
+                '- Manifest relationship summary: '
+                '`pr_data/stability/stability_scheduler_audit_summary.json` '
+                '(`{}`).'.format(
+                    scheduler_audit_summary.get('status', 'unknown')
+                ),
+                '',
+            ])
         if self.robo_params.get('auto_stability_debug_mode') == (
                 STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
             lines.extend([
@@ -31728,6 +31775,60 @@ class AutoContr(Controller):
             if temporary_path is not None and os.path.exists(temporary_path):
                 os.remove(temporary_path)
         return output_path
+
+    def _write_auto_stability_scheduler_audit_summary(self):
+        '''Write a post-run Stage-14D manifest relationship summary.
+
+        This reporting-only export reads the durable observer manifest after
+        laboratory work is complete. It cannot alter scheduling, model state,
+        or any physical action.
+        '''
+        observer = getattr(self, 'auto_stability_observer', None)
+        if observer is None or not os.path.exists(observer.manifest_path):
+            raise RuntimeError(
+                'Stability scheduler audit requires the observer manifest.'
+            )
+        with open(observer.manifest_path, newline='', encoding='utf-8') as handle:
+            manifest_rows = list(csv.DictReader(handle))
+        configuration = {
+            name: self.robo_params.get(name)
+            for name in (
+                'auto_stability_mode',
+                'auto_stability_mixing_mode',
+                'auto_stability_scan_schedule',
+                'auto_stability_retirement_policy',
+                'auto_stability_decision_horizon_s',
+                'auto_stability_max_observation_window_s',
+                'auto_stability_observation_window_s',
+                'auto_stability_min_peak_absorbance',
+                'auto_stability_plateau_max_absorbance_slope_per_s',
+            )
+            if name in self.robo_params
+        }
+        summary = build_stability_scheduler_audit_summary(
+            manifest_rows, configuration=configuration
+        )
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        output_path = os.path.join(
+            stability_path, 'stability_scheduler_audit_summary.json'
+        )
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                    mode='w', encoding='utf-8', dir=stability_path,
+                    delete=False) as handle:
+                temporary_path = handle.name
+                json.dump(summary, handle, indent=2, sort_keys=True)
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        return output_path, summary
 
     def _load_auto_stability_reporting_spectra(self, manifest_rows):
         '''Load raw reader files using their saved historical layouts.
@@ -32361,6 +32462,22 @@ class AutoContr(Controller):
             output_paths.append(self._write_auto_stability_reporting_csv(
                 os.path.join(stability_path, filename), rows
             ))
+        scheduler_audit_error = None
+        scheduler_audit_summary = None
+        try:
+            scheduler_audit_path, scheduler_audit_summary = (
+                self._write_auto_stability_scheduler_audit_summary()
+            )
+            output_paths.append(scheduler_audit_path)
+        except Exception as exc:
+            # This derived diagnostic must never hide the established CSV
+            # exports or alter a finalized run. The terminal/report retain an
+            # explicit disclosure for operator follow-up.
+            scheduler_audit_error = str(exc)
+            print(
+                '<<controller warning>> Stage-14D scheduler audit summary '
+                'was not generated: {}'.format(exc)
+            )
         self.auto_stability_reporting_summary = {
             'paths': output_paths,
             'timing_row_count': len(records['timing_rows']),
@@ -32375,6 +32492,8 @@ class AutoContr(Controller):
                 'stability_evidence_source', 'raw_reader'
             ),
             'debug_only': bool(records.get('debug_evidence_rows')),
+            'scheduler_audit_summary': scheduler_audit_summary,
+            'scheduler_audit_error': scheduler_audit_error,
             'records': records,
         }
         print(
