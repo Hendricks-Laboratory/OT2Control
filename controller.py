@@ -151,7 +151,13 @@ from auto_stability_debug import (
 )
 from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
-from auto_stability_plotting import write_stability_plot_suite
+from auto_stability_plotting import (
+    write_stability_plot_suite,
+    write_stability_spectral_evidence_plot_suite,
+)
+from auto_stability_spectral_evidence import (
+    build_raw_spectral_evidence_records,
+)
 from auto_stability_scheduler_audit import (
     build_stability_scheduler_audit_summary,
 )
@@ -28634,6 +28640,12 @@ class AutoContr(Controller):
                 self.robo_params.get('auto_stability_observation_window_s')
             ),
         )
+        # Stage 14F2 deliberately uses the observed raw-reader spectra
+        # retained before any DEBUG synthetic-companion substitution.  It is
+        # still a final reporting-only operation and cannot schedule work.
+        output_paths.extend(write_stability_spectral_evidence_plot_suite(
+            summary['records'], plot_dir
+        ))
         summary['plot_paths'] = output_paths
         return output_paths
     
@@ -32140,9 +32152,10 @@ class AutoContr(Controller):
                 ),
                 'notes': row.get('notes', ''),
             })
-        spectra_by_raw_scan, load_qc_rows = (
+        observed_spectra_by_raw_scan, load_qc_rows = (
             self._load_auto_stability_reporting_spectra(manifest_rows)
         )
+        spectra_by_raw_scan = observed_spectra_by_raw_scan
         evidence_source = 'raw_reader'
         debug_evidence_rows = []
         if (
@@ -32180,6 +32193,27 @@ class AutoContr(Controller):
             min_peak_absorbance=self.robo_params[
                 'auto_stability_min_peak_absorbance'
             ],
+        )
+        # Build raw-reader spectral evidence after the ordinary trajectory
+        # timing records exist, but from the pre-DEBUG-substitution spectra.
+        # Thus a dry-debug plot shows actual blank-corrected reader output,
+        # never the synthetic fixture used for companion-model plumbing.
+        records['raw_spectral_evidence'] = (
+            build_raw_spectral_evidence_records(
+                manifest_rows=manifest_rows,
+                observed_spectra_by_raw_scan=observed_spectra_by_raw_scan,
+                trajectory_rows=records['trajectory_rows'],
+                well_metrics=records['well_metrics'],
+            )
+        )
+        records['spectral_evidence_decision_horizon_s'] = (
+            self.robo_params.get('auto_stability_decision_horizon_s')
+        )
+        records['spectral_evidence_maximum_window_s'] = (
+            self.robo_params.get(
+                'auto_stability_max_observation_window_s',
+                self.robo_params.get('auto_stability_observation_window_s')
+            )
         )
         for row_group in (
                 records['timing_rows'], records['trajectory_rows'],
@@ -32615,6 +32649,12 @@ class AutoContr(Controller):
             ('stability_well_metrics.csv', records['well_metrics']),
             ('condition_stability_summary.csv', records['condition_summaries']),
             ('stability_qc_audit.csv', records['qc_rows']),
+            (
+                'stability_spectral_features.csv',
+                records.get('raw_spectral_evidence', {}).get(
+                    'evidence_rows', []
+                ),
+            ),
         ]
         if records.get('debug_evidence_rows'):
             output_specs.append((
@@ -32667,6 +32707,11 @@ class AutoContr(Controller):
                 for row in records['well_metrics']
             ),
             'condition_summary_count': len(records['condition_summaries']),
+            'raw_spectral_feature_count': len(
+                records.get('raw_spectral_evidence', {}).get(
+                    'evidence_rows', []
+                )
+            ),
             'stability_evidence_source': records.get(
                 'stability_evidence_source', 'raw_reader'
             ),

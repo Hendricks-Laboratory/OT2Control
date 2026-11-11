@@ -1599,10 +1599,12 @@ measurement guidance consulted on 2026-11-11:
 - https://pmc.ncbi.nlm.nih.gov/articles/PMC11833013/
 - https://www.nist.gov/system/files/documents/2023/08/31/UV-Vis_Protocol_26082023.pdf
 
-No stage below is implemented by this planning entry. None changes physical
-liquid handling, reader scheduling, packet contracts, the current stability
-optimizer, workbook schema, Auto-main, raw reader files, existing CSVs, or
-frozen decision evidence unless separately approved.
+At the time this planning record was created, none of the stages below was
+implemented. Individual later implementation records state their approved
+scope. Except where a later record explicitly says otherwise, the plan does
+not change physical liquid handling, reader scheduling, packet contracts, the
+current stability optimizer, workbook schema, Auto-main, raw reader files,
+existing CSVs, or frozen decision evidence.
 
 #### Potential future scheduler-efficiency improvement — reader-clear state
 
@@ -1631,42 +1633,57 @@ water validation, and audit logging of whether a scan used a new home or a
 previously confirmed reader-clear state. Until that stage is approved and
 validated, every scheduler scan continues to home deliberately.
 
-#### Stage 14F2 — full-spectrum stability evidence plots
+### Stage 14F2 full-spectrum stability evidence plots — 2026-11-11
 
-**Purpose:** make the actual blank-corrected spectral evolution inspectable
-alongside the existing fixed-reference trajectory. The current fixed-reference
-signal is intentionally retained because it gives each well a stable optical
-coordinate, but a change at that wavelength can arise from peak movement or
-shape change as well as an amplitude loss.
+Stage 14F2 adds a reporting-only full-spectrum evidence layer to the final
+stability export. It retains the established fixed-reference trajectories from
+Stage 12D/14F1 and adds the following raw-reader artifacts:
 
-**Scope:**
+```text
+pr_data/stability/stability_spectral_features.csv
+Plots/stability/spectral_evidence/raw_amplitude/
+Plots/stability/spectral_evidence/normalized_shape/
+Plots/stability/spectral_evidence/features/
+```
 
-- derive plotting-only spectral records from the same completed,
-  manifest-linked, blank-corrected reader spectra used by Stage 12D reporting;
-- export paginated per-well wavelength-by-time heatmaps or flattened waterfall
-  spectra using each well's actual trigger-relative acquisition times;
-- add a companion per-well feature view with fixed-reference absorbance,
-  `lambda_max`, peak height, and FWHM only when a single peak supports a
-  well-defined width;
-- show raw-amplitude and separately normalized spectral views. Normalization
-  is a shape-comparison aid and must never replace the raw-amplitude view;
-- visibly mark metric-eligible versus audit-only scans, fixed reference
-  wavelength, decision horizon, and maximum observation boundary;
-- record undefined, multi-peak, incomplete-grid, or otherwise non-comparable
-  feature extraction as explicit diagnostic status rather than silently
-  fitting a width or interpolating absent values.
+The feature CSV preserves the immutable raw-scan ID and relative source path,
+logical well, physical reader location, condition/batch identity,
+trigger-relative scan time, interval eligibility, raw-reader source, native
+wavelength range/count, `lambda_max`, peak height, FWHM, and an explicit
+feature-status field. The figures are paginated per-well native-grid waterfall
+atlases for raw blank-corrected amplitude and normalized spectral shape, plus
+separate time-series atlases for `lambda_max`, peak height, and FWHM. Solid
+traces/points are metric-eligible; dashed traces/points are later audit-only
+observations. The time-feature panels label the controller's decision horizon
+and maximum observation window with dotted orange and red boundaries.
 
-**Deliberate exclusions:** no hard-coded generic aggregation ratio such as
-`A520/A650`; no chemistry-specific wavelength bands; no new Header fields; no
-spectral feature enters model training or recipe selection; no causal labels
-for peak shift, broadening, or amplitude loss.
+FWHM is intentionally conservative: it is defined only for a single unique,
+strict interior maximum with an observed half-height bracket on both sides.
+The crossing is linearly located only inside those measured brackets. Tied,
+boundary, nonpositive, multi-peak, shoulder, sparse, or unbracketed spectra
+remain explicitly undefined; the software neither smooths nor invents missing
+wavelength values. Normalized plots are a shape-comparison aid only and never
+replace the raw-amplitude evidence.
 
-**Validation:** Python 3.9 compilation; pure synthetic spectra covering a
-stationary peak, shift, broadening, missing wavelengths, shoulder/multi-peak,
-and audit-only interval; record-nonmutation checks; output-folder and
-visual-layout review; and full hardware-free regression suite. The first
-future water/chemistry run using the suite requires human review of the
-generated figures, but no dedicated new robot behavior is introduced.
+Most importantly, the Stage 14F2 records are built from the completed,
+blank-corrected raw-reader spectra *before* any optional DEBUG synthetic
+companion-evidence substitution. Therefore a water-debug run's spectral
+figures remain genuine reader observations even when the separate synthetic
+companion data path is used to exercise model plumbing. A visible figure footer
+states that distinction. These additions do not change reader acquisition,
+robot movement, packet contracts, workbook schema, stability metrics, model
+training, optimizer selection, or Auto-main behavior.
+
+Python 3.9 compilation, AST duplicate-method detection, a controller-boundary
+test proving raw spectra are retained before DEBUG substitution, synthetic
+feature/nonmutation/output tests, a manual rendered-figure review, the focused
+58-test Stage 12–14 suite, and the complete 554-test hardware-free suite
+passed. The complete suite contains expected legacy-library deprecation
+warnings and a deliberately exercised malformed-reader failure-path warning;
+neither is a Stage 14F2 failure. This validates the software and reporting
+contract, not chemical interpretation. The next controlled water or chemistry
+run should include human review of the generated figures; no dedicated physical
+run is required solely for this reporting stage.
 
 #### Stage 14F3 — replicate, completeness, and reader-throughput dashboard
 
