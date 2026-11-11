@@ -1554,6 +1554,33 @@ liquid handling, reader scheduling, packet contracts, the current stability
 optimizer, workbook schema, Auto-main, raw reader files, existing CSVs, or
 frozen decision evidence unless separately approved.
 
+#### Potential future scheduler-efficiency improvement — reader-clear state
+
+The current stability scan paths deliberately send the Pi a fresh `home`
+command and wait for its acknowledgement before every `PlateIn` command. This
+is the established conservative reader-access sequence: it guarantees that an
+OT-2 arm is clear of the plate-reader tray after a trigger transfer or targeted
+well mix before the tray moves. It is correct, but it adds avoidable elapsed
+time to a sequence of reader-only cadence scans when the robot has not moved
+since the preceding confirmed home/scan cycle.
+
+**Future scoped improvement:** introduce a controller-owned, fail-closed
+``reader_clear`` state. A reader scan may skip a redundant new home only when
+the controller can prove that (1) the Pi has acknowledged a prior home after
+the last liquid-handling or other robot-motion packet, (2) no intervening
+packet can move an arm or alter the physical plate state, and (3) the same
+validated plate identity remains in use. Any transfer, targeted mix, manual
+recovery, pause/restart, uncertain acknowledgement, changed plate identity,
+or error must invalidate the state and require a new acknowledged home before
+`PlateIn`.
+
+This is not an optimization to apply ad hoc to the running scheduler. It
+requires a narrow physical-behavior stage with packet-sequence tests, explicit
+failure-path tests, source review of every arm-moving packet, a controlled
+water validation, and audit logging of whether a scan used a new home or a
+previously confirmed reader-clear state. Until that stage is approved and
+validated, every scheduler scan continues to home deliberately.
+
 #### Stage 14F2 — full-spectrum stability evidence plots
 
 **Purpose:** make the actual blank-corrected spectral evolution inspectable
