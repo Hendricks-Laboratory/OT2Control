@@ -1524,6 +1524,162 @@ water-run figures remains required before presenting the plots as a finalized
 laboratory reporting format. The deferred Stage 14C1 and 14C2 physical water
 checkpoints remain unchanged.
 
+### Planned stability-evidence expansion — 2026-11-11
+
+The existing Stage 12–14 evidence system is deliberately strong on execution
+provenance: immutable reader-scan membership, physical-well identity,
+trigger-relative timestamps, model-window eligibility, frozen decision
+snapshots, and later audit-only observations. Stage 14F1 adds an organized
+final figure suite for those records. It is **not yet a complete spectral
+stability presentation suite**.
+
+Literature review for the intended silver-nanocrystal use case supports
+examining a time-resolved spectrum as more than one falling absorbance value:
+peak position, peak intensity, width/broadening, and long-wavelength shape can
+all change as colloids grow, aggregate, sediment, dissolve, or change surface
+environment. Those optical changes are informative but not individually
+mechanism-specific. The planned outputs must therefore display the observations
+and their quality without calling a feature "aggregation" or "dissolution"
+unless separately established by orthogonal evidence. The following planning
+record is informed by the time-resolved AgNP UV–Vis examples and NIST UV–Vis
+measurement guidance consulted on 2026-11-11:
+
+- https://pubs.rsc.org/en/content/articlehtml/2026/na/d5na01153a
+- https://pubs.acs.org/doi/10.1021/acsomega.0c02007
+- https://pmc.ncbi.nlm.nih.gov/articles/PMC11833013/
+- https://www.nist.gov/system/files/documents/2023/08/31/UV-Vis_Protocol_26082023.pdf
+
+No stage below is implemented by this planning entry. None changes physical
+liquid handling, reader scheduling, packet contracts, the current stability
+optimizer, workbook schema, Auto-main, raw reader files, existing CSVs, or
+frozen decision evidence unless separately approved.
+
+#### Stage 14F2 — full-spectrum stability evidence plots
+
+**Purpose:** make the actual blank-corrected spectral evolution inspectable
+alongside the existing fixed-reference trajectory. The current fixed-reference
+signal is intentionally retained because it gives each well a stable optical
+coordinate, but a change at that wavelength can arise from peak movement or
+shape change as well as an amplitude loss.
+
+**Scope:**
+
+- derive plotting-only spectral records from the same completed,
+  manifest-linked, blank-corrected reader spectra used by Stage 12D reporting;
+- export paginated per-well wavelength-by-time heatmaps or flattened waterfall
+  spectra using each well's actual trigger-relative acquisition times;
+- add a companion per-well feature view with fixed-reference absorbance,
+  `lambda_max`, peak height, and FWHM only when a single peak supports a
+  well-defined width;
+- show raw-amplitude and separately normalized spectral views. Normalization
+  is a shape-comparison aid and must never replace the raw-amplitude view;
+- visibly mark metric-eligible versus audit-only scans, fixed reference
+  wavelength, decision horizon, and maximum observation boundary;
+- record undefined, multi-peak, incomplete-grid, or otherwise non-comparable
+  feature extraction as explicit diagnostic status rather than silently
+  fitting a width or interpolating absent values.
+
+**Deliberate exclusions:** no hard-coded generic aggregation ratio such as
+`A520/A650`; no chemistry-specific wavelength bands; no new Header fields; no
+spectral feature enters model training or recipe selection; no causal labels
+for peak shift, broadening, or amplitude loss.
+
+**Validation:** Python 3.9 compilation; pure synthetic spectra covering a
+stationary peak, shift, broadening, missing wavelengths, shoulder/multi-peak,
+and audit-only interval; record-nonmutation checks; output-folder and
+visual-layout review; and full hardware-free regression suite. The first
+future water/chemistry run using the suite requires human review of the
+generated figures, but no dedicated new robot behavior is introduced.
+
+#### Stage 14F3 — replicate, completeness, and reader-throughput dashboard
+
+**Purpose:** expose whether an apparent stability result is supported by
+physical replicate evidence and achievable reader timing, rather than hiding
+the limitation behind a condition mean or a requested cadence.
+
+**Scope:**
+
+- replace the compact condition loss-rate bar as the primary final summary
+  with raw eligible replicate points, muted excluded/missing points and their
+  reasons, mean plus sample SD, and an explicit eligible/planned denominator;
+- add a condition-level reference-peak absorbance companion panel, keeping
+  signal quality separate from loss-rate variability;
+- add a scheduler-quality panel from existing timing/lifecycle records:
+  trigger-to-first-scan delay, scan duration, active-well count, requested
+  versus achieved cadence, and count of decision-eligible versus audit-only
+  observations;
+- add a per-well data-completeness/QC matrix for valid metric, low signal, no
+  post-peak decline, missing spectrum, invalid interval, and other recorded
+  terminal status;
+- retain the existing lifecycle, scan-membership, and decision-boundary plots
+  as execution/audit views rather than duplicating their meaning.
+
+**Scientific presentation policy:** individual physical wells remain visible
+for small replicate counts. Summary uncertainty is labeled as sample SD, not
+SEM or a confidence interval. Means are not drawn through asynchronously
+sampled wells unless an explicit documented time-binning rule is added later.
+
+**Deliberate exclusions:** no automatic rejection based on the new dashboards;
+no interpolation or resampling for the model; no change to scheduler behavior;
+no new packet or Auto-main requirement.
+
+**Validation:** source-level confirmation that all values come from completed
+reporting records; synthetic unequal-timing and partial-replicate fixtures;
+layout tests for many wells/conditions; Python 3.9 compilation; and the full
+hardware-free suite.
+
+#### Stage 14G — stability-metric robustness study and decision gate
+
+**Purpose:** determine whether the pre-registered current response remains the
+best optimization target under unequal scan density before it is relied on for
+chemistry-directed stability selection.
+
+The existing score remains:
+
+```text
+(A_peak - A_tail_min) / (t_tail_min - t_peak)
+```
+
+where `A_tail_min` is the lowest eligible post-peak observation. It faithfully
+implements the original requested conservative decline measurement, and it
+must remain exported. However, an extreme minimum can be more noise-sensitive
+when one well receives more eligible scans than another. Cross-batch active-set
+scanning makes that a real design concern, not merely a plotting issue.
+
+**Scope:**
+
+- build a hardware-free, versioned comparison harness using synthetic
+  trajectories and saved runs; vary noise, peak timing, true decay rate,
+  missing scans, and number/placement of eligible observations;
+- compare the current tail-minimum score against clearly labeled alternatives:
+  a pre-specified standardized-horizon loss and a robust post-peak slope;
+- assess ranking stability, scan-count sensitivity, missing-data behavior,
+  low-signal behavior, and compatibility with actual per-well timestamps;
+- generate a scientific decision memo and diagnostic plots. The study does not
+  change any configured metric, model target, or past run result.
+
+**Required decision before any metric change:** retain the current conservative
+tail-minimum objective, or adopt a specifically defined alternative. The
+decision must name its handling of asynchronous scans, missing assessment-time
+measurements, noise threshold, and the status of the legacy metric in reports.
+
+#### Stage 14H — conditional stability-response versioning
+
+This stage is prohibited unless Stage 14G produces an approved scientific
+decision. If approved, it will implement the selected metric behind an explicit
+response-version identifier; preserve the current tail-minimum metric in CSVs
+and plots; add independent tests; and prevent silent mixing of condition
+history trained under different response definitions. It will require a new
+controlled water validation and later chemistry review before the revised
+metric can drive recipe selection.
+
+#### Recommended sequencing
+
+Implement Stage 14F2 first, then 14F3. Both are read-only reporting stages and
+can be completed while physical validation is deferred. Run Stage 14G only
+after enough representative timing/spectral evidence exists to make the
+comparison meaningful. Stage 14H remains conditional and is not assumed.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
