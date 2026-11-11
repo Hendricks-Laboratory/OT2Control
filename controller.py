@@ -24,6 +24,7 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import as_completed
 import copy
 import csv
+import hashlib
 import socket
 import json
 import dill
@@ -152,6 +153,9 @@ from auto_stability_observer import AutoStabilityObserver
 from auto_stability_reporting import build_stability_reporting_records
 from auto_stability_scheduler_audit import (
     build_stability_scheduler_audit_summary,
+)
+from auto_stability_snapshot_audit import (
+    build_stability_decision_snapshot_integrity_audit,
 )
 from auto_stability_model import (
     AutoStabilityModel,
@@ -23179,6 +23183,28 @@ class AutoContr(Controller):
                             scheduler_audit_summary.get('status', 'unknown')
                         )
                     )
+                snapshot_audit_error = stability_summary.get(
+                    'snapshot_integrity_audit_error'
+                )
+                snapshot_audit_summary = stability_summary.get(
+                    'snapshot_integrity_audit_summary'
+                )
+                if snapshot_audit_error:
+                    lines.append(
+                        '- Stage-14E1 frozen decision-snapshot integrity '
+                        'audit was not generated: `{}`.'.format(
+                            snapshot_audit_error
+                        )
+                    )
+                elif isinstance(snapshot_audit_summary, dict):
+                    lines.append(
+                        '- Stage-14E1 frozen decision-snapshot integrity '
+                        'audit: '
+                        '`pr_data/stability/stability_decision_snapshot_integrity_audit.json` '
+                        '(`{}`).'.format(
+                            snapshot_audit_summary.get('status', 'unknown')
+                        )
+                    )
                 for plot_path in stability_summary.get('plot_paths', []):
                     lines.append(
                         '- Stability plot: `{}`.'.format(
@@ -31663,6 +31689,34 @@ class AutoContr(Controller):
                 ),
                 '',
             ])
+        snapshot_audit_summary = (
+            self.auto_stability_reporting_summary or {}
+        ).get('snapshot_integrity_audit_summary')
+        snapshot_audit_error = (
+            self.auto_stability_reporting_summary or {}
+        ).get('snapshot_integrity_audit_error')
+        if snapshot_audit_error:
+            lines.extend([
+                '## Frozen decision-snapshot integrity audit',
+                '',
+                '- Stage-14E1 integrity audit was not generated: `{}`.'
+                .format(snapshot_audit_error),
+                '',
+            ])
+        elif isinstance(snapshot_audit_summary, dict):
+            lines.extend([
+                '## Frozen decision-snapshot integrity audit',
+                '',
+                '- Saved-evidence summary: '
+                '`pr_data/stability/stability_decision_snapshot_integrity_audit.json` '
+                '(`{}`).'.format(
+                    snapshot_audit_summary.get('status', 'unknown')
+                ),
+                '- This audit verifies saved-controller evidence only; later '
+                'extended-window observations remain audit-only for each '
+                'frozen decision.',
+                '',
+            ])
         if self.robo_params.get('auto_stability_debug_mode') == (
                 STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
             lines.extend([
@@ -31812,6 +31866,122 @@ class AutoContr(Controller):
         os.makedirs(stability_path, exist_ok=True)
         output_path = os.path.join(
             stability_path, 'stability_scheduler_audit_summary.json'
+        )
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                    mode='w', encoding='utf-8', dir=stability_path,
+                    delete=False) as handle:
+                temporary_path = handle.name
+                json.dump(summary, handle, indent=2, sort_keys=True)
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        return output_path, summary
+
+    @staticmethod
+    def _get_auto_stability_file_checksum(file_path):
+        '''Return a SHA-256 checksum for one already-exported evidence file.'''
+        digest = hashlib.sha256()
+        with open(file_path, 'rb') as source:
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def _write_auto_stability_decision_snapshot_integrity_audit(self):
+        '''Write the Stage-14E1 post-run frozen-snapshot integrity audit.
+
+        This method runs only after the normal reporting CSV exports exist.
+        It reads saved evidence and writes one derived JSON result; it cannot
+        change frozen decision data, later audit-only observations, model
+        state, scheduler state, or laboratory execution.
+        '''
+        observer = getattr(self, 'auto_stability_observer', None)
+        if observer is None or not os.path.exists(observer.manifest_path):
+            raise RuntimeError(
+                'Stability snapshot integrity audit requires the observer '
+                'manifest.'
+            )
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        required_paths = {
+            'observer_manifest': observer.manifest_path,
+            'decision_snapshot_conditions': os.path.join(
+                stability_path, 'stability_decision_snapshot_conditions.csv'
+            ),
+            'decision_snapshot_wells': os.path.join(
+                stability_path, 'stability_decision_snapshot_wells.csv'
+            ),
+            'final_condition_summary': os.path.join(
+                stability_path, 'condition_stability_summary.csv'
+            ),
+            'final_well_metrics': os.path.join(
+                stability_path, 'stability_well_metrics.csv'
+            ),
+            'final_well_trajectories': os.path.join(
+                stability_path, 'stability_well_trajectories.csv'
+            ),
+        }
+        with open(observer.manifest_path, newline='', encoding='utf-8') as handle:
+            manifest_rows = list(csv.DictReader(handle))
+
+        snapshot_rows = {}
+        source_artifacts = {}
+        missing_artifacts = []
+        for artifact_name, artifact_path in required_paths.items():
+            if not os.path.isfile(artifact_path):
+                missing_artifacts.append(artifact_name)
+                continue
+            source_artifacts[artifact_name] = {
+                'relative_path': os.path.relpath(artifact_path, self.out_path),
+                'sha256': self._get_auto_stability_file_checksum(artifact_path),
+            }
+            if artifact_name in (
+                    'decision_snapshot_conditions',
+                    'decision_snapshot_wells'):
+                with open(artifact_path, newline='', encoding='utf-8') as handle:
+                    snapshot_rows[artifact_name] = list(csv.DictReader(handle))
+
+        configuration = {
+            name: self.robo_params.get(name)
+            for name in (
+                'auto_stability_mode',
+                'auto_stability_mixing_mode',
+                'auto_stability_scan_schedule',
+                'auto_stability_retirement_policy',
+                'auto_stability_decision_horizon_s',
+                'auto_stability_max_observation_window_s',
+            ) if name in self.robo_params
+        }
+        summary = build_stability_decision_snapshot_integrity_audit(
+            manifest_rows,
+            snapshot_rows.get('decision_snapshot_conditions', []),
+            snapshot_rows.get('decision_snapshot_wells', []),
+            configuration=configuration,
+        )
+        summary['source_artifacts'] = source_artifacts
+        if missing_artifacts and summary.get('applicable'):
+            summary['violations'].append({
+                'code': 'missing_snapshot_audit_source_artifact',
+                'message': (
+                    'The decision-snapshot audit could not checksum all '
+                    'required saved evidence: {}.'.format(
+                        ', '.join(sorted(missing_artifacts))
+                    )
+                ),
+                'missing_artifacts': sorted(missing_artifacts),
+            })
+            summary['status'] = 'snapshot_violations_detected'
+        elif missing_artifacts:
+            summary['source_artifact_warnings'] = sorted(missing_artifacts)
+
+        os.makedirs(stability_path, exist_ok=True)
+        output_path = os.path.join(
+            stability_path, 'stability_decision_snapshot_integrity_audit.json'
         )
         temporary_path = None
         try:
@@ -32478,6 +32648,21 @@ class AutoContr(Controller):
                 '<<controller warning>> Stage-14D scheduler audit summary '
                 'was not generated: {}'.format(exc)
             )
+        snapshot_integrity_audit_error = None
+        snapshot_integrity_audit_summary = None
+        try:
+            snapshot_audit_path, snapshot_integrity_audit_summary = (
+                self._write_auto_stability_decision_snapshot_integrity_audit()
+            )
+            output_paths.append(snapshot_audit_path)
+        except Exception as exc:
+            # This derived, post-run review cannot discard the established
+            # exports or alter a finalized run if it encounters bad evidence.
+            snapshot_integrity_audit_error = str(exc)
+            print(
+                '<<controller warning>> Stage-14E1 frozen decision-snapshot '
+                'integrity audit was not generated: {}'.format(exc)
+            )
         self.auto_stability_reporting_summary = {
             'paths': output_paths,
             'timing_row_count': len(records['timing_rows']),
@@ -32494,6 +32679,10 @@ class AutoContr(Controller):
             'debug_only': bool(records.get('debug_evidence_rows')),
             'scheduler_audit_summary': scheduler_audit_summary,
             'scheduler_audit_error': scheduler_audit_error,
+            'snapshot_integrity_audit_summary': (
+                snapshot_integrity_audit_summary
+            ),
+            'snapshot_integrity_audit_error': snapshot_integrity_audit_error,
             'records': records,
         }
         print(

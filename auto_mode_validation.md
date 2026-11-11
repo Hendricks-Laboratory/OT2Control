@@ -1443,6 +1443,47 @@ source-isolated atomic-write verification, focused Stage 12–14 tests, and the
 complete 539-test hardware-free suite passed. No controlled run is required
 for Stage 14D itself.
 
+### Stage 14E1 frozen decision-snapshot integrity audit — 2026-11-10
+
+Stage 14E1 adds a second, independent post-run evidence check for the
+cross-batch stability-only route:
+
+```text
+pr_data/stability/stability_decision_snapshot_integrity_audit.json
+```
+
+It applies only when the validated cross-batch policy is actually active:
+`stability_only`, `pipette_mix`, `each_completion`, and a decision horizon
+shorter than the maximum observation window. Other stability policies receive
+an explicit `not_applicable` result, rather than a false missing-snapshot
+warning.
+
+The artifact reads existing saved files only: the append-only observer
+manifest, frozen condition and well snapshot CSVs, and the final condition,
+well-metric, and trajectory CSVs. It records SHA-256 checksums and
+output-relative paths for each available source file, then verifies that every
+frozen condition has linked well evidence; condition and well identities are
+unique; snapshot rows are marked frozen and use the configured decision
+horizon; each saved well maps to exactly one manifest trigger-completion and
+decision-horizon event with the same batch identity; and saved condition
+replicate counts agree with their linked well rows. Missing required saved
+evidence and mismatches are explicit audit violations.
+
+The final report links the new JSON and distinguishes this saved-controller
+evidence review from a physical claim. It never reads a later extended-window
+observation into a frozen decision, changes a recipe or model, schedules a
+scan, sends a packet, changes Auto-main, or affects normal Auto, dilution, or
+target-wavelength behavior. Its atomic JSON write is best-effort: failure is
+reported in the terminal and final report without suppressing established
+stability CSV exports.
+
+Python 3.9 compilation, AST duplicate-method detection, a source-isolated
+atomic writer/checksum test, pure valid/invalid/not-applicable snapshot tests,
+and the focused Stage 12–14 hardware-free suite passed. A controlled water
+run is not needed to validate this reporting-only stage; the separately
+deferred Stage 14C1 and 14C2 water checkpoints remain required to establish
+their respective physical scheduler behavior.
+
 ### Stage 12 optical-stability planning record — revised future stages
 
 Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
