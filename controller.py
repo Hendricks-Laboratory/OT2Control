@@ -158,6 +158,10 @@ from auto_stability_plotting import (
 from auto_stability_spectral_evidence import (
     build_raw_spectral_evidence_records,
 )
+from auto_stability_dashboard import build_stability_dashboard_records
+from auto_stability_dashboard_plotting import (
+    write_stability_dashboard_plot_suite,
+)
 from auto_stability_scheduler_audit import (
     build_stability_scheduler_audit_summary,
 )
@@ -28646,6 +28650,12 @@ class AutoContr(Controller):
         output_paths.extend(write_stability_spectral_evidence_plot_suite(
             summary['records'], plot_dir
         ))
+        # Stage 14F3 is likewise a final, pure reporting layer. It consumes
+        # finalized reporting rows only and cannot schedule robot or reader
+        # work, alter frozen evidence, or change any optimizer decision.
+        output_paths.extend(write_stability_dashboard_plot_suite(
+            summary['records'], plot_dir
+        ))
         summary['plot_paths'] = output_paths
         return output_paths
     
@@ -32229,6 +32239,7 @@ class AutoContr(Controller):
         records['lifecycle_rows'] = lifecycle_rows
         records['stability_evidence_source'] = evidence_source
         records['debug_evidence_rows'] = debug_evidence_rows
+        records['dashboard_records'] = build_stability_dashboard_records(records)
         return records
 
     def _write_auto_stability_model_exports(self):
@@ -32655,6 +32666,18 @@ class AutoContr(Controller):
                     'evidence_rows', []
                 ),
             ),
+            (
+                'stability_replicate_completeness.csv',
+                records.get('dashboard_records', {}).get(
+                    'replicate_rows', []
+                ),
+            ),
+            (
+                'stability_reader_throughput.csv',
+                records.get('dashboard_records', {}).get(
+                    'throughput_rows', []
+                ),
+            ),
         ]
         if records.get('debug_evidence_rows'):
             output_specs.append((
@@ -32711,6 +32734,12 @@ class AutoContr(Controller):
                 records.get('raw_spectral_evidence', {}).get(
                     'evidence_rows', []
                 )
+            ),
+            'replicate_completeness_row_count': len(
+                records.get('dashboard_records', {}).get('replicate_rows', [])
+            ),
+            'reader_throughput_scan_count': len(
+                records.get('dashboard_records', {}).get('throughput_rows', [])
             ),
             'stability_evidence_source': records.get(
                 'stability_evidence_source', 'raw_reader'

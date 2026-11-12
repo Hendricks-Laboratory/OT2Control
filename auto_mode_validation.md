@@ -1685,42 +1685,53 @@ contract, not chemical interpretation. The next controlled water or chemistry
 run should include human review of the generated figures; no dedicated physical
 run is required solely for this reporting stage.
 
-#### Stage 14F3 — replicate, completeness, and reader-throughput dashboard
+#### Stage 14F3 — replicate, completeness, and reader-throughput dashboard — 2026-11-12
 
-**Purpose:** expose whether an apparent stability result is supported by
-physical replicate evidence and achievable reader timing, rather than hiding
-the limitation behind a condition mean or a requested cadence.
+Stage 14F3 is implemented as a final, reporting-only layer. It consumes the
+completed Stage-12D/13/14 reporting dictionary after its final QC rows and
+provenance fields have been attached. It does not open raw-reader data, alter a
+manifest or prior CSV, decide QC, train a model, select a recipe, schedule a
+scan, send a packet, modify a workbook, or change Auto-main behavior.
 
-**Scope:**
+It exports two audit tables:
 
-- replace the compact condition loss-rate bar as the primary final summary
-  with raw eligible replicate points, muted excluded/missing points and their
-  reasons, mean plus sample SD, and an explicit eligible/planned denominator;
-- add a condition-level reference-peak absorbance companion panel, keeping
-  signal quality separate from loss-rate variability;
-- add a scheduler-quality panel from existing timing/lifecycle records:
-  trigger-to-first-scan delay, scan duration, active-well count, requested
-  versus achieved cadence, and count of decision-eligible versus audit-only
-  observations;
-- add a per-well data-completeness/QC matrix for valid metric, low signal, no
-  post-peak decline, missing spectrum, invalid interval, and other recorded
-  terminal status;
-- retain the existing lifecycle, scan-membership, and decision-boundary plots
-  as execution/audit views rather than duplicating their meaning.
+```text
+pr_data/stability/stability_replicate_completeness.csv
+pr_data/stability/stability_reader_throughput.csv
+```
 
-**Scientific presentation policy:** individual physical wells remain visible
-for small replicate counts. Summary uncertainty is labeled as sample SD, not
-SEM or a confidence interval. Means are not drawn through asynchronously
-sampled wells unless an explicit documented time-binning rule is added later.
+and writes four organized figures:
 
-**Deliberate exclusions:** no automatic rejection based on the new dashboards;
-no interpolation or resampling for the model; no change to scheduler behavior;
-no new packet or Auto-main requirement.
+```text
+Plots/stability/replicate_completeness/stability_loss_rate_replicates_final.png
+Plots/stability/replicate_completeness/stability_reference_peak_replicates_final.png
+Plots/stability/replicate_completeness/stability_well_completeness_qc_final.png
+Plots/stability/reader_throughput/stability_reader_throughput_final.png
+```
 
-**Validation:** source-level confirmation that all values come from completed
-reporting records; synthetic unequal-timing and partial-replicate fixtures;
-layout tests for many wells/conditions; Python 3.9 compilation; and the full
-hardware-free suite.
+The loss-rate and reference-peak panels retain individual physical wells,
+explicitly call out unavailable/excluded observations, report each condition's
+eligible/planned denominator, and label variability as **sample SD**. Signal
+quality remains separate from stability-loss-rate eligibility. The completeness
+matrix shows the terminal metric status and preserves the full reason in the
+CSV. The throughput table/figure reduce timing evidence by immutable
+`raw_scan_id`, so an active-set scan containing several wells is counted once;
+it reports actual scan duration, active/eligible/audit-only membership,
+achieved cadence-delay summaries, and trigger-to-first-scan delay rather than
+presenting requested cadence as observed timing.
+
+No dashboard value changes a scientific decision. There is no automatic
+rejection, interpolation, resampling, or new physical behavior. The existing
+lifecycle, scan-membership, and decision-boundary figures remain the detailed
+execution/audit views.
+
+Python 3.9 compilation, AST duplicate-method inspection, synthetic partial-
+replicate/missing-trajectory tests, an exact-once multiwell-scan timing test,
+dashboard output/layout tests, a controller source-boundary test, the focused
+62-test Stage 12–14 suite, and the complete hardware-free suite passed. This
+validates the derived-reporting contract only. Human review of the new F2/F3
+figures will be combined with the deferred Stage 14C2 adaptive-retirement
+water checkpoint; no separate water run is required solely for F3.
 
 #### Stage 14G — stability-metric robustness study and decision gate
 
