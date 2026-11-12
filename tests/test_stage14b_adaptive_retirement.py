@@ -52,10 +52,17 @@ class _ObserverStub(object):
         self.retirements = []
 
     def get_active_wells(self):
-        return list(self.active_records)
+        return [
+            dict(record) for record in self.active_records
+            if record.get('activation_status', 'active') == 'active'
+        ]
 
     def record_adaptive_lifecycle_retirements(self, records, policy):
         self.retirements.append((records, policy))
+        retired_wellnames = set(records)
+        for record in self.active_records:
+            if record['wellname'] in retired_wellnames:
+                record['activation_status'] = 'window_complete'
 
 
 class Stage14BAdaptiveRetirementTests(unittest.TestCase):
@@ -126,14 +133,22 @@ class Stage14BAdaptiveRetirementTests(unittest.TestCase):
 
     def test_adaptive_retirement_sends_only_eligible_terminal_result(self):
         controller = self._controller()
+        controller.auto_stability_observer.active_records.append({
+            'wellname': 'autowell1C1.0',
+            'activation_monotonic_s': 130.0,
+        })
         controller._get_auto_stability_raw_lifecycle_observations = (
             lambda records: {
                 'autowell0C1.0': [
-                    {'timestamp_s': 100.0, 'reference_absorbance': 0.10},
-                    {'timestamp_s': 110.0, 'reference_absorbance': 0.60},
-                    {'timestamp_s': 120.0, 'reference_absorbance': 0.50},
-                    {'timestamp_s': 130.0, 'reference_absorbance': 0.499},
-                    {'timestamp_s': 140.0, 'reference_absorbance': 0.498},
+                    {'timestamp_s': 100.0, 'reference_absorbance': 0.02},
+                    {'timestamp_s': 110.0, 'reference_absorbance': 0.03},
+                    {'timestamp_s': 120.0, 'reference_absorbance': 0.02},
+                    {'timestamp_s': 130.0, 'reference_absorbance': 0.03},
+                    {'timestamp_s': 140.0, 'reference_absorbance': 0.02},
+                ],
+                'autowell1C1.0': [
+                    {'timestamp_s': 130.0, 'reference_absorbance': 0.50},
+                    {'timestamp_s': 140.0, 'reference_absorbance': 0.49},
                 ],
             }
         )
@@ -145,11 +160,18 @@ class Stage14BAdaptiveRetirementTests(unittest.TestCase):
             'plateau_consecutive_interval_count': 2,
             'plateau_max_absorbance_slope_per_s': 0.002,
         }
-        controller._record_auto_stability_adaptive_retirements(policy, 140.0)
+        remaining_observations = (
+            controller._record_auto_stability_adaptive_retirements(
+                policy, 140.0
+            )
+        )
         retirements = controller.auto_stability_observer.retirements
         self.assertEqual(1, len(retirements))
         result = retirements[0][0]['autowell0C1.0']
-        self.assertEqual('plateau_confirmed', result['retirement_reason'])
+        self.assertEqual('terminal_low_signal', result['retirement_reason'])
+        self.assertEqual(
+            ['autowell1C1.0'], sorted(remaining_observations)
+        )
 
     def test_fixed_policy_never_loads_or_retires_early(self):
         controller = self._controller()

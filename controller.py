@@ -6365,7 +6365,20 @@ class AutoContr(Controller):
             observer.record_adaptive_lifecycle_retirements(
                 lifecycle_records, monitoring_policy
             )
-        return observations_by_well
+        # Adaptive retirement changes the observer's active set synchronously.
+        # The immediate per-trigger scan planner accepts observations only for
+        # that current active set; passing a just-retired well's history would
+        # correctly fail its strict provenance check before reader execution.
+        # Keep every raw trajectory on disk, but filter this short-lived
+        # scheduling view after the durable retirement transition.
+        active_wellnames = {
+            record['wellname'] for record in observer.get_active_wells()
+        }
+        return {
+            wellname: observations
+            for wellname, observations in observations_by_well.items()
+            if wellname in active_wellnames
+        }
 
     def _uses_auto_stability_cross_batch_scheduler(self):
         '''Return whether the separately validated cross-batch path is active.

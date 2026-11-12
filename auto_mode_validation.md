@@ -1733,6 +1733,42 @@ validates the derived-reporting contract only. Human review of the new F2/F3
 figures will be combined with the deferred Stage 14C2 adaptive-retirement
 water checkpoint; no separate water run is required solely for F3.
 
+#### Stage 14C2 adaptive-retirement water run — partial fault and repair — 2026-11-12
+
+`DEBUGRTG_STAGE14C2_ADAPTIVE_WATER_1` completed four trigger transfers and
+four acknowledged targeted P300 mixes. Its first three immutable raw scans
+expanded the active set as intended from one well, to two wells, to three
+wells. Before the fourth completion-triggered reader scan, the controller
+correctly retired the first well as `terminal_low_signal` from raw-reader
+evidence after the decision horizon. It then incorrectly handed that newly
+retired well's observations to the next active-only per-trigger planner. The
+planner rejected the stale input before reader execution, entering the
+required no-resume partial-batch fault disposition. No automatic retry,
+model update, report finalization, or claim about the fourth scan occurred.
+
+The controller repair retains every raw trajectory and retirement event, but
+filters only the short-lived scheduling observation view after the observer's
+durable retirement transition. Therefore the next plan receives evidence only
+for wells that remain active; strict rejection of genuinely unknown or
+unmapped observation sources is unchanged. Python 3.9 compilation, the
+focused 65-test Stage 12–14 scheduler/observer/lifecycle/reporting suite, and
+the complete 558-test hardware-free suite passed after the repair. A fresh
+controlled water run is still required to close the Stage 14C2
+adaptive-retirement checkpoint.
+
+#### Planned interactive plate-map explorer — 2026-11-12
+
+A future reporting stage will add an optional, self-contained interactive
+96-well plate explorer built from a laboratory-provided plate image and the
+immutable logical-well to physical-reader-location mapping already retained in
+the stability manifest. Selecting a well will expose its measured stability
+trajectory, spectra, lifecycle/timing provenance, QC disposition, and related
+condition summary. It must remain a read-only post-run artifact: it may not
+drive robot actions, mutate a run record, infer unmapped locations, or replace
+the CSV/PNG evidence suite. Image registration and the exact interactive
+format are deliberately deferred until a representative plate image is
+provided and reviewed.
+
 #### Stage 14G — stability-metric robustness study and decision gate
 
 **Purpose:** determine whether the pre-registered current response remains the
