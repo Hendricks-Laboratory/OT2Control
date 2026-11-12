@@ -17,3 +17,8 @@ experiment_data.csv
 CLAUDE.md
 # Local/generated Claude Code state (permissions, agent settings, caches)
 .claude/
+
+# Finder/cloud duplicate-copy artifacts. Canonical test and generated-output
+# names never use a space followed by a numeric suffix before the extension.
+tests/* [0-9].py
+pr_data/* [0-9].csv
