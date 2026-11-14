@@ -1789,96 +1789,317 @@ the CSV/PNG evidence suite. Image registration and the exact interactive
 format are deliberately deferred until a representative plate image is
 provided and reviewed.
 
-#### Stage 14G — stability-metric robustness study and decision gate
+#### Revised Stage 14G–I stability-response roadmap — 2026-11-14
 
-**Purpose:** determine whether the pre-registered current response remains the
-best optimization target under unequal scan density before it is relied on for
-chemistry-directed stability selection.
+This is the authoritative forward plan for the stability response after the
+Stage 14G1 hardware-free study. It supersedes only earlier *future-tense*
+statements that describe the raw tail-minimum rate as the intended eventual
+primary optimizer target. It does not rewrite any historical implementation or
+validation record.
 
-The existing score remains:
+##### Current response: retained legacy/audit metric, not approved for new selection
+
+The implemented response remains:
 
 ```text
-(A_peak - A_tail_min) / (t_tail_min - t_peak)
+legacy_tail_minimum_v1 =
+    (A_peak - A_tail_min) / (t_tail_min - t_peak)
 ```
 
-where `A_tail_min` is the lowest eligible post-peak observation. It faithfully
-implements the original requested conservative decline measurement, and it
-must remain exported. However, an extreme minimum can be more noise-sensitive
-when one well receives more eligible scans than another. Cross-batch active-set
-scanning makes that a real design concern, not merely a plotting issue.
+where `A_tail_min` is the lowest eligible observation after the observed peak.
+It remains exported in all existing stability evidence, reports, and historical
+run records. No existing history will be reinterpreted, re-scored, or silently
+combined with a later response definition.
+
+The Stage 14G1 deterministic study used the real asynchronous timing envelopes
+from `DEBUGRTG_STAGE14C2_ADAPTIVE_WATER_3` and controlled synthetic trajectories.
+It established two design facts:
+
+1. Raw absorbance loss rate is confounded by initial optical amplitude. Under
+   equal fractional decay with realistic simulated read noise, a lower-amplitude
+   sample was incorrectly ranked as more stable in 92.1% of trials solely
+   because its absolute absorbance change was smaller.
+2. A one-sided "first scan after horizon" rule can needlessly discard usable
+   asynchronous trajectories. For a 120 s post-peak illustrative horizon, none
+   of the nine saved water-run timing patterns supplied a one-sided endpoint,
+   while every pattern supplied an actual endpoint within a symmetric +/-60 s
+   timing envelope.
+
+These are scheduler/statistical results, not chemistry evidence. The water run
+used DEBUG-only synthetic companion values, so it cannot determine a chemical
+horizon, signal threshold, spectral tolerance, or final model response. It
+does, however, rule out promoting unnormalized raw tail loss as the default
+future stability-selection target without a versioned redesign.
+
+##### Pre-registered candidate response for evaluation, not yet active
+
+The leading candidate is a time-standardized, normalized optical-retention
+response. For an observed post-peak assessment scan at `t*`:
+
+```text
+R_H = A_reference(t*) / A_peak
+L_H = 1 - R_H
+k_opt = -ln(R_H) / (t* - t_peak)
+```
+
+`R_H` (higher is more stable) is the proposed primary selection response;
+`L_H` and `k_opt` are equivalent audit/kinetic representations when a fixed
+assessment horizon is used. `A_reference` is measured at the immutable,
+per-well reference wavelength already retained by the stability data contract.
+The system will preserve the actual timestamps rather than assume a nominal
+reader cadence.
+
+The candidate response has the following non-negotiable semantics:
+
+- the scheduler must target a declared post-peak horizon `H` and preserve a
+  declared acceptable timing tolerance `delta`;
+- `t*` must be a real reader acquisition in the predeclared interval around
+  `H`; no spectrum, absorbance value, or endpoint may be interpolated;
+- missing an eligible assessment endpoint is a distinct missing/non-decision
+  status, never a zero-loss, failed-chemistry, or favorable-stability value;
+- no demonstrated post-peak decline is a censored/no-decline status until a
+  separately approved treatment is supported by chemistry data; it must not be
+  fabricated as an exact zero decay rate;
+- the existing peak-amplitude eligibility bounds remain separate from the
+  stability response, so weak/blank spectra cannot win by having a small raw
+  loss;
+- peak-wavelength drift, broadening, and full-spectrum shape change remain
+  independently exported spectral-integrity evidence. They will initially be
+  explicit gates or QC dispositions, not an undocumented weighted mixture with
+  absorbance retention;
+- `legacy_tail_minimum_v1` remains available in every response-versioned CSV,
+  plot, report, and run manifest for comparison and reproducibility.
+
+The robust Theil-Sen-style post-peak slope remains a useful secondary QC and
+sensitivity diagnostic. It must not become the initial primary response because
+it requires at least three post-peak observations and was unavailable for a
+substantial fraction of the saved short trajectories. It is valuable for
+detecting whether a retention result is supported by an internally consistent
+trend, not for discarding the only valid endpoint evidence from a sparse well.
+
+##### Stage 14G1 — completed: hardware-free comparator foundation
+
+`auto_stability_metric_study.py` is a pure, deterministic comparison harness
+with no controller, optimizer, workbook, robot, reader, filesystem, or
+model-selection integration. It returns the production tail-minimum result
+unchanged beside a non-interpolating fixed-horizon comparator and a robust
+post-peak slope comparator. Its tests cover known linear decay, unequal scan
+density, missing endpoints, low signal, timing validation, and static isolation
+from production execution modules. Stage 14G1 changed no live behavior.
+
+##### Stage 14G2 — offline reproducibility and sensitivity study
+
+**Purpose:** convert the Stage 14G1 harness into a reproducible decision-study
+artifact without changing any controller or optimizer behavior.
 
 **Scope:**
 
-- build a hardware-free, versioned comparison harness using synthetic
-  trajectories and saved runs; vary noise, peak timing, true decay rate,
-  missing scans, and number/placement of eligible observations;
-- compare the current tail-minimum score against clearly labeled alternatives:
-  a pre-specified standardized-horizon loss and a robust post-peak slope;
-- assess ranking stability, scan-count sensitivity, missing-data behavior,
-  low-signal behavior, and compatibility with actual per-well timestamps;
-- generate a scientific decision memo and diagnostic plots. The study does not
-  change any configured metric, model target, or past run result.
+1. Define a versioned, deterministic scenario matrix covering realistic peak
+   amplitudes, onset/peak timing, monotonic and nonlinear decline, scan-density
+   imbalance, missing scans, reader-delay patterns, and bounded measurement
+   noise. Every scenario must state its known ground truth and random seed.
+2. Ingest only immutable saved-run trajectory exports through an offline reader;
+   do not access a workbook, robot, Pi, or live reader. Label DEBUG-only water
+   companion evidence as timing/scheduler evidence, never chemistry evidence.
+3. Compare legacy raw tail-minimum, fixed-horizon raw loss, normalized retention,
+   log-loss rate, and robust slope for availability, amplitude sensitivity,
+   scan-count sensitivity, ranking agreement with simulated truth, and missing
+   endpoint behavior.
+4. Generate an offline CSV/Markdown decision package and figures that make the
+   trade-offs explicit. Results must identify assumptions rather than imply a
+   physical ground truth from synthetic data.
 
-**Required decision before any metric change:** retain the current conservative
-tail-minimum objective, or adopt a specifically defined alternative. The
-decision must name its handling of asynchronous scans, missing assessment-time
-measurements, noise threshold, and the status of the legacy metric in reports.
+**Required validation:** pure Python 3.9 tests; deterministic rerun equality;
+saved-run parsing fixtures; no controller/optimizer import or production call
+site; manual review that every figure says whether its source is synthetic,
+water-timing, or chemistry evidence.
 
-##### Stage 14G1 — implemented hardware-free comparator foundation
+**Exit condition:** a documented candidate specification and a list of chemical
+parameters that cannot be selected from water/synthetic data. No response
+version, Header, model target, scheduler, or recipe selection changes occur in
+this stage.
 
-`auto_stability_metric_study.py` provides a pure, deterministic comparison
-harness without controller, optimizer, workbook, robot, reader, filesystem, or
-model-selection integration. It returns the existing production tail-minimum
-result unchanged alongside two explicitly study-only comparators:
+##### Stage 14G3 — chemistry monitor pilot and parameter calibration
 
-- a fixed-horizon loss rate that selects the first *actually acquired* endpoint
-  inside a predeclared post-peak assessment interval and never interpolates a
-  missing scan; and
-- a robust post-peak decline estimate based on the median of all pairwise
-  post-peak slopes, requiring the peak plus at least two later observations.
+**Purpose:** obtain the real nanocrystal trajectories needed to choose `H`,
+`delta`, signal bounds, and spectral-integrity criteria.
 
-Its deterministic linear-decay simulator permits controlled scan-density,
-missing-endpoint, timing, and noise studies. The Stage 14G1 tests prove that
-the established production metric is returned byte-for-byte unchanged, known
-linear decay is recovered across dense and sparse schedules, unavailable
-assessment windows and low-signal trajectories remain explicitly noneligible,
-and the harness has no execution-module imports or production call sites.
+**Protocol boundary:** use monitor-only acquisition. No stability response,
+optimizer ranking, recipe choice, target stopping, or automatic chemistry
+decision may depend on the pilot result. The exact chemistry controls and safe
+recipe set require laboratory/PI approval before execution.
 
-This is not a metric-selection decision. The production response definition,
-stability optimizer, controller behavior, reports, historical data, Auto-main,
-and all physical behavior remain unchanged. A later Stage 14G decision study
-must examine representative timing/spectral evidence and obtain scientific
-approval before Stage 14H can version or select a different response.
+**Evidence required:**
 
-#### Stage 14H — conditional stability-response versioning
+- replicate trajectories spanning the practical range from stable to visibly
+  changing products, with complete raw spectra and actual reader timestamps;
+- representative formation/peak timing following the final trigger addition;
+- per-well amplitude, wavelength drift, peak width/shape, and endpoint-retention
+  distributions;
+- reader-throughput evidence under the intended batch size, including the
+  fraction of wells that receive an assessment scan inside candidate `H +/-
+  delta` windows; and
+- independent scientific review of whether optical changes reflect the intended
+  stability phenomenon rather than blank, path-length, dilution, sedimentation,
+  or instrument artifacts.
 
-This stage is prohibited unless Stage 14G produces an approved scientific
-decision. If approved, it will implement the selected metric behind an explicit
-response-version identifier; preserve the current tail-minimum metric in CSVs
-and plots; add independent tests; and prevent silent mixing of condition
-history trained under different response definitions. It will require a new
-controlled water validation and later chemistry review before the revised
-metric can drive recipe selection.
+**Exit condition:** a signed scientific decision record naming the horizon,
+timing tolerance, reference-wavelength rule, signal gate, no-decline/censoring
+policy, spectral-integrity dispositions, and chemistry scope of the response.
 
-#### Recommended sequencing
+##### Stage 14G4 — decision memo and response contract freeze
 
-Implement Stage 14F2 first, then 14F3. Both are read-only reporting stages and
-can be completed while physical validation is deferred. Run Stage 14G only
-after enough representative timing/spectral evidence exists to make the
-comparison meaningful. Stage 14H remains conditional and is not assumed.
+**Purpose:** convert the G2/G3 evidence into one reviewable, versioned contract
+before any implementation affects a model.
 
-### Stage 12 optical-stability planning record — revised future stages
+The memo must select exactly one of the following outcomes:
 
-Stage 12A–12F now provides the implemented monitoring, trajectory-reporting,
+1. retain `legacy_tail_minimum_v1` as the primary response;
+2. adopt the fixed-horizon normalized-retention response as a new version; or
+3. defer active stability selection because no response is yet scientifically
+   supported.
+
+It must state why raw loss is or is not retained, how missing/censored wells
+are treated, whether spectral drift/broadening is a hard gate or audit-only,
+which values become Header-configurable versus fixed protocol policy, and how
+legacy-v1 history remains isolated from newer history. This is the approval gate
+for Stage 14H. Without it, later stages remain prohibited.
+
+##### Stage 14H1 — response-versioned, read-only data contract
+
+**Purpose:** add the approved response calculation alongside the legacy metric
+without affecting recipe selection.
+
+**Implementation scope:** response-version identifier; immutable per-well and
+condition-level columns for `R_H`, `L_H`, `k_opt`, endpoint identity/timestamp,
+timing offset from `H`, and status; legacy-v1 metric preserved unchanged;
+explicit handling for unavailable, low-signal, spectral-QC, and censored
+trajectories. Older workbooks default to `legacy_tail_minimum_v1` behavior.
+
+**Validation:** pure calculations, schema/backward-compatibility tests,
+version-separation tests, historical-export regression, and no controller/Pi
+behavior change. No physical debug is required for this calculation-only stage.
+
+##### Stage 14H2 — endpoint-scheduling guarantee and controlled water debug
+
+**Purpose:** ensure the scheduler can acquire the assessment evidence defined
+by the approved response contract instead of merely hoping a cadence falls
+near it.
+
+**Implementation scope:** controller-side, timestamped planning for the
+declared assessment window; bounded scheduling that preserves active-well and
+cross-batch safety invariants; clear non-decision status when physical reader
+throughput cannot meet the contract. No new liquid-handling movement and no
+Auto-main modification are expected unless a packet-contract review identifies
+a genuine need.
+
+**Validation:** hardware-free scheduler simulations, then one controlled water
+run that verifies requested versus achieved endpoint timing, mixed-batch
+membership, no duplicate mix/transfer, endpoint provenance, and fail-closed
+behavior when the reader cannot satisfy the window. Water does not validate
+the chemical response itself.
+
+##### Stage 14H3 — spectral-integrity QC and evidence suite
+
+**Purpose:** make the response scientifically interpretable rather than a
+single-number absorbance artifact.
+
+**Implementation scope:** approved spectral drift, broadening/shape, blank,
+and signal dispositions; full raw-spectrum overlays at peak/endpoint; plots of
+retention versus actual elapsed time; endpoint-timing distributions; response
+status counts; and condition-replicate agreement plots. Raw and normalized
+responses must be visibly distinguished.
+
+**Validation:** synthetic spectra plus saved-run fixtures, plot review, and
+backward-compatibility checks. This remains reporting/QC-only; it does not yet
+train or select with the new response.
+
+##### Stage 14H4 — shadow response model
+
+**Purpose:** fit the approved versioned stability response in parallel with
+the existing systems while preserving observation-only operation.
+
+**Implementation scope:** separate, cumulative model history keyed by response
+version; no mixture of v1 and new-response training rows; model-health,
+coverage, and uncertainty exports; counterfactual candidate rankings written
+for review only. The ordinary lambda model and any existing stability model
+remain operationally authoritative.
+
+**Validation:** synthetic ground-truth ranking tests, atomic model-update
+tests, version-isolation tests, and controlled monitor-mode chemistry review.
+No recipe is selected from the shadow result.
+
+##### Stage 14H5 — monitored chemistry confirmation
+
+**Purpose:** confirm that endpoint retention, spectral QC, and shadow rankings
+match scientifically reviewed chemistry before autonomous selection changes.
+
+**Protocol boundary:** human-supervised, small-batch monitor mode only. Compare
+replicate and condition-level behavior, raw spectra, endpoint timing, legacy
+metric, normalized retention, robust-slope QC, and shadow-model rankings.
+
+**Exit condition:** laboratory approval that the response measures the intended
+optical stability and that its failure/censoring behavior is scientifically
+acceptable. Otherwise revise the response contract and return to Stage 14G4.
+
+##### Stage 14H6 — controlled activation of stability-only response version
+
+**Purpose:** allow `stability_only` to select recipes using the validated,
+versioned response only after all prior gates close.
+
+**Implementation scope:** explicit Header selection of an approved response
+version, fail-closed rejection of unapproved/mixed histories, selection/model
+provenance, report labeling, and compatibility behavior for legacy workbooks.
+No weighted mixture with lambda optimization is introduced here.
+
+**Validation:** exhaustive synthetic selection/feasibility/atomicity tests;
+one controlled water execution for lifecycle integration; then a separately
+approved, directly supervised small chemistry run. The new response may not be
+used for unattended or high-occupancy optimization until that review closes.
+
+##### Stage 14I — optional target-then-stability extension
+
+Only after Stage 14H6 is validated may the lexicographic
+`target_then_stability` mode be updated to use the approved response version.
+The ordering remains scientifically explicit: first satisfy the wavelength
+criterion, then rank only the target-compatible and spectral-QC-approved
+candidates by stability. This is a separate stage with separate synthetic,
+water-lifecycle, and chemistry validation; it is not a weighted average of nm
+error and optical retention.
+
+##### Deferred stability follow-ons
+
+- interactive read-only plate-map explorer using the immutable well mapping;
+- richer full-spectrum distance/shape models after enough chemistry spectra
+  exist to validate them;
+- statistically supported handling of no-decline right-censored trajectories;
+- alternative area-under-spectrum or multivariate/Pareto response definitions;
+- chemistry-specific plate-shake versus targeted-pipette-mix comparisons;
+- unattended or high-occupancy stability optimization.
+
+#### Recommended sequencing from the current state
+
+1. Complete Stage 14G2 while physical validation is deferred; it is offline and
+   cannot alter a run.
+2. Do not begin Stage 14H implementation, change a Header, alter the current
+   legacy metric, or modify optimizer behavior until Stage 14G3 chemistry
+   evidence and Stage 14G4 scientific approval exist.
+3. After approval, implement and validate H1 through H4 before a monitor-only
+   chemistry confirmation in H5.
+4. Treat H6 and the later hybrid Stage 14I as separate controlled activation
+   projects, not as automatic consequences of an encouraging monitor run.
+
+### Stage 12–13 implemented optical-stability record
+
+Stage 12A–12F records the original implemented monitoring, trajectory-reporting,
 stability-QC, companion-model, target-free stability-only selection, and
-explicit DEBUG-only dry-debug foundation. The remaining work begins with the
-optional small-chemistry monitor baseline in Stage 12G and the Stage 13
-targeted-mixing/per-trigger scheduler; it must not reinterpret DEBUG-only
-evidence as chemical evidence. Stage 12F-A/B remains the separately designed,
-later optional target-then-stability hybrid and still needs its own controlled
-dry debug before chemistry use.
+DEBUG-only dry-debug foundation. Stages 13 and 14 subsequently added targeted
+mixing, cross-batch scheduler validation, adaptive lifecycle behavior, and the
+reporting suite. This is retained as a historical implementation record; the
+Stage 14G–I roadmap above defines the remaining response-science work and
+prohibits treating DEBUG-only evidence as chemical evidence.
 
-#### Scientific data contract
+#### Current implemented data contract: legacy response v1
 
 For every completed physical well, Auto will ultimately collect a timestamped
 UV–Vis trajectory after an explicit trigger reagent has completed the reaction.
@@ -1887,7 +2108,8 @@ be validated as a final chemistry-defining addition for the specific recipe.
 A well enters the active scan set only when every required reaction component
 is complete.
 
-The primary stability response is a fixed-window post-peak loss rate:
+The currently implemented legacy stability response is a fixed-window
+post-peak raw loss rate:
 
 ```text
 loss_rate = (A_peak - A_tail_min) / (t_tail_min - t_peak)
@@ -1907,20 +2129,24 @@ wavelength, λmax drift, time since trigger addition, time since its relevant
 shake event, raw scan filename, reader timestamp, and the raw trace. Peak
 envelope loss remains an audit measurement. A configurable minimum peak
 absorbance excludes blank or low-signal wells from stability training and
-stability-directed selection.
+stability-directed selection. This section documents the as-built v1 behavior
+and historical Stage 12–13 implementation; it does not authorize raw loss as
+the future primary target. The 2026-11-14 Stage 14G–I roadmap above is
+authoritative for all response-version and future-selection work.
 
 #### Modes, mixing, and scan scheduling
 
 `off` preserves exact legacy Auto behavior. `monitor` records trajectories,
-logs, and plots without changing recipe selection. The first intended active
-mode is `stability_only`: it has no wavelength target and will minimize the
-post-peak loss-rate response only among candidates predicted to remain within
+logs, and plots without changing recipe selection. The implemented
+`stability_only` mode has no wavelength target and currently uses the legacy
+v1 post-peak raw-loss response only among candidates predicted to remain within
 the configured usable reference-peak absorbance range. The separately
-implemented `target_then_stability` mode remains the later lexicographic
-hybrid. Stage 12F-F now provides its separate target-free controller route;
-it never silently behaves as `monitor` or reuses a hidden wavelength target.
-Its legacy dummy preflight simulation remains explicitly unavailable, so its
-controlled dry-debug workflow uses `--no-sim`.
+implemented `target_then_stability` mode is the lexicographic hybrid. No mode
+may use the proposed normalized-retention response until the Stage 14G4 decision
+and all applicable Stage 14H gates close. Stage 12F-F provides the separate
+target-free controller route; it never silently behaves as `monitor` or reuses
+a hidden wavelength target. Its legacy dummy preflight simulation remains
+explicitly unavailable, so its controlled dry-debug workflow uses `--no-sim`.
 
 `target_then_stability` is lexicographic rather than a weighted sum of
 nanometers and absorbance/time:
