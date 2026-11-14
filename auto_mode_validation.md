@@ -1752,9 +1752,29 @@ durable retirement transition. Therefore the next plan receives evidence only
 for wells that remain active; strict rejection of genuinely unknown or
 unmapped observation sources is unchanged. Python 3.9 compilation, the
 focused 65-test Stage 12–14 scheduler/observer/lifecycle/reporting suite, and
-the complete 558-test hardware-free suite passed after the repair. A fresh
-controlled water run is still required to close the Stage 14C2
-adaptive-retirement checkpoint.
+the complete 558-test hardware-free suite passed after the repair.
+
+The fresh controlled water run `DEBUGRTG_STAGE14C2_ADAPTIVE_WATER_3` completed
+normally on 2026-11-12 and closes this checkpoint for the intended
+**terminal-low-signal** path. It completed nine configured trigger transfers,
+nine individually acknowledged right-arm P300 targeted mixes (`150 uL x 5`),
+and thirteen immutable active-set raw scans across two batches. After each
+terminal-low-signal retirement, later scans included only wells that remained
+active; the prior stale-observation planner failure did not recur. The run
+finalized without a fault, automatic retry, or missing manifest-linked raw
+file. All 24 recorded well/scan intervals were fully inside their respective
+maximum windows. The scheduler audit and frozen decision-snapshot audit both
+reported no detected violation.
+
+This validates the controller/Pi execution path, adaptive retirement,
+post-retirement scan membership, targeted-mix provenance, final reporting,
+and DEBUG-only companion-model lifecycle for a water run. It does **not**
+validate a genuine `plateau_confirmed` retirement, chemical stability,
+scientific signal bounds, or interpretation of the synthetic companion data.
+The run intentionally used `synthetic_companion_evidence`; real reader files
+were retained and parsed, but model-facing values remain DEBUG-only and must
+not be used as chemical evidence. A later signal-bearing experiment is
+required for genuine plateau confirmation and chemistry-directed conclusions.
 
 #### Planned interactive plate-map explorer — 2026-11-12
 
