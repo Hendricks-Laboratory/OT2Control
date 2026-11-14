@@ -1824,6 +1824,32 @@ tail-minimum objective, or adopt a specifically defined alternative. The
 decision must name its handling of asynchronous scans, missing assessment-time
 measurements, noise threshold, and the status of the legacy metric in reports.
 
+##### Stage 14G1 — implemented hardware-free comparator foundation
+
+`auto_stability_metric_study.py` provides a pure, deterministic comparison
+harness without controller, optimizer, workbook, robot, reader, filesystem, or
+model-selection integration. It returns the existing production tail-minimum
+result unchanged alongside two explicitly study-only comparators:
+
+- a fixed-horizon loss rate that selects the first *actually acquired* endpoint
+  inside a predeclared post-peak assessment interval and never interpolates a
+  missing scan; and
+- a robust post-peak decline estimate based on the median of all pairwise
+  post-peak slopes, requiring the peak plus at least two later observations.
+
+Its deterministic linear-decay simulator permits controlled scan-density,
+missing-endpoint, timing, and noise studies. The Stage 14G1 tests prove that
+the established production metric is returned byte-for-byte unchanged, known
+linear decay is recovered across dense and sparse schedules, unavailable
+assessment windows and low-signal trajectories remain explicitly noneligible,
+and the harness has no execution-module imports or production call sites.
+
+This is not a metric-selection decision. The production response definition,
+stability optimizer, controller behavior, reports, historical data, Auto-main,
+and all physical behavior remain unchanged. A later Stage 14G decision study
+must examine representative timing/spectral evidence and obtain scientific
+approval before Stage 14H can version or select a different response.
+
 #### Stage 14H — conditional stability-response versioning
 
 This stage is prohibited unless Stage 14G produces an approved scientific
