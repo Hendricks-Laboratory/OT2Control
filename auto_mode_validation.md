@@ -1919,6 +1919,22 @@ parameters that cannot be selected from water/synthetic data. No response
 version, Header, model target, scheduler, or recipe selection changes occur in
 this stage.
 
+**Implementation record (2026-11-14):** implemented as an isolated offline
+study package. It creates a deterministic synthetic scenario matrix and can
+ingest immutable `stability_well_trajectories.csv` exports. The package writes
+scenario-level metric results, availability and known-truth-ranking summaries,
+a Markdown report, and source-labeled diagnostic figures. It compares the
+unchanged `legacy_tail_minimum_v1` result with fixed-horizon raw loss,
+normalized retention, log-loss rate, and robust post-peak slope. DEBUG-only
+saved trajectories are automatically labeled `water_timing`; neither these nor
+synthetic trajectories are chemical-stability evidence. The package has no
+controller, optimizer, workbook, packet, robot, reader, or model-selection
+integration, and it does not choose a response version or scientific
+parameters. Stage 14G3 remains required for those decisions.
+Python 3.9 compilation, 16 focused Stage 14G1/G2 tests, and the 574-test
+repository suite passed; the generated diagnostic figures were reviewed for
+source labeling and readable presentation.
+
 ##### Stage 14G3 — chemistry monitor pilot and parameter calibration
 
 **Purpose:** obtain the real nanocrystal trajectories needed to choose `H`,

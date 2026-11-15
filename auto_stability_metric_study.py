@@ -30,6 +30,9 @@ STUDY_STATUS_ASSESSMENT_WINDOW_UNOBSERVED = 'assessment_window_unobserved'
 STUDY_STATUS_INSUFFICIENT_POST_PEAK_OBSERVATIONS = (
     'insufficient_post_peak_observations'
 )
+STUDY_STATUS_NONPOSITIVE_ENDPOINT_ABSORBANCE = (
+    'nonpositive_endpoint_absorbance'
+)
 
 
 class AutoStabilityMetricStudyError(ValueError):
@@ -304,6 +307,166 @@ def compute_robust_post_peak_slope(
         'loss_rate_absorbance_per_s': -median_signed_slope,
     })
     return result
+
+
+def compute_fixed_horizon_normalized_metrics(
+        observations, min_peak_absorbance, post_peak_horizon_s,
+        endpoint_tolerance_s, trigger_timestamp_s=None,
+        observation_window_s=None):
+    '''Return co-timed raw, normalized, and log-loss study metrics.
+
+    This is deliberately a study-only comparator.  It selects the observed
+    post-peak point nearest the requested horizon inside a symmetric, declared
+    tolerance.  It never constructs an interpolated value.  The three returned
+    records therefore use the exact same peak, endpoint, and elapsed time.
+    A missing, nonpositive, or nondeclining endpoint remains an explicit
+    noneligible status rather than becoming an artificial favorable response.
+    '''
+    horizon_s = _positive_finite(
+        post_peak_horizon_s, 'post_peak_horizon_s'
+    )
+    tolerance_s = _nonnegative_finite(
+        endpoint_tolerance_s, 'endpoint_tolerance_s'
+    )
+    prepared = _study_trajectory(
+        observations, min_peak_absorbance, trigger_timestamp_s,
+        observation_window_s
+    )
+
+    common = {
+        'observation_count': prepared['observation_count'],
+        'observation_count_within_window': (
+            prepared['observation_count_within_window']
+        ),
+        'trigger_timestamp_s': prepared['trigger_timestamp_s'],
+        'observation_window_s': prepared['observation_window_s'],
+        'peak_index': prepared['peak_index'],
+        'peak_time_s': prepared['peak_time_s'],
+        'peak_absorbance': prepared['peak_absorbance'],
+        'post_peak_horizon_s': horizon_s,
+        'endpoint_tolerance_s': tolerance_s,
+        'assessment_target_time_s': None,
+        'endpoint_index': None,
+        'endpoint_time_s': None,
+        'endpoint_absorbance': None,
+        'endpoint_timing_offset_s': None,
+        'endpoint_selection': (
+            'nearest_observed_in_predeclared_symmetric_assessment_interval'
+        ),
+    }
+    names = (
+        'fixed_horizon_raw_loss_rate',
+        'normalized_retention',
+        'log_loss_rate',
+    )
+    results = {}
+    for name in names:
+        result = dict(common)
+        result.update({
+            'metric_name': name,
+            'status': prepared['status'],
+            'absorbance_loss': None,
+            'loss_rate_absorbance_per_s': None,
+            'retention_fraction': None,
+            'fractional_loss': None,
+            'log_loss_rate_per_s': None,
+        })
+        results[name] = result
+    if prepared['status'] != 'post_peak_observations_available':
+        return results
+
+    target_time_s = prepared['peak_time_s'] + horizon_s
+    endpoint_candidates = []
+    for index, observation in enumerate(prepared['trajectory']):
+        if index <= prepared['peak_index']:
+            continue
+        offset_s = observation['timestamp_s'] - target_time_s
+        if abs(offset_s) <= tolerance_s:
+            endpoint_candidates.append((abs(offset_s), index, observation))
+    for result in results.values():
+        result['assessment_target_time_s'] = target_time_s
+    if not endpoint_candidates:
+        for result in results.values():
+            result['status'] = STUDY_STATUS_ASSESSMENT_WINDOW_UNOBSERVED
+        return results
+
+    _, endpoint_index, endpoint = min(endpoint_candidates)
+    elapsed_s = endpoint['timestamp_s'] - prepared['peak_time_s']
+    if elapsed_s <= 0.0:
+        raise AutoStabilityMetricStudyError(
+            'Fixed-horizon endpoint must follow the identified peak.'
+        )
+    endpoint_absorbance = endpoint['reference_absorbance']
+    absorbance_loss = prepared['peak_absorbance'] - endpoint_absorbance
+    endpoint_fields = {
+        'endpoint_index': endpoint_index,
+        'endpoint_time_s': endpoint['timestamp_s'],
+        'endpoint_absorbance': endpoint_absorbance,
+        'endpoint_timing_offset_s': endpoint['timestamp_s'] - target_time_s,
+        'absorbance_loss': absorbance_loss,
+    }
+    for result in results.values():
+        result.update(endpoint_fields)
+    if endpoint_absorbance <= 0.0:
+        for result in results.values():
+            result['status'] = STUDY_STATUS_NONPOSITIVE_ENDPOINT_ABSORBANCE
+        return results
+
+    retention_fraction = endpoint_absorbance / prepared['peak_absorbance']
+    fractional_loss = 1.0 - retention_fraction
+    for result in results.values():
+        result.update({
+            'retention_fraction': retention_fraction,
+            'fractional_loss': fractional_loss,
+        })
+    if absorbance_loss <= 0.0:
+        for result in results.values():
+            result['status'] = METRIC_STATUS_NO_POST_PEAK_DECLINE
+        return results
+
+    results['fixed_horizon_raw_loss_rate'].update({
+        'status': METRIC_STATUS_ELIGIBLE,
+        'loss_rate_absorbance_per_s': absorbance_loss / elapsed_s,
+    })
+    results['normalized_retention'].update({
+        'status': METRIC_STATUS_ELIGIBLE,
+    })
+    results['log_loss_rate'].update({
+        'status': METRIC_STATUS_ELIGIBLE,
+        'log_loss_rate_per_s': -math.log(retention_fraction) / elapsed_s,
+    })
+    return results
+
+
+def compare_stage14g2_metrics(
+        observations, min_peak_absorbance, post_peak_horizon_s,
+        endpoint_tolerance_s, trigger_timestamp_s=None,
+        observation_window_s=None):
+    '''Compare the five Stage 14G2 study metrics without choosing a winner.'''
+    legacy = compute_stability_metrics(
+        observations,
+        min_peak_absorbance,
+        trigger_timestamp_s=trigger_timestamp_s,
+        observation_window_s=observation_window_s,
+    )
+    legacy = dict(legacy)
+    legacy['metric_name'] = 'legacy_tail_minimum_v1'
+    results = {'legacy_tail_minimum_v1': legacy}
+    results.update(compute_fixed_horizon_normalized_metrics(
+        observations,
+        min_peak_absorbance,
+        post_peak_horizon_s,
+        endpoint_tolerance_s,
+        trigger_timestamp_s=trigger_timestamp_s,
+        observation_window_s=observation_window_s,
+    ))
+    results['robust_post_peak_slope'] = compute_robust_post_peak_slope(
+        observations,
+        min_peak_absorbance,
+        trigger_timestamp_s=trigger_timestamp_s,
+        observation_window_s=observation_window_s,
+    )
+    return results
 
 
 def compare_stability_metric_estimators(
