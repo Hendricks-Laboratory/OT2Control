@@ -141,6 +141,13 @@ from auto_stability import (
     parse_auto_stability_header_settings,
     validate_stability_trigger_reagent
 )
+from auto_stability_monitor import (
+    AutoStabilityMonitorValidationError,
+    STABILITY_MONITOR_MODE_REQUIRED,
+    STABILITY_MONITOR_WORKSHEET_NAME,
+    build_stability_monitor_condition_manifest,
+    parse_auto_stability_monitor_header_settings,
+)
 from auto_stability_lifecycle import (
     build_stability_monitoring_policy,
     evaluate_well_monitoring_lifecycle,
@@ -373,7 +380,8 @@ def init_parser():
     parser = argparse.ArgumentParser()
     mode_help_str = (
         'mode=auto runs Auto; mode=protocol or not supplied runs a protocol; '
-        'mode=mix_calibration runs the isolated supervised P300 mix assay'
+        'mode=mix_calibration runs the isolated supervised P300 mix assay; '
+        'mode=stability_monitor runs fixed, monitor-only stability conditions'
     )
     parser.add_argument('-m','--mode',help=mode_help_str,default='protocol')
     parser.add_argument('-n','--name',help='the name of the google sheet')
@@ -479,6 +487,12 @@ def main(serveraddr):
     elif args.mode == 'mix_calibration':
         print('launching supervised well-mix calibration mode')
         launch_auto_mix_calibration(
+            serveraddr, args.name, args.cache, args.simulate, args.no_sim,
+            args.no_pr
+        )
+    elif args.mode == 'stability_monitor':
+        print('launching fixed-condition stability monitor mode')
+        launch_auto_stability_monitor(
             serveraddr, args.name, args.cache, args.simulate, args.no_sim,
             args.no_pr
         )
@@ -693,6 +707,44 @@ def launch_auto_mix_calibration(
         calibration.run_protocol(simulate=False, no_pr=False)
     finally:
         calibration._stop_terminal_output_capture()
+
+
+def launch_auto_stability_monitor(
+        serveraddr, rxn_sheet_name, use_cache, simulate, no_sim, no_pr):
+    '''Launch only fixed, monitor-only stability conditions.
+
+    This route deliberately constructs no ``OptimizationModel``. Conditions
+    must originate in the dedicated fixed-condition worksheet, and recorded
+    spectra remain monitor evidence rather than an optimizer input.
+    '''
+    if simulate or no_pr:
+        raise AutoStabilityMonitorValidationError(
+            'stability_monitor requires the established real reader path; '
+            '--simulate and --no-pr are not supported.'
+        )
+    if not no_sim:
+        raise AutoStabilityMonitorValidationError(
+            'stability_monitor has no legacy simulator. Use --no-sim only '
+            'after its static and controlled water-debug review.'
+        )
+    if not rxn_sheet_name:
+        rxn_sheet_name = input('<<controller>> please input the sheet name ')
+    my_ip = socket.gethostbyname(socket.gethostname())
+    monitor = AutoStabilityMonitorContr(
+        rxn_sheet_name, my_ip, serveraddr, use_cache=use_cache
+    )
+    try:
+        response = input(
+            '<<controller>> This runs only the explicit fixed conditions in '
+            '{}. It cannot select, score, or update recipes. Type y or yes '
+            'to begin: '.format(STABILITY_MONITOR_WORKSHEET_NAME)
+        ).strip().lower()
+        if response not in ('y', 'yes'):
+            print('<<controller>> stability monitor cancelled before connection.')
+            return
+        monitor.run_protocol(simulate=False, no_pr=False)
+    finally:
+        monitor._stop_terminal_output_capture()
 
 
 
@@ -1546,6 +1598,13 @@ class Controller(ABC):
         # Use the literal here because this shared base-class parser is also
         # extracted by hardware-free legacy Header tests without Auto imports.
         stability_only_mode = raw_stability_mode == 'stability_only'
+        raw_monitor_only = str(
+            header_dict.get('auto_stability_monitor_only', '')
+        ).strip().lower().replace('-', '_').replace(' ', '_')
+        monitor_only_mode = (
+            raw_stability_mode == 'monitor'
+            and raw_monitor_only in ('required', 'on', 'true', '1')
+        )
 
         def _is_blank_header_value(value):
             '''Treat an actually blank workbook cell as absent, not ``nan``.'''
@@ -1558,22 +1617,22 @@ class Controller(ABC):
                 or str(value).strip() == ''
             )
 
-        if stability_only_mode:
+        if stability_only_mode or monitor_only_mode:
             target_value = header_dict.get('target')
             target_tolerance_value = header_dict.get('target_tolerance_nm')
             if (
                     not _is_blank_header_value(target_value)
                     or not _is_blank_header_value(target_tolerance_value)):
                 raise ValueError(
-                    'auto_stability_mode=stability_only is target-free: '
+                    'target-free stability execution is configured: '
                     'Header values target and target_tolerance_nm must be '
                     'blank or omitted.'
                 )
             self.robo_params['target'] = None
             self.robo_params['target_tolerance_nm'] = None
             print(
-                '<<controller>> Auto stability-only mode has no wavelength '
-                'target or wavelength target tolerance.'
+                '<<controller>> Target-free stability execution has no '
+                'wavelength target or wavelength target tolerance.'
             )
         else:
             self.robo_params['target'] = float(
@@ -5762,6 +5821,7 @@ class AutoContr(Controller):
         #print(f'variable reagents: {self.variable_reagents}')
         self.fixed_reagents = self.get_fixed_reagents()
         self._initialize_auto_stability_configuration()
+        self._initialize_auto_stability_monitor_only_configuration()
         self._initialize_auto_mix_calibration_configuration()
         self.y_shape = len(self.variable_reagents)
         #print(f"y-shape is {self.y_shape}")
@@ -5812,7 +5872,8 @@ class AutoContr(Controller):
                 STABILITY_MODE_MONITOR,
                 STABILITY_MODE_STABILITY_ONLY,
                 STABILITY_MODE_TARGET_THEN_STABILITY
-            ) else None
+            ) and not getattr(self, '_stability_monitor_only_execution', False)
+            else None
         )
         self.auto_stability_model_training_records = []
         self.auto_stability_model_summary = None
@@ -5915,6 +5976,17 @@ class AutoContr(Controller):
         if (
                 stability_settings['auto_stability_mode']
                 == STABILITY_MODE_MONITOR):
+            monitor_only_requested = str(
+                header_dict.get('auto_stability_monitor_only', '')
+            ).strip().lower() in ('required', 'on', 'true', '1')
+            if monitor_only_requested:
+                print(
+                    '<<controller>> Fixed-condition stability monitoring is '
+                    'requested. The dedicated stability_monitor route will '
+                    'execute only its declared condition worksheet; it will '
+                    'not construct or update an optimizer model.'
+                )
+                return
             print(
                 '<<controller>> Auto stability monitoring configured: '
                 'trigger={}, schedule={}, window={} s, interval={} s, '
@@ -6012,6 +6084,7 @@ class AutoContr(Controller):
                         ],
                     )
                 )
+
                 if stability_settings['auto_stability_debug_mode'] == (
                         STABILITY_DEBUG_MODE_SYNTHETIC_COMPANION_EVIDENCE):
                     print(
@@ -6037,6 +6110,57 @@ class AutoContr(Controller):
                         stability_settings['auto_stability_trigger_reagent'],
                     )
                 )
+
+    def _initialize_auto_stability_monitor_only_configuration(self):
+        '''Fail closed unless fixed-condition monitoring uses its own route.
+
+        ``auto_stability_mode=monitor`` remains backward-compatible ordinary
+        Auto monitoring. The additional opt-in setting is intentionally more
+        restrictive: it is for an explicitly listed chemistry-pilot plan and
+        therefore cannot fall through to the normal optimizer launcher.
+        '''
+        header_dict = {
+            row[0]: row[1]
+            for row in self.header_data[1:]
+        }
+        monitor_settings = parse_auto_stability_monitor_header_settings(
+            header_dict
+        )
+        self.robo_params.update(monitor_settings)
+        if monitor_settings['auto_stability_monitor_only'] != (
+                STABILITY_MONITOR_MODE_REQUIRED):
+            return
+        if not getattr(self, '_stability_monitor_only_execution', False):
+            raise AutoStabilityMonitorValidationError(
+                'auto_stability_monitor_only=required is a fixed-condition '
+                'chemistry-pilot workflow. It cannot run through normal Auto '
+                'because normal Auto constructs and updates an optimizer. '
+                'Use -m stability_monitor.'
+            )
+        if self.robo_params.get('auto_stability_mode') != (
+                STABILITY_MODE_MONITOR):
+            raise AutoStabilityMonitorValidationError(
+                'auto_stability_monitor_only=required requires '
+                'auto_stability_mode=monitor.'
+            )
+        if self.robo_params.get('auto_stability_debug_mode') != 'off':
+            raise AutoStabilityMonitorValidationError(
+                'Fixed-condition stability monitoring requires '
+                'auto_stability_debug_mode=off. Synthetic evidence is not '
+                'permitted for a chemistry-pilot route.'
+            )
+        if self.robo_params.get('auto_model_checkpoint_mode') != 'off':
+            raise AutoStabilityMonitorValidationError(
+                'Fixed-condition stability monitoring requires '
+                'auto_model_checkpoint_mode=off because it constructs no '
+                'optimizer state.'
+            )
+        if self.robo_params.get('auto_preparation_mode') != 'off':
+            raise AutoStabilityMonitorValidationError(
+                'Fixed-condition stability monitoring currently requires '
+                'auto_preparation_mode=off. Use already prepared, declared '
+                'physical sources for this isolated pilot.'
+            )
 
     def _initialize_auto_mix_calibration_configuration(self):
         '''Reject calibration-only Header settings from the normal Auto route.
@@ -10221,7 +10345,19 @@ class AutoContr(Controller):
             'auto_source_reserve_volume_uL',
             'auto_preparation_mode',
             'auto_model_checkpoint_mode',
-            'auto_plot_profile'
+            'auto_plot_profile',
+            # Stage 14G3A monitor-only runs have no optimizer state. Keep
+            # their explicit target-free mode and stability scheduler policy
+            # in the immutable baseline as well as the Header snapshot.
+            'auto_stability_mode',
+            'auto_stability_monitor_only',
+            'auto_stability_trigger_reagent',
+            'auto_stability_mixing_mode',
+            'auto_stability_scan_schedule',
+            'auto_stability_scan_interval_s',
+            'auto_stability_decision_horizon_s',
+            'auto_stability_max_observation_window_s',
+            'auto_stability_retirement_policy'
         )
         auto_settings = {
             key: self.robo_params.get(key)
@@ -12484,6 +12620,11 @@ class AutoContr(Controller):
                 if getattr(self, 'robo_params', {}).get(
                     'auto_stability_mode'
                 ) == 'stability_only'
+                or getattr(self, 'robo_params', {}).get(
+                    'auto_stability_monitor_only'
+                # Keep this literal because legacy export tests extract this
+                # method without the controller module's optional imports.
+                ) == 'required'
                 else 'lambda_max_nm'
             )
 
@@ -13682,8 +13823,15 @@ class AutoContr(Controller):
             # source-extracted by legacy controller tests without Auto imports.
             == 'stability_only'
         )
+        monitor_only_mode = (
+            self.robo_params.get('auto_stability_monitor_only')
+            # Keep this literal because legacy performance-log tests extract
+            # this method without the controller module's optional imports.
+            == 'required'
+        )
+        stability_audit_only_mode = stability_only_mode or monitor_only_mode
         target_lambda = (
-            None if stability_only_mode else self.getModelInfo()['target']
+            None if stability_audit_only_mode else self.getModelInfo()['target']
         )
 
         for recipe_i, recipe in enumerate(unique_recipes):
@@ -13772,15 +13920,23 @@ class AutoContr(Controller):
                 spectral_observations=replicate_spectral_observations
             )
 
-            if stability_only_mode:
+            if stability_audit_only_mode:
+                audit_mode_label = (
+                    'stability_only'
+                    if stability_only_mode else 'monitor_only'
+                )
+                model_training_status = (
+                    'not_applicable_stability_only'
+                    if stability_only_mode else 'not_applicable_monitor_only'
+                )
                 model_training_decision = {
                     'use_for_model_training': False,
-                    'model_training_status': 'not_applicable_stability_only',
+                    'model_training_status': model_training_status,
                     'n_replicates_used_for_model_training': 0,
                     'model_training_reason': (
-                        'Target-free stability-only mode retains lambda-max '
-                        'observations as audit data only; it does not train '
-                        'the ordinary wavelength GP.'
+                        'Target-free {} mode retains lambda-max observations '
+                        'as audit data only; it does not train the ordinary '
+                        'wavelength GP.'.format(audit_mode_label)
                     ),
                 }
             else:
@@ -13796,14 +13952,18 @@ class AutoContr(Controller):
                 )
             )
 
-            if stability_only_mode:
+            if stability_audit_only_mode:
+                target_eligibility_status = (
+                    'not_applicable_stability_only'
+                    if stability_only_mode else 'not_applicable_monitor_only'
+                )
                 target_eligibility_decision = {
                     'eligible_for_target_incumbent': False,
                     'eligible_for_target_stop': False,
-                    'target_eligibility_status': 'not_applicable_stability_only',
+                    'target_eligibility_status': target_eligibility_status,
                     'target_eligibility_reason': (
-                        'Target-free stability-only mode has no wavelength '
-                        'incumbent or target stopping rule.'
+                        'Target-free {} mode has no wavelength incumbent or '
+                        'target stopping rule.'.format(audit_mode_label)
                     ),
                     'replicate_sd_tolerance_nm': None,
                     'n_finite_qc_replicates_for_target_validation': 0,
@@ -13909,7 +14069,7 @@ class AutoContr(Controller):
             # Derive the predicted target error when older callers provide a
             # mean prediction but not the newer explicit audit field.
             if (
-                    not stability_only_mode
+                    not stability_audit_only_mode
                     and
                 predicted_target_error is None
                 and predicted_mean is not None
@@ -13918,7 +14078,7 @@ class AutoContr(Controller):
                     abs(predicted_mean - target_lambda)
                 )
 
-            if stability_only_mode or qc_mean is None:
+            if stability_audit_only_mode or qc_mean is None:
                 target_error = None
                 prediction_error = None
             else:
@@ -13945,6 +14105,15 @@ class AutoContr(Controller):
                 'batch_number': int(batch_number),
                 'reaction_number': int(self.auto_condition_counter),
                 'condition_type': condition_type,
+                # Fixed-condition monitor pilots provide an external,
+                # operator-declared identifier. It is absent from ordinary
+                # Auto selection rows and never participates in model state.
+                'monitor_condition_id': prediction_metadata.get(
+                    'monitor_condition_id'
+                ),
+                'monitor_condition_notes': prediction_metadata.get(
+                    'monitor_condition_notes'
+                ),
                 # Separates wells this run physically executed from condition
                 # history inherited through a model-checkpoint import, whose
                 # well locations belong to another plate and must not be
@@ -14117,7 +14286,10 @@ class AutoContr(Controller):
                     predicted_reference_peak_interval_upper
                 ),
                 'wavelength_observation_role': (
-                    'audit_only' if stability_only_mode else 'target_model'
+                    'audit_only' if stability_only_mode
+                    else (
+                        'audit_only' if monitor_only_mode else 'target_model'
+                    )
                 ),
                 'stability_mask_results': (
                     self._serialize_auto_audit_value(
@@ -35042,6 +35214,371 @@ class AutoContr(Controller):
             print('  ratios were {}'.format(reagent_ratios))
             found_errors = max(found_errors, 2)
         return found_errors
+
+class AutoStabilityMonitorContr(AutoContr):
+    '''Run explicit monitor-only stability conditions without an optimizer.
+
+    This controller deliberately reuses the established Auto dataframe,
+    source/tip preflight, transfer, trigger acknowledgement, targeted-mix,
+    reader, and observer paths.  It replaces only recipe selection with an
+    immutable, operator-declared condition manifest.  No condition outcome
+    can cause another condition to be selected, retried, or modelled.
+    '''
+
+    def __init__(self, rxn_sheet_name, my_ip, server_ip, buff_size=4,
+                 use_cache=False, cache_path='Cache'):
+        self._stability_monitor_only_execution = True
+        self.auto_stability_monitor_manifest = None
+        super().__init__(
+            rxn_sheet_name, my_ip, server_ip, buff_size, use_cache,
+            cache_path
+        )
+        if self.robo_params.get('auto_stability_monitor_only') != (
+                STABILITY_MONITOR_MODE_REQUIRED):
+            raise AutoStabilityMonitorValidationError(
+                'stability_monitor requires Header '
+                'auto_stability_monitor_only=required.'
+            )
+        if self.auto_stability_monitor_manifest is None:
+            raise AutoStabilityMonitorValidationError(
+                'stability_monitor requires one validated '
+                '{} worksheet.'.format(STABILITY_MONITOR_WORKSHEET_NAME)
+            )
+        if self.auto_stability_monitor_manifest['variable_reagents'] != [
+                str(reagent) for reagent in self.variable_reagents]:
+            raise AutoStabilityMonitorValidationError(
+                'The monitor-condition variable columns no longer match the '
+                'Input Template variable-reagent order.'
+            )
+        print(
+            '<<controller>> fixed-condition stability monitor configured: '
+            '{} condition(s), no optimizer or model updates.'.format(
+                len(self.auto_stability_monitor_manifest['conditions'])
+            )
+        )
+
+    def _initialize_auto_preparation_plan(self, spreadsheet_key, credentials):
+        '''Validate the fixed-condition sheet before any connection exists.'''
+        header_dict = {
+            row[0]: row[1]
+            for row in self.header_data[1:]
+        }
+        monitor_settings = parse_auto_stability_monitor_header_settings(
+            header_dict
+        )
+        if monitor_settings['auto_stability_monitor_only'] == (
+                STABILITY_MONITOR_MODE_REQUIRED) and self.robo_params.get(
+                    'auto_preparation_mode', 'off') != 'off':
+            raise AutoStabilityMonitorValidationError(
+                'Fixed-condition stability monitoring requires '
+                'auto_preparation_mode=off before any source worksheet is '
+                'loaded. Use already prepared, declared sources.'
+            )
+
+        # Preserve ordinary Auto source parsing and explicit binding checks.
+        super()._initialize_auto_preparation_plan(
+            spreadsheet_key, credentials
+        )
+        if monitor_settings['auto_stability_monitor_only'] != (
+                STABILITY_MONITOR_MODE_REQUIRED):
+            return None
+
+        cache_filename = os.path.join(
+            self.cache_path, 'stability_monitor_conditions_sheet.pkl'
+        )
+        try:
+            if self.use_cache:
+                with open(cache_filename, 'rb') as monitor_cache:
+                    monitor_df = dill.load(monitor_cache)
+            else:
+                monitor_df = g2d.download(
+                    spreadsheet_key,
+                    STABILITY_MONITOR_WORKSHEET_NAME,
+                    col_names=True,
+                    row_names=False,
+                    credentials=credentials
+                )
+                with open(cache_filename, 'wb') as monitor_cache:
+                    dill.dump(monitor_df, monitor_cache)
+        except (IOError, OSError, ValueError, KeyError) as exc:
+            raise AutoStabilityMonitorValidationError(
+                'Could not load the {} worksheet: {}.'.format(
+                    STABILITY_MONITOR_WORKSHEET_NAME, exc
+                )
+            )
+        if not isinstance(monitor_df, pd.DataFrame):
+            raise AutoStabilityMonitorValidationError(
+                'The {} worksheet did not download as a table.'.format(
+                    STABILITY_MONITOR_WORKSHEET_NAME
+                )
+            )
+        variable_reagents = [
+            str(reagent) for reagent in self.rxn_df.loc[
+                (self.rxn_df['op'] == 'transfer') & self.rxn_df['conc'].isna(),
+                'reagent'
+            ].dropna().unique()
+        ]
+        monitor_rows = monitor_df.where(
+            pd.notna(monitor_df), None
+        ).to_dict(orient='records')
+        self.auto_stability_monitor_manifest = (
+            build_stability_monitor_condition_manifest(
+                monitor_rows, variable_reagents
+            )
+        )
+        print(
+            '<<controller>> validated {} fixed monitor condition(s) from '
+            '{} (manifest {}).'.format(
+                len(self.auto_stability_monitor_manifest['conditions']),
+                STABILITY_MONITOR_WORKSHEET_NAME,
+                self.auto_stability_monitor_manifest['manifest_sha256'][:12]
+            )
+        )
+        return self.auto_stability_monitor_manifest
+
+    def run_simulation(self, no_pr=False):
+        raise AutoStabilityMonitorValidationError(
+            'stability_monitor has no simulator because its purpose is '
+            'immutable, real reader chemistry evidence.'
+        )
+
+    def run_protocol(self, simulate=False, no_pr=False, port=50000):
+        if simulate or no_pr:
+            raise AutoStabilityMonitorValidationError(
+                'stability_monitor requires the established real reader path.'
+            )
+        self._run_monitor_only(port, simulate=False, no_pr=False)
+
+    def _write_auto_stability_monitor_plan(self):
+        '''Write the validated fixed plan before a connection is created.'''
+        stability_path = os.path.join(self.out_path, 'pr_data', 'stability')
+        os.makedirs(stability_path, exist_ok=True)
+        output_path = os.path.join(
+            stability_path, 'stability_monitor_condition_manifest.json'
+        )
+        if os.path.exists(output_path):
+            raise RuntimeError(
+                'Fixed-condition stability monitor plan already exists at {}; '
+                'refusing to overwrite evidence.'.format(output_path)
+            )
+        temporary_path = None
+        try:
+            with NamedTemporaryFile(
+                    mode='w', encoding='utf-8', dir=stability_path,
+                    delete=False) as handle:
+                temporary_path = handle.name
+                json.dump(
+                    self.auto_stability_monitor_manifest, handle,
+                    indent=2, sort_keys=True
+                )
+                handle.write('\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        finally:
+            if temporary_path is not None and os.path.exists(temporary_path):
+                os.remove(temporary_path)
+        return output_path
+
+    def _get_current_batch_scan_filename(self):
+        '''Return the normal template scan that measured one fixed condition.'''
+        scan_rows = self.rxn_df.loc[
+            self.rxn_df['op'].isin(['scan', 'scan_until_complete'])
+        ].reset_index()
+        if scan_rows.empty:
+            raise RuntimeError(
+                'Fixed-condition stability monitoring requires one existing '
+                'Input Template scan row.'
+            )
+        filename = scan_rows.loc[
+            scan_rows['index'].idxmax(), 'scan_filename'
+        ]
+        if pd.isna(filename) or not str(filename).strip():
+            raise RuntimeError(
+                'Fixed-condition stability monitoring did not receive a '
+                'usable primary scan filename.'
+            )
+        return str(filename)
+
+    @terminal_output_capture_guard
+    @error_exit
+    def _run_monitor_only(self, port, simulate, no_pr):
+        '''Execute every declared condition once, with no adaptive selection.'''
+        self.batch_num = 0
+        self.well_count = 0
+        self.last_auto_source_volume_audit = []
+        self._initialize_auto_live_run_journal(
+            SimpleNamespace(_auto_model_checkpoint_eligible=True)
+        )
+        plan_path = self._write_auto_stability_monitor_plan()
+        self._record_auto_live_run_event(
+            'stability_monitor_run_started',
+            {
+                'monitor_manifest_sha256': (
+                    self.auto_stability_monitor_manifest['manifest_sha256']
+                ),
+                'condition_count': len(
+                    self.auto_stability_monitor_manifest['conditions']
+                ),
+                'plan_path': os.path.relpath(plan_path, self.out_path),
+                'optimizer_constructed': False,
+                'model_updates_permitted': False,
+            }
+        )
+        self._initialize_auto_stability_observer()
+        self.create_connection(simulate, no_pr, port)
+        if self.auto_main_robot_state_snapshot is not None:
+            self._record_auto_live_run_event(
+                'auto_main_compatibility_validated',
+                copy.deepcopy(self.auto_main_robot_state_snapshot)
+            )
+        if self._uses_auto_stability_pipette_mix_schedule():
+            self._require_auto_main_targeted_mix_capability()
+
+        declared_header_replicates = self.num_duplicates
+        try:
+            for condition in self.auto_stability_monitor_manifest['conditions']:
+                recipe = np.asarray([[
+                    condition['variable_concentrations_mM'][str(reagent)]
+                    for reagent in self.variable_reagents
+                ]], dtype=float)
+                self._validate_auto_recipe_volume_feasibility(
+                    recipe,
+                    context_label='fixed monitor condition {!r}'.format(
+                        condition['condition_id']
+                    )
+                )
+                self.num_duplicates = int(condition['replicate_count'])
+                recipes = self.duplicate_list_elements(
+                    recipe, self.num_duplicates
+                )
+                wellnames = [
+                    self._generate_wellname()
+                    for _ in range(recipes.shape[0])
+                ]
+                self._ensure_auto_plate_capacity_for_batch(len(wellnames))
+                print(
+                    '<<controller>> executing fixed monitor condition {} '
+                    '({} replicate well(s)); no optimizer decision is made.'
+                    .format(condition['condition_id'], len(wellnames))
+                )
+                self._create_samples(wellnames, recipes, model=None)
+                scan_filename = self._get_current_batch_scan_filename()
+                scan_data = self._get_sample_data(
+                    wellnames, scan_filename
+                )
+                # Preserve the established journal state boundary: a batch
+                # that has physically transferred and produced its template
+                # scan enters processing before any audit extraction occurs.
+                # The monitor route has no model update, but it must never
+                # bypass the normal measuring -> processing -> ready state
+                # sequence.
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_PROCESSING_BATCH,
+                    'batch_measurement_completed',
+                    {
+                        'batch_number': int(self.batch_num),
+                        'physical_well_count': int(len(wellnames)),
+                        'wellnames': list(wellnames),
+                        'scan_filename': str(scan_filename),
+                        'monitor_condition_id': condition['condition_id'],
+                    },
+                    active_batch_number=int(self.batch_num)
+                )
+                lambda_values, scan_quality = self._extract_auto_lambda_maxima(
+                    scan_data
+                )
+                volume_balance = self._get_auto_recipe_volume_balance(recipe[0])
+                metadata = {
+                    'acquisition_mode': 'not_applicable_monitor_only',
+                    'stability_selection_mode': 'monitor_only',
+                    'stability_selection_status': 'operator_declared',
+                    'stability_evidence_source': 'raw_reader',
+                    'monitor_condition_id': condition['condition_id'],
+                    'monitor_condition_notes': condition['notes'],
+                    'selected_physical_recipe': recipe.tolist(),
+                    'executed_physical_recipe': recipe.tolist(),
+                    'selected_controller_volume_balances': [volume_balance],
+                    'executed_controller_volume_balances': [volume_balance],
+                    'notes': (
+                        'Fixed monitor-only condition declared in {} row {}. '
+                        'No optimizer selection, GP update, target stopping, '
+                        'or condition retry is permitted.'.format(
+                            STABILITY_MONITOR_WORKSHEET_NAME,
+                            condition['source_row_number']
+                        )
+                    ),
+                }
+                self._append_auto_model_performance_rows(
+                    unique_recipes=recipe,
+                    lambda_max_values=lambda_values,
+                    condition_type='monitor_only',
+                    batch_number=self.batch_num,
+                    prediction_metadata=metadata,
+                    scan_quality_by_replicate=scan_quality,
+                    replicate_wellnames=wellnames,
+                )
+                self._update_experiment_data(recipes, lambda_values)
+                self._record_auto_live_run_transition(
+                    LIFECYCLE_READY_FOR_BATCH,
+                    'stability_monitor_condition_completed',
+                    {
+                        'batch_number': int(self.batch_num),
+                        'monitor_condition_id': condition['condition_id'],
+                        'physical_well_count': len(wellnames),
+                        'wellnames': list(wellnames),
+                        'optimizer_constructed': False,
+                        'model_updates_permitted': False,
+                    },
+                    active_batch_number=None
+                )
+                self.batch_num += 1
+        finally:
+            self.num_duplicates = declared_header_replicates
+
+        self._build_labeled_auto_experiment_data_export().to_csv(
+            os.path.join(self.out_path, 'pr_data', 'experiment_data.csv'),
+            index=False
+        )
+        self._export_auto_model_performance_log()
+        try:
+            self._generate_auto_stability_reporting_exports()
+        except Exception as exc:
+            # Derived reporting must not retroactively alter a completed
+            # fixed-condition execution. Preserve the primary raw evidence,
+            # state the failure in the durable event log, and leave scientific
+            # interpretation to subsequent human review.
+            self.auto_stability_reporting_summary = {
+                'error': str(exc),
+                'paths': [],
+            }
+            self._record_auto_live_run_event(
+                'stability_monitor_reporting_failed',
+                {'error': str(exc)}
+            )
+            print(
+                '<<controller warning>> monitor-only stability reporting '
+                'exports were not generated: {}'.format(exc)
+            )
+        self._record_auto_live_run_transition(
+            LIFECYCLE_FINALIZED,
+            'stability_monitor_run_finalized',
+            {
+                'completed_condition_count': int(self.batch_num),
+                'optimizer_constructed': False,
+                'model_updates_permitted': False,
+            },
+            active_batch_number=None
+        )
+        print(
+            '<<controller>> fixed-condition stability monitoring completed; '
+            'trajectory evidence was exported without optimizer selection or '
+            'model updates.'
+        )
+        self.close_connection()
+        self.pr.shutdown()
+
 
 class ProtocolExecutor(Controller): 
     '''

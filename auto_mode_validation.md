@@ -6,7 +6,7 @@
 **Active development branch:** `Auto-RTG`
 **Prepared for:** Branch-local documentation / validation notes  
 **Originally prepared:** 2026-06-08  
-**Updated through:** 2026-10-16
+**Updated through:** 2026-11-14
 
 ---
 
@@ -1945,6 +1945,42 @@ optimizer ranking, recipe choice, target stopping, or automatic chemistry
 decision may depend on the pilot result. The exact chemistry controls and safe
 recipe set require laboratory/PI approval before execution.
 
+**Stage 14G3A implementation record (2026-11-14):** the first bounded
+software portion of this pilot is implemented on `Auto-RTG` as a dedicated
+`stability_monitor` launcher and controller route. It accepts only an explicit
+`stability_monitor_conditions` worksheet containing an operator-declared
+`condition_id`, positive `replicate_count`, and one exact final-reaction
+concentration column for every variable reagent. The worksheet is validated
+and hashed before any robot/reader connection. The resulting immutable manifest
+is written to the run evidence package before a connection is created.
+
+The route is deliberately target-free and monitor-only: Header
+`auto_stability_mode=monitor` and
+`auto_stability_monitor_only=required` are required; `target` and
+`target_tolerance_nm` must be blank; Auto preparation, model checkpointing,
+and synthetic stability evidence are prohibited. Normal `-m auto` rejects this
+opt-in setting before connection so it cannot silently construct an optimizer.
+The route constructs no `OptimizationModel`, makes no acquisition call, updates
+no GP or model history, applies no target stop, and never selects/retries a
+condition based on observed spectra.
+
+For each declared condition, it reuses the already validated Auto source and
+tip preflight, transfer, trigger-confirmation, configured stability mixing,
+reader, active-well observation, and raw-evidence paths. It introduces no
+packet, Pi/Auto-main code, or physical movement. Existing raw scans, trajectory
+exports, condition-level audit rows, and Stage 12D/14 reporting artifacts are
+retained; lambda maxima are explicitly labeled audit-only. In this initial
+bounded pilot route, each declared condition completes its existing maximum
+observation window before the next declared condition begins. It therefore does
+not claim new cross-batch scheduler behavior.
+
+Hardware-free validation passed Python 3.9 compilation, duplicate-method/AST
+checks, monitor-manifest rejection tests, dedicated route-isolation tests, and
+the focused 159-test Stage 12–14/preparation regression suite. This is not a
+physical clearance: a controlled water debug remains required before a
+chemistry-monitor pilot, followed by the separately approved chemistry and
+scientific review described below.
+
 **Evidence required:**
 
 - replicate trajectories spanning the practical range from stable to visibly
@@ -2095,14 +2131,19 @@ error and optical retention.
 
 #### Recommended sequencing from the current state
 
-1. Complete Stage 14G2 while physical validation is deferred; it is offline and
-   cannot alter a run.
-2. Do not begin Stage 14H implementation, change a Header, alter the current
+1. Perform one controlled Stage 14G3A water debug using an explicit
+   fixed-condition worksheet. Verify manifest provenance, target-free rejection
+   behavior, ordinary source/tip preflight, trigger/scan mapping, and audit-only
+   exports. This validates integration, not chemistry.
+2. Use the separately approved monitor-only chemistry pilot to gather the
+   Stage 14G3 evidence. It remains fixed-condition, human supervised, and
+   non-optimizing.
+3. Do not begin Stage 14H implementation, change a Header, alter the current
    legacy metric, or modify optimizer behavior until Stage 14G3 chemistry
    evidence and Stage 14G4 scientific approval exist.
-3. After approval, implement and validate H1 through H4 before a monitor-only
+4. After approval, implement and validate H1 through H4 before a monitor-only
    chemistry confirmation in H5.
-4. Treat H6 and the later hybrid Stage 14I as separate controlled activation
+5. Treat H6 and the later hybrid Stage 14I as separate controlled activation
    projects, not as automatic consequences of an encouraging monitor run.
 
 ### Stage 12–13 implemented optical-stability record

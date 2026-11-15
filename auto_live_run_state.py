@@ -135,6 +135,13 @@ EVENT_TYPES = frozenset({
     'stability_only_companion_models_refreshed',
     'stability_only_batch_completed',
     'stability_only_run_finalized',
+    # Stage 14G3A fixed-condition chemistry monitoring remains outside every
+    # optimizer/model route, but its declared-plan and completion boundaries
+    # are durable audit events.
+    'stability_monitor_run_started',
+    'stability_monitor_condition_completed',
+    'stability_monitor_reporting_failed',
+    'stability_monitor_run_finalized',
     # Stage 13C records a targeted-mix intent before its Pi packet is sent.
     # An unacknowledged intent is deliberately terminal evidence, never a
     # retry authorization. Acknowledgement records preserve the Pi result.
